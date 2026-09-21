@@ -2835,12 +2835,42 @@ def _sample_window(sysm, sig, at_window):
     ENDING AT THE CURSOR, i.e. the material just consumed. Nothing in the frozen surfaces states
     which end, and a run that encodes the units AHEAD of the cursor is encoding text the model has
     not trained on.
+
+    `at_window` IS THE WINDOW ORDINAL AND NOT A TOKEN OFFSET -- _signature_cursor multiplies it by
+    LM.ctx. Passing `i * ctx` returns the window `i * ctx` windows in, which is a real window of the
+    right width and completely the wrong material, so the error is silent by construction. Said here
+    because it was made once while driving this function and cost half an hour.
+
+    IT RETURNS THE FROZEN WIDTH OR IT DOES NOT RETURN -- AND IT RETURNED 173 UNITS AT ORDINAL 1
+    UNTIL 2026-09-21, which sig/api.py::encode refuses outright ("no eval variant, no gist
+    placeholder and no fallback ... because the alternative measured a whole project's routing on
+    one byte"). The arithmetic: the cursor after one window is byte_pos[ctx] = 173 at the shipped
+    geometry, width_units is 192, so `start` is -19, the clamp took it to 0, and the first flush of
+    every run handed SIG a short window. Measured across 600 ordinals: exactly one is short, and it
+    is the first.
+    THE HEAD IS LEFT-PADDED AND THE TAIL IS NOT, AND THE ASYMMETRY IS THE HONEST ONE. At ordinal 1
+    the stream genuinely HAS no earlier units -- the corpus has a beginning -- so this is "a real
+    window whose text ran out", which spine/loop.py already distinguishes from "a caller declining
+    to measure" at its own tail-padding site, and the pad goes on the side the material is missing
+    from. Taking the units AHEAD instead is what this docstring's own paragraph above rules out;
+    returning short is what SIG refuses; so padding at the head is the remaining answer and it is
+    stated rather than inferred. Under space="tokens" the pad is token id 0, which is a real byte
+    id and not a sentinel -- the same choice memory/api.py::_key_windows makes for its left pad
+    ("padding with token id 0 is the same choice that tree made and is visible in the stored
+    context").
     """
     stream = _signature_stream(sysm, sig)
     end = _signature_cursor(sysm, sig, at_window)
     width = int(sysm.sig.width_units)
     start = end - width
-    return stream[start if start > 0 else 0:end]
+    if start >= 0:
+        return stream[start:end]
+    head = stream[0:end]
+    # THE PAD MATCHES THE STREAM'S OWN TYPE, because the two consumers differ in what they do with
+    # it: SIG.encode iterates it and DOM.observe stores it in a reservoir that rekey re-encodes, so
+    # a bytes stream must stay concatenable as bytes and a token list as a list.
+    n = width - len(head)
+    return (bytes(n) + head) if isinstance(head, (bytes, bytearray)) else ([0] * n + list(head))
 
 
 def _key_fn(sysm):

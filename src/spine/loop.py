@@ -43,8 +43,12 @@ is written and maintained, the vocabulary mints and LM.on_mint initialises each 
 parents. WHAT IS STILL MISSING, all of it for a named reason a reader can check: DOM.observe is a
 stub so every window is domain 0; MEM.read is a stub so the store is write-only and its eviction
 rules are write-order FIFO whatever they say; MEM.census is a stub so growth's memory-pressure leg
-is unreachable; and the retok is RAISED AND NOT ACTED ON, counted in tok.due_dropped rather than
-allowed to look like a cadence that never came due.
+is unreachable. ALL THREE OF THOSE SENTENCES WERE TRUE UNTIL 2026-09-21 AND ARE NOW FALSE: observe,
+read and census have bodies, this driver calls all three, the partition assigns real ids, the probe
+retrieves and promotes, and pressure has a producer. What remains: FAB.manage and SIG.train_step
+are stubs, so no expert is ever culled and the signature encoder never learns; and the retok is
+RAISED AND NOT ACTED ON, counted in tok.due_dropped rather than allowed to look like a cadence that
+never came due.
 """
 import dataclasses
 import math
@@ -63,6 +67,7 @@ from opt import api as opt_api
 from capacity import api as cap_api
 from spine.compose import _sample_window as _c_sample_window
 from spine.compose import _key_fn as _c_key_fn
+from spine.compose import _sig_encode_fn as _c_sig_encode_fn
 from ckpt import api as ckpt_api
 from domains import api as dom_api
 from memory import api as mem_api
@@ -93,8 +98,9 @@ def _is_stub(fn):
 # here, in the same edit, and the cross-check below turns a forgotten one into a raise rather than
 # into a report that overstates what the run did.
 _CALLS = frozenset({
-    # ---- stage A, per window
-    "RUN.RunClock.advance", "SIG.encode", "TOK.on_window",
+    # ---- stage A: the cadenced maintenance block, then the per-window pair
+    "MEM.census", "DOM.manage", "DOM.census", "DOM.rekey",
+    "RUN.RunClock.advance", "SIG.encode", "DOM.observe", "TOK.on_window",
     # ---- stage B, per flush: all twenty-one
     "LM.embed", "LM.encode", "SIG.encode", "FAB.forward", "LM.decode", "LM.lm_loss",
     "WORLD.loss_terms", "LM.anchor_term", "OPT.scaled_backward", "RUN.RunClock.note_backward",
@@ -146,10 +152,17 @@ _WHY = {
     "DOM.census": "the partition has no did-it-fire surface and the R stage lists it as having no "
                   "producer",
     "FAB.manage": "NO EXPERT IS EVER CULLED OR SPARED. Growth runs and pruning does not, so the "
-                  "population only ever rises; 'fab.manage' reads checks=0",
+                  "population only ever rises. Its cadence is NOT ASKED rather than asked-and-"
+                  "ignored: Cadences.due RECORDS the step when it answers True, so an asked gate "
+                  "with no body behind it would show 'fab.manage' firing on a run where nothing "
+                  "was ever culled. checks=0 is the honest reading and this line is its sentence",
     "MEM.census": "the store has no did-it-fire surface, and FAB.grow_check's memory_pressure has "
                   "no producer, so grow_on_mem_pressure is UNREACHABLE rather than off",
-    "SIG.cadence_due": "SIG's own training cadence is never asked",
+    "SIG.cadence_due": "SIG's own training cadence is NOT ASKED, deliberately: it gates "
+                       "SIG.train_step, which is a stub, and Cadences-style gates RECORD the step "
+                       "when they answer True -- so asking it and doing nothing would throw the "
+                       "fire away and report a cadence that fired on a run where the encoder never "
+                       "trained",
     "SIG.train_step": "THE SIGNATURE ENCODER NEVER LEARNS -- sig.train_steps reads 0, so every "
                       "routing and domain decision is taken on the warm-up encoder for the whole run",
     # ---- stage B is complete; these remain for the gated-call-site report's wording
@@ -445,6 +458,7 @@ def run(sysm, *, max_windows=None, progress=True):
     fab_cfg, sig_cfg, dat_cfg, opt_cfg = cfg["FAB"], cfg["SIG"], cfg["DATA"], cfg["OPT"]
     tok_cfg = cfg["TOK"]
     dom_cfg = cfg["DOM"]
+    dom_cfg = cfg["DOM"]
 
     # WHAT CANNOT BE CALLED, DETERMINED ONCE, BEFORE THE FIRST WINDOW. Deciding per-flush would put
     # a branch on a stub check inside the hot loop and would let the answer change mid-run, which
@@ -515,7 +529,23 @@ def run(sysm, *, max_windows=None, progress=True):
 
     curve, t0 = [], time.time()
     saves = 0
+    # `did` IS SEEDED AT 0 AND IS NO LONGER A CONSTANT. It is overwritten by DOM.observe on every
+    # window; the seed only covers the impossible case of a flush with no window in it.
     did = 0
+    # THE PER-WINDOW ACCUMULATORS THE A STAGE FILLS AND THE FLUSH DRAINS. They are parallel to
+    # `batch` and cleared with it, because a signature or a domain id that outlived its window
+    # would be attributed to the next one -- the same hazard `batch = []` already guards.
+    sigs, dids, samples = [], [], []
+    # THE PREVIOUS FLUSH'S BATCH, CARRIED FOR MEM.maintain'S READ PROBE. It crosses backwards, like
+    # System.novelty, and for the same reason: a `produces` column reads forwards only. It is a
+    # LOCAL rather than a System slot because nothing outside this driver reads it and nothing
+    # resumes from it -- a probe that started cold after a resume loses one flush of measurement
+    # and no state.
+    probe_prev = None
+    # THE ROOT'S ONE BOUND SIG.encode, formed once: DOM.rekey's `encode`. domains/api.py::rekey
+    # requires the SAME callable the live path used, or the partition drifts into two signature
+    # spaces that do not compare.
+    sig_encode = _c_sig_encode_fn(sysm)
     first_loss = last_loss = float("nan")
     batch = []
     ids = sysm.segmentation.ids
@@ -561,7 +591,64 @@ def run(sysm, *, max_windows=None, progress=True):
         # taking the units AHEAD of the cursor is what that helper's own docstring rules out. The
         # repair belongs in the root, which owns the slicer.
 
-        # ---- ROW A: TOK'S FOUR CADENCES, ASKED ONCE PER WINDOW ---------------------------------
+        # ---- ROW A, IN LOOP_ORDER'S OWN ORDER --------------------------------------------------
+        # MEM.census -> DOM.manage -> DOM.census -> FAB.manage -> SIG.cadence_due -> SIG.train_step
+        # -> SIG.encode -> DOM.observe -> DOM.rekey -> TOK.on_window. THIS WHOLE STAGE WAS UNCALLED
+        # UNTIL 2026-09-21 and the ledger said so the entire time: 'dom.manage', 'dom.rekey' and
+        # 'fab.manage' read checks=0 on every run ever taken, which is RUN.Cadences reporting that
+        # the gate was never EVALUATED -- a different and worse fact than fires=0.
+        #
+        # THE CADENCED MAINTENANCE BLOCK. MEM.census is here and not only at R because it is
+        # DOM.manage's PRODUCER: manage takes `memory_counts` and `mem_floor_entries` and nothing
+        # else in the tree returns them. reconcile=False here -- the exact recount is the R stage's
+        # one-shot repair, and running it every hundred windows would be an O(capacity) bincount on
+        # a cadence nobody asked for.
+        if cadences.due("dom.manage", periods["dom.manage"], clock):
+            _c = mem_api.census(cfg["MEM"], sysm.store)
+            dom_api.manage(dom_cfg, sysm.partition, now=tick.step,
+                           memory_counts=_c.counts, mem_floor_entries=_c.floor_entries)
+            dom_api.census(dom_cfg, sysm.partition)
+        # DOM.rekey RE-ENCODES EVERY DOMAIN'S RESERVOIR WITH THE LIVE ENCODER, and it is what
+        # MEASURES the acceptance radius: `radius` reads 0.0 for every domain until it runs, so on
+        # a run without it DOM_RADIUS_Q, DOM_RADIUS_MULT and DOM_RADIUS_CAP are set-but-inert and
+        # every assignment is decided on the pooled bootstrap (part.n_bootstrap_radius is the
+        # counter that says so). `encode` is the root's ONE bound SIG.encode, for the reason
+        # domains/api.py::rekey gives: a rekey that used a second encoder puts the partition into
+        # two signature spaces that do not compare.
+        if cadences.due("dom.rekey", periods["dom.rekey"], clock):
+            dom_api.rekey(dom_cfg, sysm.partition, encode=sig_encode)
+        # FAB.manage IS A STUB AND ITS CADENCE IS THEREFORE NOT ASKED. Asking it and doing nothing
+        # would CONSUME the fire -- Cadences.due RECORDS the step when it answers True -- so the
+        # ledger would show fab.manage firing on a run where no expert was ever culled. An
+        # unevaluated gate reading checks=0 is the honest state and `skipped` names it.
+        # SIG.cadence_due IS NOT ASKED FOR THE SAME REASON, AND IT IS THE STRONGER CASE: it is the
+        # gate for SIG.train_step, which IS a stub, and tok/api.py::on_window's own paragraph is
+        # the general rule -- "asking under a shared key CONSUMES the event: probation sharing the
+        # grow key means minting never fires at all". A gate asked by nobody who can act on it is a
+        # fire thrown away.
+        #
+        # SIG.encode, PER WINDOW, WHICH IS WHERE THE TABLE PUTS IT -- immediately above DOM.observe.
+        # It used to be called once per FLUSH from inside _flush, off a second slice of the corpus;
+        # both of those are now here, and `sample` is the ONE object both consumers take.
+        sample = _c_sample_window(sysm, st, tick.step)
+        samples.append(sample)
+        sig_i = sig_api.encode(sig_cfg, st, [sample])[0]
+        if sig_i.device != sysm.process.device:
+            sig_i = sig_i.to(sysm.process.device)
+        sigs.append(sig_i)
+        # DOM.observe: THE ONLY PRODUCER OF A DOMAIN ID IN THE TREE. Until it had a body every
+        # window was domain 0 and the fabric's per-domain books, its breadth ban and MEM's
+        # per-source floor all saw exactly ONE source. domains/api.py::Assignment says the loop
+        # must take its `did` from here: "memory provenance (MEM.write's `sources`), the
+        # expert-to-domain affiliation (FAB.forward's and FAB.observe's `domain_id`) and
+        # DOM.note_competence's `did` are all the same id under three spellings, and a loop that
+        # keeps a literal 0 makes all three see one source."
+        asg = dom_api.observe(dom_cfg, sysm.partition, signature=sig_i, sample_window=sample,
+                              tokens=ids[bounds[0]:bounds[0] + ctx], now=tick.step)
+        did = int(asg.did)
+        dids.append(did)
+
+        # ---- ROW A CONTINUED: TOK'S FOUR CADENCES, ASKED ONCE PER WINDOW ------------------------
         # ASKED HERE AND ACTED ON AT THE FLUSH, which is the whole of Q-TOK-12. batch_windows Dues
         # reach one flush and the root ORs them PER CADENCE KEY, because `_due` RECORDS the step
         # when it answers True: a Due a flush discards is a fire that is silently GONE, at a rate of
@@ -591,8 +678,9 @@ def run(sysm, *, max_windows=None, progress=True):
                 probation=prev.probation or due.probation, frozen=due.frozen)
 
         if tick.flush_due:
-            loss, per_window = _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg,
-                                      opt_cfg, vocab, clock, sysm.novelty, did, key_fn)
+            loss, per_window, probe_prev = _flush(
+                sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, vocab, clock,
+                sysm.novelty, did, key_fn, sigs, dids, probe_prev)
             # NOVELTY CROSSES BACKWARDS, WHICH IS WHY IT LIVES ON THE SYSTEM AND NOT IN A RETURN.
             # compose.py's row says it: "novelty is the PREVIOUS flush's mean surprise
             # (self_organize.py:7499), carried on System.novelty because it crosses backwards and
@@ -609,7 +697,7 @@ def run(sysm, *, max_windows=None, progress=True):
             # initialised for -- and nothing could have caught it except forming the real quantity
             # for the consumer that names it.
             sysm.novelty = per_window
-            batch = []
+            batch, sigs, dids, samples = [], [], [], []
             if loss is not None:
                 last_loss = loss
                 if curve == []:
@@ -763,7 +851,7 @@ def _periods_of(sysm):
 
 
 def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, vocab, clock,
-           novelty, domain_id, key_fn):
+           novelty, domain_id, key_fn, sigs, dids, probe_prev):
     cfg_world = sysm.configs["WORLD"]
     cfg_dom = sysm.configs["DOM"]
     cfg_mem = sysm.configs["MEM"]
@@ -844,21 +932,21 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     # byte_pos[t] is the byte offset of token t, so a window that starts at token `a` starts at
     # byte byte_pos[a], and the signature reads width_units bytes from there -- the same text the
     # window is made of, measured in the alphabet SIG was built for.
-    bpos, raw = sysm.segmentation.byte_pos, sysm.stream.bytes
-    wu = int(st.width_units)
-    units = []
-    for a, _b in pairs:
-        o = int(bpos[a])
-        chunk = raw[o:o + wu]
-        if len(chunk) < wu:
-            # SHORT AT THE END OF THE CORPUS. Padded with zeros ONLY here, at the last window of
-            # the stream, and never as a fallback for a call that should have supplied the units:
-            # the difference is that this is a real window whose text ran out, not a caller
-            # declining to measure. A narrower window is what SIG refuses; a full-width window
-            # whose tail is past the end of the corpus is a fact about the corpus.
-            chunk = chunk + bytes(wu - len(chunk))
-        units.append(list(chunk))
-    sig_vec = sig_api.encode(sig_cfg, st, units)
+    # THE SIGNATURES ARE THE A STAGE'S AND ARE NOT RE-ENCODED HERE. SIG.encode is a ROW A entry
+    # point sitting IMMEDIATELY ABOVE DOM.observe in LOOP_ORDER, and this function used to call it
+    # itself off a second slice of the corpus -- which made the driver hold TWO SLICERS for a value
+    # whose entire contract is that there is one.
+    # WHAT THE TWO DISAGREED ABOUT, MEASURED: this block took `raw[byte_pos[a] : byte_pos[a] + 192]`
+    # -- 192 bytes FORWARD from the window's first token -- while spine/compose.py::_sample_window
+    # takes the 192 units ENDING AT THE CURSOR. Those coincide only when a window happens to be
+    # exactly width_units bytes long; at the shipped geometry window 2's two slices differ
+    # (b'sBsCsuupqyrCtqAq' against b'rBrDqsBsCsuupqyr') and window 5's agree. _sample_window's own
+    # docstring says why that cannot stand: "ONE OBJECT, TWO CONSUMERS ... because domains/api.py::
+    # observe says a rekey cannot reproduce the signature otherwise -- so a second slicer at the DOM
+    # call site is a defect by construction". The defect was at the SIG call site instead, and it
+    # would have put the signature DOM stores in its reservoir in a different space from the one
+    # the router actually used -- exactly the drift DOM.rekey exists to prevent.
+    sig_vec = torch.stack(sigs) if len(sigs) > 1 else sigs[0].unsqueeze(0)
     # SIG BUILDS ITS OWN TENSOR AND NEED NOT AGREE WITH THE PROCESS DEVICE, so the signature is
     # moved rather than assumed. Checked instead of called unconditionally, because `.to()` on a
     # tensor already there is a copy on some backends.
@@ -987,13 +1075,18 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
 
     # GROWTH. THE ONE MECHANISM GOAL B CANNOT BE STUDIED WITHOUT, and until this line the run's
     # report read "0 experts born" for a population that was never asked to grow.
-    # memory_pressure=None IS THE DECLARED PRESENT STATE AND NOT A PLACEHOLDER. grow_check's own
-    # docstring: "when it is None that lever is UNREACHABLE and says so ... ITS PRESENT STATE IS
-    # unreachable AND THE ARITHMETIC IS MEM'S: MEM.read is deferred and MEM.maintain's probe has no
-    # contexts, so nothing promotes out of probation ... which is why grow_on_mem_pressure also
-    # ships False. Two named causes, not one." The producer is MEM.census, which is still a P4
-    # stub; inventing a number here would be a threshold comparison at a consumer site, in a
-    # package that does not own pressure_thresh, which is the defect Q-MEM-4 settled.
+    # memory_pressure COMES FROM MEM.census NOW, AND THIS ARGUMENT WAS HARD-CODED None UNTIL
+    # 2026-09-21. grow_check's docstring described that state and named its TWO causes -- "MEM.read
+    # is deferred and MEM.maintain's probe has no contexts, so nothing promotes out of probation" --
+    # and both are closed: read has a body and the probe has the previous flush's batch. What
+    # arrives here is MEM'S VERDICT (True / False / None) and never MEM's reading, because the
+    # pressure_thresh comparison belongs to the package that declares it; passing the raw share
+    # would make fab.grow_mem_eligible fire on every flush, which is Q-MEM-4's ruling.
+    # STILL None UNTIL THE FIRST CADENCED CENSUS, and None after it whenever census cannot form the
+    # verdict -- no eviction yet, or nothing has ever promoted. grow_check prints UNREACHABLE for
+    # None and "armed, did not fire" for False, which are different sentences about different runs.
+    # FAB_GROW_ON_MEM_PRESSURE STILL SHIPS False, so the leg is off by configuration even now that
+    # it has a producer. That is a lever the owner turns, not something this driver decides.
     # shift_at RIDES THE SYSTEM AND IS None UNTIL SOMETHING STAMPS IT. Three sites are supposed to:
     # the E draw row's resample, TOK.mint_burst's retok and OPT's LR restart. The first two are not
     # driven yet (the retok needs TOK.on_window's Due, a stub), so fab.shift_notifications reads 0
@@ -1034,12 +1127,13 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
                 "writing every entry of the flush to block 0 instead would put a whole flush under "
                 "one owner's provenance. Refused rather than defaulted.")
         owners = (out.weights.argmax(dim=1).long() % int(cfg_mem.d_owner_blocks))
-        # PROVENANCE, AND IT IS domain 0 FOR EVERY WINDOW BECAUSE DOM.observe IS A STUB. That is a
-        # real source id rather than an absence -- domains/api.py::observe's own sentence, quoted
-        # in full at the DOM.observe call site above -- so the store's per-source floor is
-        # protecting exactly one source and `n_floor_blocked` must be read with that in mind. It is
-        # `domain_id` and not a literal 0 so that the day observe lands, this line is already right.
-        sources = torch.full((x.shape[0],), int(domain_id), dtype=torch.long, device=dev)
+        # PROVENANCE, PER WINDOW, FROM DOM.observe -- AND IT WAS A BROADCAST ZERO UNTIL OBSERVE
+        # HAD A BODY. memory/api.py::_require_rows refuses a broadcast argument by name for exactly
+        # this shape: "the six per-row arguments are six different quantities about the same rows,
+        # and a broadcast one writes a whole flush under one window's provenance". `dids` is one id
+        # per WINDOW, which is what the (B,) requirement means, and it is now genuinely more than
+        # one value -- measured, 7 domains over 600 windows at the shipped defaults.
+        sources = torch.tensor(dids, dtype=torch.long, device=dev)
         # TRUE BYTE OFFSETS, NOT AN ARANGE. MEM.write's docstring: "a token averages ~1.85 bytes
         # and the drift reached 200+ bytes per window against a 220-byte recall span". byte_pos is
         # the Segmentation's own table and the cut is `_window_bounds`'s, so the two cannot
@@ -1049,22 +1143,40 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     now_w = U.Windows(int(clock.step))
     mem_api.write(cfg_mem, sysm.store, contexts=x, tokens=y, surprise=surprise,
                   sources=sources, owners=owners, positions=positions, key_fn=key_fn, now=now_w)
-    # MAINTAIN, WITH NO PROBE CONTEXTS, AND THE None IS FORCED RATHER THAN CHOSEN. Its docstring:
+    # MAINTAIN, AND THE PROBE NOW HAS CONTEXTS -- WHICH IT COULD NOT HAVE UNTIL MEM.read EXISTED.
+    # This block said "the None IS FORCED rather than chosen" and quoted maintain's own sentence,
     # "MEM.read is still a P4 stub, so this line raises NotImplementedError the moment a caller
-    # supplies probe_contexts -- which is the loud state, and is why the cadence above is counted
-    # before it", and "WITH probe_contexts None OR EMPTY the honest DID IT FIRE reading is
-    # n_probe_fired counting the CADENCE and n_probe_rows == 0: armed-but-0, not unreachable and
-    # not silence." So the probe cadence fires and retrieves nothing, which means evict='lru' and
-    # evict='usage' are write-order FIFO for this run whatever they say, and probation can never
-    # promote. That is a fact about what this run measures and it belongs in the report.
-    # resegment=None FOR THE SAME REASON THE RETOK IS NOT DRIVEN: TOK.on_window is a stub, so no
-    # Due.retok is ever raised and there is no RetokEvent to distribute.
+    # supplies probe_contexts". read has a body now, so supplying them RETRIEVES instead of
+    # raising, and both of those sentences have been corrected where they were written.
+    # WHAT IT UNLOCKS, AND IT IS THE LARGEST SINGLE THING ON THIS ROW: only a retrieval promotes out
+    # of probation. With no probe, nothing promoted, every eviction took the probation branch,
+    # store.n_evict_main was identically 0 for every configuration -- so evict='lru' and
+    # evict='usage' were WRITE-ORDER FIFO whatever they said (four archive files recorded that as
+    # measured fact when it was measured through a constant), and MEM.census's pressure was
+    # structurally None rather than merely low.
+    # THE PROBE READS THE PREVIOUS FLUSH'S BATCH AND NOT THIS ONE'S, AND THAT IS A MEASUREMENT
+    # DECISION RATHER THAN CONVENIENCE. MEM.write ran four lines above on THIS flush's x, so
+    # probing with the same tensor asks the store whether it can retrieve what it stored
+    # microseconds ago -- a question whose answer is yes by construction and tells nobody anything.
+    # The previous flush's batch is material the store has had a full flush of eviction pressure to
+    # lose, which is the question worth asking, and it costs one carried tensor. Q-MEM-4 named "one
+    # P4 smoke run with probe_contexts stubbed from the training batch itself" as the way to
+    # measure this rather than guess; this is that, with the lag that makes it a measurement.
+    # IT IS None ON THE FIRST FLUSH, which maintain handles as the declared armed-but-0 reading
+    # (n_probe_fired counts the CADENCE, n_probe_rows stays 0) rather than as an error.
+    # THE PROBE MOVES `use`, `prob` AND `last`, AND THAT IS THE MECHANISM, NOT AN INSTRUMENT
+    # EDITING ITS SUBJECT. memory/levers.py's probe_rows is emphatic that a probe must not consume
+    # RNG draws, and it does not -- the stride is deterministic and MEM.read draws no randomness.
+    # What it does change is which entries survive eviction, which is precisely what promotion is
+    # for; an instrument that refused to promote would be the constant this repair removes.
+    # resegment=None FOR THE SAME REASON THE RETOK IS NOT DRIVEN: no Due.retok is acted on, so
+    # there is no RetokEvent to distribute.
     # THE TWO GATES ARE MEM'S OWN and are compared against `now` INSIDE the call -- there is no
     # Cadences key for them, which is why store.n_probe_fired / n_rekey_passes are their only
     # did-it-fire surface. Calling it once per flush is the shipped semantics: both periods are
     # Windows and elapsed-since-last-fire is phase-independent.
     mem_api.maintain(cfg_mem, sysm.store, now=now_w, key_fn=key_fn,
-                     probe_contexts=None, resegment=None)
+                     probe_contexts=probe_prev, resegment=None)
 
     # ---- THE EVENT-DRIVEN ROWS: what THIS BATCH'S Dues made due ---------------------------------
     # ACTED ON PER FLUSH, ASKED PER WINDOW. The Due was OR-ed across the batch in `run`; it is
@@ -1141,4 +1253,4 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     # it is NOT the per-window loss this function returned until the MEM wiring landed. Both are
     # (B,) and both come off the same flush, which is exactly why the substitution survived: only
     # forming the quantity MEM.write names by its own definition made the two visibly different.
-    return float(mean.detach()), surprise.mean(dim=1)
+    return float(mean.detach()), surprise.mean(dim=1), x

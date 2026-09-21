@@ -21,6 +21,24 @@ RECORD TYPES RETURNED (P4 defines them):
                  (Q-MEM-11, RESOLVED 2026-09-02): counts (the per-source table), floor_entries,
                  quota_arm, pressure, probation_share, live_src, nsrc, nsrc_max, census_drift,
                  n_census_reconciles, and every store.n_* counter passed through.
+                 TWO MORE FIELDS THE BODY RETURNS, DECLARED HERE IN THE FORM
+                 fabric/api.py::grow_check uses for the extra ledger keys its own body writes: a
+                 field on the record the contract does not admit to producing is the same defect as
+                 a declared field nothing fills, and the count is taken in both directions.
+                   counters -- the name the pass-through clause above takes in the body, as a dict
+                     copied ONE LEVEL DEEP. store.counters['store.n_writes_by_block'] is a LIST, so
+                     a frozen record holding a live reference to it is still a caller that can
+                     change what the run reported -- WriteReceipt's own reason, one container in.
+                   gates -- the store's declared spine/gate.py::Gate objects. census's own frozen
+                     DID IT FIRE line makes that call this package's did-it-fire surface, and MEM
+                     may not import fabric/api.py::_three_state (O10), so without this field the
+                     seven mem.* gates reach no reader at all: spine/loop.py::_gate_report is keyed
+                     to the tok. and fab. books alone, and spine/loop.py::_report copies
+                     store.counters straight out -- so the numbers cross the boundary and the
+                     reachability does not. The alternative considered and rejected was FAB's
+                     `gate:<name>` string rows inside the counters dict, which makes a mapping of
+                     ints heterogeneous and breaks the absent/0/positive convention
+                     spine/loop.py::_gate_report reads.
                  THE FIELDS CARRY MEM'S OWN SPELLINGS AND NOT ITS CONSUMERS'. DOM.manage reads two
                  of them as `memory_counts` and `mem_floor_entries` and FAB.grow_check reads a
                  third as `memory_pressure`; those renames stay in spine/compose.py's `produces`
@@ -140,18 +158,33 @@ class Store:
     resume. `gen` is ONE torch.Generator per store, built once here: spine/rng.py::Rng.torch_generator
     RE-SEEDS A FRESH GENERATOR ON EVERY CALL, so calling it per write would draw the identical victim
     pool every time -- a sampler that samples one sample.
+
+    `vocab_slots` IS HELD HERE BECAUSE TWO ENTRY POINTS NEED IT AND NEITHER SIGNATURE OFFERS
+    ANOTHER ROUTE. open_store's frozen signature has taken `vocab_slots` since it was written and
+    its body DROPPED IT: spine/compose.py hands over int(LM.vocab_slots) and nothing read it, which
+    is this project's own thesis performed inside the store -- a declared argument that decides
+    nothing. MEM.read returns `dist` as (B, V) and declares no lever and no wire that could supply
+    V; memory/api.py::judge's recon arm has to fit a reconstructor of that width and its signature
+    is (mem, store, *, scorer, reconstructor). So the Store is the only carrier, and it is not
+    checkpointed for the same reason `capacity` is not: open_store is re-handed LM.vocab_slots on
+    resume, and a width saved in a blob could disagree with the model that is about to be loaded.
     """
 
     __slots__ = ("keys", "tok", "src", "pos", "ctx", "ctx_w", "own", "active", "prob", "use",
                  "last", "born", "selfcon", "recon", "tick", "gate_theta", "gate_seeded",
                  "n_written", "rekey_cursor", "rekey_snap", "nsrc", "nsrc_max", "live_src",
-                 "capacity", "quota", "owners", "key_dim", "lm_kind", "counters", "gates", "rng",
-                 "gen")
+                 "capacity", "quota", "owners", "key_dim", "vocab_slots", "lm_kind", "counters",
+                 "gates", "rng", "gen")
 
-    def __init__(self, *, capacity, quota, owners, key_dim, device, rng, lm_kind):
+    def __init__(self, *, capacity, quota, owners, key_dim, vocab_slots, device, rng, lm_kind):
         z = lambda *shape, dtype=torch.float32: torch.zeros(*shape, dtype=dtype, device=device)
         self.capacity, self.quota, self.owners = capacity, quota, owners
         self.key_dim, self.lm_kind, self.rng = key_dim, lm_kind, rng
+        # THE WIDTH OF THE TOKEN DISTRIBUTION MEM.read RETURNS, and nothing else in this class is
+        # sized by it. It is a MODEL geometry travelling with the store rather than a store
+        # geometry: a stored token id outside it is a store keyed to a segmentation the model no
+        # longer has, which MEM.maintain's job 3 leaves visibly stale on purpose.
+        self.vocab_slots = int(vocab_slots)
         self.keys = z(capacity, key_dim)
         self.tok = z(capacity, dtype=torch.long)
         self.src = z(capacity, dtype=torch.long)
@@ -385,8 +418,13 @@ def open_store(mem: Config, *, key_dim, vocab_slots, device, rng, lm_kind, resto
             f"{owners * quota}. A partitioned store holds blocks x quota entries and has no size "
             f"independent of its partition; one quantity, two answers.")
 
+    # `vocab_slots` IS PASSED ON RATHER THAN DROPPED, which it was until MEM.read acquired a body.
+    # It is not a size argument in the sense the paragraph above refuses: it sizes nothing in this
+    # store, it is the width of the distribution MEM.read returns, and the operator still sizes the
+    # store through `quota` and `owners` alone. See Store's own docstring for why the Store is the
+    # only route -- read and judge both need it and neither frozen signature can carry it.
     store = Store(capacity=capacity, quota=quota, owners=owners, key_dim=int(key_dim),
-                  device=device, rng=rng, lm_kind=str(lm_kind))
+                  vocab_slots=int(vocab_slots), device=device, rng=rng, lm_kind=str(lm_kind))
     # THE CENSUS GROWS ON DEMAND AND IS NEVER CLAMPED. d_source_slots is a starting width, not a
     # bound: clamping ids into a fixed-width table is the exact pattern that re-broke this at the
     # scale it was written for -- the table was 64 rows wide on every default run while a real one
@@ -712,6 +750,40 @@ def _gate_window(store, mode, write_gate, target, surprise):
         f"threshold the other two exist to replace, which is the defect MEM_WRITE_MODE is named in.")
 
 
+def _floor_entries(store, share):
+    """-> (floor, live): the per-source reservation ACTUALLY IN FORCE, and the divisor it used.
+
+    ONE EXPRESSION FOR ONE QUANTITY, IN THREE PLACES. The number memory/api.py::_unprotected
+    enforces against candidates, the number memory/api.py::census puts on its record, and the number
+    DOM.manage's cull brake is judged against are the same reservation, and the moment they are two
+    spellings they are "one quantity, two answers" -- the shape the `capacity != owners * quota`
+    guard in memory/api.py::open_store already exists for. domains/api.py::manage's own contract
+    says a wire quietly recomputed at the call site is self_organize.py:3688 under a new name; this
+    is that rule applied one call in, where the recomputation would be in the same file.
+
+    THE `live` IT RETURNS IS THE DIVISOR THAT WAS ACTUALLY USED and is what belongs on a report,
+    not the raw store.live_src field. Store.__init__ sets live_src to 0 and only
+    memory/api.py::apply_domain_plan -- a stub -- ever sets it from DOM's verdict, so before that
+    runs the divisor is "sources holding entries" while the field reads 0. Printing the field
+    beside a floor computed over 27 sources is the defect memory/api.py::open_store refuses
+    MEM_OWNERS below 1 over: the printed configuration and the running one disagreeing about a
+    number, one of them in a report nobody can check against the other.
+
+    IT RETURNS 0 ON THREE DIFFERENT ARMS AND THE CALLERS MUST NOT READ THAT AS A FLOOR OF NOTHING
+    TO ENFORCE: src_share disarmed, one live source, and a reservation that rounds below one entry
+    are three different configurations with one consequence here. memory/api.py::census reports the
+    floor in force and DOM's brake is `memory_counts[did] >= mem_floor_entries`, which at 0 is
+    satisfied by every domain including empty ones -- the frozen tree carries the `if _fl > 0`
+    guard that prevents it (self_organize.py:3688) and DOM.manage owes it.
+    """
+    has = store.nsrc > 0
+    live = int(store.live_src) if int(store.live_src) > 0 else int(has.sum())
+    if share <= 0.0 or live <= 1:
+        return 0, live
+    floor = int(share * int(store.capacity) / live)
+    return (floor if floor > 0 else 0), live
+
+
 def _unprotected(store, cand, need, share):
     """Drop candidates whose source is at or below its reserved floor. -> (cand, blocked, deadlock).
 
@@ -739,13 +811,14 @@ def _unprotected(store, cand, need, share):
         # THE SUPERSEDED RULE IS STILL REACHABLE, which is what D3 asks for: src_share=0 disarms the
         # reservoir and leaves "pressure is a signal, not a wall" as the selectable arm.
         return cand, 0, False
-    has = store.nsrc > 0
-    live = int(store.live_src) if int(store.live_src) > 0 else int(has.sum())
-    if live <= 1:
-        return cand, 0, False                      # one source owns everything anyway
-    floor = int(share * int(store.capacity) / live)
+    # THE ARITHMETIC IS memory/api.py::_floor_entries' AND NOT THIS FUNCTION'S ANY MORE, so the
+    # number this filter ENFORCES and the number memory/api.py::census REPORTS cannot drift apart.
+    # The two other early returns this replaces -- one live source, and a reservation that rounds
+    # below one entry -- both come back as floor 0 and are still returned here unchanged.
+    floor, _live = _floor_entries(store, share)
     if floor <= 0:
         return cand, 0, False
+    has = store.nsrc > 0
     prot = has & (store.nsrc <= floor)
     cs = store.src[cand].clamp(min=0, max=store.nsrc.numel() - 1)
     # src < 0 IS "NO PROVENANCE" AND IS NEVER PROTECTED. -2 is the reserved id for synthetic
@@ -890,9 +963,16 @@ def _write_gates(store, mode, fixed_gate, target, evict, decay, decay_every, pro
                     f"which at quota={quota} is {prob_frac * quota:.1f} entries inside a block and "
                     f"not {prob_frac * int(store.capacity):.0f} across the store -- the factor is "
                     f"the block count. It cannot narrow before a block is full, and nothing leaves "
-                    f"probation until a retrieval promotes it: MEM.read is a stub, so today every "
-                    f"eviction is a probation eviction and MEM.census's `pressure`, which is "
-                    f"main/(main+prob) over these branches, is exactly 0 by construction."),
+                    f"probation until a retrieval promotes it. THAT SECOND CLAUSE SURVIVED THE "
+                    f"WRITING OF memory/api.py::read AND ITS REASON CHANGED UNDERNEATH IT: read has "
+                    f"a body now, but spine/loop.py::_flush passes probe_contexts=None, so "
+                    f"memory/api.py::maintain's job 1 never reaches the call, store.n_reads stays "
+                    f"ABSENT, and every eviction still takes the probation branch. What the body "
+                    f"did change is what memory/api.py::census can say about it: `pressure` is "
+                    f"main/(main+prob) over these branches and is now reported as UNREACHABLE with "
+                    f"no promotion path, where before it was described as an exact 0 -- and a "
+                    f"signal held at zero and a signal measured at zero are the two states that "
+                    f"whole record exists to keep apart."),
     ))
 
 
@@ -1237,6 +1317,144 @@ def write(mem: Config, store, *, contexts, tokens, surprise, sources, owners, po
 
 
 
+# ==================================================================================================
+# THE THREE RETRIEVAL NUMBERS, WHICH ARE NOT LEVERS AND SAY SO HERE
+# ==================================================================================================
+
+READ_TAU, WRONG_MAD_K, WRONG_MIN_CHECKED = 0.1, 2.5, 10
+"""The temperature of the top-k vote, the k of the median + k*MAD wrongness flag, and the number of
+checked entries below which that flag is all-False. Module constants, with no env name.
+
+THEY TAKE GATE_STEP/GATE_FLOOR/GATE_CEIL's STANDING ARGUMENT, one section up, and it is not restated
+at length: memory/levers.py's own accounting is "21 rename + 3 keep -> 24 levers declared, 8 drop",
+none of these three was ever an environment knob in the tree this is ported from, and minting names
+for them here would be minting levers the census refused in the file that implements its decision.
+Turning one is a CODE EDIT.
+
+WHAT EACH IS, so a reader can judge the number rather than the name.
+  READ_TAU is memory.py:509's `tau=0.1` default, applied at memory.py:546, and no caller in the
+    frozen tree ever overrode it. It sets how sharply the top-k vote concentrates: at 0.1 a 0.1 gap
+    in cosine similarity is a factor of e in vote weight, so `topk` produces a soft vote and not an
+    argmax, and `conf` -- the TOP similarity -- is what the match-quality gate reads instead.
+  WRONG_MAD_K is memory.py:23's `selfcon_thresh=2.5`, applied at memory.py:590 for self-consistency
+    and at memory.py:607 for reconstruction. ONE constant across both detectors in the frozen tree
+    and one here: two would let MEM_VERIFY's two arms flag at different strictness while every
+    report line called both of them the wrongness detector.
+  WRONG_MIN_CHECKED is memory.py:587's `if int(checked.sum()) > 10`. THE NUMBER IS ALREADY DECLARED
+    IN A FROZEN DOCSTRING -- memory/api.py::judge's DID IT FIRE line names n_checked <= 10 as the
+    state in which the flag rule returns all-False and the whole filter is inert -- so this name is
+    where that declaration acquires a body rather than a new decision taken here.
+"""
+
+
+def _flagged(store, verify):
+    """The ACTIVE wrongness detector's flag, or None when there is no detector at all.
+
+    Adaptive median + k*MAD over CHECKED ENTRIES ONLY, which is the frozen rule (memory.py:587-591
+    for self-consistency, memory.py:605-608 for reconstruction, identical but for the field).
+
+    ONE IMPLEMENTATION, AND THAT IS WHY IT IS A HELPER AND NOT TWO BODIES. memory/api.py::judge's
+    frozen docstring declares this same rule for the pass that WRITES the scores, and a second copy
+    there would be two spellings of the predicate that decides whether an entry is reachable at all,
+    each free to drift -- the retrieval half of exactly what Q-MEM-9 refuses. judge calls this when
+    it lands; memory/api.py::read calls it now, and its WRONG_MIN_CHECKED arm is the inert state
+    judge's own Gate is declared to print the arithmetic of.
+
+    -1.0 IS THE UNCHECKED SENTINEL AND `field >= 0` IS THE CHECKED SET.
+    memory/api.py::_commit_window stamps both selfcon and recon to -1.0 on every commit, so an entry
+    written since the last judge pass is NOT in the population the median is taken over. That is
+    what keeps the threshold on the model's current scale instead of a mixture of every scale the
+    run has had -- and it is also why an end-of-run snapshot of these fields is not a measurement of
+    what the flag did (H32/M42: "0 entries checked" printed in the same report as "61,952 entries
+    excluded from EVERY retrieval"). The counters in read are taken where the gate gates.
+
+    `store.active &` IS LOAD-BEARING AND NOT BELT-AND-BRACES. Store.__init__ allocates selfcon and
+    recon as ZEROS while the sentinel is -1.0, so every never-written slot reads as "checked, and
+    perfectly plausible" -- it is in `checked`, it is in the median's population, and only the
+    active mask keeps it out of the flag. A version of this rule without it would flag on the
+    store's empty space.
+
+    verify == "off" RETURNS None AND NOT AN ALL-FALSE MASK, and the two are different facts: None is
+    "there is no detector", all-False is "the detector ran and flagged nothing". read counts them
+    apart -- n_wrong_reads is bumped only on the arm where a detector exists.
+    """
+    if verify == "selfcon":
+        field = store.selfcon
+    elif verify == "recon":
+        field = store.recon
+    elif verify == "off":
+        return None                    # a first-class configuration (D4), not a code path that rots
+    else:
+        # THE FOURTH ARM IS A RAISE AND NOT A FALL-THROUGH, for memory/api.py::_gate_window's reason
+        # one lever over: MEM_VERIFY carries choices=, so an unrecognised value is a startup
+        # LeverError and cannot reach here today -- but a fourth choice added to the declaration
+        # without a body here would land in the "no detector" arm and silently disarm the whole
+        # wrongness filter while the report still named the mode the operator asked for.
+        raise LeverError(
+            f"MEM_VERIFY={verify!r} has no detector in memory/api.py::_flagged. The lever declares "
+            f"choices=('selfcon', 'recon', 'off') and this helper implements those three; a fourth "
+            f"arm added to the declaration without one here would fall into 'off' and turn the "
+            f"wrongness filter off under the name of a mode that was asked for.")
+    checked = field >= 0
+    if int(checked.sum()) <= WRONG_MIN_CHECKED:
+        # ARMED AND ALL-FALSE. Below this many scores the median and the MAD are taken over a
+        # handful of entries and the threshold they produce is noise; the frozen tree drew the line
+        # at the same count and judge's DID IT FIRE line already declares it as the inert state.
+        return torch.zeros_like(store.active)
+    v = field[checked]
+    med = v.median()
+    mad = (v - med).abs().median()
+    # THE +1e-6 IS THE FROZEN SPELLING (memory.py:590) AND IT IS NOT COSMETIC. At mad == 0 -- every
+    # checked entry scoring identically, which is what a freshly-judged store of one domain looks
+    # like -- a bare `>= med` flags the WHOLE checked population by tie. Measured on 100 identical
+    # scores: `field >= med` flags 100 of 100 and `field >= med + 2.5 * (mad + 1e-6)` flags 0. The
+    # epsilon is what makes the tie break toward not-flagging, which is the direction wrong_read's
+    # own 3%-precision record argues for: a flag excludes the entry from every retrieval.
+    return store.active & checked & (field >= med + WRONG_MAD_K * (mad + 1e-6))
+
+
+# ==================================================================================================
+# WHAT ONE RETRIEVAL RETURNED
+# ==================================================================================================
+
+
+@dataclasses.dataclass(frozen=True)
+class Retrieval:
+    """One read's five arrays: the vote, its quality, what it hit, at what weight, and the mix.
+
+    FROZEN, for the reason memory/api.py::WriteReceipt says "a caller that can write to this can
+    change what the run reported".
+
+    `dist` IS (B, vocab_slots) AND, WHENEVER THE RETRIEVAL FOUND ANYTHING, SUMS TO 1.0 BY
+    CONSTRUCTION -- it is a softmax over the top-k scattered into token slots. (On the empty arm it
+    is all zeros, which is the other honest answer and not a small weight.) That arithmetic is the
+    whole reason `blend` is a FIELD and not something a caller derives from `dist`: the frozen
+    tree's ungated weight was `dist.sum(dim, keepdim=True).clamp(max=1.0) * 0.5`
+    (self_organize.py:3275-3276), and a quantity that is identically 1.0 multiplied by 0.5 is an
+    unconditional 50/50 mix at every position -- the measured -0.097 b/B at 200k slots.
+
+    `conf` IS A COSINE BY CONSTRUCTION AND NOT BY TRUST: read re-normalises `queries` before the
+    matmul, and store.keys are unit-norm at every write and every rekey, so the top similarity is
+    in [-1, 1] before the clamp. A caller that recomputed it from `dist` would be reproducing ISSUES
+    P1-C8/C9 one layer up, which is why the number rides on the record.
+
+    `hits` IS -1 WHERE THE RETRIEVAL DID NOT FILL A SLOT, and that convention is DEPENDED ON rather
+    than merely documented: memory/api.py::maintain counts n_probe_hits as `(retrieval.hits >= 0)`
+    and its own comment says it assumes exactly this. Whoever changes the fill changes that line in
+    the same edit.
+
+    `blend` IS THE WEIGHT AND NOT THE MIXTURE. memory/api.py::blend applies it; nothing else may
+    recompute it, and read leaves it at blend_max rather than pre-clamping, because the one case
+    that must be clamped -- blend_max == 1.0 with conf == 1.0, where the model's mass can vanish --
+    is declared to live in blend, with the arithmetic.
+    """
+    dist: object
+    conf: object
+    hits: object
+    weights: object
+    blend: object
+
+
 def read(mem: Config, store, *, queries, promote=True):
     """kNN over readable entries -> a token distribution, its match quality, and its blend weight.
 
@@ -1267,9 +1485,212 @@ def read(mem: Config, store, *, queries, promote=True):
                  report as "61,952 entries excluded from EVERY retrieval")
     """
     mem = mem.owned_by("MEM")
-    raise NotImplementedError(
-        "MEM.read: P4 (memory) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section MEM.")
+    topk, blend_max = int(mem.topk), float(mem.blend_max)
+    match_floor, wrong_read, verify = float(mem.match_floor), bool(mem.wrong_read), str(mem.verify)
+    dev = store.keys.device
+
+    # ==============================================================================================
+    # ALL SIX COUNTERS ARE SEEDED BEFORE ANY BRANCH DECIDES ANYTHING
+    # ==============================================================================================
+    # THIS IS THE WHOLE ABSENT-VERSUS-ZERO CONTRACT FOR THIS ENTRY POINT, and it is the reason the
+    # loop is here and not inside the arms below. ABSENT means read was never called on the arm this
+    # run took -- which is TODAY'S state: spine/loop.py::_flush passes probe_contexts=None, so
+    # memory/api.py::maintain's job 1 never reaches the call at all. PRESENT-AND-0 means read ran
+    # and the mechanism did not fire. memory/api.py::census's mem.pressure Gate distinguishes
+    # exactly those two states over store.n_promoted, so seeding any of these inside the `else` of
+    # the gate it describes would be the defect fabric/api.py::_bump was written to stop -- SIG's
+    # cadence ledger shipped a counter absent rather than 0 for a whole run at the one configuration
+    # the tree ships, because the lines that seeded it stood inside the else of their own gate
+    # (sig/api.py::cadence_due carries the repaired form).
+    for _k in ("store.n_reads", "store.n_read_empty", "store.n_promoted",
+               "store.n_wrong_reads", "store.n_wrong_read_hit", "store.n_wrong_blocked"):
+        _bump(store, _k, 0)
+    _bump(store, "store.n_reads")
+
+    # ==============================================================================================
+    # A QUERY THAT IS NOT A KEY IS REFUSED BY NAME
+    # ==============================================================================================
+    # THE SEED AND THE n_reads BUMP BOTH SIT ABOVE THIS REFUSAL, SO A REFUSED CALL COUNTS AS A READ,
+    # and that is a choice rather than an oversight. It is the cheap side of the trade: a StoreError
+    # out of here ends the run, so the inflated count is read from a report that was never written,
+    # whereas seeding below the refusal would put all six keys behind a condition and give ABSENT
+    # two meanings -- "read was never called" and "read was called with the wrong argument".
+    if not torch.is_tensor(queries) or queries.dim() != 2 or not queries.is_floating_point() \
+            or int(queries.shape[1]) != int(store.key_dim):
+        got = (f"{tuple(queries.shape)} of {queries.dtype}" if torch.is_tensor(queries)
+               else type(queries).__name__)
+        raise StoreError(
+            f"MEM.read: `queries` arrived as {got} where a 2-D FLOATING (B, {int(store.key_dim)}) "
+            f"is required -- these are KEYS IN THIS STORE'S OWN KEY SPACE, not contexts and not "
+            f"token ids. This entry point declares no key lever and takes no key_fn, so it cannot "
+            f"encode: whoever calls it narrows to MEM_KEY_WIN and encodes with the same key_fn at "
+            f"the same MEM_KEY_DEPTH the write path used. memory/api.py::maintain's job 1 does that "
+            f"in package, and the report path's caller must agree with it or the store is queried "
+            f"in one key space and written in another -- the drift MEM_REKEY_EVERY exists to "
+            f"prevent, arriving through the front door. REFUSED RATHER THAN RESHAPED, and this is "
+            f"the highest-value refusal in the function: a (B, L) long tensor of token ids either "
+            f"fails obscurely inside the matmul below, or -- if L happens to equal key_dim -- "
+            f"retrieves SILENTLY from a space nothing was ever written in, which returns entries "
+            f"and means nothing. The argument is memory/api.py::_require_rows' and the message is "
+            f"written out here because that helper hardcodes the name of the other entry point.")
+    B = int(queries.shape[0])
+    V = int(store.vocab_slots)
+
+    # ==============================================================================================
+    # THE READABLE SET, AND NOTHING ELSE
+    # ==============================================================================================
+    # READS STAY GLOBAL ACROSS OWNER BLOCKS -- there is no `own` narrowing here and there must never
+    # be one. That asymmetry with memory/api.py::write is this store's design and this docstring's
+    # own second sentence: knowledge is owned but not walled off. It is also the one place the
+    # single-write-path argument does NOT apply, because there is no partition to disagree about.
+    valid = store.active.clone()
+
+    # ==============================================================================================
+    # THE WRONG FLAG, COUNTED WHERE IT GATES
+    # ==============================================================================================
+    # ONE DELIBERATE DEPARTURE FROM THE FROZEN TREE, AND IT IS THE REPAIR wrong_read IS NAMED FOR.
+    # memory.py:521 filters `valid = self.active & (~self.is_unverified())` UNCONDITIONALLY and puts
+    # only is_wrong() behind the flag -- so the reconstruction detector excluded entries from every
+    # retrieval with no switch at all, which is the 63,146-entries-at-3%-precision state
+    # memory/levers.py::MEMLevers records beside wrong_read. Here there is ONE detector, the one
+    # MEM_VERIFY selects, and wrong_read is the only thing that decides whether it gates reads.
+    # THE THREE COUNTERS CARRY THE FROZEN TREE'S EXACT MEANINGS (memory.py:110-114): n_wrong_reads
+    # is read() calls made WHILE THE GATE WAS ON, n_wrong_read_hit is those of them that excluded at
+    # least one entry, and n_wrong_blocked is entries excluded SUMMED OVER READS -- exclusion WORK,
+    # so the same entry blocked on ten reads counts ten times. Bumping n_wrong_reads only on the
+    # gate-on arm is what gives the reader three states without this body declaring a Gate its
+    # docstring does not name: n_wrong_reads present-and-0 beside n_reads > 0 says the gate was OFF
+    # (wrong_read false, or MEM_VERIFY=off so there is no detector at all), and n_wrong_reads equal
+    # to n_reads with n_wrong_read_hit == 0 says it was on and nothing was flagged. This is the
+    # H32/M42 repair in full: incremented WHERE THE GATE GATES, never derived from the flags left at
+    # the end of the run, because every write resets the sentinel underneath them.
+    flags = _flagged(store, verify)
+    if wrong_read and flags is not None:
+        _bump(store, "store.n_wrong_reads")
+        blocked = int((valid & flags).sum())
+        if blocked:
+            _bump(store, "store.n_wrong_blocked", blocked)
+            _bump(store, "store.n_wrong_read_hit")
+        valid = valid & (~flags)
+
+    # ==============================================================================================
+    # THE EMPTY ARM
+    # ==============================================================================================
+    # n_read_empty IS BUMPED FOR M == 0 AND NOT FOR topk <= 0, because they are different findings:
+    # the first says the store had nothing readable, the second says the operator asked for no
+    # neighbours. n_read_empty > 0 BESIDE n_wrong_blocked > 0 is a sentence the old report could not
+    # write at all -- every readable entry was excluded by the flag -- and that is what separating
+    # the two counters buys.
+    # MEM_TOPK DECLARES NO MEANING FOR 0 AND 0 IS AN UNDECLARED RETRIEVAL-OFF SWITCH (so is
+    # MEM_MATCH_FLOOR=1.0, measured at the ramp below). This body must NOT invent a refusal for
+    # either: read's frozen docstring declares none and no Gate, and a read-site refusal over a
+    # lever whose declared domain does not forbid the value is what tests/test_ownership.py O15
+    # calls over-refusal. The hole is named here; closing it is the owner's call, the way
+    # memory/api.py::open_store's `< 1` refusal on quota and owners was.
+    M = int(valid.sum())
+    if M == 0:
+        _bump(store, "store.n_read_empty")
+    kk = min(topk, M)
+    if kk <= 0:
+        # `tv.max(-1)` MUST NOT RUN AT kk == 0. Measured: `torch.randn(3, 5).topk(0, dim=-1)`
+        # returns a (3, 0) tensor happily and `.max(-1)` on it raises IndexError("max(): Expected
+        # reduction dim 1 to have non-zero size."), which is the mechanical reason this arm returns
+        # here rather than falling through with an empty top-k -- and an IndexError out of a
+        # retrieval names no lever, no value and no package.
+        w0 = max(0, topk)
+        return Retrieval(dist=torch.zeros(B, V, device=dev),
+                         conf=torch.zeros(B, device=dev),
+                         hits=torch.full((B, w0), -1, dtype=torch.long, device=dev),
+                         weights=torch.zeros(B, w0, device=dev),
+                         blend=torch.zeros(B, device=dev))
+
+    # ==============================================================================================
+    # THE kNN AND THE PROMOTION, BOTH OUTSIDE THE GRAPH
+    # ==============================================================================================
+    # no_grad FOR THE REASON memory/api.py::_encode_keys GIVES -- a stored key is data -- AND ONE
+    # THIS FUNCTION OWNS: retrieval has never entered the training distribution in this project, and
+    # putting it in the graph is the unmeasured behaviour change Q-MEM-10 refuses. It would also
+    # hold the whole flush's activations alive for as long as a retrieved entry is cited.
+    with torch.no_grad():
+        vi = valid.nonzero(as_tuple=True)[0]                       # (M,) GLOBAL row indices
+        # RE-NORMALISING `queries` IS NOT DEFENSIVE TIDINESS: it is what makes `conf` a COSINE BY
+        # CONSTRUCTION rather than by trust. read has two callers that encode at two sites --
+        # memory/api.py::maintain's job 1 and the composition root's report path -- and the
+        # match-quality gate below reads `conf` as a similarity in [0, 1].
+        qn = torch.nn.functional.normalize(queries.detach().float(), dim=-1)
+        sim = qn @ store.keys[vi].t()                              # (B, M); store.keys are unit-norm
+        tv, ti = sim.topk(kk, dim=-1)                              # (B, kk)
+        w = torch.softmax(tv / READ_TAU, dim=-1)                   # similarity weights
+        gi = vi[ti]                                                # (B, kk) GLOBAL row indices
+        # NO CLAMP ON store.tok[gi]. A stored token id outside the model's vocabulary is a store
+        # keyed to a segmentation the model no longer has -- the gap memory/api.py::maintain's job 3
+        # deliberately leaves visibly stale rather than rewriting under a guess -- and clamping it
+        # would cast a retrieval vote for a token nobody ever stored. Let the scatter_add_ raise.
+        dist = torch.zeros(B, V, device=dev)
+        dist.scatter_add_(1, store.tok[gi], w)
+        conf = tv.max(-1).values.clamp(0.0, 1.0)
+        hits = torch.full((B, topk), -1, dtype=torch.long, device=dev)
+        hits[:, :kk] = gi
+        weights = torch.zeros(B, topk, device=dev)
+        weights[:, :kk] = w
+
+        if promote:
+            # `use` ACCUMULATES OVER THE NON-UNIQUE HIT LIST, because it is decayed retrieval MASS
+            # and two query rows wanting one entry is twice the evidence. It is a FLOAT for the
+            # reason Store's own docstring gives.
+            flat = gi.reshape(-1)
+            store.use.index_add_(0, flat, w.reshape(-1))
+            # THE UNIQUE IS A REPAIR AND IT IS MEASURED. memory.py:557 counts
+            # `self.n_promoted += int(self.prob[_g].sum())` over the NON-unique index, so one entry
+            # reached by two query rows counts twice. Measured on a driven store of 2,048 entries:
+            # 16 query rows x topk=8 is 128 hits covering 120 DISTINCT entries, so the frozen
+            # spelling would report 128 promotions where 120 entries left probation -- a 6.7%
+            # overcount on the FIRST read, before any turnover at all. n_promoted came back 120, and
+            # that is the exact quantity memory/api.py::census's mem.pressure Gate tests for zero,
+            # so an overcount there makes the no-promotion-path reading unreadable. Same argument as
+            # memory/api.py::_commit_window's duplicate refusal, one counter over.
+            uniq = torch.unique(flat)
+            _bump(store, "store.n_promoted", int(store.prob[uniq].sum()))
+            store.prob[uniq] = False
+            # THE CLOCK IS READ, NEVER ADVANCED. read takes no `now` and must not invent one:
+            # memory/api.py::write and memory/api.py::maintain have already advanced `tick` to this
+            # window, and Store's own docstring says MEM.read stamps `last` from the same field. The
+            # rejected alternative is the frozen tree's per-call `self.tick += 1` (memory.py:565),
+            # which makes "born at window 120, last retrieved at window 400" unsayable.
+            store.last[uniq] = int(store.tick)
+        # promote=False SKIPS ALL THREE WRITES AND NOTHING ELSE CHANGES -- L49/G7, an instrument
+        # that edits what it measures. It still counts n_reads and the wrong_* trio, because those
+        # describe the READ and not the store.
+        # AND READ DRAWS NO RANDOMNESS ON EITHER ARM: it must never touch store.gen. The probe's
+        # whole claim (deterministic stride, memory/levers.py::MEMLevers at probe_rows) is that a
+        # diagnostic does not move the training trajectory, and a retrieval that consumed draws
+        # would break that from the inside.
+
+    # ==============================================================================================
+    # THE BLEND WEIGHT, COMPUTED HERE AND NEVER AT THE CALLER
+    # ==============================================================================================
+    # VERBATIM THE FROZEN RAMP (self_organize.py:3277), INCLUDING THE max(1e-6, ...), which is not
+    # padding: MEM_MATCH_FLOOR declares no domain=, so >= 1.0 is reachable from the environment and
+    # the naive denominator INVERTS the ramp there. Measured over conf in {0.0, 0.5, 1.0}: at
+    # match_floor=1.5 this spelling reads [0.0, 0.0, 0.0] -- correct, nothing passes -- while
+    # `(conf - mf) / (1.0 - mf)` reads [1.0, 1.0, 1.0], the exact inversion, and at match_floor=1.0
+    # this spelling reads [0.0, 0.0, 0.0] while the naive one returns nan at conf == 1.0. So
+    # MEM_MATCH_FLOOR=1.0 is a second, undeclared retrieval-off switch beside the declared
+    # MEM_BLEND_MAX=0.0, and it is the frozen spelling that makes it a clean one.
+    # THE WEIGHT RIDES ON THE RECORD. Recomputing conf or this ramp at the blend site is ISSUES
+    # P1-C8/C9 reproduced one layer up, which is the whole reason it is computed once, here.
+    # MEASURED, AND IT IS WHAT THE GATE IS FOR. `dist` sums to 1.0 by construction -- 0.9999999 to
+    # 1.0000001 over 16 rows on this tree -- which is the arithmetic behind the frozen ungated
+    # weight being identically 1.0 and the blend being an unconditional 50/50 mix at every position,
+    # the reason memory measured -0.097 b/B at 200k slots. AND THE RAMP IS NOT DECORATION: on the
+    # same store, 16 queries re-encoded from entries the store actually holds came back at conf=1.0
+    # and blend=0.5, exactly MEM_BLEND_MAX, while 16 RANDOM unit-norm queries against those same
+    # 2,048 entries topped out at conf=0.3048 -- barely over MEM_MATCH_FLOOR=0.3 -- and the largest
+    # blend weight they earned was 0.0034, 0.7% of the ceiling. A bad match being scaled to nothing
+    # while a real one is paid in full is the mechanism working, not an inert one.
+    g = ((conf - match_floor) / max(1e-6, 1.0 - match_floor)).clamp(0.0, 1.0)
+    blend = (blend_max * g).clamp(min=0.0)
+    return Retrieval(dist=dist, conf=conf, hits=hits, weights=weights, blend=blend)
 
 
 def blend(mem: Config, model_probs, retrieval):
@@ -1413,9 +1834,16 @@ def maintain(mem: Config, store, *, now, key_fn, probe_contexts=None, resegment=
                 # THE PROBE *IS* read(), NOT A SECOND RETRIEVAL (Q-MEM-9, RESOLVED (a)). Open-coding
                 # a kNN here would put n_reads/n_promoted/n_wrong_* on one path while the store is
                 # moved by another, and would give wrong_read and match_floor a second
-                # implementation free to drift. MEM.read is still a P4 stub, so this line raises
-                # NotImplementedError the moment a caller supplies probe_contexts -- which is the
-                # loud state, and is why the cadence above is counted before it.
+                # implementation free to drift. memory/api.py::read HAS A BODY as of this commit,
+                # so this line RETRIEVES the moment a caller supplies probe_contexts, where it used
+                # to raise NotImplementedError -- and this comment's whole argument inverts with it.
+                # NOTHING CHANGES AT RUNTIME TODAY: spine/loop.py::_flush passes probe_contexts=None
+                # and this branch is not entered, so store.n_reads / n_promoted / n_wrong_* stay
+                # ABSENT rather than present-and-0. That absence is a reading and not a hole in the
+                # report: it is what memory/api.py::census's mem.pressure Gate prints as UNREACHABLE
+                # with no promotion path, and it is why the cadence above is counted BEFORE this
+                # line -- n_probe_fired with n_probe_rows == 0 is armed-but-0, which is a different
+                # finding from a probe that never fired.
                 retrieval = read(mem, store, queries=queries, promote=True)
                 _bump(store, "store.n_probe_rows", int(rows.shape[0]))
                 # ONE RETRIEVAL THAT RETURNED AT LEAST ONE ENTRY, which is what this counter is
@@ -1634,6 +2062,70 @@ def judge(mem: Config, store, *, scorer=None, reconstructor=None):
         "docs/04_CONTRACT.md, section MEM.")
 
 
+# ==================================================================================================
+# EVERYTHING THE REPORT AND THE DOMAIN MANAGER NEED TO KNOW ABOUT THE STORE
+# ==================================================================================================
+
+
+@dataclasses.dataclass(frozen=True)
+class StoreCensus:
+    """The store's occupancy, its provenance table, its verdict and its did-it-fire surface.
+
+    FROZEN, on memory/api.py::WriteReceipt's argument, and with one consequence this record has that
+    that one does not: `counters` and `gates` are containers, so freezing the dataclass freezes the
+    BINDING and not the contents. That is what the deep-enough copy in the body is for.
+
+    `counts` IS A DICT KEYED BY SOURCE ID AND A TUPLE WAS REJECTED FOR A NAMED REASON. DOM.manage
+    indexes it as `memory_counts[did]`, and a Python tuple answers a NEGATIVE did by returning the
+    LAST bucket, so the -1 and -2 no-provenance ids would read as some real domain's count. A dict
+    raises. THE ZEROS ARE IN THE MAPPING AND THAT IS THE POINT: a source with no entries is exactly
+    the case DOM's cull brake must see -- domains/api.py::manage says "It self-releases --
+    once eviction has genuinely drained the domain it falls below the floor" -- and a mapping that
+    omitted zeros would force the consumer to choose between a KeyError and a silent 0 default,
+    which is the absent-versus-zero collapse refused everywhere else in this tree.
+
+    `pressure` IS MEM'S VERDICT -- True, False or None -- AND NOT MEM'S READING, and three frozen
+    texts force that encoding rather than one. fabric/api.py::grow_check says "IT ARRIVES AS MEM'S
+    VERDICT, NOT AS MEM'S READING"; memory/api.py::census's own docstring puts the comparison
+    against the threshold inside this call; and memory/levers.py::MEMLevers argues at pressure_thresh
+    that handing over the raw share would make fab.grow_mem_eligible fire on every flush. FAB's body
+    confirms the encoding it expects on both halves -- an eligibility that is the truth of the value
+    and a reachability that is the value not being None.
+    NOTHING IS LOST BY LEAVING THE SHARE OFF THIS RECORD: n_evict_main and n_evict_probation both
+    cross on `counters`, so the ratio is derivable, and the mem.pressure Gate prints it pre-computed
+    beside its own denominator.
+
+    `census_drift` IS None ON THE reconcile=False ARM AND NOT 0. A 0 there would claim "measured and
+    exact" about a measurement that was not taken -- the record-level form of the same
+    absent-versus-zero rule the counters obey one layer down.
+
+    `live_src` IS THE DIVISOR THAT WAS ACTUALLY USED, i.e. memory/api.py::_floor_entries' own
+    `live`, and not the raw store.live_src field. The two differ before MEM.apply_domain_plan has
+    run -- Store.__init__ sets the field to 0 -- and reporting a raw 0 beside a floor computed over
+    27 sources is the printed-configuration-disagrees-with-the-running-one defect
+    memory/api.py::open_store refuses MEM_OWNERS below 1 over.
+
+    `nsrc` IS THE NUMBER OF SOURCE IDS HOLDING ENTRIES, NOT THE TABLE WIDTH, and that reading is
+    what makes the orphan gap readable beside live_src: 125 sources holding entries against 27 live
+    domains is the 4.6x swing three docstrings in this tree cite, and memory/api.py::_unprotected
+    says "a dead source that still holds entries is still protected by it".
+    The table width is already on the record twice over -- as counters['store.census_slots'] and as
+    len(counts).
+    """
+    counts: dict
+    floor_entries: int
+    quota_arm: str
+    pressure: object
+    probation_share: float
+    live_src: int
+    nsrc: int
+    nsrc_max: int
+    census_drift: object
+    n_census_reconciles: int
+    counters: dict
+    gates: tuple
+
+
 def census(mem: Config, store, *, reconcile=False):
     """Everything the report and the domain manager need to know about the store, in one call.
 
@@ -1696,9 +2188,233 @@ def census(mem: Config, store, *, reconcile=False):
                  BOTH unreachability causes named above
     """
     mem = mem.owned_by("MEM")
-    raise NotImplementedError(
-        "MEM.census: P4 (memory) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section MEM.")
+    share, prob_frac = float(mem.src_share), float(mem.probation_frac)
+    thresh, quota, evict = float(mem.pressure_thresh), int(mem.quota), str(mem.evict)
+    # NO WIRE IS READ HERE -- the frozen WIRES READ line says none, so the capacity comes off the
+    # STORE and the block count off store.owners, not off mem.d_capacity / mem.d_owner_blocks.
+    # Touching a d_ field here would also be a new O4 edge for a value this package already holds.
+    c = store.counters
+
+    # ==============================================================================================
+    # BOTH COUNTERS ARE SEEDED BEFORE THE reconcile BRANCH DECIDES
+    # ==============================================================================================
+    # Seeding them inside `if reconcile:` is precisely the recorded defect fabric/api.py::_bump
+    # exists to stop, and sig/api.py::cadence_due carries the repaired form of it. With the seed at
+    # the top, ABSENT means census was never called AT ALL -- which is today's state, because
+    # spine/loop.py has no management pass and its R stage lists this row as having no producer --
+    # and PRESENT-AND-0 means census ran and never reconciled. That is also why this entry point
+    # needs no n_census_calls counter: the seed already carries the distinction, and minting one
+    # would be a counter the frozen DID IT FIRE line does not declare.
+    _bump(store, "store.n_census_reconciles", 0)
+    _bump(store, "store.census_drift", 0)
+    # AND CENSUS SEEDS NO OTHER ENTRY POINT'S COUNTER AND NO OTHER PACKAGE'S. n_promoted,
+    # n_probe_fired, n_evict_main and n_evict_probation are read below with `.get(k, 0)` and their
+    # ABSENCE is the signal the mem.pressure Gate exists to report; seeding them here would rewrite
+    # "MEM.read was never called" into "MEM.read ran and promoted nothing", which is a claim about
+    # another entry point's work made by the function that reports on it.
+
+    # ==============================================================================================
+    # THE EXACT RECOUNT, ONLY UNDER reconcile=True, AND IT IS THE REPAIR
+    # ==============================================================================================
+    drift = None
+    if reconcile:
+        _bump(store, "store.n_census_reconciles")
+        # src < 0 IS "NO PROVENANCE" AND IS CREDITED TO NOBODY, ON BOTH PATHS. -2 is the reserved id
+        # for synthetic eval-injected entries (H30), and memory/api.py::_commit_window already
+        # refuses to credit a negative source; a recount that bincounted them would invent a bucket
+        # the incremental table never had and then report the difference as drift.
+        m = store.active & (store.src >= 0)
+        if int(m.sum()):
+            # THE TABLE IS GROWN, NEVER CLAMPED -- the same sentence memory/api.py::open_store and
+            # memory/api.py::_commit_window both carry, and the pattern that re-broke this at the
+            # scale it was written for: the table stood 64 rows wide on every default run against a
+            # real one carrying 125 source ids.
+            top = int(store.src[m].max()) + 1
+            if top > int(store.nsrc.numel()):
+                grown = torch.zeros(top, dtype=store.nsrc.dtype, device=store.nsrc.device)
+                grown[:store.nsrc.numel()] = store.nsrc
+                store.nsrc = grown
+        exact = torch.bincount(store.src[m],
+                               minlength=int(store.nsrc.numel())).to(store.nsrc.dtype)
+        drift = int((exact - store.nsrc).abs().sum())
+        if drift:
+            # A NONZERO DRIFT IS A DEFECT SIGNAL AND NOT A REPAIR REPORT, which is the frozen DID IT
+            # FIRE line's own reading of this counter. It is counted BEFORE the table is replaced,
+            # because after the assignment the evidence is gone.
+            _bump(store, "store.census_drift", drift)
+        # IT REPLACES THE TABLE, and the authority is verbatim in this file:
+        # memory/api.py::_commit_window says of its underflow clamp that "the bite is COUNTED and
+        # MEM.census(reconcile=True) is what repairs it".
+        store.nsrc = exact
+        # nsrc_max IS RAISED AND NEVER LOWERED, even when the recount is smaller. Re-deriving it
+        # from current counts forgets every source evicted before now (M53/M67) and leaves the
+        # starvation alarm comparing against a peak that never happened.
+        store.nsrc_max = max(int(store.nsrc_max), int(exact.max()) if exact.numel() else 0)
+
+    # ==============================================================================================
+    # THE FLOOR, THROUGH THE ONE SHARED EXPRESSION
+    # ==============================================================================================
+    # memory/api.py::_floor_entries is the number the eviction filter ENFORCES, so this is the
+    # number the report PRINTS and the number DOM's cull brake is judged against, and the three
+    # cannot be three answers. `live` is the divisor that was ACTUALLY used and is what goes on the
+    # record -- see StoreCensus. WHAT THIS REPORTS IS THE FLOOR IN FORCE AND NOT A HYPOTHETICAL ONE:
+    # on the shipped configuration today DOM.observe is a stub, every window is domain 0, exactly
+    # one source holds entries, `live <= 1`, and the floor in force is 0 -- which is why
+    # n_floor_blocked reads 0 and NOT because the floor held. DOM.manage's declared brake is
+    # `memory_counts[did] >= mem_floor_entries`, satisfied at 0 by every domain including empty
+    # ones, so the brake becomes a wall; the frozen tree carries the `if _fl > 0` guard that
+    # prevents it (self_organize.py:3688). Naming the hazard is this function's job and fixing it is
+    # DOM.manage's.
+    floor, live = _floor_entries(store, share)
+
+    # ==============================================================================================
+    # THE PER-SOURCE TABLE, AND THE TWO PROBATION READINGS
+    # ==============================================================================================
+    counts = {i: int(n) for i, n in enumerate(store.nsrc.tolist())}
+    # `prob` ON A FREED SLOT IS STALE (L61) -- memory/api.py::_commit_window sets it True on every
+    # write and nothing clears it on deactivation -- so both readings mask it with `active`.
+    prob_live = store.prob & store.active
+    # THE TWO READINGS ARE DIFFERENT NUMBERS AND BOTH ARE PRINTED. probation_frac is a PER-BLOCK
+    # predicate -- memory/api.py::write says so twice and Q-MEM-4 closed it as the adjacent hole --
+    # so the STORE-WIDE share on this record is NOT what the eviction branch tests, and write's own
+    # docstring asks for the per-block distribution beside it. Measured on this tree after 60
+    # windows: per-block min/median/max 0/128/128 against a budget of prob_frac*quota = 12.8, beside
+    # a store-wide share of 0.5625 against prob_frac = 0.10. Two denominators a factor of the block
+    # count apart, and only the first one decides anything.
+    probation_share = int(prob_live.sum()) / int(store.capacity)
+    # THE GEOMETRY IS THE STORE'S AND THE BUDGET IS THE LEVER'S, and they cannot disagree:
+    # memory/api.py::open_store refuses `capacity != owners * quota` before a Store exists.
+    per_block = prob_live.view(int(store.owners), int(store.quota)).sum(1)
+    p_min, p_med, p_max = int(per_block.min()), int(per_block.median()), int(per_block.max())
+
+    # ==============================================================================================
+    # THE PRESSURE VERDICT -- THE ONE INTERPRETATION THAT DECIDES THE SHAPE OF THE RECORD
+    # ==============================================================================================
+    ev_p, ev_m = int(c.get("store.n_evict_probation", 0)), int(c.get("store.n_evict_main", 0))
+    tot = ev_p + ev_m
+    n_probe = int(c.get("store.n_probe_fired", 0))
+    promoted_key = "store.n_promoted" in c
+    promoted = int(c.get("store.n_promoted", 0))
+    reading = (ev_m / tot) if tot else None
+    # None ON TWO ARMS, NOT False, AND THE TWO ARMS ARE DIFFERENT FACTS.
+    #   (a) tot == 0: no eviction has happened, the ratio has no denominator, and a False here would
+    #       claim a measurement that was never taken.
+    #   (b) promoted == 0: nothing has ever left probation, so no eviction CAN destroy a promoted
+    #       entry -- n_evict_main is identically 0 and the reading is pinned at 0.0 for EVERY
+    #       configuration, which is Q-MEM-4's exact chain. Handing FAB a False there would make its
+    #       own gate print "armed, did not fire", which is the language of a measurement, about a
+    #       signal that cannot move. None makes it print UNREACHABLE, which is what this package's
+    #       Gate says one package over, and the two reports then agree.
+    # Measured on this tree after 60 windows: ev_p=3072, ev_m=0, so the denominator exists, and
+    # store.n_promoted is ABSENT -- arm (b).
+    pressure = None if (reading is None or promoted == 0) else bool(reading > thresh)
+
+    # ==============================================================================================
+    # THE mem.pressure GATE, DECLARED AT THE END
+    # ==============================================================================================
+    # AT THE END, for the reason memory/api.py::_write_gates records: a gate declared before the
+    # work reports the PREVIOUS call. EXACTLY ONE GATE, AND ITS NAME MATTERS -- _declare_gates
+    # replaces by NAME, so spelling this one "mem.probation" would silently clobber the
+    # scan-resistance Gate memory/api.py::write declares.
+    # THERE IS NO NOISE FLOOR HERE AND THE OMISSION IS DELIBERATE. The frozen tree suppressed the
+    # reading below 1,000 evictions (memory.py:415); that number is declared nowhere in this tree
+    # and was chosen at a capacity of 200,000 against today's 8,192, so porting it would be
+    # re-tuning an instrument by importing a constant. The DENOMINATOR IS PRINTED in `value`
+    # instead, which is this tree's answer to a verdict without its arithmetic. Whether a declared
+    # minimum is owed is the owner's, beside Q-MEM-4's standing "measure before retuning".
+    _ratio = "no evictions yet" if tot == 0 else f"{ev_m}/{tot} = {reading:.3f}"
+    # ABSENT AND 0 ARE PRINTED AS DIFFERENT WORDS, AND RENDERING `.get(k, 0)` HERE WOULD COLLAPSE
+    # THEM. n_promoted ABSENT says memory/api.py::read was never called at all on the arm this run
+    # took -- a fact about the spine -- while n_promoted 0 says read ran and nothing left probation,
+    # a fact about the store. Those are different findings about different packages' work, and the
+    # unconditional seeding in memory/api.py::read exists precisely so this line can tell them
+    # apart. n_probe_fired carries the same pair against memory/api.py::maintain's cadence.
+    _prom = str(promoted) if promoted_key else "ABSENT"
+    _probe = str(n_probe) if "store.n_probe_fired" in c else "ABSENT"
+    _prom_note = (" (ABSENT is the stronger of the two readings: MEM.read was never called at all, "
+                  "so that is a statement about the spine and not about this store)" if not promoted_key
+                  else " (present and 0, so read HAS run and nothing left probation)")
+    _arm = "reservoir" if share > 0.0 else "pressure_signal"
+    # THE PAIR Gate.line PRINTS IS `(value vs threshold)`, SO THE RATIO GOES LAST: the threshold is
+    # pressure_thresh and it applies to the ratio alone, and a value string ending in some other
+    # number renders "n_promoted 35 vs 0.8" -- one sentence pairing a count with a fraction. Found
+    # by reading the rendered line on a driven store, which is the only place it is visible.
+    _value = (f"probation_share {probation_share:.3f} against probation_frac {prob_frac} "
+              f"STORE-WIDE, while the PER-BLOCK distribution the eviction branch actually tests is "
+              f"min/median/max {p_min}/{p_med}/{p_max} against {prob_frac * quota:.1f}; "
+              f"n_probe_fired {_probe}; n_promoted {_prom}; pressure {_ratio}")
+    # THE UNREACHABLE ARM BRANCHES AGAIN, BECAUSE THERE ARE TWO WAYS TO HAVE NO VERDICT AND ONLY
+    # ONE OF THEM IS "NO PROMOTION PATH". The docstring names that one and it is tested FIRST, on
+    # n_promoted, exactly as written there. The other is tot == 0 with promotions on the board --
+    # measured on a driven store: 727 entries written, 35 promoted by one read, and NOT ONE
+    # EVICTION. The first draft of this reason had only the promotion clause and printed "NO
+    # PROMOTION PATH ... n_promoted 35" on that store: a reason describing the state the run is not
+    # in, which is the defect this whole file argues against, and it was invisible until the line
+    # was rendered on a real store.
+    _declare_gates(store, (
+        Gate("mem.pressure", bool(pressure), _value, thresh, reachable=pressure is not None,
+             reason=(f"MEM_PRESSURE_THRESH={thresh} is MEM's own bar and THIS COMPARISON IS ITS "
+                     f"ONLY READER: what the composition root hands fabric/api.py::grow_check is "
+                     f"this verdict and not this ratio. MEM_EVICT={evict!r} ranks the victims the "
+                     f"two branches are counted over, and MEM_SRC_SHARE={share} puts quota_arm at "
+                     f"{_arm!r}. The denominator is PRINTED beside the ratio rather than suppressed "
+                     f"below a minimum: the frozen tree returned None under 1,000 evictions "
+                     f"(memory.py:415), that floor was chosen at a capacity of 200,000 against this "
+                     f"store's {int(store.capacity)}, and porting it would be re-tuning an "
+                     f"instrument by importing a constant -- so at {ev_m}/{tot} a reader can see "
+                     f"for themselves how many samples this verdict rests on."
+                     if pressure is not None else
+                     (f"NO PROMOTION PATH. Only a retrieval promotes out of probation, the only "
+                      f"in-loop retrieval is memory/api.py::maintain's job 1, and its "
+                      f"`probe_contexts` has no producer -- spine/loop.py::_flush passes None. "
+                      f"n_probe_fired {_probe}, n_promoted {_prom}{_prom_note}, so no eviction "
+                      f"can destroy a promoted entry: n_evict_main is identically 0 and the "
+                      f"reading is pinned -- {_ratio} -- for every configuration rather than for "
+                      f"this one. MEM_EVICT={evict!r} then ranks victims on a clock no retrieval "
+                      f"ever advances, so both retrieval arms are write-order FIFO whatever they "
+                      f"say. THE SECOND CAUSE IS SEPARATE AND ALSO HOLDS: MEM_SRC_SHARE={share} "
+                      f"puts quota_arm at {_arm!r} and FAB ships its grow-on-memory-pressure flag "
+                      f"False, so the pressure-signal half of D3 is off at BOTH ends. Reported as "
+                      f"a state and never as 0.000 -- a signal held at zero by construction and "
+                      f"one measured at zero print the same number, which is H33's own point read "
+                      f"one level up."
+                      if promoted == 0 else
+                      f"NO DENOMINATOR YET, AND THAT IS NOT A ZERO. n_promoted {_prom}, so the "
+                      f"promotion path is OPEN on this run -- but not one eviction has happened, "
+                      f"so main/(main+prob) has nothing to divide and a False here would claim a "
+                      f"measurement nobody took. This is the arm the frozen tree spent a noise "
+                      f"floor on (memory.py:415) and this tree prints the denominator for "
+                      f"instead. THE SECOND CAUSE IS SEPARATE AND HOLDS WHATEVER THIS ONE DOES: "
+                      f"MEM_SRC_SHARE={share} puts quota_arm at {_arm!r} and FAB ships its "
+                      f"grow-on-memory-pressure flag False, so the pressure-signal half of D3 is "
+                      f"off at BOTH ends -- and MEM_EVICT={evict!r} is what will rank the victims "
+                      f"these two branches count once eviction does start."))),
+    ))
+
+    # ==============================================================================================
+    # THE RECORD
+    # ==============================================================================================
+    # `counters` IS A DEEP-ENOUGH COPY. store.counters['store.n_writes_by_block'] is a LIST, and a
+    # frozen record holding a live reference to it is a caller that can still change what the run
+    # reported. `gates` is a tuple already and is re-wrapped for the same reason.
+    counters = {k: (list(v) if isinstance(v, list) else v) for k, v in store.counters.items()}
+    return StoreCensus(
+        counts=counts,
+        floor_entries=floor,
+        # THE SAME TEST THE FILTER USES -- memory/api.py::_unprotected disarms at `share <= 0.0` --
+        # so the reported arm cannot disagree with the running one. MEM_SRC_SHARE declares no
+        # domain, so this is `> 0.0` and not `!= 0`.
+        quota_arm=_arm,
+        pressure=pressure,
+        probation_share=probation_share,
+        live_src=live,
+        # THE NUMBER OF SOURCE IDS HOLDING ENTRIES, not the table width -- see StoreCensus.
+        nsrc=int((store.nsrc > 0).sum()),
+        nsrc_max=int(store.nsrc_max),
+        census_drift=drift,
+        n_census_reconciles=int(c["store.n_census_reconciles"]),
+        counters=counters,
+        gates=tuple(store.gates))
 
 
 def state_dict(mem: Config, store):
