@@ -252,6 +252,7 @@ class RunResult:
     elapsed_s: float
     skipped: tuple
     gated: tuple
+    report: dict
     cadence_ledger: dict
     warnings: tuple
 
@@ -564,7 +565,65 @@ def run(sysm, *, max_windows=None, progress=True):
         gated=_gate_report(sysm) + (
             f"CKPT.save: {saves} checkpoint(s) written by this run (periodic, SIGUSR1 and the "
             f"final one together); 0 means CKPT_DIR names no directory and saving is off",),
+        report=_report(sysm, time.time() - t0, ctx),
         cadence_ledger=cadences.ledger(), warnings=tuple(warnings))
+
+
+# ---- THE R STAGE: the did-it-fire surfaces, asked through the entry points that own them --------
+# EIGHT OF THE THIRTEEN R ROWS, AND THE FIVE THAT ARE MISSING ARE MISSING FOR ONE REASON EACH. This
+# is the stage LOOP_ORDER puts after the last window, and until this function nothing ran it: a
+# 262,601-window run printed a loss and a cadence ledger and NOTHING about whether an expert was
+# born, a token minted or an entry written. The counters existed the whole time; no caller asked.
+# WHY EACH ONE IS ASKED THROUGH ITS PACKAGE'S ENTRY POINT rather than read off the object: every
+# one of these renders the three-state form (`fired N` / `armed but 0` / `unreachable (predicate)`)
+# out of a flat counters dict PLUS that package's Gate objects, and the predicate's arithmetic is
+# the package's own. Reading `pop.counters` here would give the numbers and drop the reachability,
+# which is the half that distinguishes "set but inert" from "not set".
+_R_MISSING = (
+    "MEM.census: a P4 stub. The store's occupancy, its probation share and the pressure "
+    "FAB.grow_check's memory_pressure leg needs are all this row's, and none of them is produced.",
+    "DOM.census: a P4 stub, and so is DOM.observe above it -- the partition has one domain because "
+    "nothing ever assigned a second, so there is no census to take.",
+    "EVAL.*: the whole package is deferred; its holdout probe has no logits_fn that spans "
+    "FAB.forward, which is the same missing join that deferred FAB.contribution.",
+)
+
+
+def _report(sysm, elapsed_s, ctx):
+    """The R stage, as {row: rendering}. Asked once, after the last window.
+
+    RUN.bench_summary TAKES THE LIVE bytes_per_window AND NOT THE SEED'S. ISSUES P1-L42 is a
+    throughput number initialised at the SEED vocabulary and refreshed only inside an instrument's
+    cadence, so a short run quoted kB/s at a vocabulary it had long since grown past -- a RUN-owned
+    number whose correctness depended on an INSTRUMENT's clock. Segmentation.bytes_per_token is the
+    live figure and `ctx` is the window, so the product is this run's.
+    """
+    cfg = sysm.configs
+    out = {}
+    out["LM.counters"] = lm_api.counters(cfg["LM"], sysm.model)
+    out["SIG.counters"] = sig_api.counters(cfg["SIG"], sysm.sig)
+    out["FAB.counters"] = fab_api.counters(cfg["FAB"], sysm.fabric)
+    out["OPT.counters"] = opt_api.counters(cfg["OPT"], sysm.optimizer)
+    out["CAP.counters"] = cap_api.counters(cfg["CAP"], sysm.valve)
+    out["TOK(vocab.counters)"] = dict(sysm.vocab.counters)
+    out["MEM(store.counters)"] = dict(sysm.store.counters)
+    # DOM.prior FOR did=0, WHICH IS EVERY WINDOW THIS RUN HAD. Rendered as the pair the entry point
+    # returns rather than as the histogram: (None, 0.0) is the real answer at the shipped
+    # DOM_PRIOR_BLEND, and it is a different fact from a histogram of zeros.
+    _pr, _w = dom_api.prior(cfg["DOM"], sysm.partition, did=0)
+    out["DOM.prior(0)"] = {"has_histogram": _pr is not None, "weight": float(_w)}
+    if sysm.retention is not None:
+        out["CKPT.Retention.counters"] = sysm.retention.counters()
+    bench = run_api.bench_summary(
+        cfg["RUN"], sysm.clock, elapsed_s=elapsed_s,
+        bytes_per_window=int(ctx * float(sysm.segmentation.bytes_per_token)),
+        n_params=sum(int(t.numel()) for t in sysm.base_params))
+    # None IS THE OFF ARM AND IS RECORDED AS SUCH. bench_summary "PRINTS INSTEAD OF the eval
+    # battery", so it returns None rather than empty lines at RUN_BENCH=0 -- a caller that got []
+    # would print a heading with nothing under it.
+    out["RUN.bench_summary"] = bench if bench is not None else "RUN_BENCH=0: off"
+    out["R ROWS WITH NO PRODUCER"] = _R_MISSING
+    return out
 
 
 def _periods_of(sysm):

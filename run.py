@@ -119,6 +119,21 @@ def main(argv=None):
     print("=== GATED CALL SITES (a call site is not a call):")
     for g in result.gated:
         print(f"      - {g}")
+    # THE R STAGE. LOOP_ORDER's last block, and nothing ran it until 2026-09-21: a 53-minute run
+    # printed a loss curve and said nothing about whether an expert had been born, a token minted
+    # or an entry written. Rendered through each package's own counters entry point, so a row reads
+    # `fired N` / `armed but 0` / `unreachable (<predicate>)` rather than a bare integer.
+    print("=== R STAGE -- the did-it-fire surfaces:")
+    for row, body in result.report.items():
+        print(f"    -- {row}")
+        if isinstance(body, dict):
+            for k in sorted(body):
+                print(f"       {k:<44} {body[k]}")
+        elif isinstance(body, (tuple, list)):
+            for line in body:
+                print(f"       {line}")
+        else:
+            print(f"       {body}")
     print("=== cadence ledger (checks=0 means the gate was never evaluated, which is a different "
           "fact from fires=0):")
     for k, v in sorted(result.cadence_ledger.items()):
