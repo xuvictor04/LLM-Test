@@ -38,6 +38,7 @@ scored and the world model contributes no loss. Continual learning is a claim ab
 a second pass through mechanisms that are, today, not called.
 """
 import dataclasses
+import math
 import time
 
 import torch
@@ -51,6 +52,7 @@ from sig import api as sig_api
 from fabric import api as fab_api
 from opt import api as opt_api
 from capacity import api as cap_api
+from spine.compose import _sample_window as _c_sample_window
 from ckpt import api as ckpt_api
 from domains import api as dom_api
 from memory import api as mem_api
@@ -83,6 +85,8 @@ def _is_stub(fn):
 _CALLS = frozenset({
     "LM.encode", "SIG.encode", "FAB.forward", "LM.decode", "LM.lm_loss",
     "OPT.scaled_backward", "OPT.maybe_step", "CKPT.save",
+    "LM.embed", "WORLD.loss_terms", "LM.anchor_term",
+    "FAB.observe", "DOM.note_competence",
 })
 
 # CALLS THIS DRIVER MAKES THAT ARE NOT B-ROW ENTRY POINTS. The clock, which LOOP_ORDER lists under
@@ -92,7 +96,8 @@ _CALLS = frozenset({
 # first draft of _CALLS listed it as though it were a B-row name, and a set that quietly disagreed
 # with the table is exactly what the check exists to refuse. Row A, not row B, measured through
 # spine/compose.py::plan().
-_NOT_B_ROW = frozenset({"RUN.RunClock.advance", "RUN.RunClock.note_backward", "SIG.encode"})
+_NOT_B_ROW = frozenset({"RUN.RunClock.advance", "RUN.RunClock.note_backward",
+                        "SIG.encode", "DOM.observe"})
 
 # WHY EACH UNWIRED MECHANISM'S ABSENCE MATTERS, in the consequence a reader needs rather than the
 # name they already have. Missing keys fall back to a plain sentence; nothing here is load-bearing
@@ -254,6 +259,7 @@ def run(sysm, *, max_windows=None, progress=True):
     cfg = sysm.configs
     run_cfg, lm_cfg, tok_cfg = cfg["RUN"], cfg["LM"], cfg["TOK"]
     fab_cfg, sig_cfg, dat_cfg, opt_cfg = cfg["FAB"], cfg["SIG"], cfg["DATA"], cfg["OPT"]
+    dom_cfg = cfg["DOM"]
 
     # WHAT CANNOT BE CALLED, DETERMINED ONCE, BEFORE THE FIRST WINDOW. Deciding per-flush would put
     # a branch on a stub check inside the hot loop and would let the answer change mid-run, which
@@ -301,7 +307,19 @@ def run(sysm, *, max_windows=None, progress=True):
     batch_w = int(opt_cfg.batch_windows)
     vocab = sysm.vocab
 
+    # THE PER-TOKEN APPEARANCE COUNTER, ALLOCATED ONCE AND CARRIED ON THE SYSTEM. compose.py's row
+    # says it: "token_seen is the per-token appearance counter, carried on System.token_seen
+    # because it is written every window and read at the flush. It is the SAME object
+    # TOK.judge_probation takes as `appearances` -- one counter, two spellings, and C5 is the
+    # record of what one counter under two names cost the last time."
+    # COUNTING APPEARANCES AND NOT STEPS is what makes the anchor independent of re-segmentation:
+    # `seen` only advances when a token turns up in a training batch, so a retok cannot move it.
+    if sysm.token_seen is None:
+        sysm.token_seen = torch.zeros(int(lm_cfg.vocab_slots), dtype=torch.float32,
+                                      device=sysm.process.device)
+
     curve, t0 = [], time.time()
+    did = 0
     first_loss = last_loss = float("nan")
     batch = []
     ids = sysm.segmentation.ids
@@ -322,10 +340,34 @@ def run(sysm, *, max_windows=None, progress=True):
                 f"stream it was measured on disagree.")
             break
         batch.append(bounds)
+        # DOM.observe IS CALLED ONCE PER WINDOW, ABOVE THE BATCH EARLY-OUT, and that placement is
+        # what makes `sustain` a Windows clock rather than a flush one -- domains/api.py::observe
+        # says so, and `s.run` is incremented once per call. Putting it in the flush would divide
+        # every domain clock by the batch width, silently, at every BATCH_W.
+        # sample_window IS THE SAME OBJECT SIG.encode GETS, through the root's one slicer: a rekey
+        # cannot reproduce the signature otherwise, so a second slice at this call site would be a
+        # defect by construction.
+        # DOM.observe IS NOT WIRED, AND IT IS NOT ONE OF THE ELEVEN -- IT IS A TWELFTH STUB.
+        # It is the only producer of a domain id, so with no body every window is domain 0 and the
+        # fabric's per-domain books, the breadth ban and DOM.note_competence all see ONE domain.
+        # domains/api.py::observe says what that state is: "enabled == False returns did=0 for every
+        # window ... THAT IS NOT A DEGENERACY MEM HAS TO DISCOVER: 0 is a real source id that MEM
+        # sees, and the report must say 'the partition is off' rather than leaving the per-source
+        # floor to protect exactly one source in silence." The same sentence applies to a stubbed
+        # observe, and this is the loop saying it.
+        # A SECOND DEFECT WAS FOUND ON THE WAY AND IS RECORDED BECAUSE NOTHING ELSE WILL FIND IT:
+        # spine/compose.py::_sample_window clamps its start at 0, so early in the stream it returns
+        # a SHORT window -- 173 units against a frozen 192 on the first flush, measured -- and
+        # sig/api.py::encode refuses exactly that ("no eval variant, no gist placeholder and no
+        # fallback ... because the alternative measured a whole project's routing on one byte").
+        # The helper returns a window its only consumer refuses, and until this loop called it
+        # there was no consumer to find out. Padding would invent units the model has not consumed;
+        # taking the units AHEAD of the cursor is what that helper's own docstring rules out. The
+        # repair belongs in the root, which owns the slicer.
 
         if tick.flush_due:
             loss, per_window = _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg,
-                                      opt_cfg, vocab, clock, sysm.novelty)
+                                      opt_cfg, vocab, clock, sysm.novelty, did)
             # NOVELTY CROSSES BACKWARDS, WHICH IS WHY IT LIVES ON THE SYSTEM AND NOT IN A RETURN.
             # compose.py's row says it: "novelty is the PREVIOUS flush's mean surprise
             # (self_organize.py:7499), carried on System.novelty because it crosses backwards and
@@ -406,7 +448,9 @@ def _periods_of(sysm):
 
 
 def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, vocab, clock,
-           novelty):
+           novelty, domain_id):
+    cfg_world = sysm.configs["WORLD"]
+    cfg_dom = sysm.configs["DOM"]
     """One flush: cut the batch, forward, loss, backward. Returns the scalar loss, or None.
 
     THE ORDER IS LOOP_ORDER's B ROW, minus the rows whose entry points are stubs -- and the caller
@@ -425,6 +469,13 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     x = torch.tensor([ids[a:a + ctx] for a, b in pairs], dtype=torch.long, device=dev)
     y = torch.tensor([ids[a + 1:b] for a, b in pairs], dtype=torch.long, device=dev)
 
+    # THE EMBEDDING IS TAKEN BEFORE THE ENCODER AND IT IS NOT encode()'s INPUT REUSED.
+    # WORLD.loss_terms takes obs_emb, "the lowest layer, the point where a new sense plugs in", and
+    # its docstring refuses three other producers by name -- encode(n_layers=0) returns the full
+    # GRU hidden on the gru arm and embedding-PLUS-positional on the transformer arm, and the root
+    # reaching for model.emb is an AttributeError at lm.compose=1. LM.embed is the producer that
+    # exists for this.
+    obs_emb = lm_api.embed(lm_cfg, model, x)
     h = lm_api.encode(lm_cfg, model, x)
     # THE SIGNATURE IS REAL OR THE CALL RAISES, AND THE FIRST DRAFT OF THIS BLOCK SWALLOWED IT.
     # It read `try: sig_vec = sig_api.encode(...) except Exception: sig_vec = None`, and then
@@ -472,7 +523,7 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     out = fab_api.forward(
         fab_cfg, pop, h=h, signature=sig_vec, novelty=novelty,
         step_windows=U.Windows(int(clock.step)),
-        domain_id=0, live_domains=1, training=True)
+        domain_id=domain_id, live_domains=1, training=True)
     # `hidden`, NOT `h`, AND THE FIRST DRAFT GOT THIS WRONG IN THE SAME TWO LINES AS THE SWALLOWED
     # EXCEPT ABOVE. It read `h = out.h if hasattr(out, "h") else h` -- so FabricOut, whose field is
     # `hidden`, never matched, the routed output was discarded, and the run trained on the
@@ -490,8 +541,45 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     logits = lm_api.decode(lm_cfg, model, h,
                            live_vocab=int(vocab.live_size()), retired_ids=tuple(vocab.retired))
     per_window, mean = lm_api.lm_loss(lm_cfg, logits, y)
-    total = mean if aux is None else (mean + aux)
+
+    # THE APPEARANCE COUNTER IS ADVANCED BY THIS FLUSH'S TOKENS, BEFORE THE TERMS THAT READ IT.
+    # index_add_ over the flattened batch is the shipped form (:6804).
+    sysm.token_seen.index_add_(0, x.reshape(-1),
+                               torch.ones(x.numel(), device=x.device, dtype=sysm.token_seen.dtype))
+
+    # THE WORLD MODEL'S TWO TERMS. Its docstring is emphatic that the two weights must not be
+    # folded into one: the integration once multiplied the anti-collapse term by WORLD_W=0.1, ran
+    # it at a tenth strength, and the latent collapsed to std 0.24. Splitting it moved latent std
+    # 0.24 -> 0.97 and forward-pred against persistence +13.6% -> +34.1%. loss_terms returns the
+    # WEIGHTED sum, so the loop adds one number and cannot re-weight it here.
+    wstep = world_api.loss_terms(cfg_world, sysm.world, obs_emb)
+    world_loss = getattr(wstep, "loss", None) if wstep is not None else None
+
+    # THE ANCHOR, ALREADY MULTIPLIED BY anchor_w BY THE ENTRY POINT. TOK_ANCHOR=0.05 was printed on
+    # the EFFECTIVE line of every run in this project's history while model.compose was None and
+    # the term never once entered the loss, because it was simply missing from the loss-weight list
+    # at :5802-5813. Returning the weighted tensor is what keeps the number and the term together;
+    # adding it here unweighted would rebuild the defect one call further out.
+    anchor = lm_api.anchor_term(lm_cfg, model, token_seen=sysm.token_seen)
+
+    total = mean
+    for term in (aux, world_loss, anchor):
+        if term is not None:
+            total = total + term
     opt_api.scaled_backward(opt_cfg, sysm.optimizer, total)
+
+    # THE BOOKS, AFTER THE BACKWARD AND ON THE SAME FLUSH'S NUMBERS. FAB.observe credits `use` by
+    # routing MASS and `uage` by SELECTION -- the H12/H13 split -- against the experts that actually
+    # produced this output, so it takes the FabricOut and the per-window loss rather than a scalar.
+    fab_api.observe(fab_cfg, pop, out, per_window_loss=per_window.detach(), domain_id=domain_id)
+
+    # COMPETENCE IS SEPARATE FROM DOM.observe BECAUSE THE NUMBER IS ONLY KNOWN AFTER THE FORWARD
+    # PASS. It is bits per window, not nats: the loss is a natural-log cross-entropy and the
+    # domain series is declared in bits, so the conversion happens once, here, at the one place the
+    # two meet. Dividing by ln(2) at the read site instead is how one series ends up compared
+    # against another in different units.
+    dom_api.note_competence(cfg_dom, sysm.partition, did=domain_id,
+                            bits=float(mean.detach()) / math.log(2.0))
     # THE PER-WINDOW VECTOR IS RETURNED BECAUSE THE NEXT FLUSH NEEDS IT. This is the reason
     # LM.lm_loss keeps reduction='none' and hands back both: "competence attribution, the domain
     # EMA and the marginal-contribution counterfactual all read them and none of them can be
