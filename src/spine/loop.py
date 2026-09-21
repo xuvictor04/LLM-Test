@@ -53,6 +53,7 @@ from fabric import api as fab_api
 from opt import api as opt_api
 from capacity import api as cap_api
 from spine.compose import _sample_window as _c_sample_window
+from spine.compose import _key_fn as _c_key_fn
 from ckpt import api as ckpt_api
 from domains import api as dom_api
 from memory import api as mem_api
@@ -87,6 +88,7 @@ _CALLS = frozenset({
     "OPT.scaled_backward", "OPT.maybe_step", "CKPT.save",
     "LM.embed", "WORLD.loss_terms", "LM.anchor_term",
     "FAB.observe", "DOM.note_competence",
+    "FAB.own_lr_scale", "CAP.caps", "FAB.grow_check", "MEM.write", "MEM.maintain",
 })
 
 # CALLS THIS DRIVER MAKES THAT ARE NOT B-ROW ENTRY POINTS. The clock, which LOOP_ORDER lists under
@@ -103,6 +105,7 @@ _NOT_B_ROW = frozenset({"RUN.RunClock.advance", "RUN.RunClock.note_backward",
 # name they already have. Missing keys fall back to a plain sentence; nothing here is load-bearing
 # for correctness, only for legibility.
 _WHY = {
+    "CAP.caps": "no operating ceiling is read, so growth has no budget to be refused by",
     "WORLD.loss_terms": "no world-model loss term enters the objective",
     "LM.anchor_term": "minted tokens are not held near their byte composite",
     "LM.residual_ratios": "no residual-ratio reading is produced",
@@ -318,6 +321,13 @@ def run(sysm, *, max_windows=None, progress=True):
         sysm.token_seen = torch.zeros(int(lm_cfg.vocab_slots), dtype=torch.float32,
                                       device=sysm.process.device)
 
+    # THE ROOT'S ONE BOUND ENCODER, FORMED ONCE. compose.py::_key_fn says why it cannot arrive as
+    # a return: "It is an entry point partially applied, not a return value, so no `produces` column
+    # can hand it over without this file forming it -- and memory/api.py's whole point is that MEM
+    # never imports LM." Formed here rather than per flush because a fresh lambda each time is a
+    # fresh identity for a callable two entry points are required to share.
+    key_fn = _c_key_fn(sysm)
+
     curve, t0 = [], time.time()
     did = 0
     first_loss = last_loss = float("nan")
@@ -367,12 +377,22 @@ def run(sysm, *, max_windows=None, progress=True):
 
         if tick.flush_due:
             loss, per_window = _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg,
-                                      opt_cfg, vocab, clock, sysm.novelty, did)
+                                      opt_cfg, vocab, clock, sysm.novelty, did, key_fn)
             # NOVELTY CROSSES BACKWARDS, WHICH IS WHY IT LIVES ON THE SYSTEM AND NOT IN A RETURN.
             # compose.py's row says it: "novelty is the PREVIOUS flush's mean surprise
             # (self_organize.py:7499), carried on System.novelty because it crosses backwards and
             # `produces` reads forwards only". The loop is the only thing that can carry it, so the
             # loop writes it here, after the flush that measured it.
+            # IT IS SURPRISE AND IT WAS THE PER-WINDOW LOSS UNTIL THIS EDIT, which is a defect the
+            # MEM.write wiring found rather than a refinement. fabric/api.py::forward declares
+            # "novelty: (B,) surprise from the previous step", the archive line the row cites is
+            # `surprise = 1 - pm.gather(-1, y...)` and `_fab_nov = float(surprise.mean())`
+            # (self_organize.py:683-685), and a cross-entropy in nats is a DIFFERENT QUANTITY on a
+            # different scale: 8.3 at the start of a run against a surprise that cannot leave
+            # [0, 1]. It is fed straight into `nov_proj`, a Linear(1, dk), so the router's query was
+            # being biased by a number an order of magnitude outside the range that layer was
+            # initialised for -- and nothing could have caught it except forming the real quantity
+            # for the consumer that names it.
             sysm.novelty = per_window
             batch = []
             if loss is not None:
@@ -380,12 +400,6 @@ def run(sysm, *, max_windows=None, progress=True):
                 if curve == []:
                     first_loss = loss
                 curve.append(loss)
-            # THE BACKWARD IS COUNTED BY THE CLOCK AND NOWHERE ELSE, and the optimizer steps only
-            # when the clock says a step is due -- derive.accum_due on a Backwards clock, never a
-            # modulo on the window counter. Two real runs one line apart measured 55 optimizer
-            # steps where 13 were due.
-            if clock.note_backward():
-                opt_api.maybe_step(opt_cfg, sysm.optimizer)
 
         # THE PERIODIC CHECKPOINT, THROUGH THE SAME Cadences EVERY OTHER GATE USES. A 53-minute
         # run finished with `ckpt checks=0` -- the gate was never EVALUATED, so nothing was written
@@ -448,9 +462,11 @@ def _periods_of(sysm):
 
 
 def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, vocab, clock,
-           novelty, domain_id):
+           novelty, domain_id, key_fn):
     cfg_world = sysm.configs["WORLD"]
     cfg_dom = sysm.configs["DOM"]
+    cfg_mem = sysm.configs["MEM"]
+    cfg_cap = sysm.configs["CAP"]
     """One flush: cut the batch, forward, loss, backward. Returns the scalar loss, or None.
 
     THE ORDER IS LOOP_ORDER's B ROW, minus the rows whose entry points are stubs -- and the caller
@@ -568,10 +584,129 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
             total = total + term
     opt_api.scaled_backward(opt_cfg, sysm.optimizer, total)
 
+    # THE BACKWARD IS COUNTED BY THE CLOCK AND NOWHERE ELSE, and the optimizer steps only when the
+    # clock says a step is due -- derive.accum_due on a Backwards clock, never a modulo on the
+    # window counter. Two real runs one line apart measured 55 optimizer steps where 13 were due.
+    # THESE TWO LINES MOVED HERE FROM `run` and the move is LOOP_ORDER's, not a preference. The B
+    # row reads scaled_backward -> note_backward -> maybe_step -> own_lr_scale -> caps ->
+    # observe/grow_check -> write/maintain -> ... -> note_competence, and with the step outside
+    # `_flush` the driver ran observe and note_competence BEFORE the step every flush -- an order
+    # nothing noticed while nothing downstream of maybe_step was wired. FAB.own_lr_scale is
+    # downstream of it: its `applied_lr` is THIS flush's StepOutcome.lr, and there is no way to
+    # supply that from a caller that has not stepped yet.
+    stepped = clock.note_backward()
+    outcome = opt_api.maybe_step(opt_cfg, sysm.optimizer) if stepped else None
+
+    # THE PER-EXPERT RATES, ON THE RATE THE OPTIMIZER JUST APPLIED. LOOP_ORDER's own row says this
+    # call "PRODUCES NOTHING ANY SIGNATURE ACCEPTS" -- the return is per-expert multipliers and
+    # OPT.maybe_step has no parameter for them -- so calling it buys the ledger and not an effect,
+    # and that is the honest state rather than a reason to leave it uncalled. fab.lr_calls now
+    # separates "no expert was scaled" from "spine/loop.py never invoked it", which is the exact
+    # distinction the entry point's own docstring says the counter exists for. At the shipped
+    # FAB_LR_OWN=False it returns None on the first line after seeding its seven counters.
+    # ONLY ON A FLUSH THAT STEPPED: with accum > 1 most flushes do not step, and StepOutcome.lr on
+    # a flush that did not is a number nobody applied. Skipping is the truthful reading, and
+    # fab.lr_calls counting fewer than the flushes is what says so.
+    if outcome is not None:
+        fab_api.own_lr_scale(fab_cfg, pop, applied_lr=float(outcome.lr))
+
+    # THE OPERATING CEILING, READ ONCE PER FLUSH, AS THE WHOLE RECORD.
+    # `soft_cap=caps` AND NOT `caps.experts`, WHICH IS A REAL DISAGREEMENT INSIDE THE CONTRACT AND
+    # NOT A STYLE CHOICE. compose.py's CAP.caps row spells the produced value "soft_cap --
+    # Caps.experts under FAB.grow_check's spelling" (an int) and then says four lines later "THE
+    # LOOP TAKES ITS BIRTH BUDGET THROUGH Caps.headroom(population) AND NEVER BY SUBTRACTING".
+    # Both cannot be true at one call site: FAB may not import capacity (O10), so the only way the
+    # method can be reached is for the RECORD to arrive. fabric/api.py::_headroom refuses a bare
+    # int by name and says so at length; passing `.experts` here would make FAB re-derive
+    # `min(n_born, cap - fab.n())`, which is P3-C30 -- negative the moment the population sits
+    # above the soft cap, and a negative clamp freezes growth for a whole run in silence.
+    caps = cap_api.caps(cfg_cap, sysm.valve)
+
     # THE BOOKS, AFTER THE BACKWARD AND ON THE SAME FLUSH'S NUMBERS. FAB.observe credits `use` by
     # routing MASS and `uage` by SELECTION -- the H12/H13 split -- against the experts that actually
     # produced this output, so it takes the FabricOut and the per-window loss rather than a scalar.
     fab_api.observe(fab_cfg, pop, out, per_window_loss=per_window.detach(), domain_id=domain_id)
+
+    # GROWTH. THE ONE MECHANISM GOAL B CANNOT BE STUDIED WITHOUT, and until this line the run's
+    # report read "0 experts born" for a population that was never asked to grow.
+    # memory_pressure=None IS THE DECLARED PRESENT STATE AND NOT A PLACEHOLDER. grow_check's own
+    # docstring: "when it is None that lever is UNREACHABLE and says so ... ITS PRESENT STATE IS
+    # unreachable AND THE ARITHMETIC IS MEM'S: MEM.read is deferred and MEM.maintain's probe has no
+    # contexts, so nothing promotes out of probation ... which is why grow_on_mem_pressure also
+    # ships False. Two named causes, not one." The producer is MEM.census, which is still a P4
+    # stub; inventing a number here would be a threshold comparison at a consumer site, in a
+    # package that does not own pressure_thresh, which is the defect Q-MEM-4 settled.
+    # shift_at RIDES THE SYSTEM AND IS None UNTIL SOMETHING STAMPS IT. Three sites are supposed to:
+    # the E draw row's resample, TOK.mint_burst's retok and OPT's LR restart. The first two are not
+    # driven yet (the retok needs TOK.on_window's Due, a stub), so fab.shift_notifications reads 0
+    # and the blackout is UNREACHABLE rather than armed -- which is precisely what that counter was
+    # declared to distinguish.
+    fab_api.grow_check(fab_cfg, pop, flush_loss=mean.detach(),
+                       step_windows=U.Windows(int(clock.step)), soft_cap=caps,
+                       memory_pressure=None, signature=sig_vec,
+                       shift_at=sysm.shift_at_windows)
+
+    # ---- MEMORY -------------------------------------------------------------------------------
+    # SURPRISE IS FORMED HERE AND NOWHERE ELSE, from LM.decode's logits and `y`, because it is the
+    # one quantity on this row that no entry point returns. It is 1 - p_model(true token) at every
+    # position -- the archive's `pm = F.softmax(lg.detach(), -1); surprise = 1 - pm.gather(...)`
+    # (self_organize.py:683-684) -- and the SAME tensor whose per-window mean becomes the next
+    # flush's `novelty`. One formation, two consumers, which is what stops the two from drifting
+    # into different quantities under one word, as they had.
+    # logsumexp RATHER THAN A FULL SOFTMAX: the gathered logit minus the row's normaliser is the
+    # same number without materialising a second (B, L, 4096) tensor, and under AMP the float()
+    # keeps the normaliser out of fp16, where a 4096-wide sum is where that format runs out.
+    with torch.no_grad():
+        lg = logits.detach().float()
+        p_true = torch.exp(lg.gather(-1, y.unsqueeze(-1)).squeeze(-1)
+                           - torch.logsumexp(lg, dim=-1))
+        surprise = (1.0 - p_true)
+        del lg
+        # THE OWNER BLOCK, WHICH IS THE ONE JOIN IN THIS DRIVER THAT NO HELPER IN compose.py MAKES.
+        # ROW_ARGUMENTS_ELSEWHERE["MEM.write"] says so in as many words: "argmax over
+        # FabricOut.weights, modulo MEM.d_owner_blocks. FAB.forward does NOT return it ... it needs
+        # a tensor operation and nothing in src/ imports torch; P4 writes it in the loop and this
+        # entry is what says so."
+        if out.weights is None:
+            raise RuntimeError(
+                "spine/loop.py::_flush: FabricOut.weights is None, and MEM.write's `owners` is an "
+                "argmax over it. fabric/api.py::FabricOut declares weights as the (B, n_live) "
+                "routing distribution 'the attribution table `observe`, the breadth cap and MEM's "
+                "owner argmax all read' -- so a None here is a fabric that did not route, and "
+                "writing every entry of the flush to block 0 instead would put a whole flush under "
+                "one owner's provenance. Refused rather than defaulted.")
+        owners = (out.weights.argmax(dim=1).long() % int(cfg_mem.d_owner_blocks))
+        # PROVENANCE, AND IT IS domain 0 FOR EVERY WINDOW BECAUSE DOM.observe IS A STUB. That is a
+        # real source id rather than an absence -- domains/api.py::observe's own sentence, quoted
+        # in full at the DOM.observe call site above -- so the store's per-source floor is
+        # protecting exactly one source and `n_floor_blocked` must be read with that in mind. It is
+        # `domain_id` and not a literal 0 so that the day observe lands, this line is already right.
+        sources = torch.full((x.shape[0],), int(domain_id), dtype=torch.long, device=dev)
+        # TRUE BYTE OFFSETS, NOT AN ARANGE. MEM.write's docstring: "a token averages ~1.85 bytes
+        # and the drift reached 200+ bytes per window against a 220-byte recall span". byte_pos is
+        # the Segmentation's own table and the cut is `_window_bounds`'s, so the two cannot
+        # disagree about which token a position is.
+        bp = sysm.segmentation.byte_pos
+        positions = torch.tensor([bp[a:a + ctx] for a, _b in pairs], dtype=torch.long, device=dev)
+    now_w = U.Windows(int(clock.step))
+    mem_api.write(cfg_mem, sysm.store, contexts=x, tokens=y, surprise=surprise,
+                  sources=sources, owners=owners, positions=positions, key_fn=key_fn, now=now_w)
+    # MAINTAIN, WITH NO PROBE CONTEXTS, AND THE None IS FORCED RATHER THAN CHOSEN. Its docstring:
+    # "MEM.read is still a P4 stub, so this line raises NotImplementedError the moment a caller
+    # supplies probe_contexts -- which is the loud state, and is why the cadence above is counted
+    # before it", and "WITH probe_contexts None OR EMPTY the honest DID IT FIRE reading is
+    # n_probe_fired counting the CADENCE and n_probe_rows == 0: armed-but-0, not unreachable and
+    # not silence." So the probe cadence fires and retrieves nothing, which means evict='lru' and
+    # evict='usage' are write-order FIFO for this run whatever they say, and probation can never
+    # promote. That is a fact about what this run measures and it belongs in the report.
+    # resegment=None FOR THE SAME REASON THE RETOK IS NOT DRIVEN: TOK.on_window is a stub, so no
+    # Due.retok is ever raised and there is no RetokEvent to distribute.
+    # THE TWO GATES ARE MEM'S OWN and are compared against `now` INSIDE the call -- there is no
+    # Cadences key for them, which is why store.n_probe_fired / n_rekey_passes are their only
+    # did-it-fire surface. Calling it once per flush is the shipped semantics: both periods are
+    # Windows and elapsed-since-last-fire is phase-independent.
+    mem_api.maintain(cfg_mem, sysm.store, now=now_w, key_fn=key_fn,
+                     probe_contexts=None, resegment=None)
 
     # COMPETENCE IS SEPARATE FROM DOM.observe BECAUSE THE NUMBER IS ONLY KNOWN AFTER THE FORWARD
     # PASS. It is bits per window, not nats: the loss is a natural-log cross-entropy and the
@@ -580,8 +715,8 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     # against another in different units.
     dom_api.note_competence(cfg_dom, sysm.partition, did=domain_id,
                             bits=float(mean.detach()) / math.log(2.0))
-    # THE PER-WINDOW VECTOR IS RETURNED BECAUSE THE NEXT FLUSH NEEDS IT. This is the reason
-    # LM.lm_loss keeps reduction='none' and hands back both: "competence attribution, the domain
-    # EMA and the marginal-contribution counterfactual all read them and none of them can be
-    # tracked without them" -- and so, it turns out, can the fabric's routing.
-    return float(mean.detach()), per_window.detach()
+    # THE PER-WINDOW MEAN SURPRISE IS RETURNED BECAUSE THE NEXT FLUSH NEEDS IT AS `novelty`, and
+    # it is NOT the per-window loss this function returned until the MEM wiring landed. Both are
+    # (B,) and both come off the same flush, which is exactly why the substitution survived: only
+    # forming the quantity MEM.write names by its own definition made the two visibly different.
+    return float(mean.detach()), surprise.mean(dim=1)
