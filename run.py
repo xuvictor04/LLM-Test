@@ -101,6 +101,34 @@ def main(argv=None):
     for w in sysm.warnings:
         print(f"WARNING: {w}")
 
+    # THE DATA PLAN'S GATES, BEFORE A BYTE IS TRAINED ON, WHICH IS THE ONLY MOMENT THEY ARE FOR.
+    # DATA_EXPOSURE_MAX is declared as the "whole-run repetition multiple ... above which the data
+    # plan is FLAGGED BEFORE TRAINING STARTS", and DATA.plan computes it correctly and hands it back
+    # on Plan.gates -- where NOTHING READ IT. `grep -n '\.plan\b' src/spine/loop.py run.py` returned
+    # nothing until this line, so the flag was raised into a record no caller opened.
+    # THAT IS HALF A PORT REQUIREMENT, DONE AND STOPPED. data/levers.py::DATALevers.exposure_max
+    # records that the old tree's two reads sat inside `if DATA_MODE == "real" and NP > 1`, so the
+    # check "is unavailable on exactly the single-area configuration goal A runs in -- which is
+    # where accidental repetition is EASIEST to reach", and asks for two things: "move the read out
+    # of the NP>1 guard, AND print the arithmetic as a declared Gate (G4) so 'did not fire' is
+    # distinguishable from 'could not fire'". The move happened. The printing did not, and the
+    # lever's own closing sentence is what that leaves behind: "A guard that cannot trip reads
+    # exactly like a healthy run" -- and so does one that trips where nobody is looking.
+    # MEASURED THE DAY THIS LINE WAS WRITTEN, at DATA_SOURCE=real with a 50 MB stream over the
+    # corpus in the tree: exposure py=22.4x, num=13.9x, c=5.5x, eng=3.3x against a declared bound of
+    # 2.0, with data.exposure_max FIRED at 22.3953 and data.exposure_skew FIRED at 6.8082. A run
+    # reading one corpus twenty-two times is not a run on 50 MB of text, and every bits-per-byte
+    # number it produces is measured against material the model has already seen.
+    print(f"=== data plan: protocol={sysm.plan.protocol}, per-area whole-run exposure "
+          f"(bytes drawn x epochs / bytes on disk):")
+    for _a in sorted(sysm.plan.exposure):
+        print(f"      {_a:<12} {sysm.plan.exposure[_a]:.2f}x")
+    for _g in sysm.plan.gates:
+        _state = ("FIRED" if _g.fired else "armed, did not fire") if _g.reachable else "unreachable"
+        print(f"      Gate {_g.name}: {_state} ({_g.value} vs {_g.threshold})")
+        if _g.fired and _g.reason:
+            print(f"        {_g.reason}")
+
     result = loop.run(sysm, max_windows=args.max_windows, progress=not args.quiet)
 
     print()
