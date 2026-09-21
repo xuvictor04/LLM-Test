@@ -108,6 +108,11 @@ def main(argv=None):
           f"{result.opt_steps} optimizer steps, {result.epochs} epoch(s) "
           f"in {result.elapsed_s:.1f}s ({result.windows / max(result.elapsed_s, 1e-9):.1f} w/s)")
     print(f"=== loss {result.loss_first:.4f} -> {result.loss_last:.4f}")
+    # THE PRECISION ASKED FOR AND THE PRECISION OBSERVED, ON ONE LINE, BECAUSE THEY DISAGREED FOR
+    # THE LIFE OF THIS DRIVER. amp_state above is what RUN.process_setup decided; this is the dtype
+    # of the tensor the step actually produced. RUN_AMP=bf16 printed "active" and ran fp32 until
+    # 2026-09-21, and the only thing that could have caught it was a reading from inside the step.
+    print(f"=== amp asked={p.amp_state} observed step dtype={sysm.process_dtype}")
     # WHAT THE CARD ACTUALLY HELD, on the runs where there is a card. A throughput number without
     # a memory figure cannot answer "would a bigger batch or a wider model fit", which is the first
     # question anyone asks of a GPU run -- and on this tree it is the question, because the step is

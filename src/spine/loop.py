@@ -683,8 +683,44 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     # GRU hidden on the gru arm and embedding-PLUS-positional on the transformer arm, and the root
     # reaching for model.emb is an AttributeError at lm.compose=1. LM.embed is the producer that
     # exists for this.
-    obs_emb = lm_api.embed(lm_cfg, model, x)
-    h = lm_api.encode(lm_cfg, model, x)
+    # THE AUTOCAST IS ENTERED HERE AND IT WAS NEVER ENTERED AT ALL UNTIL 2026-09-21.
+    # RUN.process_setup builds `Process.autocast` -- torch.autocast on cuda at RUN_AMP=bf16,
+    # contextlib.nullcontext otherwise -- and NOTHING IN THIS TREE CALLED IT. So RUN_AMP=bf16
+    # resolved, reported amp_state="active", printed "the LM step runs under torch.autocast" on
+    # run.py's banner, and the step ran in fp32. That is the exact defect class this whole project
+    # exists to refuse: a lever that is set, REPORTED AS ACTIVE, and does nothing.
+    # BOTH HALVES OF IT WERE PREDICTED IN WRITING AND NEITHER PREDICTION COULD FIRE.
+    # train/api.py::Process says of its own three reporting fields that "it becomes a real defect
+    # the day a banner prints tf32_applied and amp_state" -- and run.py began printing both on
+    # 2026-09-17, which is the day it named. train/levers.py says the mechanism
+    # is "STRUCTURALLY UNTESTABLE ON CPU, and that is a property of the lever rather than a gap in
+    # the suite ... There is no test that can catch a regression here". Both were right, and what
+    # found it was a MEASUREMENT ON THE CARD: sweep_gpu.sh's `amp` arm returned a loss curve
+    # BIT-IDENTICAL to `base` (8.4163 -> 4.2922 on both) and `xf_amp` bit-identical to `xf`. bf16
+    # carries 8 mantissa bits against fp32's 24; two runs agreeing to four decimals after 400
+    # optimizer steps did not differ in arithmetic at all.
+    # WHAT IS INSIDE: the LM step, which is the lever's own scope -- "Autocast precision for the LM
+    # step". Embed and encode here; the fabric, the decode, the loss, the world terms and the
+    # anchor in the second block below.
+    # WHAT IS OUTSIDE, AND EVERY EXCLUSION IS THE CONTRACT'S RATHER THAN CAUTION:
+    #   SIG.encode, which is why this is TWO blocks and not one. train/levers.py's carve-out is
+    #   about "the one place in the step where reduced precision changes BEHAVIOUR rather than
+    #   speed" -- retrieval by dot product over normalised vectors -- and the signature is the
+    #   other vector in this step consumed exactly that way: FAB routes on dot products against
+    #   expert centroids and DOM assigns by distance to domain centroids. It is also not "the LM
+    #   step": SIG's encoder is its own parameter group in OPT.build. Two context entries per flush
+    #   is the price of saying so, and it is a few microseconds.
+    #   MEM.write's key_fn, which is the carve-out the lever NAMES (":5719-5723 MUST SURVIVE THE
+    #   PORT: memory keys are retrieved by dot product over normalised keys ... An autocast that
+    #   swallows the key path turns a retrieval system into a noisier one with no error anywhere").
+    #   It is satisfied BY PLACEMENT -- the memory block sits below the backward, outside both
+    #   contexts -- so moving MEM.write up into either block would reintroduce it in silence.
+    #   THE BACKWARD, which is torch's own documented rule: autocast wraps the forward and the
+    #   loss, and the backward runs in the dtypes the forward recorded.
+    cast = sysm.process.autocast
+    with cast():
+        obs_emb = lm_api.embed(lm_cfg, model, x)
+        h = lm_api.encode(lm_cfg, model, x)
     # THE SIGNATURE IS REAL OR THE CALL RAISES, AND THE FIRST DRAFT OF THIS BLOCK SWALLOWED IT.
     # It read `try: sig_vec = sig_api.encode(...) except Exception: sig_vec = None`, and then
     # skipped FAB.forward when the result was None -- so the fabric silently left the forward path
@@ -728,65 +764,72 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
         novelty = torch.zeros(nb, device=dev)
     elif novelty.device != x.device:
         novelty = novelty.to(dev)
-    out = fab_api.forward(
-        fab_cfg, pop, h=h, signature=sig_vec, novelty=novelty,
-        step_windows=U.Windows(int(clock.step)),
-        domain_id=domain_id, live_domains=1, training=True)
-    # `hidden`, NOT `h`, AND THE FIRST DRAFT GOT THIS WRONG IN THE SAME TWO LINES AS THE SWALLOWED
-    # EXCEPT ABOVE. It read `h = out.h if hasattr(out, "h") else h` -- so FabricOut, whose field is
-    # `hidden`, never matched, the routed output was discarded, and the run trained on the
-    # UNROUTED hidden while reporting that the fabric was in the path. The tell was that the loss
-    # curve was byte-identical to the run taken before the fabric was wired in at all.
-    # `hasattr(x, "a") else <unchanged>` IS THE SAME DEFECT AS A BARE EXCEPT: both turn a wrong
-    # assumption into a silent no-op, and both produce a report that describes a mechanism that did
-    # not run. Written plainly now, so a rename raises instead of degrading.
-    h = out.hidden
-    # THE FABRIC'S OWN LOSS TERM ENTERS THE OBJECTIVE. aux_loss is the balance/ponder/diversity sum
-    # the fabric computes about its own routing; dropping it trains the router on nothing but the
-    # language loss, which is the configuration every load-balance result in this project's history
-    # was accidentally taken under.
-    aux = out.aux_loss
-    # `live_vocab` IS THE POSITIONAL BOUNDARY AND NOT THE COUNT OF LIVE ROWS, and this line read
-    # `vocab.live_size()` until TOK.judge_probation was wired. tok/api.py's header is explicit:
-    # "id_count is the positional boundary -- where never-minted rows begin, i.e. Vocabulary.size()
-    # -- and it is what LM.decode's `live_vocab` argument must receive, because ids are positional:
-    # retire() pops from the match table and leaves id2bytes intact, so retired rows sit BELOW the
-    # boundary and are handled separately, by id. live_size is that boundary minus the retired
-    # count, and passing it to decode would move the boundary down and mask exactly that many LIVE
-    # rows to -inf. The composition root's own wiring table named live_size here until 2026-09-03."
-    # THE TWO ARE EQUAL UNTIL SOMETHING RETIRES, which is why this survived every run so far: with
-    # `retired` empty size() == live_size(), and nothing could retire while judge_probation was
-    # uncalled. It is the same defect the header describes, one call site over, and it would have
-    # started masking the `len(retired)` HIGHEST live ids on the first retirement of the first run
-    # that turned probation on.
-    logits = lm_api.decode(lm_cfg, model, h,
-                           live_vocab=int(vocab.size()), retired_ids=tuple(vocab.retired))
-    per_window, mean = lm_api.lm_loss(lm_cfg, logits, y)
+    with cast():
+        out = fab_api.forward(
+            fab_cfg, pop, h=h, signature=sig_vec, novelty=novelty,
+            step_windows=U.Windows(int(clock.step)),
+            domain_id=domain_id, live_domains=1, training=True)
+        # `hidden`, NOT `h`, AND THE FIRST DRAFT GOT THIS WRONG IN THE SAME TWO LINES AS THE SWALLOWED
+        # EXCEPT ABOVE. It read `h = out.h if hasattr(out, "h") else h` -- so FabricOut, whose field is
+        # `hidden`, never matched, the routed output was discarded, and the run trained on the
+        # UNROUTED hidden while reporting that the fabric was in the path. The tell was that the loss
+        # curve was byte-identical to the run taken before the fabric was wired in at all.
+        # `hasattr(x, "a") else <unchanged>` IS THE SAME DEFECT AS A BARE EXCEPT: both turn a wrong
+        # assumption into a silent no-op, and both produce a report that describes a mechanism that did
+        # not run. Written plainly now, so a rename raises instead of degrading.
+        h = out.hidden
+        # THE FABRIC'S OWN LOSS TERM ENTERS THE OBJECTIVE. aux_loss is the balance/ponder/diversity sum
+        # the fabric computes about its own routing; dropping it trains the router on nothing but the
+        # language loss, which is the configuration every load-balance result in this project's history
+        # was accidentally taken under.
+        aux = out.aux_loss
+        # `live_vocab` IS THE POSITIONAL BOUNDARY AND NOT THE COUNT OF LIVE ROWS, and this line read
+        # `vocab.live_size()` until TOK.judge_probation was wired. tok/api.py's header is explicit:
+        # "id_count is the positional boundary -- where never-minted rows begin, i.e. Vocabulary.size()
+        # -- and it is what LM.decode's `live_vocab` argument must receive, because ids are positional:
+        # retire() pops from the match table and leaves id2bytes intact, so retired rows sit BELOW the
+        # boundary and are handled separately, by id. live_size is that boundary minus the retired
+        # count, and passing it to decode would move the boundary down and mask exactly that many LIVE
+        # rows to -inf. The composition root's own wiring table named live_size here until 2026-09-03."
+        # THE TWO ARE EQUAL UNTIL SOMETHING RETIRES, which is why this survived every run so far: with
+        # `retired` empty size() == live_size(), and nothing could retire while judge_probation was
+        # uncalled. It is the same defect the header describes, one call site over, and it would have
+        # started masking the `len(retired)` HIGHEST live ids on the first retirement of the first run
+        # that turned probation on.
+        logits = lm_api.decode(lm_cfg, model, h,
+                               live_vocab=int(vocab.size()), retired_ids=tuple(vocab.retired))
+        per_window, mean = lm_api.lm_loss(lm_cfg, logits, y)
 
-    # THE APPEARANCE COUNTER IS ADVANCED BY THIS FLUSH'S TOKENS, BEFORE THE TERMS THAT READ IT.
-    # index_add_ over the flattened batch is the shipped form (:6804).
-    sysm.token_seen.index_add_(0, x.reshape(-1),
-                               torch.ones(x.numel(), device=x.device, dtype=sysm.token_seen.dtype))
+        # THE APPEARANCE COUNTER IS ADVANCED BY THIS FLUSH'S TOKENS, BEFORE THE TERMS THAT READ IT.
+        # index_add_ over the flattened batch is the shipped form (:6804).
+        sysm.token_seen.index_add_(0, x.reshape(-1),
+                                   torch.ones(x.numel(), device=x.device, dtype=sysm.token_seen.dtype))
 
-    # THE WORLD MODEL'S TWO TERMS. Its docstring is emphatic that the two weights must not be
-    # folded into one: the integration once multiplied the anti-collapse term by WORLD_W=0.1, ran
-    # it at a tenth strength, and the latent collapsed to std 0.24. Splitting it moved latent std
-    # 0.24 -> 0.97 and forward-pred against persistence +13.6% -> +34.1%. loss_terms returns the
-    # WEIGHTED sum, so the loop adds one number and cannot re-weight it here.
-    wstep = world_api.loss_terms(cfg_world, sysm.world, obs_emb)
-    world_loss = getattr(wstep, "loss", None) if wstep is not None else None
+        # THE WORLD MODEL'S TWO TERMS. Its docstring is emphatic that the two weights must not be
+        # folded into one: the integration once multiplied the anti-collapse term by WORLD_W=0.1, ran
+        # it at a tenth strength, and the latent collapsed to std 0.24. Splitting it moved latent std
+        # 0.24 -> 0.97 and forward-pred against persistence +13.6% -> +34.1%. loss_terms returns the
+        # WEIGHTED sum, so the loop adds one number and cannot re-weight it here.
+        wstep = world_api.loss_terms(cfg_world, sysm.world, obs_emb)
+        world_loss = getattr(wstep, "loss", None) if wstep is not None else None
 
-    # THE ANCHOR, ALREADY MULTIPLIED BY anchor_w BY THE ENTRY POINT. TOK_ANCHOR=0.05 was printed on
-    # the EFFECTIVE line of every run in this project's history while model.compose was None and
-    # the term never once entered the loss, because it was simply missing from the loss-weight list
-    # at :5802-5813. Returning the weighted tensor is what keeps the number and the term together;
-    # adding it here unweighted would rebuild the defect one call further out.
-    anchor = lm_api.anchor_term(lm_cfg, model, token_seen=sysm.token_seen)
+        # THE ANCHOR, ALREADY MULTIPLIED BY anchor_w BY THE ENTRY POINT. TOK_ANCHOR=0.05 was printed on
+        # the EFFECTIVE line of every run in this project's history while model.compose was None and
+        # the term never once entered the loss, because it was simply missing from the loss-weight list
+        # at :5802-5813. Returning the weighted tensor is what keeps the number and the term together;
+        # adding it here unweighted would rebuild the defect one call further out.
+        anchor = lm_api.anchor_term(lm_cfg, model, token_seen=sysm.token_seen)
 
-    total = mean
-    for term in (aux, world_loss, anchor):
-        if term is not None:
-            total = total + term
+        total = mean
+        for term in (aux, world_loss, anchor):
+            if term is not None:
+                total = total + term
+    # THE DTYPE THE STEP ACTUALLY RAN IN, OBSERVED AND RECORDED -- the did-it-fire surface this
+    # lever had none of. `amp_state` says what was ASKED FOR and what process_setup DECIDED; it
+    # cannot say whether any caller ever ENTERED the context, which is precisely the fact that was
+    # false for the whole life of this driver. This is read off the tensor the step produced, and
+    # run.py prints it beside amp_state so a reader compares two numbers instead of trusting one.
+    sysm.process_dtype = str(logits.dtype)
     opt_api.scaled_backward(opt_cfg, sysm.optimizer, total)
 
     # THE BACKWARD IS COUNTED BY THE CLOCK AND NOWHERE ELSE, and the optimizer steps only when the

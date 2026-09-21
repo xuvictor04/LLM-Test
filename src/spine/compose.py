@@ -1912,7 +1912,19 @@ class System:
                  #              clock.step, because FAB's cooldown is Windows and mixing them
                  #              raises UnitError rather than being batch_windows-fold wrong. Two
                  #              typed stamps of one event is the point, not a duplication.
-                 "due", "novelty", "token_seen", "shift_at_windows")
+                 "due", "novelty", "token_seen", "shift_at_windows",
+                 # `process_dtype` IS AN OBSERVATION AND NOT A DECISION, and it is here because
+                 # RUN_AMP had no did-it-fire surface and was inert for the life of the driver
+                 # because of it. Process.amp_state says what was ASKED FOR and what
+                 # RUN.process_setup DECIDED; NEITHER of those can say whether a caller ever
+                 # entered Process.autocast, and no caller did -- found on a GPU by two arms of
+                 # sweep_gpu.sh returning bit-identical loss curves. spine/loop.py::_flush writes
+                 # the dtype of the tensor the step actually produced here, once per flush, and
+                 # run.py prints it beside amp_state. It is on System rather than on Process for
+                 # the reason `warmup` is: it is a RESULT THE ROOT OWNS, measured after the frozen
+                 # record was built, and a second writable field on Process would let a report
+                 # quote a precision nothing had run in.
+                 "process_dtype")
 
     def __init__(self, configs, wires, warnings):
         for name in self.__slots__:
