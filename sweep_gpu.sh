@@ -47,6 +47,12 @@ WINDOWS=${WINDOWS:-400}
 # a comparison of two run LENGTHS wearing the labels of two geometries.
 BYTES=${BYTES:-6000000}
 ONLY=${ONLY:-base,amp,batch8,batch32,w512,w1024l2,xf,xf_amp,big}
+# THE SECOND ROUND, OFF BY DEFAULT: ONLY=w2048l2,w1024l4,w1024l2_amp bash sweep_gpu.sh
+# The first round stopped at 92M parameters and 1.823 GiB of an H100's 79.2 -- 2.3% of the card --
+# with the best arm at 30.8% utilization, so the width curve was nowhere near either wall. These
+# three go further along the axis the first round found was cheap, and the third re-asks the bf16
+# question where it can actually matter: `amp` was tested at the SHIPPED geometry, where the step
+# is not compute-bound and bf16 therefore has nothing to speed up even when it is working.
 
 mkdir -p "$OUT"
 S="$OUT/SUMMARY.txt"
@@ -139,6 +145,9 @@ arm w1024l2  LM_WIDTH=1024 LM_LAYERS=2
 arm xf       LM_ARCH=transformer LM_WIDTH=512 LM_LAYERS=4
 arm xf_amp   LM_ARCH=transformer LM_WIDTH=512 LM_LAYERS=4 RUN_AMP=bf16
 arm big      LM_WIDTH=768 LM_LAYERS=3 LM_CTX=256
+arm w2048l2       LM_WIDTH=2048 LM_LAYERS=2
+arm w1024l4       LM_WIDTH=1024 LM_LAYERS=4
+arm w1024l2_amp   LM_WIDTH=1024 LM_LAYERS=2 RUN_AMP=bf16
 
 echo "==================================================================================" | tee -a "$S"
 echo "READ STEP/s, NOT win/s. An arm that wins on win/s and loses on STEP/s has bought" | tee -a "$S"
