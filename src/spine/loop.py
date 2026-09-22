@@ -74,6 +74,8 @@ from capacity import api as cap_api
 from spine.compose import _sample_window as _c_sample_window
 from spine.compose import _key_fn as _c_key_fn
 from spine.compose import _sig_encode_fn as _c_sig_encode_fn
+from spine.compose import _signature_stream as _c_signature_stream
+from spine.compose import _signature_cursor as _c_signature_cursor
 from ckpt import api as ckpt_api
 from domains import api as dom_api
 from memory import api as mem_api
@@ -108,6 +110,7 @@ _CALLS = frozenset({
     "DATA.draw_stream", "TOK.tokenize", "RUN.RunClock.begin_epoch",
     # ---- stage A: the cadenced maintenance block, then the per-window pair
     "MEM.census", "DOM.manage", "DOM.census", "DOM.rekey",
+    "SIG.cadence_due", "SIG.train_step",
     "RUN.RunClock.advance", "SIG.encode", "DOM.observe", "TOK.on_window",
     # ---- stage B, per flush: all twenty-one
     "LM.embed", "LM.encode", "SIG.encode", "FAB.forward", "LM.decode", "LM.lm_loss",
@@ -572,6 +575,14 @@ def run(sysm, *, max_windows=None, progress=True):
     # requires the SAME callable the live path used, or the partition drifts into two signature
     # spaces that do not compare.
     sig_encode = _c_sig_encode_fn(sysm)
+    # SIG'S OWN ALPHABET STREAM, RESOLVED ONCE. _signature_stream returns Stream.bytes under
+    # space="bytes" and Segmentation.ids under "tokens"; it is re-resolved at the epoch roll
+    # because the roll replaces both of those objects.
+    sig_stream = _c_signature_stream(sysm, st)
+    # WINDOWS SINCE THE LAST DOMAIN BOUNDARY, which SIG.cadence_due takes to choose its dense arm.
+    # Seeded at 0: before the first window there has been no boundary and no windows since one, and
+    # the dense arm firing on the opening windows of a run is the intended reading.
+    since_boundary = 0
     first_loss = last_loss = float("nan")
     batch = []
     ids = sysm.segmentation.ids
@@ -693,11 +704,26 @@ def run(sysm, *, max_windows=None, progress=True):
             # would CONSUME the fire -- Cadences.due RECORDS the step when it answers True -- so the
             # ledger would show fab.manage firing on a run where no expert was ever culled. An
             # unevaluated gate reading checks=0 is the honest state and `skipped` names it.
-            # SIG.cadence_due IS NOT ASKED FOR THE SAME REASON, AND IT IS THE STRONGER CASE: it is the
-            # gate for SIG.train_step, which IS a stub, and tok/api.py::on_window's own paragraph is
-            # the general rule -- "asking under a shared key CONSUMES the event: probation sharing the
-            # grow key means minting never fires at all". A gate asked by nobody who can act on it is a
-            # fire thrown away.
+            # SIG'S OWN CADENCE AND ITS STEP, WHICH ARE ONE MECHANISM AND LAND TOGETHER. Until
+            # SIG.train_step had a body neither was asked, because asking a gate RECORDS its fire
+            # and a fire nobody can act on is thrown away -- tok/api.py::on_window's rule ("asking
+            # under a shared key CONSUMES the event"). Both are called now.
+            # THIS IS THE ONLY PLACE THE ENCODER IS STEPPED IN THE LOOP. OPT.maybe_step writes `lr`
+            # into the encoder optimizer's param groups and deliberately does NOT step it
+            # (Q-OPT-6), and opt.encoder_steps_here is the tripwire that MUST stay 0 -- a nonzero
+            # value means both sites are stepping, which makes SIG's floor and its three cadence
+            # levers inert by construction. `opt` is OptState.encoder and nothing wider: before
+            # that field had a name the root handed over the whole OptState, an object through
+            # which this package could have stepped the language model.
+            # `windows_since_boundary` IS A PREVIOUS-ITERATION VALUE BY CONSTRUCTION, which is what
+            # domains/api.py::Assignment means by "`boundary` IS CONSUMED BACKWARDS": SIG's row
+            # sits ABOVE DOM.observe's, so the count read here is the one DOM last reset and never
+            # this window's own answer.
+            if sig_api.cadence_due(sig_cfg, st, step_windows=tick.step,
+                                   windows_since_boundary=since_boundary):
+                sig_api.train_step(sig_cfg, st, stream=sig_stream,
+                                   seen_units=_c_signature_cursor(sysm, st, win_in_epoch),
+                                   opt=sysm.optimizer.encoder)
             #
             # SIG.encode, PER WINDOW, WHICH IS WHERE THE TABLE PUTS IT -- immediately above DOM.observe.
             # It used to be called once per FLUSH from inside _flush, off a second slice of the corpus;
@@ -723,6 +749,10 @@ def run(sysm, *, max_windows=None, progress=True):
                                   tokens=ids[bounds[0]:bounds[0] + ctx], now=tick.step)
             did = int(asg.did)
             dids.append(did)
+            # THE BOUNDARY COUNTER SIG READS NEXT WINDOW. Zeroed on a boundary and incremented
+            # otherwise, so the value SIG.cadence_due sees above is always the PREVIOUS window's --
+            # the ordering domains/api.py::Assignment declares, not an accident of where this sits.
+            since_boundary = 0 if bool(asg.boundary) else since_boundary + 1
 
             # ---- ROW A CONTINUED: TOK'S FOUR CADENCES, ASKED ONCE PER WINDOW ------------------------
             # ASKED HERE AND ACTED ON AT THE FLUSH, which is the whole of Q-TOK-12. batch_windows Dues
@@ -850,6 +880,10 @@ def run(sysm, *, max_windows=None, progress=True):
                 tok_cfg, vocab, sysm.stream.bytes, sysm.stream.labels,
                 regularize=True, seed=int(run_cfg.seed))
             ids = sysm.segmentation.ids
+            # SIG'S STREAM IS RE-RESOLVED, because _signature_stream returns Stream.bytes or
+            # Segmentation.ids and the roll has just replaced both. A stale binding would train the
+            # encoder on the previous epoch's material while the loop trains on this one's.
+            sig_stream = _c_signature_stream(sysm, st)
             # THE LENGTH ARRIVES AS A COUNT OF WINDOWS, which is begin_epoch's own requirement --
             # "never as a byte budget divided by a token window" -- and the division is named once,
             # at compose.py::_windows_in_epoch, because what separates the right form from the
@@ -1396,13 +1430,17 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
                 # model must re-learn from scratch material it can already spell with the parents",
                 # measured at 2.1699 (random) against 1.4822 (last_first) immediate post-mint loss.
                 # Minting without this call is that 2.1699 arm, chosen by omission.
-                # sig_emb IS None BECAUSE SIG.encoder_embedding IS A P4 STUB, and the consequence
-                # is SIG's and not LM's: a domain centroid is a mean of encodings, so one
-                # freshly-random token inside a window perturbs every signature containing it and
-                # the assembler reads that as a domain shift. lm.mint.sig_rows reading 0 is the
-                # third of its three declared states -- "nobody passed it" -- and it is this line.
+                # sig_emb COMES FROM SIG.encoder_embedding, WHICH THIS COMMENT CALLED A STUB UNTIL
+                # 2026-09-22. SIG needs the warm row more than the LM does: a domain centroid is a MEAN
+                # of encodings, so one freshly-random token id inside a window perturbs every signature
+                # containing it and the assembler reads that as a domain shift -- a spurious shift
+                # arriving at the mechanism whose whole job is to notice real ones.
+                # IT STILL RETURNS None AT THE SHIPPED SIG_SPACE=bytes, and that is the SECOND of
+                # lm.mint.sig_rows' three declared states, not the third: "SIG is in byte space and
+                # needs none" rather than "nobody passed it". The encoder's alphabet is 256 bytes and
+                # it has no row for a token id in any sense.
                 lm_api.on_mint(lm_cfg, model, mints, vocab.id2bytes, at_window=now_w2,
-                               sig_emb=None)
+                               sig_emb=sig_api.encoder_embedding(sig_cfg, st))
         if due.retok:
             # THE RETOK IS DEFERRED TO THE NEXT EPOCH ROLL, NOT DROPPED -- and that is a change
             # from "dropped", which is what this branch did until the roll was wired.

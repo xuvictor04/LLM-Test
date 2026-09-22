@@ -198,6 +198,32 @@ class SigState:
 
 
 @dataclasses.dataclass
+class StepOutcome:
+    """What ONE loop-side InfoNCE step did. FROZEN, for the reason train/api.py freezes Tick: a
+    caller that can write to this can change what the run reported.
+
+    `loss` IS TYPED `object` AND NOT `float` BECAUSE THREE ARMS NEVER COMPUTE ONE. The bigram arm
+    has no parameters to step, the short-stream arm cannot draw a pair, and a refused configuration
+    raises before any encode -- so None here means "no objective was evaluated", which is a
+    different statement from a loss of 0.0 and must stay sayable.
+
+    `why` IS THE SENTENCE AND NOT A FLAG. `stepped=False` has four causes in this package -- the
+    mode is frozen, the stream is too short, the loss is at or below the InfoNCE floor, or the
+    cadence never asked -- and only the first three can be seen from inside this call. A boolean
+    would make the floor state, which is the ENCODER WORKING, indistinguishable from the
+    short-stream state, which is the encoder never having been given anything.
+
+    THE SAME NAME EXISTS IN opt/api.py AND THEY ARE DIFFERENT RECORDS IN DIFFERENT PACKAGES.
+    Neither imports the other (O10); opt's carries (stepped, lr, restart, damped) about the
+    language model's optimizer, and this one carries what SIG's encoder step did.
+    """
+    loss: object
+    stepped: bool
+    why: str
+    n_prototype: int
+
+
+@dataclasses.dataclass(frozen=True)
 class WarmupReport:
     """What the pre-loop warm-up did, and WHICH OF THE THREE THINGS IT SAW -- never a binary.
 
@@ -786,9 +812,157 @@ def train_step(sig: Config, st, *, stream, seen_units, opt, reservoir=None):
                  state and must be REPORTED AS SUCH, not as "trained".
     """
     sig = sig.owned_by("SIG")
-    raise NotImplementedError(
-        "SIG.train_step: P4 (sig) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section SIG.")
+    mode, space = str(sig.mode), str(sig.space)
+    batch = int(sig.contrastive_batch)
+    proto_frac, floor_kinds = float(sig.prototype_frac), int(sig.floor_kinds)
+    var_w, cov_w, d = float(sig.var_weight), float(sig.cov_weight), int(sig.d)
+    c = st.counters
+
+    # SEEDED BEFORE ANY BRANCH DECIDES. Every one of these is reachable on some arm, so every one
+    # is present from the first call -- the rule fabric/api.py::_bump states and that this package
+    # broke once already (sig/api.py::encoder_parameters records a counter that was MISSING rather
+    # than 0 for a whole run because its seed sat inside the gate it described).
+    for _k in ("sig.train_steps", "sig.train_stepped", "sig.floor_skips", "sig.prototype_pairs",
+               "sig.varcov_applied", "sig.train_stream_short"):
+        c.setdefault(_k, 0)
+
+    # ---- THE ARMS THAT NEVER REACH THE OBJECTIVE, ANSWERED FIRST AND COUNTED APART -------------
+    # sig.train_steps IS NOT BUMPED ON EITHER, and that is what keeps this function's own declared
+    # reading true: "sig.train_stepped == 0 with sig.train_steps > 0 is the encoder-at-its-floor
+    # state and must be REPORTED AS SUCH, not as 'trained'." If the bigram arm or the first three
+    # windows of an epoch bumped `train_steps`, that sentence would read the same on a run where
+    # the encoder was at its floor and on one where it was never given a pair.
+    if mode == "bigram":
+        return StepOutcome(
+            loss=None, stepped=False, n_prototype=0,
+            why=f"SIG_MODE={mode!r}: the signature is a FROZEN bigram table and has no parameters "
+                f"to step. This is not the encoder declining to train, it is a configuration with "
+                f"no encoder in it -- sig.train_steps stays 0 and sig.encoder_built says which "
+                f"arm the run took.")
+    if floor_kinds < 0:
+        raise ValueError(
+            f"SIG_FLOOR_KINDS={floor_kinds} is negative. It is the K of the InfoNCE floor "
+            f"ln(1 + (B-1)/K), the number of KINDS the batch is expected to contain, and a "
+            f"negative count has no reading -- at K<0 the log's argument goes below 1 and the "
+            f"floor turns into a NEGATIVE loss no objective can reach, so every step would be "
+            f"taken and sig.floor_skips would be structurally 0. Set 0 to disable the floor.")
+
+    base = _unit_tensor(stream)
+    units = min(int(seen_units), int(base.numel()))
+    width, radius = int(st.width_units), int(st.positive_radius_units)
+    # THE SHORT-STREAM ARM EXISTS BECAUSE _draw_pairs RAISES, AND THE FIRST WINDOWS OF EVERY EPOCH
+    # HIT IT. One pair needs width + radius + width units and `seen_units` bounds the draw to what
+    # the loop has actually reached, so at the shipped geometry the opening windows of a run cannot
+    # supply one. sig/api.py::_draw_pairs refuses that by name -- correctly, for a caller that
+    # should have supplied the units -- and this is the caller for which it is simply too early.
+    # ITS OWN COUNTER, NOT sig.floor_skips. "The stream was too short" and "the loss was already at
+    # the floor" are opposite findings: the first is the encoder never having been given anything,
+    # the second is the encoder having nothing left to learn from this batch.
+    if units - width - radius <= 0:
+        c["sig.train_stream_short"] += 1
+        return StepOutcome(
+            loss=None, stepped=False, n_prototype=0,
+            why=f"the loop has reached {units} unit(s) of {space!r} and one anchor/positive pair "
+                f"needs width_units + positive_radius_units + width_units = {width} + {radius} + "
+                f"{width}. Too early in this epoch to draw one; sig.train_stream_short counts it "
+                f"apart from sig.floor_skips because the two are opposite states.")
+
+    c["sig.train_steps"] += 1
+    # A FRESH GENERATOR PER CALL, SEEDED OFF THIS PACKAGE'S DECLARED STREAM, which is warm_up's
+    # idiom and its comment applies verbatim here: NOT st.rng.torch_generator(), because that
+    # derives its seed from the stream's NAME, so warm_up and train_step would both start at the
+    # same state and draw the same windows -- correlated draws with nothing in the ledger to say so.
+    gen = torch.Generator()
+    gen.manual_seed(int(st.rng.randint(0, 2 ** 31 - 1)))
+
+    # ---- THE PROTOTYPE ARM, WHICH CANNOT RUN AND SAYS SO RATHER THAN READING AS ARMED ----------
+    # Q-SIG-1 RESOLVED 2026-09-02 (c): no DOM entry point returns reservoir windows and the
+    # LOOP_ORDER row supplies stream, seen_units and opt only, so `reservoir` is None on every call
+    # the root makes. THIS IS THE PUREST ARMED-BUT-INERT SHAPE IN THE TREE -- prototype_frac is in
+    # this function's own LEVERS READ list and therefore passes K4 as consumed, while being
+    # structurally unreachable, which tests/test_contract.py states outright ("LEVERS READ: is
+    # prose that passes a parser"). So the gate below must print UNREACHABLE and never "armed but
+    # 0", because those are claims about different runs.
+    n_proto = 0
+    anchors, positives = _draw_pairs(st, base, units, batch, gen)
+    if proto_frac > 0.0 and reservoir:
+        # THE SLICE IS CAPPED AT batch - 1 SO THE BATCH KEEPS AT LEAST ONE CORPUS-DRAWN NEGATIVE.
+        # An InfoNCE batch of nothing but reservoir pairs has no in-corpus negative to contrast
+        # against, and B is part of the diagnostic (_contrastive_loss says the collapse reference
+        # is ln(B)), so silently changing what B is made of would move a number the report reads.
+        n_proto = min(batch - 1, int(round(proto_frac * batch)), len(reservoir))
+        if n_proto > 0:
+            pa = torch.stack([_windows_at(base, torch.tensor([0]), width)[0]
+                              if a is None else torch.as_tensor(a, dtype=torch.long)
+                              for a, _b in reservoir[:n_proto]])
+            pp = torch.stack([_windows_at(base, torch.tensor([0]), width)[0]
+                              if b is None else torch.as_tensor(b, dtype=torch.long)
+                              for _a, b in reservoir[:n_proto]])
+            anchors = torch.cat([anchors[n_proto:], pa], dim=0)
+            positives = torch.cat([positives[n_proto:], pp], dim=0)
+            c["sig.prototype_pairs"] += n_proto
+
+    loss = _contrastive_loss(sig, st, _encode_for_training(st, anchors),
+                             _encode_for_training(st, positives), d=d)
+    if var_w > 0.0 or cov_w > 0.0:
+        # THE SAME `> 0.0` CONDITION _contrastive_loss ITSELF USES, read here only to count. A
+        # second threshold would be a second opinion about whether the anti-collapse pair ran.
+        c["sig.varcov_applied"] += 1
+
+    # ---- THE InfoNCE FLOOR: THE ENCODER IS ALLOWED TO BE FINISHED ------------------------------
+    # ln(1 + (B-1)/K) is the loss a PERFECT encoder reaches when the batch's B-1 negatives contain
+    # K kinds -- some of them are the same kind as the anchor and cannot be pushed away. Stepping
+    # below it trains the encoder to separate windows that are genuinely alike, which is the
+    # mechanism sig/levers.py diagnoses as making domain identity WORSE with more training.
+    # THE OPTIMIZER IS LEFT ENTIRELY UNTOUCHED ON A SKIP -- no zero_grad either, because the graph
+    # is discarded with the loss and a zero_grad here would be indistinguishable in the ledger from
+    # a step that ran and produced no update.
+    floor = math.log(1.0 + (batch - 1) / floor_kinds) if floor_kinds > 0 else None
+    at_floor = floor is not None and float(loss.detach()) <= floor
+    if at_floor:
+        c["sig.floor_skips"] += 1
+    else:
+        opt.zero_grad(set_to_none=True)
+        loss.backward()
+        opt.step()
+        c["sig.train_stepped"] += 1
+
+    # ---- THE TWO GATES, DECLARED BY NAME INTO st.gates -----------------------------------------
+    # KEYED, NOT APPENDED: this record's `gates` is a name-keyed map precisely because this entry
+    # point re-declares once per window, and a tuple would hold one entry per window with the
+    # report reading the last one as the run (SigState's own docstring).
+    st.gates["sig.floor_skips"] = (
+        Gate("sig.floor_skips", c["sig.floor_skips"] > 0, c["sig.floor_skips"], 0,
+             reason=f"the InfoNCE floor is ln(1 + (B-1)/K) = ln(1 + ({batch}-1)/{floor_kinds}) = "
+                    f"{floor:.4f}; {c['sig.floor_skips']} of {c['sig.train_steps']} step(s) were "
+                    f"at or below it and left the optimizer untouched. Skips are the encoder being "
+                    f"FINISHED on that batch, not the encoder failing to train")
+        if floor_kinds > 0 else
+        Gate("sig.floor_skips", False, 0, 0, reachable=False,
+             reason=f"SIG_FLOOR_KINDS=0: the floor is DISABLED, so every step is taken and "
+                    f"sig.floor_skips is structurally 0 rather than armed and never fired"))
+    st.gates["sig.prototype_pairs"] = (
+        Gate("sig.prototype_pairs", c["sig.prototype_pairs"] > 0, c["sig.prototype_pairs"], 0,
+             reason=f"{c['sig.prototype_pairs']} reservoir pair(s) spliced into the batch at "
+                    f"SIG_PROTOTYPE_FRAC={proto_frac}")
+        if proto_frac > 0.0 and reservoir else
+        Gate("sig.prototype_pairs", False, 0, 0, reachable=False,
+             reason=(f"SIG_PROTOTYPE_FRAC={proto_frac}: the prototype arm is off by configuration"
+                     if proto_frac <= 0.0 else
+                     "unreachable (no DOM supplier): SIG_PROTOTYPE_FRAC is set, but `reservoir` "
+                     "arrives None on every call the composition root makes -- no DOM entry point "
+                     "returns reservoir windows and the LOOP_ORDER row supplies stream, "
+                     "seen_units and opt only (Q-SIG-1, RESOLVED 2026-09-02 option (c)). This is "
+                     "NOT 'armed but 0': the lever is consumed by this function's LEVERS READ "
+                     "line and structurally cannot fire")))
+
+    return StepOutcome(
+        loss=float(loss.detach()), stepped=not at_floor, n_prototype=n_proto,
+        why=(f"loss {float(loss.detach()):.4f} <= floor {floor:.4f}; optimizer untouched"
+             if at_floor else
+             f"loss {float(loss.detach()):.4f}"
+             + (f" > floor {floor:.4f}" if floor is not None else " (no floor)")
+             + "; encoder stepped"))
 
 
 # ==================================================================================================
@@ -1523,6 +1697,40 @@ def encoder_embedding(sig: Config, st):
     DID IT FIRE: sig.emb_handed_out (0 under space=bytes is unreachable, with the gate arithmetic)
     """
     sig = sig.owned_by("SIG")
-    raise NotImplementedError(
-        "SIG.encoder_embedding: P4 (sig) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section SIG.")
+    space = str(sig.space)
+    st.counters.setdefault("sig.emb_handed_out", 0)
+
+    # THE BRANCH IS ON WHETHER THE ENCODER CARRIES AN `emb`, NOT ON `mode`, and that is state_dict's
+    # idiom in this same file. It keeps this function's LEVERS READ line true -- `space` is the one
+    # declared read -- and it is the honest question anyway: what LM.on_mint needs is a table with
+    # a row per token id, and whether one exists is a property of the object, not of a lever.
+    table = getattr(getattr(st, "encoder", None), "emb", None)
+    if space != "tokens" or table is None:
+        # None IS A LEGITIMATE RETURN AND NOT A FAILURE. Under space="bytes" the encoder's alphabet
+        # is 256 BYTES and it has no row for a token id at all -- a minted id is not in its
+        # vocabulary in any sense -- so handing LM a byte table would write a warm row at an index
+        # that means a different symbol. lm/api.py::on_mint's `sig_rows` counter is declared to
+        # tell exactly these apart: "SIG is in token space and got its rows" from "SIG is in byte
+        # space and needs none" from "nobody passed it".
+        st.gates["sig.emb_handed_out"] = Gate(
+            "sig.emb_handed_out", False, 0, 1, reachable=False,
+            reason=(f"SIG_SPACE={space!r}: the encoder's alphabet is bytes, so it has no row for a "
+                    f"token id and a minted id needs none from this package"
+                    if space != "tokens" else
+                    f"SIG_SPACE={space!r} but this encoder carries no `emb` table -- the frozen "
+                    f"bigram arm has no embedding to warm a row in"))
+        return None
+
+    st.counters["sig.emb_handed_out"] += 1
+    # IT COUNTS HAND-OUTS, NOT ROWS. One bump per mint BURST, because that is what this call is;
+    # the rows actually written are LM's to count and lm.mint.sig_rows is where they are.
+    st.gates["sig.emb_handed_out"] = Gate(
+        "sig.emb_handed_out", True, st.counters["sig.emb_handed_out"], 1,
+        reason=f"the encoder's input table was handed to LM.on_mint "
+               f"{st.counters['sig.emb_handed_out']} time(s), once per mint burst; the ROWS "
+               f"written are lm.mint.sig_rows. SIG needs this more than the LM does: a domain "
+               f"centroid is a mean of encodings, so one freshly-random token id inside a window "
+               f"perturbs every signature containing it and the assembler reads that as a domain "
+               f"shift")
+    # THE LIVE OBJECT, NOT A COPY. LM writes INTO it; a clone would warm a table nobody reads.
+    return table
