@@ -1421,6 +1421,22 @@ DEFERRED_ENTRY_POINTS = {
         "expert pool contributed nothing to the base param group, so every expert's contribution "
         "stayed exactly zero while the population grew, culled and replicated around it -- both "
         "goals' central mechanism, inert, with every report line still printing.",
+    "WORLD.World.parameters":
+        "P4, with OPT.build, and for EXACTLY the reason the FAB entry above gives: _base_parameters "
+        "in this file already calls it by name through `getattr(obj, \"parameters\", None)`, and a "
+        "helper in the composition root is not an order-table row. It takes only self. THE COST OF "
+        "ITS ABSENCE IS MEASURED AND IT IS NOT 'THE WORLD MODEL DID NOT LEARN': WORLD's loss IS in "
+        "the objective -- spine/loop.py::_flush adds it to `total` -- and it is computed on "
+        "LM.embed's OUTPUT rather than a detached copy, so it reaches the language model whether or "
+        "not anything steps a world tensor. At initialisation, one seed, 4 windows of 64 tokens at "
+        "the shipped defaults, the world loss's gradient norm on emb.weight was 0.005194 against "
+        "the language-modelling loss's own 0.006371 -- 45% of the embedding's total, and it touches "
+        "nothing else in the model. So a FROZEN RANDOM network supplied nearly half the training "
+        "signal to the lowest layer of the language model, for every run this tree has taken, while "
+        "max|delta| over 60 windows read exactly 0.0 for encoder, qproj, preds and keys. With the "
+        "method in place those same 60 windows move preds by 7.955e-02 and the encoder by "
+        "8.08e-02; world_proj alone still reads 0.0, because its only consumer is WORLD.forecast "
+        "and that has no call site (Q-WORLD-10).",
     "FAB.Population.n":
         "P4, with the rows that read the live population size: FAB.manage's cull budget, CAP's "
         "startup refusal against CAP_FAB_START, and the banner. It is the accessor the growth "

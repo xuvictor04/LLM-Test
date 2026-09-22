@@ -130,6 +130,55 @@ class World:
     def _is_live(self):
         return self.built == "live"
 
+    def parameters(self):
+        """Every trainable tensor this package owns, for the composition root's `base` group.
+
+        THE ROOT ASKS THE OBJECT, IT DOES NOT WALK A MODULE TREE -- the same contract
+        fabric/api.py::Population.parameters answers, in the same words, for the same reason:
+        spine/compose.py::_base_parameters calls `getattr(obj, "parameters", None)` on the model,
+        the population and the world, and appends a WARNING where it is missing rather than
+        failing. THAT WARNING HAS BEEN PRINTED ON EVERY RUN THIS TREE HAS EVER TAKEN, and this
+        method is what stops it being true.
+
+        WHAT THE ABSENCE WAS, MEASURED, AND IT IS NOT "THE WORLD MODEL DOES NOT LEARN". WORLD's
+        loss DOES enter the objective -- spine/loop.py::_flush adds it to `total` and backs the sum
+        -- and obs_emb is LM.embed's OUTPUT, not a detached copy, so the gradient reaches the
+        language model whether or not anything ever steps a world tensor. At initialisation, one
+        seed, a batch of 4 windows of 64 tokens at the shipped defaults: the world loss's gradient
+        norm on `emb.weight` is 0.005194 against the language-modelling loss's own 0.006371 -- 45%
+        of the embedding's total, and the world loss touches NOTHING ELSE in the model, so it is
+        not diluted across the rest of the tree. So the state this method ends is a FROZEN RANDOM
+        NETWORK supplying nearly half the training signal to the lowest layer of the language
+        model, for the whole run, while the measurement inside world/api.py::forecast (max
+        abs(delta) over 60 windows, exactly 0.0 for encoder, qproj, preds and keys) recorded that
+        the teacher never learned anything. The share is a reading at step 0 and will move as the
+        LM's own gradient falls; the direction it moves is up.
+        RE-TAKEN WITH THIS METHOD IN PLACE, over the same 60 windows: preds 7.955e-02, encoder's
+        two weight matrices 8.078e-02 and 8.075e-02, keys 1.737e-03, qproj 1.156e-03. world_proj
+        is the ONE that still reads exactly 0.0, and it is not this method's to move: world_proj
+        appears in no expression but the forecast's, which has no caller (Q-WORLD-10), so the only
+        gradient it can ever receive arrives the moment that call site exists.
+        THE DESIGN IS NOT THE DEFECT. Shaping the embedding by predictability plus an anti-collapse
+        penalty is what world/api.py::loss_terms is FOR (`predict_w * pop_loss + collapse_w *
+        (var_loss + W_COV * cov_loss)`), and leaving obs_emb attached is what makes the language
+        model a participant rather than a data source. What was wrong is only that one side of that
+        exchange was never stepped.
+        PREALLOCATED, SO THE GROUP STRUCTURE IS FIXED. `preds` and `keys` are (nmax, ...)
+        Parameters and growth only advances n_live into rows that already exist, so this list is
+        the same length on every step of every run and a checkpoint's param-group structure cannot
+        depend on how much the population grew -- the same argument Population.parameters makes,
+        and the reason WORLD.manage's add_param_group is about a FUTURE mint rather than about
+        these five tensors.
+        THE NULL WORLD RETURNS AN EMPTY LIST AND NOT AN ERROR, which is the D4 rule this class is
+        built on: WORLD_ENABLED=0 is a configuration a run takes, every method is defined on it,
+        and `built == "null"` is what a report reads -- so contributing nothing here is the honest
+        answer rather than a missing method, which is the state that produced the warning.
+        """
+        if not self._is_live():
+            return []
+        return ([self.preds, self.keys] + list(self.encoder.parameters())
+                + list(self.world_proj.parameters()) + list(self.qproj.parameters()))
+
 
 def build(world: Config, *, d_model, device, ctx_tokens, rng):
     """Construct the subsystem, or a NULL WORLD that no other package can dereference.
@@ -522,22 +571,25 @@ def forecast(world: Config, w, obs_emb):
         lm.encode.extra_applied, which counts the flushes on which the term was actually added.
     """
     world = world.owned_by("WORLD")
-    # THIS ENTRY POINT HAS NO CALLER AND MUST NOT BE GIVEN ONE YET (Q-WORLD-10, HELD 2026-09-22).
-    # The body below is finished; what it computes with has never been stepped. MEASURED on a built
-    # World at the shipped defaults: `World` is a __slots__ record and not an nn.Module, so
-    # hasattr(w, "parameters") is False and OPT.build cannot reach a single tensor here -- every run
-    # already prints that as a startup warning. `preds` is all zeros out of build() and world/api.py
-    # line 647 records max|delta| over 60 windows as EXACTLY 0.0 for encoder, qproj, preds and keys,
-    # so it stays zero; _route is residual, so every live predictor returns `z` unchanged and
-    # max|pop(z) - z| measures 1.19e-07, which is float32 round-off. THE POPULATION HALF IS THE
-    # IDENTITY, and what is left is world_proj(encoder(obs_emb)) with both maps at their random
-    # initialisation -- one measured call returned world.forecast_rms 0.11047.
-    # WORLD_FEEDBACK ALREADY SHIPS True, so the missing call site is the ONLY thing withholding
-    # that term from every hidden state in the run. Wiring it would add a fixed random direction of
-    # magnitude 0.11 per flush while world.forecasts and lm.encode.extra_applied both read exactly
-    # as designed -- counters correct, quantity meaningless, which is the wrong-measurement class
-    # this tree spends its comments on. The order is: WORLD's tensors into a param group, then a
-    # run that shows preds MOVING, then a call site.
+    # THIS ENTRY POINT HAS NO CALLER AND HAS NOT BEEN GIVEN ONE (Q-WORLD-10, HELD 2026-09-22).
+    # THE FIRST OF THE HOLD'S TWO REASONS IS CLOSED AND THE SECOND IS NOT, which is why this
+    # paragraph is still here. Closed: World.parameters() now exists, WORLD's tensors are in
+    # OPT's `base` group, and over 60 windows preds moves 7.955e-02 and the encoder 8.08e-02 where
+    # both read EXACTLY 0.0 before. So the population is no longer the identity map it is
+    # zero-initialised as, and `z` is no longer build()'s uniform draw.
+    # STILL OPEN: world_proj. It appears in NO expression in this package but the one below, so the
+    # forecast's own call site is the only gradient path it can ever have -- re-measured over those
+    # same 60 windows it is the one tensor still reading exactly 0.0, while every other moved. A
+    # first call therefore adds world_proj's RANDOM uniform(-0.1, 0.1) projection to the hidden
+    # state: one measured call returned world.forecast_rms 0.11047, and WORLD_FEEDBACK ALREADY
+    # SHIPS True, so a call site is the only thing withholding it.
+    # THAT IS A BOOTSTRAP AND NOT A PERMANENT DEFECT -- it is what adding any head looks like -- but
+    # this tree has a rule about it and world_proj does not follow it: fabric/api.py::build
+    # zero-inits A and B so "every expert is born an identity, so adding one never disrupts what
+    # already works", and build() above zero-inits `preds` citing the same sentence. world_proj is
+    # the third tensor of that kind and is drawn uniform. SETTLE THAT BEFORE WIRING, not after: the
+    # question is whether the forecast should be born a no-op and grow, like everything else this
+    # tree adds mid-run, and it costs nothing to answer while there is still no caller.
     # THE CALL COUNT IS SEEDED BEFORE EITHER GATE BELOW DECIDES ANYTHING, which is this tree's rule
     # about absence: ABSENT must mean the mechanism was UNREACHABLE on the arm this run took, so a
     # counter seeded inside the else of the gate it describes is a defect rather than a detail.
@@ -659,17 +711,18 @@ def forecast(world: Config, w, obs_emb):
     # MEASURED, NOT ARGUED, AND THE MEASUREMENT FOUND A SECOND THING: on a 60-window run at the
     # shipped defaults, w.world_proj.weight.grad is None on the way out -- loss_terms ran 60 times
     # and never touched it, so before this body existed world_proj had never received a gradient
-    # from anything at all. THE SAME RUN SHOWS THE LARGER HOLE, WHICH IS NOT THIS PACKAGE'S TO
-    # CLOSE: max|delta| over 60 windows is exactly 0.0 for encoder, qproj, preds AND keys as well,
-    # while their .grad is nonzero (the encoder's first weight accumulates a gradient sum of 19.5)
-    # -- WORLD's tensors take gradient and are never STEPPED. spine/compose.py::_base_parameters
-    # harvests each object by `getattr(obj, "parameters", None)`, and this package's World class
-    # has no such method, so the optimizer is built without a single world tensor in it and the
-    # composition root records the absence as a warning nobody has acted on. That is why nothing
-    # here may read the latent's smallness as a training outcome: at WORLD_ENABLED=1 today the
-    # encoder is still exactly build()'s uniform draw. Closing it is not this file's to do -- a
-    # `parameters()` on World would be a new public method on a public class in an api.py, which
-    # this package's own WorldStep docstring says IS an entry point.
+    # from anything at all. THE SAME RUN SHOWED THE LARGER HOLE AND IT IS NOW CLOSED, ONE
+    # LINE OF THIS FILE AWAY:
+    # max|delta| over 60 windows was exactly 0.0 for encoder, qproj, preds AND keys while their
+    # .grad was nonzero (the encoder's first weight accumulated a gradient sum of 19.5) -- WORLD's
+    # tensors took gradient and were never STEPPED, because spine/compose.py::_base_parameters
+    # harvests each object by `getattr(obj, "parameters", None)` and this package's World class had
+    # no such method. World.parameters() supplies it, the startup warning that said so is gone, and
+    # the same 60 windows now move preds by 7.955e-02 and the encoder by 8.08e-02.
+    # WHAT THAT MEANS FOR THE PARAGRAPH ABOVE: the gradient this return carries is now the ONLY one
+    # world_proj receives AND the only one it is missing, since every other tensor here is fed by
+    # loss_terms. It is the one tensor that still measures exactly 0.0 over those 60 windows, for
+    # the plain reason that nothing calls this function.
     # THE ENCODER AND THE POPULATION TAKE GRADIENT FROM THE LM LOSS THROUGH THIS PATH TOO, which is
     # a real coupling and not a side effect: `feedback` on means the latent is shaped by what makes
     # the language model better as well as by what predicts the latent forward, and that is the

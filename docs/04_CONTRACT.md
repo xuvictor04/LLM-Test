@@ -28,10 +28,10 @@ unchanged by either) — and
 (`FAB.hop_mode`, `FAB.merge_dist`) readers rather than dropping either, so **UNCONSUMED LEVERS**
 below is now an empty table with the two rulings under it. K4 reads that table, so a future lever
 with no reader still lands there with a reason or the check fails.
-**Naming is not calling**: which stubs the composition root actually reaches is section 3, and 108
+**Naming is not calling**: which stubs the composition root actually reaches is section 3, and 110
 of the entry points (§7 holds the count, and it is the only place that does — this sentence was one
-of five copies) are named by a row — 94 in a row's entry column and 14 by a call written
-into a row's note — with the remaining **23 declared deferred**, each with the argument that has no
+of five copies) are named by a row — 94 in a row's entry column and 16 by a call written
+into a row's note — with the remaining **24 declared deferred**, each with the argument that has no
 producer as the reason. That number was seven until the order tables grew a `produces` column and
 the same standard was applied to every row rather than to EVAL alone (§3.6). *(This sentence said
 "14" while `DEFERRED_ENTRY_POINTS` held 15; corrected 2026-09-02. K6 prints all three numbers, so
@@ -3361,29 +3361,39 @@ deliberately left without a caller. The reason is not the body — it is what th
 | what | reading |
 |---|---|
 | `WORLD_FEEDBACK` | **`True` — the lever already ships ON**, so the only thing withholding the forecast is the missing call site |
-| `hasattr(world, "parameters")` | **`False`** — `World` is a `__slots__` record, not an `nn.Module`, so `OPT.build` cannot reach its tensors. Every run prints this as a startup warning: *"WORLD.world exposes no parameters(), so it contributes NOTHING to the 'base' param group"* |
+| `hasattr(world, "parameters")` | **`False` when this was written; `True` as of the same day.** `World` is a `__slots__` record, not an `nn.Module`, so `OPT.build` could not reach its tensors and every run printed *"WORLD.world exposes no parameters(), so it contributes NOTHING to the 'base' param group"*. `World.parameters()` closes it: 10 tensors, 31,944 elements, all ten in the `base` group, and the warning is gone |
 | `preds` after `build` | **all zeros**, `(6, 32, 32)`, 3 slots live |
 | `max abs(pop(z) - z)` | **`1.19e-07`** — float32 round-off. `_route` is residual (`outs = z + einsum(z, preds[live])`) and `preds` is identically zero, so every live predictor returns `z` and a convex blend of identical rows is `z`. **The population half of the forecast is the identity, exactly** |
 | `world.forecast_rms` on one call | **`0.11047`** |
 
-So `world_proj(pop(z))` is `world_proj(encoder(obs_emb))` with **both maps at their random
-initialisation and no gradient path to move them**: `world/api.py:647` already records
+When this was written, `world_proj(pop(z))` was `world_proj(encoder(obs_emb))` with **both maps at
+their random initialisation and no gradient path to move them**, and `forecast`'s own body recorded
 `max abs(delta)` over 60 windows as **exactly 0.0 for `encoder`, `qproj`, `preds` and `keys`**.
-Wiring `extra=WORLD.forecast(...)` would add a **fixed random projection of a fixed random encoding**
-of magnitude ≈0.11 to every hidden state, every flush, for the whole run — a constant-direction
-perturbation, not a prediction — while `world.forecasts` counted one fire per flush and
-`lm.encode.extra_applied` agreed with it. Every counter would read as designed and the number they
-describe would be noise. That is the wrong-measurement class this whole document is organised
-against, and it would be introduced by a wiring step that looks like finishing the job.
 
-**What has to be true before it is wired**, in this order: (1) WORLD's tensors reach a param group —
-which is a real decision, because `World` is not an `nn.Module` and the choice is between making it
-one and having `OPT.build` take an explicit tensor list; (2) a run shows `preds` moving (the
-`max abs(delta)` measurement above, re-taken and non-zero); (3) only then a call site, at which point
-`world.forecast_rms` beside `lm.encode.extra_applied` prices what it contributes. Until (1), this is
-**BUILT BUT NOT WIRED, ON PURPOSE**, and that is a third state beside `notes/07_WIP.md`'s three —
-worth naming, because the other two ways to leave it (no body, or a body and a call site) are both
-worse than this one.
+**The first half of that is now false and the second half is not.** `World.parameters()` puts
+WORLD's tensors in OPT's `base` group, and the same 60-window measurement re-taken reads **preds
+7.955e-02, encoder 8.078e-02 / 8.075e-02, keys 1.737e-03, qproj 1.156e-03** — and **`world_proj`
+exactly 0.0**. That one is not an oversight and cannot be fixed from the loss side: `world_proj`
+appears in **no expression in the package but the forecast's**, so *the forecast's own call site is
+the only gradient path it will ever have*.
+
+**So the hold now rests on one thing instead of two.** The population is no longer the identity and
+the latent is no longer a random draw, but a first call still adds `world_proj`'s
+`uniform(-0.1, 0.1)` projection — one measured call returns `world.forecast_rms` **0.11047** — and
+`WORLD_FEEDBACK` already ships `True`, so a call site is the only thing withholding it. That is a
+**bootstrap**, which is what adding any head looks like, except that this tree has a rule for it and
+`world_proj` does not follow it: `fabric/api.py::build` zero-inits `A`/`B` so *"every expert is born
+an identity, so adding one never disrupts what already works"*, and `world/api.py::build` zero-inits
+`preds` citing the same sentence. `world_proj` is the third tensor of that kind and is drawn uniform.
+
+**What has to be true before it is wired**, in this order: (1) ~~WORLD's tensors reach a param
+group~~ — **DONE**, `World.parameters()`, and the startup warning is gone; (2) **settle
+`world_proj`'s initialisation** — born-an-identity like every other tensor this tree adds mid-run,
+or born random and allowed to disrupt — which costs nothing to answer while there is no caller and
+is expensive to answer after; (3) only then a call site, at which point `world.forecast_rms` beside
+`lm.encode.extra_applied` prices what it contributes. Until (2), this is **BUILT BUT NOT WIRED, ON
+PURPOSE**, and that is a third state beside `notes/07_WIP.md`'s three — worth naming, because the
+other two ways to leave it (no body, or a body and a call site) are both worse than this one.
 
 ### Q-TOK-10 — `TOK.save_vocabulary` takes no suffix, so M46 is not closed — **RESOLVED 2026-09-02: (b), OVERRULING THIS DOCUMENT'S OWN RECOMMENDATION (a). ⚠ A FROZEN SIGNATURE MOVED: `save_vocabulary(tok, vocab, *, suffix="")`**
 `CKPT.save` has a `suffix` and says *"THE SUFFIX APPLIES TO THE WHOLE SNAPSHOT"*;
@@ -4132,9 +4142,9 @@ row and one deleted exemption. After P4 it is a coordinated edit across ten inde
 **THE COUNT WAS RE-VERIFIED BY SCRIPT ON 2026-09-03, NOT COPIED FROM THIS DOCUMENT**, because
 `Q-TOK-11` and this question collided on it once already and a fifth stale count would be the sixth
 time. Running `test_contract.api_signatures()` — K1's own AST walk, the same oracle the check uses —
-over `src/` returns **133 entry points**, against **133 declared** in §7's ```contract block, all
+over `src/` returns **134 entry points**, against **134 declared** in §7's ```contract block, all
 distinct. Per package: CAP 7, CKPT 11, DATA 5, DOM 10, EVAL 9, FAB 11, **LM 12**, MEM 10, OPT 7,
-RUN 14, SIG 10, TOK 9, WORLD 8. LM's twelve are `anchor_term`, `build_model`, `counters`, `decode`,
+RUN 14, SIG 10, TOK 9, **WORLD 9**. LM's twelve are `anchor_term`, `build_model`, `counters`, `decode`,
 **`embed`**, `encode`, `lm_loss`, `load_state`, `on_mint`, **`residual_ratios`**, `resolve`,
 `state_dict` — the two additions are both present and both in §7, so 121 + 2 = 123 is the arithmetic
 and the tree agrees with it in both directions.
@@ -4204,12 +4214,18 @@ nobody has watched fail is indistinguishable from a check that cannot fail.
 
 ## 7. THE FROZEN SIGNATURE SET
 
-Everything above is prose about these 133 entry points — 121 until 2026-09-02, when Q-TOK-11 added
-`LM.residual_ratios` (122) and Q-LM-12 added `LM.embed` (123); 133 since 2026-09-15, when P4 wrote
-`CAP.caps` and the `Caps` record it returns brought `Caps.headroom(n)` with it. That one is not a
-new ruling: this document has said since the record was specified that "`Caps.headroom(n)` exists
-so the negative clamp (C30) **cannot be written** at a call site", and it became an ENTRY POINT the
-moment a body existed to carry it. A record's public method is public surface, which K1 and K6 both
+Everything above is prose about these 134 entry points — 121 until 2026-09-02, when Q-TOK-11 added
+`LM.residual_ratios` (122) and Q-LM-12 added `LM.embed` (123); 133 from 2026-09-15, when P4 wrote
+`CAP.caps` and the `Caps` record it returns brought `Caps.headroom(n)` with it; **134 since
+2026-09-22, when `World.parameters(self)` closed the hole `spine/compose.py::_base_parameters` had
+been warning about on every run** — WORLD's tensors took gradient from a loss that was in the
+objective and were never STEPPED, because that helper harvests by
+`getattr(obj, "parameters", None)` and `World` had no such method. It is the same shape as
+`FAB: Population.parameters(self)`, which is in this block for the same reason. Neither of the two
+is a new ruling: this document has said since the record was specified that "`Caps.headroom(n)`
+exists so the negative clamp (C30) **cannot be written** at a call site", and it became an ENTRY
+POINT the moment a body existed to carry it. A record's public method is public surface, which K1
+and K6 both
 say in the only way that matters — they went red on it the first run after it landed. Both are LM, both landed on the same
 day from two different rulings, and **that is why the count lives here and nowhere else**: the first
 of the two wrote "121 → 122" while the second was independently preparing to write "121 → 122" for a
@@ -4354,6 +4370,7 @@ TOK: save_vocabulary(tok: Config, vocab, *, suffix='')
 TOK: vocab_state(tok: Config, vocab)
 TOK: restore_vocab(tok: Config, state, vocab)
 WORLD: build(world: Config, *, d_model, device, ctx_tokens, rng)
+WORLD: World.parameters(self)
 WORLD: loss_terms(world: Config, w, obs_emb)
 WORLD: forecast(world: Config, w, obs_emb)
 WORLD: manage(world: Config, w, *, latent, plateau, add_param_group)
