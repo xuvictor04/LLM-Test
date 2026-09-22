@@ -1219,6 +1219,54 @@ def check_a9_wiring_doc_current():
 
 
 # ==================================================================================================
+# A10 -- docs/05_DEFAULTS.md is what the generator would write right now
+# ==================================================================================================
+
+def check_a10_defaults_doc_current():
+    """The generated defaults document on disk equals what tools/render_defaults.py produces today.
+
+    THE SAME CHECK AS A9 OVER A DIFFERENT GENERATOR, AND IT IS HERE BECAUSE THE FAILURE IT GUARDS
+    HAS ALREADY HAPPENED ONCE IN THIS REPOSITORY, TO THE FILE IT REPLACES. notes/CURRENT_DEFAULTS.md
+    opens "GENERATED FILE -- do not edit" and regenerates from `_SPEC` in self_organize.py, and its
+    own header records why it exists: "the notes have been wrong about the defaults twice at real
+    cost -- once telling the user a built mechanism did not exist, once stating FAB_N0=3 in nine
+    files a week after it became 2048". That file is now correct about a tree nothing runs, which is
+    the same defect wearing a green tick: the document did not drift, the PROGRAM moved out from
+    under it. A generator with no check is a document that is right until the day it matters.
+
+    WHAT IT CANNOT CATCH, said here so nobody reads it as more: it compares the file to the
+    generator, not the generator to the truth. If render_defaults.py reads the wrong field off a
+    Lever, this check passes on a wrong document -- A1 and the K-series are what read the registry
+    independently. The oracle is the command a human is told to run, which is A9's rule and the
+    reason neither check re-renders anything itself.
+    """
+    findings = []
+    n_lines = 0
+    try:
+        sys.path.insert(0, os.path.join(ROOT, "tools"))
+        import render_defaults
+        want = render_defaults.defaults_markdown()
+        have = (io.open(render_defaults.DOC, encoding="utf-8").read()
+                if os.path.isfile(render_defaults.DOC) else "")
+        n_lines = len(want.splitlines())
+        if have != want:
+            hl, wl = have.splitlines(), want.splitlines()
+            diff = [d for d in difflib.unified_diff(hl, wl, "on disk", "regenerated", n=0)
+                    if d.startswith(("+", "-")) and not d.startswith(("+++", "---"))]
+            findings.append(f"docs/05_DEFAULTS.md is stale: {len(diff)} changed line(s). "
+                            f"Regenerate with `python3 tools/render_defaults.py`.")
+            for d in diff[:6]:
+                findings.append(f"    {d[:160]}")
+    except Exception as e:
+        findings.append(f"could not run the generator: {type(e).__name__}: {e}")
+
+    detail = (f"{n_lines} generated line(s) compared against docs/05_DEFAULTS.md via "
+              f"tools/render_defaults.py::defaults_markdown")
+    return _report("A10", "the generated defaults document matches the live registry",
+                   not findings, detail, findings, vacuous=(n_lines == 0))
+
+
+# ==================================================================================================
 # The runner
 # ==================================================================================================
 
@@ -1232,6 +1280,7 @@ CHECKS = (
     check_a7_rng_accounting,
     check_a8_stated_counts,
     check_a9_wiring_doc_current,
+    check_a10_defaults_doc_current,
 )
 
 
