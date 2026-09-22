@@ -105,28 +105,46 @@ def _is_stub(fn):
 # THE ENTRY POINTS `_flush` AND `run` ACTUALLY INVOKE. Adding a call above means adding its name
 # here, in the same edit, and the cross-check below turns a forgotten one into a raise rather than
 # into a report that overstates what the run did.
-_CALLS = frozenset({
+# KEYED BY STAGE, AND IT WAS ONE FLAT SET UNTIL 2026-09-22. `uncalled` is computed as
+# `rows[stage] - _CALLS`, so a flat set credits an entry point at EVERY stage the table lists it
+# at, as soon as the driver calls it at ONE of them. MEM.census and DOM.census are stage-A rows
+# this driver calls on the dom.manage cadence AND stage-R rows -- "(reconcile=True) ... re-taken at
+# the end so the report's numbers are the settled ones, and the ONLY place the two ungated gates
+# inside MEM.maintain become visible" -- and the R calls did not exist. The run printed
+# "uncalled=0" anyway, every time, because the A call had already spent their names. A per-stage
+# split is what made them visible, and it found nothing else: those two, and the ordering defect
+# beside them.
+# CKPT.save IS IN THREE STAGES ON PURPOSE. LOOP_ORDER lists it at B (the cadence), at C (the
+# fan-out it heads) and at R (reason='final'), and one entry point reached by three routes is what
+# that means -- not one call credited three times.
+_CALLS = {
     # ---- stage E, the epoch roll (reachable only at RUN_EPOCHS > 1)
-    "DATA.draw_stream", "TOK.tokenize", "RUN.RunClock.begin_epoch",
+    "E": frozenset({"DATA.draw_stream", "TOK.tokenize", "RUN.RunClock.begin_epoch"}),
     # ---- stage A: the cadenced maintenance block, then the per-window pair
-    "MEM.census", "DOM.manage", "DOM.census", "DOM.rekey",
-    "SIG.cadence_due", "SIG.train_step", "FAB.manage",
-    "RUN.RunClock.advance", "SIG.encode", "DOM.observe", "TOK.on_window",
+    "A": frozenset({
+        "MEM.census", "DOM.manage", "DOM.census", "DOM.rekey",
+        "SIG.cadence_due", "SIG.train_step", "FAB.manage",
+        "RUN.RunClock.advance", "SIG.encode", "DOM.observe", "TOK.on_window"}),
     # ---- stage B, per flush: all twenty-one
-    "LM.embed", "LM.encode", "SIG.encode", "FAB.forward", "LM.decode", "LM.lm_loss",
-    "WORLD.loss_terms", "LM.anchor_term", "OPT.scaled_backward", "RUN.RunClock.note_backward",
-    "OPT.maybe_step", "FAB.own_lr_scale", "CAP.caps", "FAB.observe", "FAB.grow_check",
-    "MEM.write", "MEM.maintain", "TOK.mint_burst", "LM.residual_ratios", "TOK.judge_probation",
-    "DOM.note_competence", "CKPT.save",
+    "B": frozenset({
+        "LM.embed", "LM.encode", "FAB.forward", "LM.decode", "LM.lm_loss",
+        "WORLD.loss_terms", "LM.anchor_term", "OPT.scaled_backward", "RUN.RunClock.note_backward",
+        "OPT.maybe_step", "FAB.own_lr_scale", "CAP.caps", "FAB.observe", "FAB.grow_check",
+        "MEM.write", "MEM.maintain", "TOK.mint_burst", "LM.residual_ratios", "TOK.judge_probation",
+        "DOM.note_competence", "CKPT.save"}),
     # ---- stage C, the checkpoint fan-out, through _payload and _save
-    "DATA.stream_state", "TOK.vocab_state", "LM.state_dict", "SIG.state_dict", "FAB.state_dict",
-    "WORLD.state_dict", "WORLD.geometry", "MEM.state_dict", "DOM.state_dict", "CAP.state",
-    "OPT.state_dict", "CKPT.Retention.state", "TOK.save_vocabulary",
+    "C": frozenset({
+        "DATA.stream_state", "TOK.vocab_state", "LM.state_dict", "SIG.state_dict", "FAB.state_dict",
+        "WORLD.state_dict", "WORLD.geometry", "MEM.state_dict", "DOM.state_dict", "CAP.state",
+        "OPT.state_dict", "CKPT.Retention.state", "TOK.save_vocabulary", "CKPT.save"}),
     # ---- stage R, the report, through _report and run's own tail
-    "DOM.prior", "LM.counters", "SIG.counters", "FAB.counters", "OPT.counters", "CAP.counters",
-    "RUN.RunClock.counters", "RUN.Cadences.ledger", "CKPT.Retention.counters",
-    "RUN.bench_summary",
-})
+    "R": frozenset({
+        "DOM.prior", "MEM.census", "DOM.census",
+        "LM.counters", "SIG.counters", "FAB.counters", "OPT.counters", "CAP.counters",
+        "RUN.RunClock.counters", "RUN.Cadences.ledger", "CKPT.Retention.counters",
+        "RUN.bench_summary", "CKPT.save"}),
+}
+_CALLS_FLAT = frozenset().union(*_CALLS.values())
 
 # CALLS THIS DRIVER MAKES THAT LOOP_ORDER DOES NOT GIVE A ROW OF THEIR OWN. Two, and both are named
 # inside ANOTHER row's text rather than carrying a row, which is the only thing that puts a name
@@ -505,17 +523,28 @@ def run(sysm, *, max_windows=None, progress=True):
     # cannot be silently dropped from the report, and a name in `_CALLS` that LOOP_ORDER does not
     # list raises rather than passing -- which is what caught SIG.encode being filed as a B row on
     # this guard's very first run.
-    stray = sorted(_CALLS - every - _OFF_TABLE)
+    stray = sorted(_CALLS_FLAT - every - _OFF_TABLE)
     if stray:
         raise RuntimeError(
             f"spine/loop.py::_CALLS names {stray}, which LOOP_ORDER does not list at any stage and "
             f"_OFF_TABLE does not excuse. One of the three is wrong, and a driver whose own record "
             f"of what it calls disagrees with the table is a driver whose report cannot be read.")
+    # AND IN THE SAME DIRECTION PER STAGE, which the flat check cannot ask: a name this driver
+    # claims to call AT A STAGE the table does not list it at is the mirror of the stray above and
+    # is how a stage key drifts from the row it was copied from.
+    misfiled = sorted(f"[{st}] {k}" for st in _CALLS for k in _CALLS[st] - rows.get(st, set()))
+    if misfiled:
+        raise RuntimeError(
+            f"spine/loop.py::_CALLS files {misfiled} under a stage LOOP_ORDER does not list them "
+            f"at. The stage is the WHEN, so a name under the wrong one credits a call that never "
+            f"happens at that point in the loop -- which is the defect the per-stage split exists "
+            f"to end.")
     # PER STAGE, BECAUSE A TOTAL HIDES WHICH PART OF THE LOOP IS MISSING. Stage E uncalled means
     # this driver runs one pass; stage A uncalled means the cadenced maintenance never happens;
     # stage C uncalled would mean the checkpoint is short a package. Those are three different
     # runs and one number cannot say which.
-    uncalled = {st: sorted(rows[st] - _CALLS) for st in sorted(rows) if rows[st] - _CALLS}
+    uncalled = {st: sorted(rows[st] - _CALLS.get(st, frozenset()))
+                for st in sorted(rows) if rows[st] - _CALLS.get(st, frozenset())}
     skipped = tuple(
         f"[{st}] {k}: {_WHY.get(k, 'not called by this driver')}"
         + ("" if not _is_stub(_entry(k)) else "  [and the body is still a P4 stub]")
@@ -1025,6 +1054,23 @@ def run(sysm, *, max_windows=None, progress=True):
             f"is every mint the run makes: the single roll a one-epoch run takes is the one that "
             f"also finishes it, and Tick requires `finished` to be tested first.")
 
+    # THE R STAGE RUNS BEFORE THE FINAL SAVE, WHICH IS WHAT ITS OWN ROW ASKS FOR AND WHAT THIS
+    # DRIVER DID BACKWARDS. LOOP_ORDER's ("R", "CKPT", "save") row reads: "the third route into the
+    # C block: reason='final'. It runs AFTER the counters above so the checkpointed counter vectors
+    # are the ones the report printed." The save was at this line and the report was built at the
+    # return statement, so every final checkpoint this tree has written carries counters taken
+    # BEFORE the R stage -- and the R stage is not a passive read: MEM.census(reconcile=True)
+    # recounts the per-source census exactly and bumps n_census_reconciles, so the blob's census
+    # and the report's census were two different numbers by construction.
+    # ONE elapsed_s FOR BOTH, MEASURED HERE. RUN.bench_summary's throughput and RunResult.elapsed_s
+    # were read at two different instants with a 130MB torch.save between them, so the run length
+    # the report quoted and the one the throughput was computed from disagreed by the cost of the
+    # save. They are now the same number, and it is the TRAINING time: a throughput figure that
+    # includes the checkpoint is measuring the disk, which is the reason sweep_gpu.sh sets no
+    # CKPT_DIR at all.
+    elapsed_s = time.time() - t0
+    report = _report(sysm, elapsed_s, ctx)
+
     final_written = _save(sysm, clock, "final")
     for _d in dict.fromkeys(_disagree):
         warnings.append(f"loop: recorded-geometry disagreement -- {_d}")
@@ -1039,11 +1085,11 @@ def run(sysm, *, max_windows=None, progress=True):
     return RunResult(
         windows=int(c["step"]), opt_steps=int(c["opt_steps"]), flushes=int(c["flushes"]),
         epochs=int(c["epoch"]), loss_first=first_loss, loss_last=last_loss,
-        loss_curve=tuple(curve), elapsed_s=time.time() - t0, skipped=skipped,
+        loss_curve=tuple(curve), elapsed_s=elapsed_s, skipped=skipped,
         gated=_gate_report(sysm) + (
             f"CKPT.save: {saves} checkpoint(s) written by this run (periodic, SIGUSR1 and the "
             f"final one together); 0 means CKPT_DIR names no directory and saving is off",),
-        report=_report(sysm, time.time() - t0, ctx),
+        report=report,
         cadence_ledger=cadences.ledger(), warnings=tuple(warnings))
 
 
@@ -1057,11 +1103,13 @@ def run(sysm, *, max_windows=None, progress=True):
 # out of a flat counters dict PLUS that package's Gate objects, and the predicate's arithmetic is
 # the package's own. Reading `pop.counters` here would give the numbers and drop the reachability,
 # which is the half that distinguishes "set but inert" from "not set".
+# TWO OF THE THREE ENTRIES HERE WENT FALSE UNDER THEIR OWN REPAIRS AND ARE GONE (2026-09-22).
+# "MEM.census: a P4 stub" and "DOM.census: a P4 stub, and so is DOM.observe above it" were both
+# true when written; both bodies exist, both are called at A on the dom.manage cadence and both are
+# now called HERE with the arguments their R rows name. A list of what is missing is exactly the
+# kind of text that rots into a claim about a repair that already landed, which is the defect class
+# this file spends its comments on, so the two lines are deleted rather than annotated.
 _R_MISSING = (
-    "MEM.census: a P4 stub. The store's occupancy, its probation share and the pressure "
-    "FAB.grow_check's memory_pressure leg needs are all this row's, and none of them is produced.",
-    "DOM.census: a P4 stub, and so is DOM.observe above it -- the partition has one domain because "
-    "nothing ever assigned a second, so there is no census to take.",
     "EVAL.*: the whole package is deferred; its holdout probe has no logits_fn that spans "
     "FAB.forward, which is the same missing join that deferred FAB.contribution.",
 )
@@ -1085,6 +1133,49 @@ def _report(sysm, elapsed_s, ctx):
     out["CAP.counters"] = cap_api.counters(cfg["CAP"], sysm.valve)
     out["TOK(vocab.counters)"] = dict(sysm.vocab.counters)
     out["MEM(store.counters)"] = dict(sysm.store.counters)
+    # WORLD HAD NO LINE IN THIS REPORT AT ALL, and it is the package that turned out to supply 45%
+    # of the gradient on the language model's token embedding. It declares no counters() entry
+    # point -- it is the third package without one, after TOK and MEM -- so the dict is read off
+    # the record the same way and spelled the same way, `WORLD(w.counters)`, which is what says
+    # the root took it rather than asked for it. What it makes readable: world.built (live against
+    # null, the D4 distinction the class docstring calls its whole point), world.loss_terms.calls,
+    # world.latent_std -- the COLLAPSE reading, and the one number that says whether an arm that
+    # improved the loss did so by flattening the latent -- and world.forecast.*, which is ABSENT
+    # today and correctly so (Q-WORLD-10: that entry point has no call site).
+    out["WORLD(w.counters)"] = dict(sysm.world.counters)
+    # MEM.census AT R, WITH reconcile=True, WHICH IS THE ROW AND WHICH NOTHING CALLED. The A-stage
+    # census runs on the dom.manage cadence with reconcile=False -- the exact recount is an
+    # O(capacity) bincount and does not belong on a cadence -- so the settled numbers and
+    # `census_drift` had no producer. Drift is the whole point: the incremental per-source census
+    # is maintained by _commit_window and the exact one is `src & active`, and the difference
+    # between them is how "s779 (-2 now, peaked 111230)" gets printed. The counters dict above is
+    # NOT this: it carries the tallies, this carries the reconciliation.
+    # WHY IT WAS INVISIBLE: spine/loop.py::_CALLS was one flat set, so the A-stage call spent the
+    # name "MEM.census" for every stage at once and the run printed uncalled=0.
+    _mc = mem_api.census(cfg["MEM"], sysm.store, reconcile=True)
+    out["MEM.census(reconcile=True)"] = {
+        "floor_entries": int(_mc.floor_entries), "live_src": int(_mc.live_src),
+        "quota_arm": str(_mc.quota_arm), "pressure": _mc.pressure,
+        "probation_share": round(float(_mc.probation_share), 4),
+        "nsrc": int(_mc.nsrc), "nsrc_max": int(_mc.nsrc_max),
+        # THE PER-SOURCE TABLE IS NOT PRINTED, and that is a size decision rather than a judgement:
+        # `counts` is capacity-wide. Its WIDTH is the reading that belongs here.
+        "sources_holding_entries": sum(1 for v in _mc.counts.values() if int(v) > 0),
+        "census_drift": _mc.census_drift, "n_census_reconciles": int(_mc.n_census_reconciles),
+    }
+    # DOM.census AT R -- "the partition's did-it-fire surface, and the domain sizes every verdict is
+    # keyed by". Same history as the row above and the same repair. Until this line the partition
+    # had NO report line but DOM.prior(0), so a run said nothing about how many domains it ended
+    # with, how many boundaries it saw, or whether the acceptance radius had ever been measured.
+    _dc = dom_api.census(cfg["DOM"], sysm.partition)
+    out["DOM.census"] = {
+        "n_live": int(_dc.n_live), "live": list(_dc.live)[:32], "boundaries": int(_dc.boundaries),
+        "created": _dc.created, "merged": _dc.merged, "culled": _dc.culled, "folded": _dc.folded,
+        "held": _dc.held, "spared": _dc.spared, "emptied": _dc.emptied,
+        "pooled_radius": round(float(_dc.pooled_radius), 6),
+        "partition_off": bool(_dc.partition_off), "collapsed_at": _dc.collapsed_at,
+    }
+    out["DOM(part.counters)"] = dict(_dc.counters)
     # DOM.prior FOR did=0, WHICH IS EVERY WINDOW THIS RUN HAD. Rendered as the pair the entry point
     # returns rather than as the histogram: (None, 0.0) is the real answer at the shipped
     # DOM_PRIOR_BLEND, and it is a different fact from a histogram of zeros.
