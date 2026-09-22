@@ -348,8 +348,10 @@ def save_period(ckpt: Config):
                  negative period saves EVERY window rather than none -- the three GATE STATES are
                  still three, and it is the fourth CONSTRUCTION that keeps the sentence honest; and
                  dir off is UNREACHABLE instead of a zero the ledger cannot explain. The word an
-                 operator sees is owed by RUN.cadence_audit, which is a stub; until it has a body
-                 this Gate is readable only from the returned object
+                 operator sees is owed by RUN.cadence_audit, WHICH HAS A BODY AND RUNS: this
+                 sentence read "which is a stub; until it has a body this Gate is readable only
+                 from the returned object" until 2026-09-22. compose() calls it and run.py prints
+                 its warnings, so the operator does see the word
     """
     ckpt = ckpt.owned_by("CKPT")
     # NOT A STUB, AND THE FOUR SIBLINGS ARE NOT EITHER -- EVAL.curve_period, DOM.manage_period,
@@ -491,8 +493,9 @@ def save_period(ckpt: Config):
                            f"the disable state and this run is not saving less often than a "
                            f"positive one. RUN.Cadences.due DECLARES its contract as 'True at most "
                            f"once per `period` WINDOWS elapsed since this key last fired' -- its "
-                           f"body is still a P4 stub, so this is a statement about the contract "
-                           f"and not about running code -- and a body written to that contract "
+                           f"body IS WRITTEN and implements exactly that -- this sentence said "
+                           f"'still a P4 stub, so this is a statement about the contract and not "
+                           f"about running code' until 2026-09-22 -- and that body "
                            f"compares `step - last_fired >= {every}`, which is true on the FIRST "
                            f"window and on every window after it: a checkpoint EVERY window, the "
                            f"opposite of what the zero arm one step above prints. The refusal this "

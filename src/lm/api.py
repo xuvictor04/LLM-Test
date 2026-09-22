@@ -428,7 +428,10 @@ def build_model(lm: Config, geom, *, device, seed):
     # BOTH ARE reachable=False TODAY AND ON BOTH ARMS OF compose, for two different reasons, and
     # the reason string carries which. At compose off there is no composer by configuration; at
     # compose on the ByteComposer is not built in this tree (_LM.composed_table raises NotBuilt,
-    # LM.on_mint is a P4 stub), so the mechanism cannot run either way. Declaring them reachable at
+    # and LM.on_mint -- which HAS A BODY since 2026-09-21, where this line used to call it a stub --
+    # raises NotBuilt at LM_COMPOSE=1 for the same missing composer), so the mechanism cannot run
+    # either way. THE CONCLUSION IS UNCHANGED AND ONLY ITS REASON MOVED: what is absent is TOK's
+    # ByteComposer, not a body in this file. Declaring them reachable at
     # compose=1 would put "armed, did not fire" -- the words Gate.line reserves for a mechanism
     # that RAN -- on a mechanism that has no body to run.
     # THE UNBUILT SENTENCE IS THE ONE _composer_books HANDS BACK, not a second copy of it: the gate
@@ -821,8 +824,11 @@ def lm_loss(lm: Config, logits, y):
 
 # THE COMPOSER'S TWO PER-TOKEN BOOKS, AND THE SENTENCE FOR WHEN THEY ARE NOT THERE.
 _COMPOSER_UNBUILT = (
-    "the ByteComposer is not built in this tree: _LM.composed_table raises NotBuilt and LM.on_mint "
-    "is a P4 stub, so no token has a free residual (`delta`) or a birth stamp (`born`) yet")
+    "the ByteComposer is not built in this tree: _LM.composed_table raises NotBuilt, and LM.on_mint "
+    "-- which HAS A BODY, and whose step 1 is the composer's set_vocab/note_born -- raises NotBuilt "
+    "at LM_COMPOSE=1 rather than running, so no token has a free residual (`delta`) or a birth "
+    "stamp (`born`) yet. This string said 'LM.on_mint is a P4 stub' until 2026-09-22; the state it "
+    "describes is the same and the reason for it is not")
 
 
 def _composer_books(model):
@@ -1313,16 +1319,19 @@ def state_dict(lm: Config, model, geom):
     # THE COMPOSER'S `born` TENSOR IF THERE IS ONE, AND A DECLARED ABSENCE IF THERE IS NOT.
     # Without it a resume releases every token's anchor immediately or holds every token forever,
     # because anchor_term masks on `born`. It is read with getattr because THE COMPOSER IS NOT
-    # BUILT IN THIS TREE YET: model.composed_table() raises NotBuilt and LM.on_mint is a P4 stub,
-    # so under compose there is no composer and therefore no born. Saving `None` and saying so
+    # BUILT IN THIS TREE YET: model.composed_table() raises NotBuilt, and LM.on_mint -- which has
+    # a body since 2026-09-21, where this line called it a stub -- raises NotBuilt at LM_COMPOSE=1
+    # because step 1 of it IS the composer's set_vocab/note_born. So under compose there is still
+    # no composer and therefore no born; what changed is which file the absence is in. Saving `None` and saying so
     # beats omitting the key -- a missing key on load is indistinguishable from an old checkpoint,
     # and this one has to be distinguishable, because a resume that silently finds no born is a
     # resume that silently releases every anchor.
     born = getattr(model, "born", None)
     out["born"] = None if born is None else born.detach().cpu().clone()
     out["born_unbuilt_reason"] = None if born is not None else (
-        "the ByteComposer is not built in this tree (LM.composed_table raises NotBuilt and "
-        "LM.on_mint is a P4 stub), so no token has a birth step to anchor against")
+        "the ByteComposer is not built in this tree (LM.composed_table raises NotBuilt, and "
+        "LM.on_mint has a body but raises NotBuilt at LM_COMPOSE=1 because its step 1 IS the "
+        "composer), so no token has a birth step to anchor against")
     # NOT IN IT: the composer's derived byte-index tensors (_idx/_msk/_len/_v) and the dead-row
     # mask cache. Both are REBUILT on load, so a resume with a re-segmented vocabulary cannot come
     # back with a stale table -- which is the point, and is why they are named here rather than

@@ -273,9 +273,9 @@ def _clamp_gate(arith, lifts, clamped, *, dead_facts=None):
     inequality is impossible in a correct ledger; entering the FIRED arm on `if clamped:` alone
     rendered "3 of 0 earned lift(s) were CLAMPED at the hard ceiling" from `(arith, 0, 3)`, a false
     equation on the surface whose whole subject is false equations. It was never reachable through a
-    build -- new_valve passes 0 and 0 by construction and CAP.counters is a stub -- and this is the
-    frozen surface CAP.counters will call with a live ledger, which is when an incoherent pair
-    becomes reachable. The refusal is a ValueError, on capacity/api.py::_clamp_blocked_clause's
+    build -- new_valve passes 0 and 0 by construction -- and CAP.counters, which HAS A BODY and is
+    called by spine/loop.py's R stage (this clause said it was a stub until 2026-09-22), calls this
+    frozen surface with a live ledger, which is when an incoherent pair becomes reachable. The refusal is a ValueError, on capacity/api.py::_clamp_blocked_clause's
     precedent: a DID IT FIRE line handed numbers that cannot both be true fails loudly.
 
     HOW THIS MAPS ONTO .rework/DECISIONS.md D16's TABLE, SAID OUT LOUD BECAUSE THE TWO USES OF THE
@@ -972,7 +972,9 @@ def new_valve(cap: Config, *, restored=None):
     #                   flush, so growth is frozen for the whole run with nothing in the log (C30).
     #                   Reachable today: CAP_FAB_START=-5 resolves a soft expert cap of -5, and the
     #                   declared catcher -- startup_refusals clause (1), "a soft cap below the
-    #                   population" -- is a stub, so no other line in the run says so.
+    #                   population" -- HAS A BODY and runs at compose, so the run DOES say so. This
+    #                   line read "is a stub, so no other line in the run says so" until
+    #                   2026-09-22, which was a claim about coverage that had stopped being true.
     #   cap >= ceiling  NO ROOM TO EARN: the cap is ALREADY at or above the hard ceiling, which is
     #                   the condition observe refuses by name as at_hard_ceiling. This clause said
     #                   until 2026-09-04 that "derive.lift_to ... from a cap at or above the hard
