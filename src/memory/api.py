@@ -442,6 +442,38 @@ def open_store(mem: Config, *, key_dim, vocab_slots, device, rng, lm_kind, resto
         "store.blocks": owners,
         "store.census_slots": source_slots,
     }
+    if restored is not None:
+        # THE COUNTERS WERE SAVED AND NEVER READ BACK -- the same shape as the rekey cursor
+        # memory/api.py::_restore_by_block repairs eight lines from its end, on the surface this
+        # project measures goal B with. memory/api.py::state_dict has written
+        # "counters": dict(store.counters) since the day it was written and nothing on this side
+        # ever assigned it, so every n_* number restarted at 0 on the far side of a resume:
+        # store.n_entries_deleted_by_cull is THE GOAL-B NUMBER -- how much of the store the domain
+        # manager destroyed -- and a resumed run reported it per SEGMENT while the run it describes
+        # is the concatenation. A forgetting number that forgets at the resume boundary is the
+        # defect the four checkpointed additions below it were each added to close.
+        # IT RUNS HERE AND NOT IN _restore_by_block, and that is not a preference: the assignment
+        # directly above REPLACES store.counters wholesale, so a restore written on the other side
+        # of it would be overwritten by the seed a few microseconds later and the whole repair
+        # would read as a no-op nobody could see. The five keys seeded above describe THIS open --
+        # the capacity opened, the rows this restore placed and refused, the block count and the
+        # census width -- so the blob may not overwrite them; everything else is the previous
+        # segment's tally and carries forward.
+        _seeded = set(store.counters)
+        for _k, _v in dict(restored.get("counters") or {}).items():
+            if _k in _seeded:
+                continue
+            if isinstance(_v, list):
+                # store.n_writes_by_block IS THE ONE LIST AND ITS WIDTH IS A GEOMETRY, not a
+                # value: MEM_OWNERS can differ between the run that saved and the run that resumes
+                # (the row restore above refuses ROWS naming a block this run lacks, which is a
+                # different question from how wide the tally is). Truncated and zero-extended to
+                # THIS run's block count, so the list a reader indexes by block index is always
+                # indexable by every block index this run has.
+                _l = [int(x) for x in _v][:owners]
+                store.counters[_k] = _l + [0] * (owners - len(_l))
+            else:
+                store.counters[_k] = _v
     store.gates = (
         # `lm_kind` IS STORED ONLY SO THIS GATE CAN PRINT ITS OWN ARITHMETIC; nothing else reads it.
         Gate("mem.key_depth", int(mem.key_depth) > 0, int(mem.key_depth), 0)
@@ -550,7 +582,19 @@ def _restore_by_block(store, blob):
     # nsrc_max IS CARRIED FORWARD from the blob rather than re-derived from the restored counts:
     # re-deriving it forgets every source that was evicted before the save.
     store.nsrc_max = int(blob.get("nsrc_max", int(store.nsrc.max()) if store.nsrc.numel() else 0))
-    store.live_src = int((store.nsrc > 0).sum())
+    # DOM'S VERDICT FIRST, THE CENSUS ONLY AS THE FALLBACK. Re-deriving this from the restored rows
+    # unconditionally is the 125-against-27 defect memory/api.py::_unprotected measures, reinstated
+    # by the act of resuming: the run stopped with a divisor of 27 live domains, the rows carry 125
+    # source ids, and this line silently handed the next segment 125 -- so every live domain's
+    # reservation shrank by 4.6x across a boundary nothing reports. It is not re-derivable, because
+    # it is not a property of the rows: it is what the domain manager last SAID, and only the blob
+    # can carry it.
+    # A BLOB WITHOUT THE KEY READS 0 AND FALLS BACK, which is the conservative arm and is exactly
+    # what this line did before: a checkpoint written before live_src was saved resumes on
+    # "sources holding entries", the frozen tree's documented live_src=None behaviour, rather than
+    # on a zero that would disarm the floor's divisor outright.
+    _ls = int(blob.get("live_src", 0))
+    store.live_src = _ls if _ls > 0 else int((store.nsrc > 0).sum())
     # gate_theta IS THE FOURTH OF THE FOUR CHECKPOINTED ADDITIONS docs/04_CONTRACT.md's MEM section
     # names as fixed and, until this fix, was the one never actually wired: Store.__init__'s literal
     # 0.0 default survived every restore untouched. gate_theta is the adaptive write-admission floor
@@ -762,23 +806,45 @@ def _floor_entries(store, share):
     is that rule applied one call in, where the recomputation would be in the same file.
 
     THE `live` IT RETURNS IS THE DIVISOR THAT WAS ACTUALLY USED and is what belongs on a report,
-    not the raw store.live_src field. Store.__init__ sets live_src to 0 and only
-    memory/api.py::apply_domain_plan -- a stub -- ever sets it from DOM's verdict, so before that
-    runs the divisor is "sources holding entries" while the field reads 0. Printing the field
+    not the raw store.live_src field. Store.__init__ sets live_src to 0 and
+    memory/api.py::apply_domain_plan is the only thing that ever sets it from DOM's verdict -- on
+    the management cadence, so until the first pass of a run has been carried here the divisor is
+    "sources holding entries" while the field still reads 0. Measured on a warmed store with no
+    call site at all: the field read 0 while the divisor was 6. Printing the field
     beside a floor computed over 27 sources is the defect memory/api.py::open_store refuses
     MEM_OWNERS below 1 over: the printed configuration and the running one disagreeing about a
     number, one of them in a report nobody can check against the other.
 
     IT RETURNS 0 ON THREE DIFFERENT ARMS AND THE CALLERS MUST NOT READ THAT AS A FLOOR OF NOTHING
-    TO ENFORCE: src_share disarmed, one live source, and a reservation that rounds below one entry
-    are three different configurations with one consequence here. memory/api.py::census reports the
+    TO ENFORCE: src_share disarmed, one source HOLDING ENTRIES, and a reservation that rounds below
+    one entry are three different configurations with one consequence here. The middle one is asked
+    of the store's census and NOT of `live` -- a partition that has merged down to one live domain
+    is not a store with nothing to protect, and the body below says why at length. memory/api.py::census reports the
     floor in force and DOM's brake is `memory_counts[did] >= mem_floor_entries`, which at 0 is
     satisfied by every domain including empty ones -- the frozen tree carries the `if _fl > 0`
     guard that prevents it (self_organize.py:3688) and DOM.manage owes it.
     """
     has = store.nsrc > 0
-    live = int(store.live_src) if int(store.live_src) > 0 else int(has.sum())
-    if share <= 0.0 or live <= 1:
+    n_has = int(has.sum())
+    live = int(store.live_src) if int(store.live_src) > 0 else n_has
+    # `n_has <= 1`, NOT `live <= 1`, AND THE DIFFERENCE IS A FLOOR THAT SWITCHES ITSELF OFF. The
+    # short-circuit says "there is nothing here to protect anything FROM", and that is a statement
+    # about the STORE: with one source holding entries the only candidates eviction can see are
+    # that source's own, so protecting them leaves eviction nothing to take. Asked of `live`
+    # instead, it also caught the case where DOM reports exactly ONE LIVE DOMAIN -- and the day
+    # MEM.apply_domain_plan stopped being a stub and became a wired call site, that stopped being
+    # hypothetical: a partition that merges down to a single domain writes store.live_src = 1 and
+    # the per-source reservation DISARMS ITSELF against a store that may still hold six sources'
+    # worth of entries. Nothing in the report would have said so -- census would print
+    # floor_entries 0, which is also what src_share=0 and a sub-entry rounding print, so the one
+    # reading that means "the mechanism turned itself off" is spelled the same as the two that mean
+    # "the operator turned it off". That is the defect docs/04_CONTRACT.md's G4 is about, one layer
+    # down from a counter.
+    # WHAT THE NARROWED FORM DOES ON THAT ARM is protect up to src_share * capacity for the single
+    # live domain, which is exactly its entitlement, and memory/api.py::_unprotected cannot lock up
+    # on it: if protection would leave fewer than `need` candidates the filter is dropped FOR THAT
+    # CALL and counted, so the worst case is the old behaviour with a number attached.
+    if share <= 0.0 or n_has <= 1:
         return 0, live
     floor = int(share * int(store.capacity) / live)
     return (floor if floor > 0 else 0), live
@@ -805,7 +871,13 @@ def _unprotected(store, cand, need, share):
     entries against 27 live domains, so a floor divided by the wrong one of those gave each domain
     800 slots instead of the ~3300 it was due -- the divisor here is right the moment DOM has spoken,
     but a dead source that still holds entries is still protected by it. Closing that needs a live-id
-    SET on the Store, written by apply_domain_plan, which is a stub.
+    SET on the Store, which no signature in this file carries; what memory/api.py::apply_domain_plan
+    does instead is set the COUNT and REPORT the residue as store.n_orphan_sources, so the gap is a
+    number rather than an inference. THE RESIDUE IS NOT A STANDING CONDITION, and that is the part
+    worth knowing before anyone mints the set: a merged id is relabelled and a culled id is emptied,
+    so an orphan can only survive a pass whose plan nobody applied. Measured on one warmed
+    configuration, both ways: 3 orphans out of 6 sources holding entries with no call site, 0 out of
+    3 with the plan carried on every pass.
     """
     if share <= 0.0:
         # THE SUPERSEDED RULE IS STILL REACHABLE, which is what D3 asks for: src_share=0 disarms the
@@ -813,8 +885,8 @@ def _unprotected(store, cand, need, share):
         return cand, 0, False
     # THE ARITHMETIC IS memory/api.py::_floor_entries' AND NOT THIS FUNCTION'S ANY MORE, so the
     # number this filter ENFORCES and the number memory/api.py::census REPORTS cannot drift apart.
-    # The two other early returns this replaces -- one live source, and a reservation that rounds
-    # below one entry -- both come back as floor 0 and are still returned here unchanged.
+    # The two other early returns this replaces -- one source HOLDING ENTRIES, and a reservation
+    # that rounds below one entry -- both come back as floor 0 and are still returned unchanged.
     floor, _live = _floor_entries(store, share)
     if floor <= 0:
         return cand, 0, False
@@ -1977,7 +2049,7 @@ def apply_domain_plan(mem: Config, store, *, folds, deletions, live_sources):
     DID IT FIRE: store.n_folds_applied, n_deletes_applied, n_entries_deleted_by_cull (THE GOAL-B
                  NUMBER: how much of the store the domain manager destroyed, which in the old tree
                  was 200,000 entries with no counter at all), n_live_sources
-    THREE MORE KEYS THE BODY WRITES, DECLARED HERE IN THE FORM fabric/api.py::grow_check uses for
+    FOUR MORE KEYS THE BODY WRITES, DECLARED HERE IN THE FORM fabric/api.py::grow_check uses for
     the extra ledger keys its own body writes: a key in the report that the contract does not admit
     to producing is the same defect as a declared key nothing writes, and the count is taken in
     both directions.
@@ -1990,10 +2062,18 @@ def apply_domain_plan(mem: Config, store, *, folds, deletions, live_sources):
         SET and not bumped, read AFTER the relabel and the delete. It is the residue of the
         paragraph above: store.live_src is a COUNT, so this body corrects the floor's DIVISOR and
         still cannot make one orphan ineligible -- memory/api.py::_unprotected is where that is
-        argued, and a live-id set on the Store is what would close it. Because a plan relabels
-        every merged id and deletes every culled one, the expected reading is 0, and a nonzero one
-        is evidence that a management pass produced a plan nothing applied -- the state this entry
-        point exists to end, reported as a number rather than inferred from two other reports.
+        argued, and a live-id set on the Store is what would close it. Because a plan relabels every
+        merged id and deletes every culled one, the reading on a run that carried every pass here is
+        0, and a nonzero one is evidence of a pass whose plan nothing applied -- the state this
+        entry point exists to end, as a number rather than an inference off two other reports.
+        Measured on one warmed configuration, both ways: 3 orphans out of 6 sources holding entries
+        with no call site, 0 out of 3 with the plan carried on every pass.
+      store.n_fold_targets_culled -- fold SURVIVORS that the same plan also deletes, which is the
+        one overlap the two entry counts cannot show: the entries a fold refiles into a survivor
+        that is then culled are counted once as moved and once as destroyed, as though they were
+        two populations. domains/api.py::_resolve makes it unreachable by construction, so this is
+        a claim being checked rather than a case being handled, and PRESENT-AND-0 is the reading
+        the wiring exists to produce.
       store.n_floor_at_plan -- the per-source floor in force when the plan ARRIVED, SET and not
         bumped, and the whole reason src_share is on the LEVERS READ line. It is read before
         anything moves, because what DOM judged this plan against is what MEM.census handed it at
@@ -2015,8 +2095,20 @@ def apply_domain_plan(mem: Config, store, *, folds, deletions, live_sources):
     # minted: the seed already separates "never called" from "called with an empty plan", which is
     # the argument memory/api.py::census makes one entry point over.
     for _k in ("store.n_folds_applied", "store.n_deletes_applied",
-               "store.n_entries_refiled_by_fold", "store.n_entries_deleted_by_cull"):
+               "store.n_entries_refiled_by_fold", "store.n_entries_deleted_by_cull",
+               "store.n_fold_targets_culled"):
         _bump(store, _k, 0)
+    # THE THREE SET-NOT-BUMPED KEYS ARE SEEDED HERE TOO, AND THE REASON IS THE BRANCH TWENTY LINES
+    # DOWN. The negative-id refusal is a branch this body takes, it is taken before any of the three
+    # is written, and it raises -- so a plan carrying one left n_live_sources and n_orphan_sources
+    # ABSENT, which under this tree's own rule reads as "the cadence never fired and this entry
+    # point was never reached". That is the one thing certainly false at the instant the refusal
+    # fires, and the report that carries the StoreError is the report that would have said it.
+    # SETDEFAULT AND NOT ASSIGNMENT, because these three are readings and not tallies: on a later
+    # pass that refuses, the previous pass's measurement is the last true one and blanking it to 0
+    # would replace a reading with a different reading rather than with an absence.
+    for _k in ("store.n_live_sources", "store.n_orphan_sources", "store.n_floor_at_plan"):
+        store.counters.setdefault(_k, 0)
 
     # THE FLOOR IS READ BEFORE ANYTHING MOVES, AND THE ORDER IS THE VALUE OF THE NUMBER. What DOM
     # judged this plan against is what MEM.census handed it at the top of this same pass, over the
@@ -2048,6 +2140,21 @@ def apply_domain_plan(mem: Config, store, *, folds, deletions, live_sources):
             f"is not a domain -- it is this store's no-provenance marker, of which -2 is the "
             f"reserved id for eval-injected entries. Refused rather than skipped: skipping would "
             f"count the fold or the delete as applied while the id stayed live in the store.")
+    # AND THE SAME REFUSAL FOR `live_sources`, WHERE THE DAMAGE IS ARITHMETIC RATHER THAN
+    # DESTRUCTIVE AND SO HAS NOTHING TO ANNOUNCE IT. A negative id here relabels nothing and deletes
+    # nothing; it is counted into the SET below, so it inflates store.live_src by one and SHRINKS
+    # every live domain's reservation -- the 125-sources-against-27-domains defect this docstring
+    # measures, in miniature and from the other direction, with no entry moved to notice it by. It
+    # also lands in `live`, where it can only subtract an id `held` cannot contain, so the orphan
+    # residue keeps reading clean while the divisor it is meant to corroborate is wrong.
+    _bad_live = sorted({int(x) for x in live_sources if int(x) < 0})
+    if _bad_live:
+        raise StoreError(
+            f"MEM.apply_domain_plan: live_sources names source id(s) {_bad_live}, and a negative "
+            f"source id is not a domain -- it is this store's no-provenance marker, of which -2 is "
+            f"the reserved id for the entries the wrongness harness injects. Refused rather than "
+            f"filtered: a filtered id is still one the producer counted, and the number this "
+            f"argument sets is the divisor EVERY per-source floor in the run is taken over.")
 
     # ==============================================================================================
     # 1 -- THE FOLDS: RELABEL FIRST, THEN RECOUNT THE IDS INVOLVED EXACTLY
@@ -2119,15 +2226,27 @@ def apply_domain_plan(mem: Config, store, *, folds, deletions, live_sources):
         _bump(store, "store.n_entries_deleted_by_cull", n)
         if 0 <= d < int(store.nsrc.numel()):
             # SET TO 0, NOT DECREMENTED. Every active entry of this source has just gone, so 0 is
-            # exact -- and an index_add of -n would re-open the underflow memory/api.py::_commit_window
-            # counts and clamps, on a path that has the exact answer in hand.
+            # exact -- while an index_add of -n re-opens the underflow that
+            # memory/api.py::_commit_window counts and clamps, on the one path holding the answer.
             store.nsrc[d] = 0
-    # BY len(deletions), INCLUDING EVERY ID THAT REMOVED NOTHING. domains/api.py::manage sends its
-    # empty-cull ids here knowing the delete cannot reach anything, and says of them that "a delete
-    # that removed nothing and a delete that never happened are two facts" -- only one of the two is
-    # evidence that the memory-floor brake held, and a count of ENTRIES alone cannot tell them
-    # apart. This is the counter DOM's own empty-cull comment is written against.
+    # BY len(deletions), INCLUDING EVERY ID THAT REMOVED NOTHING. Of the empty-cull ids it sends here
+    # knowing the delete cannot reach anything, domains/api.py::manage says
+    # "a delete that removed nothing and a delete that never happened are two facts"
+    # -- and only one of the two is evidence that the memory-floor brake held, which a count of
+    # ENTRIES cannot supply on its own. This counter is the one that comment is written against, and
+    # it is why the loop above runs every id through the mask instead of skipping an empty one.
     _bump(store, "store.n_deletes_applied", len(deletions))
+    # THE ONE OVERLAP THE TWO COUNTERS ABOVE CANNOT SHOW, counted on its own key. If a fold names
+    # survivor `a` and the same pass culls `a`, the relabel files b's entries into a and the delete
+    # destroys them four lines later: n_entries_refiled_by_fold counts them as moved, then
+    # n_entries_deleted_by_cull counts THE SAME ENTRIES as lost, and the pair reads as two
+    # independent facts about two populations. domains/api.py::_resolve is what should make this
+    # unreachable -- it walks the merge chain so every pair arrives naming the FINAL survivor, and a
+    # final survivor is by construction one the pass kept -- so this is not a condition to handle,
+    # it is a claim to check, and a nonzero reading here is evidence that the resolution upstream
+    # did not hold. Zero is the expected value and PRESENT-AND-0 is the point.
+    _bump(store, "store.n_fold_targets_culled",
+          len({int(a) for a in folds.values()} & {int(d) for d in deletions}))
 
     # ==============================================================================================
     # 3 -- ELIGIBILITY: THE DIVISOR THE FLOOR IS TAKEN OVER, AND THE RESIDUE IT CANNOT REACH
@@ -2146,11 +2265,21 @@ def apply_domain_plan(mem: Config, store, *, folds, deletions, live_sources):
     store.counters["store.n_live_sources"] = len(live)
     # THE RESIDUE, MEASURED RATHER THAN ASSUMED. store.live_src is a COUNT, so the two lines above
     # fix the floor's divisor and cannot make one dead-but-occupied source ineligible; this is the
-    # number that says whether any such source exists. After a plan that was actually applied it is
-    # 0 by construction -- every merged id was relabelled above and every culled id emptied -- so a
-    # nonzero reading is not a tuning question, it is a pass whose plan nothing carried.
+    # number that says whether any such source exists. Every merged id was relabelled above and
+    # every culled id emptied, so on a run that carried every pass here this reads 0 -- a nonzero
+    # reading is not a tuning question, it is a pass whose plan nothing applied. Measured on one
+    # warmed configuration, both ways: 3 with no call site, 0 with one.
     held = {int(i) for i in torch.nonzero(store.nsrc > 0).flatten().tolist()}
-    store.counters["store.n_orphan_sources"] = len(held - live)
+    # `if live else 0`, AND THE GUARD IS THE ARM TWO LINES ABOVE READ CONSISTENTLY RATHER THAN A
+    # DEFENSIVE HABIT. An empty `live` sets store.live_src = 0, which memory/api.py::_floor_entries
+    # reads as the frozen tree's live_src=None arm: no domain information supplied, everything
+    # holding entries eligible. On that arm NOTHING is orphaned, because nothing is excluded.
+    # Subtracting the empty set instead reports EVERY source holding entries as an orphan -- the
+    # largest reading this counter can take, on the one counter whose nonzero value this file
+    # declares to be evidence of a plan nobody applied -- so the fallback arm would raise the alarm
+    # that says the fallback arm is running, every pass, and the number meant to end an inference
+    # would need one.
+    store.counters["store.n_orphan_sources"] = len(held - live) if live else 0
 
 
 def judge(mem: Config, store, *, scorer=None, reconstructor=None):
@@ -2426,14 +2555,22 @@ def census(mem: Config, store, *, reconcile=False):
     # memory/api.py::_floor_entries is the number the eviction filter ENFORCES, so this is the
     # number the report PRINTS and the number DOM's cull brake is judged against, and the three
     # cannot be three answers. `live` is the divisor that was ACTUALLY used and is what goes on the
-    # record -- see StoreCensus. WHAT THIS REPORTS IS THE FLOOR IN FORCE AND NOT A HYPOTHETICAL ONE:
-    # on the shipped configuration today DOM.observe is a stub, every window is domain 0, exactly
-    # one source holds entries, `live <= 1`, and the floor in force is 0 -- which is why
-    # n_floor_blocked reads 0 and NOT because the floor held. DOM.manage's declared brake is
-    # `memory_counts[did] >= mem_floor_entries`, satisfied at 0 by every domain including empty
-    # ones, so the brake becomes a wall; the frozen tree carries the `if _fl > 0` guard that
-    # prevents it (self_organize.py:3688). Naming the hazard is this function's job and fixing it is
-    # DOM.manage's.
+    # record -- see StoreCensus. WHAT THIS REPORTS IS THE FLOOR IN FORCE AND NOT A HYPOTHETICAL ONE,
+    # AND WHAT IT IS IN FORCE OVER MOVED THE DAY DOM.observe GOT A BODY. This block used to say that
+    # every window is domain 0, that exactly one source holds entries, that `live <= 1` and that the
+    # floor in force is therefore 0 -- four clauses, each true of a stubbed partition and none of
+    # them true now. Measured on the shipped defaults after 60 windows: six sources hold entries
+    # (2432/896/512/384/384/384), the divisor is 6 and the floor in force is 682. So a run that
+    # prints n_floor_blocked 0 is no longer explained by a floor of nothing, and has to be read as
+    # the floor being armed and not biting.
+    # THE ZERO ARM IS STILL REACHABLE AND IS STILL THE HAZARD, which is why the paragraph stays.
+    # memory/api.py::_floor_entries returns 0 on three arms, DOM.manage's declared brake is
+    # `memory_counts[did] >= mem_floor_entries`, and at 0 that is satisfied by every domain
+    # including empty ones -- the brake becoming a wall. The frozen tree carries the `if _fl > 0`
+    # guard that prevents it (self_organize.py:3688) and domains/api.py::manage now carries it too,
+    # at the one site that reads this number; a population collapsed to one live domain reaches the
+    # arm on the shipped defaults (live == 1, floor == 0, measured). Naming the hazard was this
+    # function's job and fixing it was DOM.manage's, and both halves have now been done.
     floor, live = _floor_entries(store, share)
 
     # ==============================================================================================
@@ -2589,8 +2726,18 @@ def census(mem: Config, store, *, reconcile=False):
 def state_dict(mem: Config, store):
     """The checkpoint blob. Everything mutable that the store cannot re-derive: keys, tok, src,
     pos, ctx, own, active, use, last, born, prob, selfcon, recon, nsrc_max, gate_theta,
-    gate_seeded, ctx_w, the rekey cursor, the write counter behind use_decay_every, the tick clocks,
-    and every store.n_* counter.
+    gate_seeded, ctx_w, live_src, the rekey cursor, the write counter behind use_decay_every, the
+    tick clocks, and every store.n_* counter.
+
+    TWO OF THOSE NAMES ARE NEW AND ONE OF THE TWO WAS ALREADY HERE. `live_src` is DOM's last
+    verdict on which sources are alive, and it is the only scalar in this blob that is not a
+    property of the rows beside it -- memory/api.py::open_store re-derived it from the restored
+    census, which on the measured run meant resuming a 27-domain divisor as 125 and shrinking every
+    live domain's reservation 4.6x at the boundary. The one that was already here is `counters`:
+    this function has written it since it was written and nothing ever read it back, so every n_*
+    number in the report -- including n_entries_deleted_by_cull, THE GOAL-B NUMBER -- restarted at
+    0 on the far side of a resume. The read side is in open_store rather than in
+    _restore_by_block, because the seed of store.counters happens between them.
 
     THREE OF THOSE NAMES ARRIVED WITH THE TWO CADENCED BODIES AND ONE LEFT. `ctx` is now the stored
     CONTEXT WINDOW rather than one long per entry, because it is the only thing MEM.maintain can
@@ -2669,6 +2816,13 @@ def state_dict(mem: Config, store):
         # a lever that may have moved between the two runs.
         "ctx_w": int(store.ctx_w),
         "rekey_cursor": int(store.rekey_cursor),
+        # THE DIVISOR THE PER-SOURCE FLOOR IS TAKEN OVER, and the one field here that is NOT a
+        # property of the rows above: it is what DOM last said was alive, set by
+        # MEM.apply_domain_plan on the management cadence. The restore re-derived it from the
+        # restored census, which is a different number on every store that has ever merged a
+        # domain -- 125 source ids against 27 live ones on the measured run -- so the reservation
+        # each live domain got shrank by that ratio at the resume boundary, silently.
+        "live_src": int(store.live_src),
         "counters": dict(store.counters),
     }
     store.counters["store.n_state_dicts"] = store.counters.get("store.n_state_dicts", 0) + 1
