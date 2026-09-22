@@ -1470,7 +1470,9 @@ moved** — the root hands back what the producer wrote.
 **Driven, not argued.** A clean resume from a pristine checkpoint passes with `sig.width_units 192`
 against the sidecar's 192 and both warnings gone. A checkpoint whose sidecar was edited to
 `width_units: 999` is refused by name: *"SIG resume refused on width_units: the checkpoint was
-written at 999 and this run resolves 197."* And the 197 in that message is itself a finding — it
+written at 999 and this run resolves 197."* The other end fires too — `rank: 999` gives *"FAB resume
+refused on rank: the checkpoint was written at 999 and this run resolves 8. This is an INNER
+dimension … a same-shaped restore would be a different decomposition wearing the right shape."* And the 197 in that message is itself a finding — it
 came from pairing an **early** blob with the **final** vocabulary file, a combination that resolves
 a different signature width than the blob's centroids were measured at, and which every resume
 before this repair would have accepted in silence.
