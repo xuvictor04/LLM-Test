@@ -413,9 +413,12 @@ ASSEMBLY_ORDER = (
                                               "the OTHER direction, recorded and absent from the "
                                               "manifest, which is where WORLD's grown counts sit. "
                                               "Three statements here had them the wrong way round. "
-                                              "The two SIDECAR refusals below remain disarmed and "
-                                              "are the RESIDUE of Q-CKPT-2, which is HIGH and not "
-                                              "blocking. The GROWN population counts genuinely "
+                                              "The two SIDECAR refusals below are ARMED as of "
+                                              "2026-09-22 -- Q-CKPT-2's residue is closed, and its "
+                                              "producer existed all along: both packages write a "
+                                              "'sidecar' key into their OWN payload slice, which is "
+                                              "where _sidecar reads it now. The GROWN population "
+                                              "counts genuinely "
                                               "cannot be here (they need a built object) and are "
                                               "re-refused by WORLD.load_into and FAB.load_state_dict"),
     ("plan",      "DATA",  "data_plan",       "(epochs=RUN.epochs, win_tokens=LM.ctx, "
@@ -489,14 +492,16 @@ ASSEMBLY_ORDER = (
                                               "the snapshot's "
                                               "recorded manifest under the key 'SIG'. NOTHING "
                                               "WRITES THAT KEY: the C rows record WORLD.geometry "
-                                              "alone, so the sidecar is None on every real resume "
+                                              "alone, so the sidecar was None on every real resume "
                                               "and the width_units/alphabet_size/space/d/mode "
-                                              "refusal this row exists for is DISARMED until the "
-                                              "save side records a per-prefix slice. That is the "
-                                              "untrippable-guard shape, stated rather than left "
-                                              "looking armed; _sidecar now records the disarmed "
-                                              "state on System.warnings and Q-CKPT-2 asks for the "
-                                              "producer)"),
+                                              "refusal this row exists for was DISARMED. ARMED as "
+                                              "of 2026-09-22: _sidecar reads Snapshot.payload["
+                                              "'SIG']['sidecar'], which sig/api.py::state_dict has "
+                                              "written all along and which carries all five fields "
+                                              "-- the flat manifest carries three of them and "
+                                              "cannot carry width_units at all. _sidecar still "
+                                              "warns when a blob has no sidecar, which now means a "
+                                              "blob older than the producer)"),
     ("fabric",    "FAB",   "build",           "(d_model=LM.width, signature_dim=SIG.d, device, "
                                               "generator)",
                                               "live_experts -- Population.n_live under "
@@ -1216,11 +1221,13 @@ LOOP_ORDER = (
     # ISSUES P1-C12, WITHDRAWN AS FILED; the "other ten" this comment reported as refused was
     # arithmetic over that claim and over a miscount of WORLD.geometry's own width, which the B row
     # for it below states.
-    # WHAT IS ACTUALLY LEFT is narrower, and it is Q-CKPT-2's residue rather than this block's: the
-    # two `sidecar` refusals read a per-prefix key ('SIG', 'FAB') that no row writes and that a FLAT
-    # prefixed manifest cannot have at any point in its life, so both are disarmed on every resume
-    # -- and FAB.state_dict does not even claim to emit a sidecar. Not a row this file can write
-    # alone: FAB has to declare its sidecar first.
+    # WHAT WAS ACTUALLY LEFT was narrower and is now CLOSED (2026-09-22): the two `sidecar`
+    # refusals read a per-prefix key ('SIG', 'FAB') that no row writes and that a FLAT prefixed
+    # manifest cannot have at any point in its life, so both were disarmed on every resume. The
+    # producer Q-CKPT-2 asked for existed the whole time in the other direction -- each package
+    # writes a 'sidecar' key into its OWN payload slice -- and spine/compose.py::_sidecar reads it
+    # there. Read off a real checkpoint: payload['SIG']['sidecar'] has all five compared fields and
+    # payload['FAB']['sidecar'] all four, against three in the flat manifest's sig.*.
     ("C", "DATA",  "stream_state",    "(areas) -- the per-area cursors, without "
                                       "which a resume re-reads the head of every area under "
                                       "seg_contig and trains a second time on the parent's material",
@@ -1725,16 +1732,19 @@ ROW_ARGUMENTS_ELSEWHERE = {
         "neither is any package's return value -- they are the assembly's own arithmetic over two "
         "packages' frozen Configs, which is exactly what the root is for.",
     "SIG.load_state_dict":
-        "sidecar is _sidecar(sysm, restored, 'SIG') -- the RECORDED geometry fields SIG compares its "
-        "own state against. IT IS DISARMED TODAY: nothing on the save side writes a per-prefix key, "
-        "so _sidecar returns None and the refusal on width_units/alphabet_size/space/d/mode cannot "
-        "fire. That is recorded on System.warnings rather than returned in silence, and it is "
-        "Q-CKPT-2. A guard that cannot fire must not look armed.",
+        "sidecar is _sidecar(sysm, restored, 'SIG') -- the recorded fields SIG compares its own "
+        "state against, read from Snapshot.payload['SIG']['sidecar'], which sig/api.py::state_dict "
+        "writes. IT WAS DISARMED UNTIL 2026-09-22, when that lookup read a per-prefix key of the "
+        "FLAT manifest instead and could never match: the refusal on "
+        "width_units/alphabet_size/space/d/mode could not fire, and _sidecar recorded that on "
+        "System.warnings rather than letting a dead guard look armed. A guard that cannot fire must "
+        "not look armed, and the repair is that it now can.",
     "FAB.load_state_dict":
-        "sidecar is _sidecar(sysm, restored, 'FAB'), with the same disarmed state and the same "
-        "warning -- and worse at this end: FAB.state_dict does not even CLAIM to emit a sidecar, so "
-        "the refusal on slots/rank/dk reads a value with no declared origin at either end. "
-        "Q-CKPT-2 covers both.",
+        "sidecar is _sidecar(sysm, restored, 'FAB'), from Snapshot.payload['FAB']['sidecar'], which "
+        "fabric/api.py::state_dict writes -- slots, rank, dk, signature_dim, the four "
+        "FAB.load_state_dict refuses on. Same history as SIG's above and the same repair; the "
+        "claim that FAB 'does not even CLAIM to emit a sidecar' was true of an earlier tree and is "
+        "not true of this one, which is why the refusal now has a declared origin at both ends.",
     "OPT.build":
         "param_groups is {'base': _base_parameters(sysm), 'encoder': SIG.encoder_parameters(...)}. "
         "The base list is assembled here because OPT DOES NOT WALK ANYBODY'S MODULE TREE -- that is "
@@ -2683,42 +2693,54 @@ def _sidecar(sysm, restored, prefix):
     recorded, and absent from the manifest. The reverse (in the manifest, absent from the recording)
     is ckpt/api.py::check_geometry's REFUSAL, and three statements in this file borrowed the word for it.
 
-    IT RETURNS None ON EVERY REAL RESUME AND BOTH REFUSALS ARE THEREFORE DISARMED -- STILL TRUE,
-    FOR A DIFFERENT REASON THAN THE ONE WRITTEN HERE UNTIL 2026-09-02. That reason was "the save
-    side records WORLD.geometry alone", which is the withdrawn C12 claim and is false: the recorded
-    map is CKPT.save's `geometry`, and ROW_ARGUMENTS_ELSEWHERE declares that to be
-    _geometry_manifest(sysm) -- a FLAT map with PREFIXED keys, 'sig.d' and 'fab.rank'. The live
-    reason it returns None is therefore a SHAPE MISMATCH IN THIS FUNCTION: it indexes the recorded
-    map by a bare package prefix, recorded.get('SIG'), and a flat prefixed map has no such key at
-    any point in its life. Q-CKPT-2's first half is resolved; this is its residue, and it is HIGH.
+    IT RETURNED None ON EVERY REAL RESUME AND BOTH REFUSALS WERE THEREFORE DISARMED -- Q-CKPT-2's
+    residue, RESOLVED 2026-09-22, and the producer it asked for turned out to exist already.
+    This function read `Snapshot.geometry[PFX]`, a NESTED key. The recorded map is CKPT.save's
+    `geometry`, which ROW_ARGUMENTS_ELSEWHERE declares to be _geometry_manifest(sysm) -- FLAT, with
+    PREFIXED keys, 'sig.d' and 'fab.rank' -- so the lookup could not match at any point in its life.
 
-    WHAT IS AND IS NOT STILL OWED, since four of the fields moved. lm.arch, lm.compose, sig.mode
-    and fab.emb_hid joined the manifest on 2026-08-30, and fab.cap on 2026-09-02 -- so FAB's whole
-    declared comparison set (slots, n0-via-cap, rank, dk, emb_hid) is now in the manifest and
-    FAB.state_dict does NOT have to emit a sidecar it never claimed to emit. SIG's `width_units` is
-    the one field that cannot be there: derive.signature_width_bytes reads Vocabulary.bytes_per_token,
-    which is MEASURED over the build sample, so it fails the wire predicate the same way the
-    couplings do -- it travels in SIG's own state blob, which SIG reads back from `sd`.
-    THE OPEN QUESTION IS THEREFORE WHETHER THIS FUNCTION AND THE TWO `sidecar` PARAMETERS SURVIVE
-    AT ALL, or whether a prefix SLICE of the recorded flat manifest replaces them. That is a frozen
-    signature decision on sig/api.py and fabric/api.py, it is cheap while both are stubs, and it is
-    the owner's: it is not reopened here.
+    WHERE THE SIDECAR ACTUALLY IS: IN THE PACKAGE'S OWN PAYLOAD SLICE, WRITTEN BY THE PACKAGE.
+    sig/api.py::state_dict returns a "sidecar" key and so does fabric/api.py::state_dict, and
+    docs/04_CONTRACT.md's SIG section has said so in prose the whole time -- "Checkpointed: ... plus
+    a sidecar carrying width_units, alphabet_size, space, d, mode". READ OFF A REAL CHECKPOINT
+    rather than inferred: payload['SIG']['sidecar'] carries all five of the fields
+    SIG.load_state_dict compares, payload['FAB']['sidecar'] all four of FAB's, and the flat
+    manifest's sig.* is only ('sig.d', 'sig.space', 'sig.mode') -- three of five, MISSING
+    width_units and alphabet_size, which are the two the whole refusal is about.
 
-    A GUARD THAT CANNOT FIRE IS A DEFECT EVEN WHERE THE CODE AROUND IT IS CORRECT, so the state is
-    recorded instead of returned in silence: with a snapshot in hand and a payload for this package
-    but no recorded slice, the warning below is the only place a report can learn that the width
-    refusal did not run. Q-CKPT-2 asks for the producer.
+    SO THE OPEN QUESTION IS ANSWERED BY THE TREE AND NOT BY A DECISION HERE. This docstring used to
+    ask whether the two `sidecar` parameters survive at all or whether a prefix SLICE of the flat
+    manifest replaces them, and called that cheap "while both are stubs". Both have bodies now, so
+    it is no longer cheap -- and the slice is the worse of the two answers anyway, because it cannot
+    carry width_units: derive.signature_width_bytes reads Vocabulary.bytes_per_token, which is
+    MEASURED over the build sample and so fails the wire predicate. The sidecar travels in the blob.
+    Nothing frozen moves; the root hands back what the producer wrote.
+    (The paragraph this replaces also said "FAB.state_dict does NOT have to emit a sidecar it never
+    claimed to emit". It emits one -- slots, rank, dk, signature_dim -- and it is in the checkpoint.)
+
+    A GUARD THAT CANNOT FIRE IS A DEFECT EVEN WHERE THE CODE AROUND IT IS CORRECT, so the warning
+    below stays for the case it now describes: a blob written before the producer existed. With a
+    snapshot in hand and a payload for this package but no sidecar in it, that warning is the only
+    place a report can learn that the width refusal did not run.
     """
     if restored is None:
         return None
-    recorded = getattr(restored, "geometry", None) or {}
-    side = recorded.get(prefix)
+    payload = getattr(restored, "payload", None) or {}
+    mine = payload.get(prefix)
+    side = mine.get("sidecar") if isinstance(mine, dict) else None
+    if side is None:
+        # THE OLD LOOKUP, KEPT AS THE FALLBACK AND NOT AS THE RULE. It has never matched a blob this
+        # tree wrote; it stays because a recorded geometry that DID carry a nested slice would still
+        # be a legitimate thing to honour, and removing it would silently narrow what this function
+        # accepts on the one boundary every goal-B number is measured across.
+        side = (getattr(restored, "geometry", None) or {}).get(prefix)
     if side is None and sysm is not None and sysm.warnings is not None:
         sysm.warnings.append(
-            f"{prefix}.load_state_dict: no '{prefix}' slice in the snapshot's recorded geometry, so "
-            f"sidecar=None and its width/shape refusal DID NOT RUN. The recorded geometry is the "
-            f"FLAT prefixed manifest (CKPT.save's geometry is _geometry_manifest); this lookup "
-            f"wants a nested '{prefix}' key that nothing writes. Q-CKPT-2's residue.")
+            f"{prefix}.load_state_dict: the snapshot carries no sidecar for {prefix}, so "
+            f"sidecar=None and its width/shape refusal DID NOT RUN. {prefix}.state_dict writes a "
+            f"'sidecar' key into its own payload slice and this snapshot's slice has none, which "
+            f"means it was written before that producer existed. A resume from it cannot be "
+            f"refused on a width it disagrees about.")
     return side
 
 

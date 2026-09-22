@@ -1448,20 +1448,32 @@ exists (Q-CKPT-1). Five of its six fields duplicate the manifest's `world.*`; th
 recorded-only, reported UNCHECKED by the child's gate and re-refused in both directions by
 `WORLD.load_into` (M43).
 
-**Two `sidecar` refusals are still disarmed, and that is Q-CKPT-2's residue — HIGH, not blocking.**
-`SIG.load_state_dict` and `FAB.load_state_dict` take a `sidecar` that `_sidecar(sysm, restored, PFX)`
-reads as `Snapshot.geometry[PFX]` — a **nested** key. The recorded map is flat and prefixed, so the
-lookup finds nothing and both receive `None` on every real resume. `_sidecar` records the disarmed
-state on `System.warnings` rather than returning `None` in silence, and both restore rows say the
-refusal is disarmed until P4. What changed is what is still *owed*: `lm.arch`, `lm.compose`,
-`sig.mode` and `fab.emb_hid` joined the manifest on 2026-08-30 and **`fab.cap` on 2026-09-02**, so
-`FAB`'s entire declared comparison set is in the manifest and **`FAB.state_dict` never has to emit
-the sidecar it never claimed to emit**. SIG's `width_units` is the single field that cannot be
-there — `derive.signature_width_bytes` reads `Vocabulary.bytes_per_token`, which is **measured**, so
-it fails the wire predicate and travels in SIG's own blob. **The open question is therefore whether
-the two `sidecar` parameters survive at all**, or whether a prefix *slice* of the recorded flat
-manifest replaces them. That moves two frozen signatures, it is cheap while both are stubs, and it
-is the owner's.
+**Two `sidecar` refusals were disarmed — Q-CKPT-2's residue, RESOLVED 2026-09-22, and the producer
+it asked for existed the whole time.** `SIG.load_state_dict` and `FAB.load_state_dict` take a
+`sidecar` that `_sidecar(sysm, restored, PFX)` read as `Snapshot.geometry[PFX]` — a **nested** key.
+The recorded map is flat and prefixed, so the lookup could never match and both received `None` on
+every real resume; `_sidecar` recorded the disarmed state on `System.warnings` rather than letting a
+dead guard look armed.
+
+**The sidecar is in the package's own payload slice, written by the package**, and this document's
+own SIG section has said so in prose the whole time: *"Checkpointed: … plus a sidecar carrying
+`width_units`, `alphabet_size`, `space`, `d`, `mode`"*. Read off a real checkpoint rather than
+inferred: `payload['SIG']['sidecar']` carries all five fields `SIG.load_state_dict` compares,
+`payload['FAB']['sidecar']` all four of FAB's, and the flat manifest's `sig.*` is only
+`sig.d`/`sig.space`/`sig.mode` — three of five, **missing `width_units` and `alphabet_size`**, which
+are the two the refusal is really about. So the prefix-*slice* alternative this paragraph used to
+pose as the open question is the worse of the two answers, and the claim that **`FAB.state_dict`
+never has to emit the sidecar it never claimed to emit** was true of an earlier tree: it emits one.
+`_sidecar` now reads the payload slice and keeps the old lookup as a fallback. **No frozen signature
+moved** — the root hands back what the producer wrote.
+
+**Driven, not argued.** A clean resume from a pristine checkpoint passes with `sig.width_units 192`
+against the sidecar's 192 and both warnings gone. A checkpoint whose sidecar was edited to
+`width_units: 999` is refused by name: *"SIG resume refused on width_units: the checkpoint was
+written at 999 and this run resolves 197."* And the 197 in that message is itself a finding — it
+came from pairing an **early** blob with the **final** vocabulary file, a combination that resolves
+a different signature width than the blob's centroids were measured at, and which every resume
+before this repair would have accepted in silence.
 
 ### 3.10 Three TOK events are produced at `A` and consumed at `B`
 
