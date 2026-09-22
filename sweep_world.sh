@@ -98,10 +98,21 @@ last = re.search(r"=== loss [\d.]+ -> ([\d.]+)", t)
 # that goes constant predicts itself perfectly, so a win on loss with a falling std is not a win.
 std = re.search(r"world\.latent_std\s+([\d.]+)", t)
 params = re.search(r"=== (\d+) trainable parameter", t)
+# A RUN SHORTER THAN ONE PROGRESS CADENCE HAS NO TAIL TO TAKE, and a bare nan in the column the
+# comparison sorts on reads as a broken arm rather than as a run that was too short. It falls back
+# to loss_last and MARKS ITSELF, because the two are not the same measurement: loss_last is ONE
+# flush and is exactly the noise this tail mean exists to average out.
 tailv = prog[-tail_n:] if prog else []
-mean = sum(tailv) / len(tailv) if tailv else float("nan")
+mark = " "
+if tailv:
+    mean = sum(tailv) / len(tailv)
+    if len(tailv) < tail_n:
+        mark = "~"                      # fewer progress lines than asked for; averaged over what there was
+else:
+    mean = float(last.group(1)) if last else float("nan")
+    mark = "!"                          # NO progress line at all: this is loss_last, one flush
 print(f"  {name:<14} seed {seed} | {summ.group(1) if summ else '?':>5} win "
-      f"{summ.group(2) if summ else '?':>5} steps | tail{tail_n} mean {mean:7.4f} "
+      f"{summ.group(2) if summ else '?':>5} steps | tail{tail_n} mean {mean:7.4f}{mark}"
       f"| last {last.group(1) if last else '?':>7} "
       f"| latent_std {std.group(1) if std else 'ABSENT':>8} "
       f"| {params.group(1) if params else '?'} params")
@@ -125,7 +136,7 @@ python3 - "$S" "$TAIL" >> "$S" <<'PY'
 import re, sys
 S, tail_n = sys.argv[1], int(sys.argv[2])
 rows = {}
-for m in re.finditer(r"^  (\S+)\s+seed (\d+) \|.*?tail\d+ mean\s+([\d.]+)", open(S).read(), re.M):
+for m in re.finditer(r"^  (\S+)\s+seed (\d+) \|.*?tail\d+ mean\s+([\d.]+)[ ~!]", open(S).read(), re.M):
     rows.setdefault(m.group(1), []).append((int(m.group(2)), float(m.group(3))))
 if not rows:
     sys.exit(0)
@@ -140,6 +151,9 @@ for name, vals in rows.items():
     delta = f"{mean - bmean:+.4f} vs off" if bmean is not None else ""
     print(f"  {name:<14} mean {mean:7.4f}  spread {spread:6.4f}  "
           f"seeds {' '.join(f'{v:.4f}' for v in vs)}  {delta}")
+print()
+print("A '~' beside a number means fewer progress lines than TAIL asked for; a '!' means none at")
+print("all, so that row is loss_last -- ONE flush, and exactly the noise the tail mean averages out.")
 print()
 print("A separation smaller than the within-arm spread is NOTHING. notes/07_WIP.md records a")
 print("measured seed spread of 1.227 b/B on a single arm, larger than the gap between any two")
