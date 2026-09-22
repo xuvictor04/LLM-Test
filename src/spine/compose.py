@@ -1940,7 +1940,21 @@ class System:
                  # the reason `warmup` is: it is a RESULT THE ROOT OWNS, measured after the frozen
                  # record was built, and a second writable field on Process would let a report
                  # quote a precision nothing had run in.
-                 "process_dtype")
+                 "process_dtype",
+                 # THE VALVE POSITION THIS DRIVER HAS ALREADY ACTED ON, which is what makes
+                 # TOK.lift_vocab_cap the EVENT its own docstring says it is ("AN EVENT, NOT A
+                 # PERIOD ... CAP calls this function when it lifts"). The LOOP_ORDER row for
+                 # CAP.caps spells the wire ("-> ... TOK.lift_vocab_cap(to=...)") and a wire has no
+                 # frequency, so without this field the only call site available was PER FLUSH --
+                 # a quarter of a million calls to announce a lift that happened once, with
+                 # tok.cap_lift reading present-and-0 for the whole run and no way to tell that
+                 # from a route that ran and moved nothing. It holds Caps.vocab and NOT the cap
+                 # lift_vocab_cap returned: the two differ whenever the vocabulary's own ceiling is
+                 # tighter than the valve's position, and storing the clamped answer would make
+                 # every subsequent flush see a difference and fire the event again, forever.
+                 # None UNTIL THE FIRST FLUSH, AND THE FIRST FLUSH IS A BASELINE AND NOT A LIFT: a
+                 # lift is a CHANGE, so the first observation has nothing to be a change from.
+                 "cap_vocab_seen")
 
     def __init__(self, configs, wires, warnings):
         for name in self.__slots__:

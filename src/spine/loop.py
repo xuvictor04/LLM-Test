@@ -128,9 +128,18 @@ _CALLS = frozenset({
     "RUN.bench_summary",
 })
 
-# CALLS THIS DRIVER MAKES THAT LOOP_ORDER DOES NOT GIVE A ROW OF THEIR OWN. Exactly one: LM.on_mint
-# is named inside TOK.mint_burst's B-row text ("-> LM.on_mint(sig_emb=SIG.encoder_embedding(...))")
-# rather than carrying a row, so it is a real call with no row to be counted against.
+# CALLS THIS DRIVER MAKES THAT LOOP_ORDER DOES NOT GIVE A ROW OF THEIR OWN. Two, and both are named
+# inside ANOTHER row's text rather than carrying a row, which is the only thing that puts a name
+# here. LM.on_mint is named in TOK.mint_burst's B-row text ("-> LM.on_mint(sig_emb=
+# SIG.encoder_embedding(...))"). MEM.apply_domain_plan is named in DOM.manage's A-row text, as the
+# call it is and with its arguments -- "the Plan it returns is handed straight on as
+# MEM.apply_domain_plan(plan=Plan, live_sources=DOM.census's `live`)" -- which is the form K6
+# credits, and DOM.census's row names the other end of the same wire. TOK.lift_vocab_cap is named
+# in CAP.caps's B-row text the same way ("-> FAB.grow_check(soft_cap=...) and
+# TOK.lift_vocab_cap(to=...)"). None of the three is an excuse for a missing row: a row would say
+# WHEN, and all three are pinned to another row's moment -- the first two to that row's flush or
+# pass, and the third to the moment the number that row produces CHANGES, which is the one thing a
+# row naming a wire cannot express and which its own docstring rules ("AN EVENT, NOT A PERIOD").
 # THIS SET USED TO CARRY FOUR NAMES AND TWO OF THEM WERE WRONG IN OPPOSITE DIRECTIONS.
 # RUN.RunClock.advance and RUN.RunClock.note_backward are ON the table -- A and B respectively --
 # and belong in _CALLS, which is where they are now. DOM.observe was in here, and this set does two
@@ -140,7 +149,7 @@ _CALLS = frozenset({
 # the B row, because DOM.observe is a row-A entry point and the subtraction was a no-op; the moment
 # the report covered every stage it would have started lying. Two wrongs cancelling is not a test
 # passing.
-_OFF_TABLE = frozenset({"LM.on_mint"})
+_OFF_TABLE = frozenset({"LM.on_mint", "MEM.apply_domain_plan", "TOK.lift_vocab_cap"})
 
 # WHY EACH UNCALLED MECHANISM'S ABSENCE MATTERS, in the consequence a reader needs rather than the
 # name they already have. Missing keys fall back to a plain sentence; nothing here is load-bearing
@@ -680,9 +689,32 @@ def run(sysm, *, max_windows=None, progress=True):
             # a cadence nobody asked for.
             if cadences.due("dom.manage", periods["dom.manage"], clock):
                 _c = mem_api.census(cfg["MEM"], sysm.store)
-                dom_api.manage(dom_cfg, sysm.partition, now=tick.step,
-                               memory_counts=_c.counts, mem_floor_entries=_c.floor_entries)
-                dom_api.census(dom_cfg, sysm.partition)
+                _plan = dom_api.manage(dom_cfg, sysm.partition, now=tick.step,
+                                       memory_counts=_c.counts, mem_floor_entries=_c.floor_entries)
+                _pc = dom_api.census(dom_cfg, sysm.partition)
+                # AND THE HALF OF THE PASS THAT TOUCHES THE STORE. DOM DECIDES, THE SPINE CARRIES,
+                # MEM EDITS -- domains/api.py::Plan's first line is "the spine carries it to MEM;
+                # this package touches no memory", and until this call existed the second half of
+                # that sentence was true and the first was not. The old tree closed the same gap by
+                # having the domain manager call mem.reassign_src()/mem.delete_src() and read
+                # `int(mem.src_floor * mem.cap / max(1, mem._eligible().sum()))` inline at
+                # self_organize.py:3688 -- a PRIVATE method, across a package boundary O10 forbids.
+                # WHAT A PASS WITHOUT IT MEANT, and it is not "the merge did not take effect": DOM
+                # renumbered its own partition while store.src kept the OLD ids, so every entry a
+                # merged domain wrote became provenance filed under an id DOM no longer has, and
+                # every entry a culled domain wrote stayed in the store forever with nothing left
+                # to claim it. Both populations still counted toward the per-source floor that the
+                # NEXT pass's cull brake is judged against -- store.n_orphan_sources is the number
+                # that says how many, and it is the reading that goes to 0 here.
+                # live_sources IS DOM.census's `live` AND NOT Plan.live, which is the wire LOOP_ORDER
+                # declares on the DOM.census row ("its `live` list is what MEM.apply_domain_plan
+                # takes as live_sources"). The two agree on a correct pass; the census is the one the
+                # table names, and naming the other would be a wire recomputed at the call site under
+                # a second spelling -- the defect self_organize.py:3688 is cited for one line up.
+                # `_plan` AND `_pc`, NOT `_c`: `_c` is the MEM census this block opened with and
+                # feeds mem_pressure three lines down.
+                mem_api.apply_domain_plan(cfg["MEM"], sysm.store, folds=_plan.folds,
+                                          deletions=_plan.deletions, live_sources=_pc.live)
                 # AND THE PRESSURE VERDICT, CARRIED TO EVERY FLUSH UNTIL THE NEXT CENSUS. LOOP_ORDER's
                 # B row for FAB.observe/grow_check names this shape exactly -- "memory_pressure from
                 # MEM.census, which is a CADENCED producer feeding a per-flush required argument" -- so
@@ -1307,6 +1339,35 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     # `min(n_born, cap - fab.n())`, which is P3-C30 -- negative the moment the population sits
     # above the soft cap, and a negative clamp freezes growth for a whole run in silence.
     caps = cap_api.caps(cfg_cap, sysm.valve)
+
+    # TOK.lift_vocab_cap, EDGE-TRIGGERED ON THE VALVE MOVING, WHICH IS WHAT ITS DOCSTRING ASKS FOR
+    # AND WHAT THE ROW ABOVE COULD NOT SAY. tok/api.py::lift_vocab_cap opens with "AN EVENT, NOT A
+    # PERIOD" and its RECEIVES line reads "to <- CAP.caps().vocab, as an argument, ON THE FLUSH CAP
+    # LIFTED"; LOOP_ORDER's CAP.caps row names the wire ("-> ... TOK.lift_vocab_cap(to=...)") and a
+    # wire carries no frequency, so the two together left the call site unruled and the body's own
+    # comment enumerated both readings rather than choosing. This is the choice, and it is the
+    # docstring's: a lift is a CHANGE, so it is announced when the number changes.
+    # THE DIFFERENCE IS NOT COSMETIC AND IT IS NOT PERFORMANCE. Per flush, tok.cap_lift reads
+    # present-and-0 for a whole run -- "this route ran a quarter of a million times and lifted
+    # nothing" -- which is indistinguishable in the report from a valve that was asked and declined.
+    # Edge-triggered, the counters stay ABSENT while CAP.observe is deferred, and ABSENT is this
+    # tree's word for UNREACHABLE, which is the true state: valve.cap_vocab moves only inside
+    # CAP.observe, so today nothing can move it and the event cannot occur. The route is wired all
+    # the same, because the route existing is what lets that body be written later without a second
+    # copy of the cap rule appearing at a call site.
+    # THE FIRST FLUSH SEEDS AND DOES NOT CALL. A lift is a change and the first observation has
+    # nothing to be a change from; calling on it would put a present-and-0 in the ledger that means
+    # "the driver started", which is the reading this whole arrangement exists to avoid.
+    _cv = int(caps.vocab)
+    if sysm.cap_vocab_seen is None:
+        sysm.cap_vocab_seen = _cv
+    elif _cv != int(sysm.cap_vocab_seen):
+        # THE RETURN IS THE CAP IN FORCE AND IT IS NOT WHAT IS STORED. lift_vocab_cap clamps
+        # against d_vocab_ceiling and against this vocabulary's own (possibly closed) ceiling, so
+        # its answer can sit below `_cv`; storing that instead would leave every later flush seeing
+        # a difference and re-firing the event on a valve that never moved again.
+        tok_api.lift_vocab_cap(tok_cfg, vocab, to=_cv)
+        sysm.cap_vocab_seen = _cv
 
     # THE BOOKS, AFTER THE BACKWARD AND ON THE SAME FLUSH'S NUMBERS. FAB.observe credits `use` by
     # routing MASS and `uage` by SELECTION -- the H12/H13 split -- against the experts that actually

@@ -102,21 +102,53 @@ _NONFINITE_MEASURED = {
         "convention is that an ABSENT counter means the branch is unreachable, so the report says "
         "the regularizer is off on a run the operator switched on",
     "TOK_MINT_PMIN":
-        "the pre-mint quality criterion, read by TOK.mint_burst, which raises NotImplementedError "
-        "today -- so a non-finite value here has NO live reader and is refused for what it freezes "
-        "into the Config rather than for a measured effect. It arms the day that body is written: "
-        "mint_burst re-ranks the candidate window by p(b|a) against this threshold, and both halves "
-        "of that comparison are the shape every guard in this sweep failed on",
+        "the pre-mint quality criterion, and IT HAS A LIVE READER NOW -- TOK.mint_burst, at "
+        "tok/api.py::mint_burst's `pmin = float(tok.mint_pmin)`, gated by `if pmin > 0.0`. These "
+        "three entries said 'raises NotImplementedError today' for as long as that was true and "
+        "kept saying it afterwards, which matters more here than in a comment: this whole "
+        "dictionary is quoted VERBATIM into the LeverError an operator sees. THE TWO NON-FINITE "
+        "VALUES DO OPPOSITE THINGS AND BOTH WERE MEASURED, over eight windows of a 20kB three-area "
+        "text with 71 candidate pairs in the tally and TOK_GROW_BURST=6. AT +inf THE GATE ARMS AND "
+        "BLOCKS EVERYTHING: p(b|a) is a probability, so no candidate clears it -- "
+        "tok.mint_gate_block 69, tok.mint_gate_pass 0, tok.mint_gate_forced 1, tok.mint_exhausted "
+        "1, and the burst minted ONE token instead of six, that one arriving through the forced "
+        "rescue rather than through the gate. AT nan THE GATE NEVER ARMS: `nan > 0.0` is False, so "
+        "the three gate counters are never seeded and stay ABSENT, and the burst was BIT-IDENTICAL "
+        "to TOK_MINT_PMIN=0.0 -- the same six mints, the same first three tokens. That is the "
+        "TOK_DROPOUT=nan shape exactly: this file's convention is that an ABSENT counter means the "
+        "branch was unreachable, so the report tells the operator the quality gate does not exist "
+        "on a run they switched it on for",
     "TOK_MINT_NOVEL":
-        "the novelty exponent, read by TOK.mint_burst, which raises NotImplementedError today -- "
-        "same standing as TOK_MINT_PMIN. Note that this lever's declaration says in as many words "
-        "that a value ABOVE its unit label is legal ('a reader who takes fraction 0..1 as a bound "
-        "on legal values will be surprised by 2.0, which is legal'); 2.0 is an exponent, and "
-        "infinity is not one",
+        "the novelty exponent, read by TOK.mint_burst at `novel = float(tok.mint_novel)` and -- "
+        "through the same `> 0.0` test -- the switch that makes TOK.on_window maintain "
+        "vocab.tally_seen at all. SAME ASYMMETRY AS TOK_MINT_PMIN AND MEASURED THE SAME WAY. AT nan "
+        "NOTHING ARMS: tally_seen stayed EMPTY where any positive value filled it with 65 pairs, "
+        "tok.mint_novel_reranked stayed ABSENT, and the burst was bit-identical to the shipped 0.0. "
+        "AT +inf THE RE-RANK ARMS AND STOPS BEING AN EXPONENT: the key is "
+        "count / (1 + tally_seen) ** novel, which at an infinite exponent is exactly 0.0 for every "
+        "pair the run has ever seen and exactly `count` for a pair it has not, so a graded "
+        "preference collapses into a hard never-seen-first filter with every other candidate tied "
+        "at zero -- and a total tie is the input order, while tok.mint_novel_reranked still reads 1 "
+        "and says the list was re-ranked. This lever's declaration says in as many words that a "
+        "value ABOVE its unit label is legal ('a reader who takes fraction 0..1 as a bound on legal "
+        "values will be surprised by 2.0, which is legal'); 2.0 is an exponent, and infinity is not "
+        "one",
     "TOK_PROBATION_RESIDUAL":
-        "the residual-ratio threshold, read by TOK.judge_probation, which raises "
-        "NotImplementedError today -- same standing as TOK_MINT_PMIN. It is one side of a ratio "
-        "comparison, which is the family that goes silent rather than loud at nan",
+        "the residual-ratio threshold, read by TOK.judge_probation at "
+        "`resid_min = float(tok.probation_residual)` and used on the embed arm as "
+        "`keep = earned and float(residual_ratio[tid]) >= resid_min`. IT IS THE ONE OF THE FOUR "
+        "WHERE nan IS NOT THE QUIET ARM, and that is worth the sentence because the other three "
+        "trained the reader to expect it: those are armed by `x > 0.0`, which nan fails, so nan "
+        "turns them off. This one has no arming comparison at all -- it is read unconditionally and "
+        "goes straight into the judgement -- so nan reaches the `>=` and every comparison against "
+        "it is False. MEASURED AT TOK_PROBATION_USES=3 on six freshly minted tokens, each having "
+        "earned five more appearances than required, each with a residual of 0.5: at 0.30 six kept "
+        "and none retired; at +inf ZERO KEPT AND ALL SIX RETIRED; at nan ZERO KEPT AND ALL SIX "
+        "RETIRED, the two non-finite values doing identical damage. Retiring every token a run "
+        "mints, at its first judgement, inside the package whose job is to keep what it learns, is "
+        "goal B failing through the tokenizer. It reaches the decision only at "
+        "TOK_PROBATION_BY=embed with a residual vector supplied; at the shipped "
+        "TOK_PROBATION_USES=0 probation is off and this lever decides nothing",
 }
 
 
@@ -2346,6 +2378,20 @@ def lift_vocab_cap(tok: Config, vocab, *, to: int):
     LEVERS READ: none
     WIRES READ: d_vocab_ceiling
     DID IT FIRE: tok.cap_lift, tok.cap_lift_refused_at_ceiling
+    ONE MORE KEY THE BODY WRITES, declared here in the form fabric/api.py::grow_check uses for its
+    own additions, because a key in the report the contract does not admit to producing is the same
+    defect as a declared key nothing writes:
+      tok.cap_lift_stored_only -- calls that MOVED vocab.soft_cap and did not move the cap in
+        force. It is the fixed arm's state and it was a silent mutation until it was counted: on
+        tok.mode="fixed" build_vocabulary closes vocab.ceiling down to the achieved build size, so
+        `before` is that tight ceiling, a `to` above it passes the `target > before` test, the
+        assignment runs, and then _cap() returns the same number it returned before -- tok.cap_lift
+        stays 0 and the only record that this call wrote anything was the write. THE WRITE IS NOT
+        LOCAL: tok/api.py::vocab_state carries `soft_cap` and tok/api.py::restore_vocab puts it
+        back, so a position stored under a closed ceiling outlives the run that stored it and
+        arrives in a resume whose ceiling may not be closed at all. "Called and did nothing" and
+        "called, wrote a number into the vocabulary, and the number is inert until the next run"
+        are two facts, and two counters is what tells them apart.
     """
     tok = tok.owned_by("TOK")
     ceiling = int(tok.d_vocab_ceiling)                   # WIRE READ HERE -- min(to, ceiling)
@@ -2357,17 +2403,22 @@ def lift_vocab_cap(tok: Config, vocab, *, to: int):
     # route RAN and the number it was handed moved nothing; ABSENT means nothing ever called this
     # entry point on the arm this run took. Seeding inside the lift below would report "called and
     # lifted nothing" as silence, which is the one reading indistinguishable from an unwired route.
-    # WHICH OF THE TWO A RUN SHOWS TODAY IS DECIDED BY THE CALL SITE, AND NEITHER OF THEM IS A
-    # LIFT: this comment will not claim the body changes a number today, because it does not.
-    # CAP.observe is DEFERRED, so capacity/api.py::caps reads the same valve.cap_vocab off the
-    # valve on every flush and the value arriving here is the same one every time --
-    # spine/compose.py::LOOP_ORDER's CAP.caps row states it outright: "THESE ARE THE STARTING
-    # CEILINGS AND NOTHING LIFTS THEM". A root that calls this once per flush reads tok.cap_lift
-    # present-and-0 for the whole run; a root that calls it only when the number changes never
-    # calls it at all and reads ABSENT. Writing the body is still the right act -- the entry point
-    # is the ROUTE, and a route that exists is what lets the valve be turned on later without a
-    # second copy of the cap rule appearing at a call site -- but nothing here lifts anything yet.
-    for _row in ("tok.cap_lift", "tok.cap_lift_refused_at_ceiling"):
+    # WHICH OF THE TWO A RUN SHOWS IS DECIDED BY THE CALL SITE, AND THE CALL SITE IS NOW RULED --
+    # spine/loop.py calls this EDGE-TRIGGERED, on the flush Caps.vocab differs from the position
+    # the driver has already acted on, which is what the docstring's "AN EVENT, NOT A PERIOD" asks
+    # for and what LOOP_ORDER's CAP.caps row could not say (it names the wire, and a wire carries
+    # no frequency). NEITHER READING IS A LIFT TODAY: this comment will not claim the body changes
+    # a number, because it does not. CAP.observe is DEFERRED, so capacity/api.py::caps reads the
+    # same valve.cap_vocab off the valve on every flush and the value that would arrive here is the
+    # same one every time -- spine/compose.py::LOOP_ORDER's CAP.caps row states it outright: "THESE
+    # ARE THE STARTING CEILINGS AND NOTHING LIFTS THEM". SO THE ROWS READ ABSENT, AND ABSENT IS THE
+    # TRUE ONE. Per flush they would read present-and-0, which says "this route ran a quarter of a
+    # million times and lifted nothing" and cannot be told from a valve that was asked and declined;
+    # ABSENT is this tree's word for unreachable, and a cap that moves only inside a deferred body
+    # is unreachable exactly. Writing the body is still the right act -- the entry point is the
+    # ROUTE, and a route that exists is what lets the valve be turned on later without a second copy
+    # of the cap rule appearing at a call site -- but nothing here lifts anything yet.
+    for _row in ("tok.cap_lift", "tok.cap_lift_refused_at_ceiling", "tok.cap_lift_stored_only"):
         c.setdefault(_row, 0)
 
     # THE CLAMP IS AGAINST THE WIRE, WHICH IS THE AUTHORITY ON EVERY PATH INCLUDING A RESUME
@@ -2417,13 +2468,22 @@ def lift_vocab_cap(tok: Config, vocab, *, to: int):
     # force is the full 4096, and the first call lands here BELOW it and moves nothing.
     # THAT IS NOT THIS ROUTE'S JOB TO APPLY, and the no-op is the report rather than the repair:
     # the STARTING cap reaches TOK through build_vocabulary's soft_cap
-    # argument, which spine/compose.py::LOOP_ORDER's own vocab row says should carry CAP's
-    # `vocab_start` lever and records that the body passes None today. A lift entry point that
+    # argument, which spine/compose.py::ASSEMBLY_ORDER's own vocab row says should carry CAP's
+    # `vocab_start` lever and records that the body passes None today. ASSEMBLY_ORDER AND NOT
+    # LOOP_ORDER, which this comment named until 2026-09-22: they are two tables in one file and
+    # the difference is the whole point of the sentence -- the starting cap is set ONCE while the
+    # system is being built, and the lift is a LOOP event. A citation that sends a reader to the
+    # wrong table sends them looking for a per-flush row that says where a startup value comes
+    # from, and the row they would find (CAP.caps, stage B) is the other end of this same argument. A lift entry point that
     # quietly also lowered would make those two channels two ways to set one number.
     # THE STORED POSITION IS MONOTONE TOO, not only the cap in force, and the max() is what a fixed
     # arm needs: with a soft cap of 4096 recorded above a closed ceiling of 512, a `to` of 600 is
     # above the cap in force and below the position already on record, and the record must not walk
     # backwards on a call that moves nothing.
+    # READ BEFORE THE ASSIGNMENT SO THE ASSIGNMENT CAN BE SEEN, which is what the counter below
+    # needs and what `before`/`after` cannot supply: those two are the cap IN FORCE, and the whole
+    # fixed-arm case is a soft_cap that moves while the cap in force does not.
+    sc_before = vocab.soft_cap
     if target > before:
         vocab.soft_cap = target if vocab.soft_cap is None else max(int(vocab.soft_cap), target)
 
@@ -2435,6 +2495,16 @@ def lift_vocab_cap(tok: Config, vocab, *, to: int):
     after = vocab._cap()
     if after > before:
         c["tok.cap_lift"] += 1
+    elif vocab.soft_cap != sc_before:
+        # THE THIRD STATE, AND UNTIL IT WAS COUNTED THIS ROUTE MUTATED CHECKPOINTED STATE IN
+        # SILENCE. The paragraph above already says the soft cap can rise while the cap in force
+        # does not; what it did not say is that the run then reports the call as having moved
+        # nothing, because tok.cap_lift is decided by _cap() and _cap() did not move. On
+        # tok.mode="fixed" that is not an edge case, it is the arm: the ceiling is closed to the
+        # achieved build size, so every `to` above it lands exactly here. ELIF AND NOT A SECOND IF,
+        # because a lift that moves the cap in force has necessarily moved the stored position too
+        # and counting it twice would make the three rows sum to more than the calls.
+        c["tok.cap_lift_stored_only"] += 1
     # THE CAP NOW IN FORCE -- not `target`, and not what CAP asked for. Those three numbers differ
     # on any vocabulary whose own ceiling is tighter than the wire's, and the caller is owed the
     # one that decides whether the next mint is refused.
