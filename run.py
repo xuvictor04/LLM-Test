@@ -23,15 +23,25 @@ WHAT IT STILL DOES NOT MEASURE, AND THE RUN PRINTS BOTH LISTS RATHER THAN CLAIMI
     LM.residual_ratios and TOK.judge_probation behind Due.probation -- and the probation family is
     UNREACHABLE at the shipped TOK_PROBATION_USES=0. The GATED CALL SITES block says which of the
     three states each one is in, read off the counter the owning package keeps.
-  * THE RETOK IS RAISED AND NOT ACTED ON. TOK's retok_every cadence fires and the root does not
-    re-segment, because that needs a new Segmentation mid-epoch against a clock whose epoch length
-    was measured on the old one. The fire is counted in tok.due_dropped, which Q-TOK-12 says must
-    read zero -- so a nonzero value there is this, stated loudly rather than hidden.
-  * DOMAINS ARE OFF. DOM.observe is a stub, so every window is domain 0 and the fabric's per-domain
-    books, the breadth ban and MEM's per-source floor all see exactly one source.
-  * MEMORY IS WRITE-ONLY. MEM.read is a stub, so MEM.maintain's probe fires and retrieves nothing:
-    evict='lru' and evict='usage' are write-order FIFO whatever they say, and probation can never
-    promote. The store's own counters (n_probe_fired against n_probe_rows) are where that reads.
+  * THE RETOK IS DEFERRED TO THE EPOCH ROLL, NOT PERFORMED MID-EPOCH. Re-segmenting changes how
+    many windows an epoch holds and RunClock.begin_epoch cannot be told a new length without
+    zeroing the epoch cursor, so the act waits for the next roll -- which re-segments anyway. AT
+    RUN_EPOCHS=1 NO ROLL EVER REACHES IT, because the single roll a one-epoch run takes is the one
+    that also finishes it; every retok that run raises lands in tok.due_dropped with a warning
+    naming why. Recorded as Q-RUN-8, with the measurement that settles it.
+  * NO EXPERT IS EVER CULLED and THE SIGNATURE ENCODER NEVER LEARNS. FAB.manage and SIG.train_step
+    are the last two LOOP_ORDER rows without bodies, so the population only ever rises and every
+    routing and domain decision for the whole run is taken on the warm-up encoder. Their cadences
+    are deliberately NOT ASKED rather than asked-and-ignored: an asked gate records its fire.
+  * FIVE ENTRY POINTS ARE DEFERRED BY THE CONTRACT, not merely unwritten -- CAP.observe,
+    FAB.contribution, MEM.blend, MEM.judge and WORLD.manage. CAP.observe's absence is why no cap is
+    ever lifted; FAB.contribution's is why the marginal-contribution counterfactual has no producer.
+
+WHAT CHANGED ON 2026-09-21/22, because several sentences above used to say the opposite: DOM.observe,
+MEM.read and MEM.census have bodies and are called, so the partition assigns real ids, the store
+retrieves and promotes, and growth's memory-pressure leg has a producer. Stage E is driven, so at
+RUN_EPOCHS>1 the stream is redrawn and RE-SEGMENTED -- which is the only route by which a token this
+run minted can appear in this run's own training data.
 """
 import argparse
 import os

@@ -3956,6 +3956,45 @@ record would empty a checked mechanism into an unchecked one. **(b) is refused**
 then invent the field names and the four `produces` entries would certify a round trip nothing can
 verify — which is `TOK.vocab_state`'s D-T3 exactly, one package over.
 
+### Q-RUN-8 — a mid-epoch retok needs `windows_in_epoch` revised with the epoch cursor kept — **OPEN, AND MEASURABLE. The act is DEFERRED TO THE EPOCH ROLL today; no signature has moved**
+
+`TOK.on_window` raises `Due.retok` on its own `retok_every` cadence, and the act it asks for is to
+re-segment the stream with the vocabulary as it now stands — which is the only route by which an id
+the run minted can appear in the run's own training data. `spine/loop.py` cannot perform it
+mid-epoch, and the reason is one line in `RunClock`:
+
+```
+rolled = self._in_epoch >= self.windows_in_epoch
+```
+
+Re-segmenting changes how many **windows** the epoch holds, so `windows_in_epoch` must be revised.
+The only public way to set it is `begin_epoch`, and `begin_epoch` **zeroes `_in_epoch`** — *"the only
+quantity a roll may zero"*, in its own words. Calling it mid-epoch therefore restarts the epoch and
+re-trains on material already consumed. The archive did the other half (*"refresh the token stream
+with the grown vocab; remap position by byte"*, `self_organize.py:702`) and the byte remap is
+writable in the loop today; what is not writable is **a new length with the position kept**.
+
+**What the loop does instead, and what it costs.** The Due sets `System.retok_pending`; the next
+epoch roll re-segments and satisfies it (`tok.retok_satisfied_by_roll`). A retok that no roll ever
+reaches is counted in `tok.due_dropped` — the counter Q-TOK-12 says must read 0 — with a warning
+naming why. **At `RUN_EPOCHS=1` that is every retok the run raises**, because the single roll a
+one-epoch run takes is the one that also finishes it and `Tick` requires `finished` to be tested
+first. At `TOK_RETOK_EVERY=3000` over a 262,601-window run that is ~87 deferred fires, all of them
+lost.
+
+**Options.** (a) `RunClock.revise_epoch_length(n)` — a new entry point, the frozen set grows by one;
+the loop remaps by byte and the clock keeps its cursor. (b) `begin_epoch(n, at=None)` — a defaulted
+keyword, so no caller breaks, but it makes one entry point mean two things and a defaulted argument
+is invisible to K10. (c) Leave it deferred to the roll and document that a single-epoch run cannot
+retok — cheapest, and it makes `TOK_RETOK_EVERY` set-but-inert at the shipped `RUN_EPOCHS = 1`,
+which is the defect class this document exists to refuse.
+
+**Recommendation: (a).** It is the only one that names what is actually happening — the epoch's
+length was re-measured, the run did not restart — and `(c)` leaves a shipped lever that cannot fire
+at the shipped configuration. **It is MEASURABLE before it is decided**: run two epochs with
+`DATA_RESAMPLE=1` and compare `tok.retok_satisfied_by_roll` against `tok.retok_deferred`; if a roll
+reaches every fire at realistic epoch lengths, (c) is adequate and (a) is not worth a signature.
+
 ### Q-TOK-12 — which window's `Due` does the flush act on? — **RESOLVED 2026-09-02: (b), THE OR, PER CADENCE KEY. IDENTICAL TO (a) AT THE SHIPPED `OPT_BATCH_WINDOWS = 1`; NO SIGNATURE MOVES**
 `TOK.on_window` is asked per WINDOW; `mint_burst`, the retok and `judge_probation` act per FLUSH
 (§3.10). `batch_windows` Dues therefore reach one flush and nothing in the frozen surfaces says which

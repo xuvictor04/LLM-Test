@@ -46,9 +46,15 @@ rules are write-order FIFO whatever they say; MEM.census is a stub so growth's m
 is unreachable. ALL THREE OF THOSE SENTENCES WERE TRUE UNTIL 2026-09-21 AND ARE NOW FALSE: observe,
 read and census have bodies, this driver calls all three, the partition assigns real ids, the probe
 retrieves and promotes, and pressure has a producer. What remains: FAB.manage and SIG.train_step
-are stubs, so no expert is ever culled and the signature encoder never learns; and the retok is
-RAISED AND NOT ACTED ON, counted in tok.due_dropped rather than allowed to look like a cadence that
-never came due.
+are stubs, so no expert is ever culled and the signature encoder never learns, and their cadences
+are deliberately NOT ASKED because an asked gate records its fire; and the retok is DEFERRED TO THE
+EPOCH ROLL rather than performed mid-epoch, which at RUN_EPOCHS=1 means never (Q-RUN-8).
+
+STAGE E IS DRIVEN AS OF 2026-09-22 and it is what makes a second epoch a second epoch: the stream
+is redrawn, the segmentation is REBUILT AT THE CURRENT VOCABULARY -- the only route by which a
+token this run minted can appear in this run's own training data -- the clock is told the new
+length, an epoch resample is stamped as a self-inflicted shift (the first thing in the tree ever to
+supply FAB.grow_check's `shift_at`), and MEM is told its contexts are stale.
 """
 import dataclasses
 import math
@@ -98,6 +104,8 @@ def _is_stub(fn):
 # here, in the same edit, and the cross-check below turns a forgotten one into a raise rather than
 # into a report that overstates what the run did.
 _CALLS = frozenset({
+    # ---- stage E, the epoch roll (reachable only at RUN_EPOCHS > 1)
+    "DATA.draw_stream", "TOK.tokenize", "RUN.RunClock.begin_epoch",
     # ---- stage A: the cadenced maintenance block, then the per-window pair
     "MEM.census", "DOM.manage", "DOM.census", "DOM.rekey",
     "RUN.RunClock.advance", "SIG.encode", "DOM.observe", "TOK.on_window",
@@ -529,6 +537,14 @@ def run(sysm, *, max_windows=None, progress=True):
 
     curve, t0 = [], time.time()
     saves = 0
+    # THE EPOCH-LOCAL WINDOW INDEX. Zero at the start of every epoch, which is what makes the cut
+    # and the signature slice index the segmentation that is currently loaded rather than the run's
+    # cumulative window count. See the paragraph at the cut.
+    win_in_epoch = 0
+    # ONE TAIL WARNING PER RUN, not one per epoch: the one-token tail is a property of the
+    # geometry, so a resampling run would otherwise repeat the same sentence every time a
+    # draw happened to land on a multiple of ctx.
+    _tail_warned = False
     # `did` IS SEEDED AT 0 AND IS NO LONGER A CONSTANT. It is overwritten by DOM.observe on every
     # window; the seed only covers the impossible case of a flush with no window in it.
     did = 0
@@ -542,6 +558,13 @@ def run(sysm, *, max_windows=None, progress=True):
     # resumes from it -- a probe that started cold after a resume loses one flush of measurement
     # and no state.
     probe_prev = None
+    # MEM'S PRESSURE VERDICT, None UNTIL THE FIRST CADENCED CENSUS. None is the honest seed and not
+    # False: fabric/api.py::grow_check prints UNREACHABLE for None and "armed, did not fire" for
+    # False, and before any census has run there is no measurement to call False.
+    mem_pressure = None
+    # THE PENDING RESEGMENTATION EVENT, set by the epoch roll and consumed by the next flush. None
+    # on every other flush, which is what makes store.n_resegment_events a count of ROLLS.
+    resegment = None
     # THE ROOT'S ONE BOUND SIG.encode, formed once: DOM.rekey's `encode`. domains/api.py::rekey
     # requires the SAME callable the live path used, or the partition drifts into two signature
     # spaces that do not compare.
@@ -553,185 +576,310 @@ def run(sysm, *, max_windows=None, progress=True):
 
     while True:
         tick = clock.advance()
-        i = int(tick.step) - 1
+        # THE CUT'S INDEX IS EPOCH-LOCAL AND `tick.step` IS NOT, AND THIS LINE READ `tick.step - 1`
+        # UNTIL THE EPOCH ROLL WAS WIRED. RunClock.begin_epoch says which is which: "`step` is the
+        # run's window total across every epoch -- it is what OPT's horizon is compared against --
+        # while `_in_epoch` is how far into THIS stream the loop has read, which is the only
+        # quantity a roll may zero." The clock keeps `_in_epoch` PRIVATE and Tick does not carry
+        # it, so at epoch 1 the old spelling cut at `step * ctx` into a stream of the same length
+        # and `_window_bounds` returned None on the FIRST window of the epoch -- the loop would
+        # have warned that the segmentation ran out and stopped, one window into a second epoch it
+        # had just correctly drawn.
+        # THE LOOP KEEPS ITS OWN, AND THAT IS NOT A SECOND SOURCE FOR THE CLOCK'S. This file owns
+        # THE CUT -- its module docstring says so and `_window_bounds` is here for that reason --
+        # and the cut needs an offset into the CURRENT segmentation. The clock's `_in_epoch` is a
+        # different question (has this window rolled the epoch) answered for a different consumer.
+        # They agree by construction because both advance once per window and both zero at a roll.
+        i = win_in_epoch
+        win_in_epoch += 1
         bounds = _window_bounds(ids, i, ctx)
         if bounds is None:
-            # THE STREAM RAN OUT INSIDE AN EPOCH THE CLOCK STILL THINKS IS RUNNING. Reported rather
-            # than silently treated as the end: the clock's epoch length came from
-            # _windows_in_epoch and a disagreement between it and the ids it was measured on is a
-            # defect somebody needs to see, not a loop exit.
-            warnings.append(
-                f"loop: the segmentation ran out at window {i} while the clock's epoch was not "
-                f"finished (len(ids)={len(ids)}, ctx={ctx}). Stopping; the epoch length and the "
-                f"stream it was measured on disagree.")
-            break
-        batch.append(bounds)
-        # DOM.observe IS CALLED ONCE PER WINDOW, ABOVE THE BATCH EARLY-OUT, and that placement is
-        # what makes `sustain` a Windows clock rather than a flush one -- domains/api.py::observe
-        # says so, and `s.run` is incremented once per call. Putting it in the flush would divide
-        # every domain clock by the batch width, silently, at every BATCH_W.
-        # sample_window IS THE SAME OBJECT SIG.encode GETS, through the root's one slicer: a rekey
-        # cannot reproduce the signature otherwise, so a second slice at this call site would be a
-        # defect by construction.
-        # DOM.observe IS NOT WIRED, AND IT IS NOT ONE OF THE ELEVEN -- IT IS A TWELFTH STUB.
-        # It is the only producer of a domain id, so with no body every window is domain 0 and the
-        # fabric's per-domain books, the breadth ban and DOM.note_competence all see ONE domain.
-        # domains/api.py::observe says what that state is: "enabled == False returns did=0 for every
-        # window ... THAT IS NOT A DEGENERACY MEM HAS TO DISCOVER: 0 is a real source id that MEM
-        # sees, and the report must say 'the partition is off' rather than leaving the per-source
-        # floor to protect exactly one source in silence." The same sentence applies to a stubbed
-        # observe, and this is the loop saying it.
-        # A SECOND DEFECT WAS FOUND ON THE WAY AND IS RECORDED BECAUSE NOTHING ELSE WILL FIND IT:
-        # spine/compose.py::_sample_window clamps its start at 0, so early in the stream it returns
-        # a SHORT window -- 173 units against a frozen 192 on the first flush, measured -- and
-        # sig/api.py::encode refuses exactly that ("no eval variant, no gist placeholder and no
-        # fallback ... because the alternative measured a whole project's routing on one byte").
-        # The helper returns a window its only consumer refuses, and until this loop called it
-        # there was no consumer to find out. Padding would invent units the model has not consumed;
-        # taking the units AHEAD of the cursor is what that helper's own docstring rules out. The
-        # repair belongs in the root, which owns the slicer.
-
-        # ---- ROW A, IN LOOP_ORDER'S OWN ORDER --------------------------------------------------
-        # MEM.census -> DOM.manage -> DOM.census -> FAB.manage -> SIG.cadence_due -> SIG.train_step
-        # -> SIG.encode -> DOM.observe -> DOM.rekey -> TOK.on_window. THIS WHOLE STAGE WAS UNCALLED
-        # UNTIL 2026-09-21 and the ledger said so the entire time: 'dom.manage', 'dom.rekey' and
-        # 'fab.manage' read checks=0 on every run ever taken, which is RUN.Cadences reporting that
-        # the gate was never EVALUATED -- a different and worse fact than fires=0.
-        #
-        # THE CADENCED MAINTENANCE BLOCK. MEM.census is here and not only at R because it is
-        # DOM.manage's PRODUCER: manage takes `memory_counts` and `mem_floor_entries` and nothing
-        # else in the tree returns them. reconcile=False here -- the exact recount is the R stage's
-        # one-shot repair, and running it every hundred windows would be an O(capacity) bincount on
-        # a cadence nobody asked for.
-        if cadences.due("dom.manage", periods["dom.manage"], clock):
-            _c = mem_api.census(cfg["MEM"], sysm.store)
-            dom_api.manage(dom_cfg, sysm.partition, now=tick.step,
-                           memory_counts=_c.counts, mem_floor_entries=_c.floor_entries)
-            dom_api.census(dom_cfg, sysm.partition)
-        # DOM.rekey RE-ENCODES EVERY DOMAIN'S RESERVOIR WITH THE LIVE ENCODER, and it is what
-        # MEASURES the acceptance radius: `radius` reads 0.0 for every domain until it runs, so on
-        # a run without it DOM_RADIUS_Q, DOM_RADIUS_MULT and DOM_RADIUS_CAP are set-but-inert and
-        # every assignment is decided on the pooled bootstrap (part.n_bootstrap_radius is the
-        # counter that says so). `encode` is the root's ONE bound SIG.encode, for the reason
-        # domains/api.py::rekey gives: a rekey that used a second encoder puts the partition into
-        # two signature spaces that do not compare.
-        if cadences.due("dom.rekey", periods["dom.rekey"], clock):
-            dom_api.rekey(dom_cfg, sysm.partition, encode=sig_encode)
-        # FAB.manage IS A STUB AND ITS CADENCE IS THEREFORE NOT ASKED. Asking it and doing nothing
-        # would CONSUME the fire -- Cadences.due RECORDS the step when it answers True -- so the
-        # ledger would show fab.manage firing on a run where no expert was ever culled. An
-        # unevaluated gate reading checks=0 is the honest state and `skipped` names it.
-        # SIG.cadence_due IS NOT ASKED FOR THE SAME REASON, AND IT IS THE STRONGER CASE: it is the
-        # gate for SIG.train_step, which IS a stub, and tok/api.py::on_window's own paragraph is
-        # the general rule -- "asking under a shared key CONSUMES the event: probation sharing the
-        # grow key means minting never fires at all". A gate asked by nobody who can act on it is a
-        # fire thrown away.
-        #
-        # SIG.encode, PER WINDOW, WHICH IS WHERE THE TABLE PUTS IT -- immediately above DOM.observe.
-        # It used to be called once per FLUSH from inside _flush, off a second slice of the corpus;
-        # both of those are now here, and `sample` is the ONE object both consumers take.
-        sample = _c_sample_window(sysm, st, tick.step)
-        samples.append(sample)
-        sig_i = sig_api.encode(sig_cfg, st, [sample])[0]
-        if sig_i.device != sysm.process.device:
-            sig_i = sig_i.to(sysm.process.device)
-        sigs.append(sig_i)
-        # DOM.observe: THE ONLY PRODUCER OF A DOMAIN ID IN THE TREE. Until it had a body every
-        # window was domain 0 and the fabric's per-domain books, its breadth ban and MEM's
-        # per-source floor all saw exactly ONE source. domains/api.py::Assignment says the loop
-        # must take its `did` from here: "memory provenance (MEM.write's `sources`), the
-        # expert-to-domain affiliation (FAB.forward's and FAB.observe's `domain_id`) and
-        # DOM.note_competence's `did` are all the same id under three spellings, and a loop that
-        # keeps a literal 0 makes all three see one source."
-        asg = dom_api.observe(dom_cfg, sysm.partition, signature=sig_i, sample_window=sample,
-                              tokens=ids[bounds[0]:bounds[0] + ctx], now=tick.step)
-        did = int(asg.did)
-        dids.append(did)
-
-        # ---- ROW A CONTINUED: TOK'S FOUR CADENCES, ASKED ONCE PER WINDOW ------------------------
-        # ASKED HERE AND ACTED ON AT THE FLUSH, which is the whole of Q-TOK-12. batch_windows Dues
-        # reach one flush and the root ORs them PER CADENCE KEY, because `_due` RECORDS the step
-        # when it answers True: a Due a flush discards is a fire that is silently GONE, at a rate of
-        # gcd(period, batch_windows)/batch_windows -- half of all mints at grow_every=200 with
-        # batch_windows=16, and 15 of every 16 at any period coprime with the batch.
-        # THE OR IS THE ROOT'S BECAUSE THE ROOT IS THE ONLY THING THAT CAN SEE A BATCH, and it is
-        # written with dataclasses.replace on the record TOK returned rather than by naming
-        # tok_api.Due: this file receives records from packages and reads them, and the ruling that
-        # settled the OR also said "`Due` keeps its four fields and no signature moves".
-        # `frozen` COMES FROM THE LAST WINDOW, which is the same value as the OR because it is a
-        # monotone STATE and not an event -- at step >= freeze_at it is True from then on.
-        due = tok_api.on_window(tok_cfg, vocab, ids[bounds[0]:bounds[1]], step=tick.step)
-        if sysm.due is None:
-            sysm.due = due
+            # THE WINDOW HAS NO MATERIAL. TWO CAUSES, AND THEY ARE DIFFERENT FACTS ABOUT DIFFERENT
+            # RUNS, so this branch names which before it does anything.
+            # (1) THE ONE-TOKEN TAIL, WHICH IS ARITHMETIC AND NOT A DEFECT. `_windows_in_epoch` is
+            #     `len(ids) // ctx` and a window needs ctx + 1 ids -- `y` is `x` shifted one token
+            #     -- so whenever len(ids) is an exact multiple of ctx the LAST window of the epoch
+            #     is one target short. The clock is right, the division is right, and the epoch
+            #     simply ends one window earlier than the floor suggests. It happens on about one
+            #     epoch in `ctx`, so a single-epoch run almost never sees it and a long resampling
+            #     run eventually does.
+            # (2) A REAL DISAGREEMENT between the epoch length and the stream it was measured on,
+            #     which is a defect somebody needs to see.
+            # THIS BRANCH USED TO `break` FOR BOTH, and in case (1) that STOPPED THE RUN one window
+            # before a roll it should have taken -- so a multi-epoch run would silently become a
+            # one-epoch run, with a warning that called the arithmetic a defect. The window is
+            # skipped either way; what changed is that the loop now falls through to the
+            # finished/rolled tail below instead of leaving, so the epoch can roll.
+            _short_by = (i * ctx + ctx + 1) - len(ids)
+            if _short_by == 1 and not _tail_warned:
+                _tail_warned = True
+                warnings.append(
+                    f"loop: epoch {int(tick.epoch)}'s last window has inputs and no final target "
+                    f"-- len(ids)={len(ids)} is an exact multiple of LM_CTX={ctx}, and a window "
+                    f"needs ctx+1 ids because `y` is `x` shifted one token. The window is skipped "
+                    f"and the epoch rolls normally. This is the floor in "
+                    f"spine/compose.py::_windows_in_epoch, not a defect.")
+            elif _short_by != 1:
+                warnings.append(
+                    f"loop: the segmentation ran out at window {i} of epoch {int(tick.epoch)} and "
+                    f"it is NOT the one-token tail -- it is short by {_short_by} "
+                    f"(len(ids)={len(ids)}, ctx={ctx}). The epoch length and the stream it was "
+                    f"measured on disagree, which is a defect rather than arithmetic.")
         else:
-            prev = sysm.due
-            merged = ((prev.mint and due.mint) or (prev.retok and due.retok)
-                      or (prev.probation and due.probation))
-            if merged:
-                # tok.due_merged: A FLUSH WHERE MORE THAN ONE WINDOW RAISED THE SAME KEY.
-                # UNREACHABLE AT THE SHIPPED batch_windows=1, where no two windows share a flush --
-                # which is why it is bumped here, in the branch that only a second window can reach,
-                # rather than seeded to a number the shipped configuration cannot produce.
-                vocab.counters["tok.due_merged"] = vocab.counters.get("tok.due_merged", 0) + 1
-            sysm.due = dataclasses.replace(
-                prev, mint=prev.mint or due.mint, retok=prev.retok or due.retok,
-                probation=prev.probation or due.probation, frozen=due.frozen)
+            batch.append(bounds)
+            # DOM.observe IS CALLED ONCE PER WINDOW, ABOVE THE BATCH EARLY-OUT, and that placement is
+            # what makes `sustain` a Windows clock rather than a flush one -- domains/api.py::observe
+            # says so, and `s.run` is incremented once per call. Putting it in the flush would divide
+            # every domain clock by the batch width, silently, at every BATCH_W.
+            # sample_window IS THE SAME OBJECT SIG.encode GETS, through the root's one slicer: a rekey
+            # cannot reproduce the signature otherwise, so a second slice at this call site would be a
+            # defect by construction.
+            # DOM.observe IS NOT WIRED, AND IT IS NOT ONE OF THE ELEVEN -- IT IS A TWELFTH STUB.
+            # It is the only producer of a domain id, so with no body every window is domain 0 and the
+            # fabric's per-domain books, the breadth ban and DOM.note_competence all see ONE domain.
+            # domains/api.py::observe says what that state is: "enabled == False returns did=0 for every
+            # window ... THAT IS NOT A DEGENERACY MEM HAS TO DISCOVER: 0 is a real source id that MEM
+            # sees, and the report must say 'the partition is off' rather than leaving the per-source
+            # floor to protect exactly one source in silence." The same sentence applies to a stubbed
+            # observe, and this is the loop saying it.
+            # A SECOND DEFECT WAS FOUND ON THE WAY AND IS RECORDED BECAUSE NOTHING ELSE WILL FIND IT:
+            # spine/compose.py::_sample_window clamps its start at 0, so early in the stream it returns
+            # a SHORT window -- 173 units against a frozen 192 on the first flush, measured -- and
+            # sig/api.py::encode refuses exactly that ("no eval variant, no gist placeholder and no
+            # fallback ... because the alternative measured a whole project's routing on one byte").
+            # The helper returns a window its only consumer refuses, and until this loop called it
+            # there was no consumer to find out. Padding would invent units the model has not consumed;
+            # taking the units AHEAD of the cursor is what that helper's own docstring rules out. The
+            # repair belongs in the root, which owns the slicer.
 
-        if tick.flush_due:
-            loss, per_window, probe_prev = _flush(
-                sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, vocab, clock,
-                sysm.novelty, did, key_fn, sigs, dids, probe_prev)
-            # NOVELTY CROSSES BACKWARDS, WHICH IS WHY IT LIVES ON THE SYSTEM AND NOT IN A RETURN.
-            # compose.py's row says it: "novelty is the PREVIOUS flush's mean surprise
-            # (self_organize.py:7499), carried on System.novelty because it crosses backwards and
-            # `produces` reads forwards only". The loop is the only thing that can carry it, so the
-            # loop writes it here, after the flush that measured it.
-            # IT IS SURPRISE AND IT WAS THE PER-WINDOW LOSS UNTIL THIS EDIT, which is a defect the
-            # MEM.write wiring found rather than a refinement. fabric/api.py::forward declares
-            # "novelty: (B,) surprise from the previous step", the archive line the row cites is
-            # `surprise = 1 - pm.gather(-1, y...)` and `_fab_nov = float(surprise.mean())`
-            # (self_organize.py:683-685), and a cross-entropy in nats is a DIFFERENT QUANTITY on a
-            # different scale: 8.3 at the start of a run against a surprise that cannot leave
-            # [0, 1]. It is fed straight into `nov_proj`, a Linear(1, dk), so the router's query was
-            # being biased by a number an order of magnitude outside the range that layer was
-            # initialised for -- and nothing could have caught it except forming the real quantity
-            # for the consumer that names it.
-            sysm.novelty = per_window
-            batch, sigs, dids, samples = [], [], [], []
-            if loss is not None:
-                last_loss = loss
-                if curve == []:
-                    first_loss = loss
-                curve.append(loss)
+            # ---- ROW A, IN LOOP_ORDER'S OWN ORDER --------------------------------------------------
+            # MEM.census -> DOM.manage -> DOM.census -> FAB.manage -> SIG.cadence_due -> SIG.train_step
+            # -> SIG.encode -> DOM.observe -> DOM.rekey -> TOK.on_window. THIS WHOLE STAGE WAS UNCALLED
+            # UNTIL 2026-09-21 and the ledger said so the entire time: 'dom.manage', 'dom.rekey' and
+            # 'fab.manage' read checks=0 on every run ever taken, which is RUN.Cadences reporting that
+            # the gate was never EVALUATED -- a different and worse fact than fires=0.
+            #
+            # THE CADENCED MAINTENANCE BLOCK. MEM.census is here and not only at R because it is
+            # DOM.manage's PRODUCER: manage takes `memory_counts` and `mem_floor_entries` and nothing
+            # else in the tree returns them. reconcile=False here -- the exact recount is the R stage's
+            # one-shot repair, and running it every hundred windows would be an O(capacity) bincount on
+            # a cadence nobody asked for.
+            if cadences.due("dom.manage", periods["dom.manage"], clock):
+                _c = mem_api.census(cfg["MEM"], sysm.store)
+                dom_api.manage(dom_cfg, sysm.partition, now=tick.step,
+                               memory_counts=_c.counts, mem_floor_entries=_c.floor_entries)
+                dom_api.census(dom_cfg, sysm.partition)
+                # AND THE PRESSURE VERDICT, CARRIED TO EVERY FLUSH UNTIL THE NEXT CENSUS. LOOP_ORDER's
+                # B row for FAB.observe/grow_check names this shape exactly -- "memory_pressure from
+                # MEM.census, which is a CADENCED producer feeding a per-flush required argument" -- so
+                # the staleness is the table's design and not a shortcut. Calling census per flush
+                # would materialise an 8192-entry dict and two capacity-wide reductions on every one of
+                # a quarter-million flushes, to move a boolean that changes on the scale of eviction
+                # pressure.
+                mem_pressure = _c.pressure
+            # DOM.rekey RE-ENCODES EVERY DOMAIN'S RESERVOIR WITH THE LIVE ENCODER, and it is what
+            # MEASURES the acceptance radius: `radius` reads 0.0 for every domain until it runs, so on
+            # a run without it DOM_RADIUS_Q, DOM_RADIUS_MULT and DOM_RADIUS_CAP are set-but-inert and
+            # every assignment is decided on the pooled bootstrap (part.n_bootstrap_radius is the
+            # counter that says so). `encode` is the root's ONE bound SIG.encode, for the reason
+            # domains/api.py::rekey gives: a rekey that used a second encoder puts the partition into
+            # two signature spaces that do not compare.
+            if cadences.due("dom.rekey", periods["dom.rekey"], clock):
+                dom_api.rekey(dom_cfg, sysm.partition, encode=sig_encode)
+            # FAB.manage IS A STUB AND ITS CADENCE IS THEREFORE NOT ASKED. Asking it and doing nothing
+            # would CONSUME the fire -- Cadences.due RECORDS the step when it answers True -- so the
+            # ledger would show fab.manage firing on a run where no expert was ever culled. An
+            # unevaluated gate reading checks=0 is the honest state and `skipped` names it.
+            # SIG.cadence_due IS NOT ASKED FOR THE SAME REASON, AND IT IS THE STRONGER CASE: it is the
+            # gate for SIG.train_step, which IS a stub, and tok/api.py::on_window's own paragraph is
+            # the general rule -- "asking under a shared key CONSUMES the event: probation sharing the
+            # grow key means minting never fires at all". A gate asked by nobody who can act on it is a
+            # fire thrown away.
+            #
+            # SIG.encode, PER WINDOW, WHICH IS WHERE THE TABLE PUTS IT -- immediately above DOM.observe.
+            # It used to be called once per FLUSH from inside _flush, off a second slice of the corpus;
+            # both of those are now here, and `sample` is the ONE object both consumers take.
+            # EPOCH-LOCAL FOR THE SAME REASON THE CUT IS: _signature_cursor multiplies `at_window` by
+            # LM.ctx and indexes Segmentation.byte_pos, and `sysm.segmentation` is THIS epoch's. The
+            # ordinal is 1-based there -- it is "how many windows have been reached" -- so it is the
+            # cut's 0-based index plus one, which is `win_in_epoch` after the increment above.
+            sample = _c_sample_window(sysm, st, win_in_epoch)
+            samples.append(sample)
+            sig_i = sig_api.encode(sig_cfg, st, [sample])[0]
+            if sig_i.device != sysm.process.device:
+                sig_i = sig_i.to(sysm.process.device)
+            sigs.append(sig_i)
+            # DOM.observe: THE ONLY PRODUCER OF A DOMAIN ID IN THE TREE. Until it had a body every
+            # window was domain 0 and the fabric's per-domain books, its breadth ban and MEM's
+            # per-source floor all saw exactly ONE source. domains/api.py::Assignment says the loop
+            # must take its `did` from here: "memory provenance (MEM.write's `sources`), the
+            # expert-to-domain affiliation (FAB.forward's and FAB.observe's `domain_id`) and
+            # DOM.note_competence's `did` are all the same id under three spellings, and a loop that
+            # keeps a literal 0 makes all three see one source."
+            asg = dom_api.observe(dom_cfg, sysm.partition, signature=sig_i, sample_window=sample,
+                                  tokens=ids[bounds[0]:bounds[0] + ctx], now=tick.step)
+            did = int(asg.did)
+            dids.append(did)
 
-        # THE PERIODIC CHECKPOINT, THROUGH THE SAME Cadences EVERY OTHER GATE USES. A 53-minute
-        # run finished with `ckpt checks=0` -- the gate was never EVALUATED, so nothing was written
-        # and the trained weights were lost at process exit. That is what this call is: not a
-        # refinement, a repair. It is evaluated per window rather than per flush because the period
-        # is in WINDOWS and Cadences.due is phase-independent by construction.
-        if cadences.due("ckpt", periods["ckpt"], clock):
-            saves += 1 if _save(sysm, clock, "periodic") else 0
-        # AND THE SIGUSR1 FLAG, DRAINED ONCE PER WINDOW. CKPT.install_save_signal armed it at
-        # compose; take() returns True exactly once per `kill -USR1`, so a checkpoint is written on
-        # demand without the run being stopped to get one.
-        if sysm.save_flag is not None and sysm.save_flag.take():
-            saves += 1 if _save(sysm, clock, "sigusr1") else 0
+            # ---- ROW A CONTINUED: TOK'S FOUR CADENCES, ASKED ONCE PER WINDOW ------------------------
+            # ASKED HERE AND ACTED ON AT THE FLUSH, which is the whole of Q-TOK-12. batch_windows Dues
+            # reach one flush and the root ORs them PER CADENCE KEY, because `_due` RECORDS the step
+            # when it answers True: a Due a flush discards is a fire that is silently GONE, at a rate of
+            # gcd(period, batch_windows)/batch_windows -- half of all mints at grow_every=200 with
+            # batch_windows=16, and 15 of every 16 at any period coprime with the batch.
+            # THE OR IS THE ROOT'S BECAUSE THE ROOT IS THE ONLY THING THAT CAN SEE A BATCH, and it is
+            # written with dataclasses.replace on the record TOK returned rather than by naming
+            # tok_api.Due: this file receives records from packages and reads them, and the ruling that
+            # settled the OR also said "`Due` keeps its four fields and no signature moves".
+            # `frozen` COMES FROM THE LAST WINDOW, which is the same value as the OR because it is a
+            # monotone STATE and not an event -- at step >= freeze_at it is True from then on.
+            due = tok_api.on_window(tok_cfg, vocab, ids[bounds[0]:bounds[1]], step=tick.step)
+            if sysm.due is None:
+                sysm.due = due
+            else:
+                prev = sysm.due
+                merged = ((prev.mint and due.mint) or (prev.retok and due.retok)
+                          or (prev.probation and due.probation))
+                if merged:
+                    # tok.due_merged: A FLUSH WHERE MORE THAN ONE WINDOW RAISED THE SAME KEY.
+                    # UNREACHABLE AT THE SHIPPED batch_windows=1, where no two windows share a flush --
+                    # which is why it is bumped here, in the branch that only a second window can reach,
+                    # rather than seeded to a number the shipped configuration cannot produce.
+                    vocab.counters["tok.due_merged"] = vocab.counters.get("tok.due_merged", 0) + 1
+                sysm.due = dataclasses.replace(
+                    prev, mint=prev.mint or due.mint, retok=prev.retok or due.retok,
+                    probation=prev.probation or due.probation, frozen=due.frozen)
 
-        if progress and cadences.due("progress", periods["progress"], clock):
-            print(f"[{int(tick.step)} windows] loss={last_loss:.4f} "
-                  f"opt_steps={int(clock.counters()['opt_steps'])} "
-                  f"n_live={int(pop.n_live)} vocab={int(vocab.size())} "
-                  f"uncalled={len(skipped)}", flush=True)
+            if tick.flush_due:
+                loss, per_window, probe_prev = _flush(
+                    sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, vocab, clock,
+                    sysm.novelty, did, key_fn, sigs, dids, probe_prev, mem_pressure, resegment)
+                # `resegment` IS CONSUMED ON THE FIRST FLUSH AFTER A ROLL AND NOT ON EVERY ONE. It is
+                # an EVENT: memory/api.py::maintain drops and retakes its rekey snapshot each time it
+                # is non-None, so leaving it set would restart that walk every flush and the amortized
+                # rekey would never complete a pass -- n_rekey_passes pinned at 0 with n_rekey_slices
+                # climbing, which reads exactly like a cadence that is working.
+                resegment = None
+                # NOVELTY CROSSES BACKWARDS, WHICH IS WHY IT LIVES ON THE SYSTEM AND NOT IN A RETURN.
+                # compose.py's row says it: "novelty is the PREVIOUS flush's mean surprise
+                # (self_organize.py:7499), carried on System.novelty because it crosses backwards and
+                # `produces` reads forwards only". The loop is the only thing that can carry it, so the
+                # loop writes it here, after the flush that measured it.
+                # IT IS SURPRISE AND IT WAS THE PER-WINDOW LOSS UNTIL THIS EDIT, which is a defect the
+                # MEM.write wiring found rather than a refinement. fabric/api.py::forward declares
+                # "novelty: (B,) surprise from the previous step", the archive line the row cites is
+                # `surprise = 1 - pm.gather(-1, y...)` and `_fab_nov = float(surprise.mean())`
+                # (self_organize.py:683-685), and a cross-entropy in nats is a DIFFERENT QUANTITY on a
+                # different scale: 8.3 at the start of a run against a surprise that cannot leave
+                # [0, 1]. It is fed straight into `nov_proj`, a Linear(1, dk), so the router's query was
+                # being biased by a number an order of magnitude outside the range that layer was
+                # initialised for -- and nothing could have caught it except forming the real quantity
+                # for the consumer that names it.
+                sysm.novelty = per_window
+                batch, sigs, dids, samples = [], [], [], []
+                if loss is not None:
+                    last_loss = loss
+                    if curve == []:
+                        first_loss = loss
+                    curve.append(loss)
+
+            # THE PERIODIC CHECKPOINT, THROUGH THE SAME Cadences EVERY OTHER GATE USES. A 53-minute
+            # run finished with `ckpt checks=0` -- the gate was never EVALUATED, so nothing was written
+            # and the trained weights were lost at process exit. That is what this call is: not a
+            # refinement, a repair. It is evaluated per window rather than per flush because the period
+            # is in WINDOWS and Cadences.due is phase-independent by construction.
+            if cadences.due("ckpt", periods["ckpt"], clock):
+                saves += 1 if _save(sysm, clock, "periodic") else 0
+            # AND THE SIGUSR1 FLAG, DRAINED ONCE PER WINDOW. CKPT.install_save_signal armed it at
+            # compose; take() returns True exactly once per `kill -USR1`, so a checkpoint is written on
+            # demand without the run being stopped to get one.
+            if sysm.save_flag is not None and sysm.save_flag.take():
+                saves += 1 if _save(sysm, clock, "sigusr1") else 0
+
+            if progress and cadences.due("progress", periods["progress"], clock):
+                print(f"[{int(tick.step)} windows] loss={last_loss:.4f} "
+                      f"opt_steps={int(clock.counters()['opt_steps'])} "
+                      f"n_live={int(pop.n_live)} vocab={int(vocab.size())} "
+                      f"uncalled={len(skipped)}", flush=True)
 
         if tick.finished:
             break
         if tick.rolled:
-            # THE CALLER MUST SUPPLY A FRESH STREAM AND CALL begin_epoch, which RunClock now
-            # ENFORCES by re-arming windows_in_epoch to None at the roll.
-            warnings.append("loop: an epoch rolled; this driver runs a single pass and stops "
-                            "there, because DATA.draw_stream at stage E is not yet driven per "
-                            "epoch from here.")
-            break
+            # ---- STAGE E: THE EPOCH ROLL. DATA.draw_stream -> TOK.tokenize -> begin_epoch -------
+            # THIS DRIVER RAN A SINGLE PASS AND STOPPED HERE UNTIL 2026-09-22, and stage E's three
+            # rows were three of the six the report listed as having no call site at all.
+            # IT IS TESTED AFTER `finished` AND THAT ORDER IS THE CONTRACT'S. train/api.py::Tick:
+            # "`finished` is tested BEFORE `rolled`. Both can be True on one advance -- at the
+            # shipped RUN_EPOCHS=1 the only roll a run ever takes is exactly that one -- and a
+            # caller that tests `rolled` first re-enters the stage-E rows to draw a stream for an
+            # epoch the run has already finished." So at RUN_EPOCHS=1 this block is UNREACHABLE,
+            # and it is exercised at RUN_EPOCHS=2.
+            #
+            # THE PARTIAL BATCH IS DISCARDED FIRST, AND THIS IS THE LINE THAT WOULD OTHERWISE BE A
+            # SILENT DEFECT. `batch` holds (a, b) TOKEN BOUNDS into the OLD segmentation, and
+            # `sigs` / `dids` / `samples` hold that segmentation's material; a flush after the roll
+            # would cut the NEW ids at the OLD offsets and train on a batch spanning two
+            # tokenizations. Nothing would raise -- the bounds are in range -- and the loss would
+            # simply have been measured on text nobody assembled.
+            if batch:
+                warnings.append(
+                    f"loop: {len(batch)} window(s) were accumulated and not flushed when epoch "
+                    f"{int(tick.epoch)} began. DISCARDED rather than carried: their token bounds "
+                    f"index the previous epoch's segmentation. At OPT_BATCH_WINDOWS=1 this cannot "
+                    f"happen; above 1 it costs up to batch_windows-1 windows per epoch.")
+            batch, sigs, dids, samples = [], [], [], []
+            win_in_epoch = 0
+            # probe_prev IS DROPPED FOR THE SAME REASON ONE LAYER OVER: a tensor of token ids under
+            # a segmentation that has just been replaced, which MEM.read would encode as current.
+            probe_prev = None
+            # THE DRAW. `epoch=clock.epoch` is the row's own spelling and it is read INSIDE
+            # draw_stream -- data/api.py owns whether dat.resample makes this a different stream --
+            # so the root passes the number and never the decision.
+            sysm.stream = data_api.draw_stream(dat_cfg, sysm.areas, sysm.plan,
+                                               epoch=int(tick.epoch), seed=int(run_cfg.seed))
+            # THE RE-SEGMENTATION, AND IT IS WHAT FINALLY LETS A MINTED TOKEN BE USED. Every id
+            # minted during the previous epoch is in `vocab`'s match table, so tokenize() emits
+            # them here -- the first route in this tree by which a token the run invented can
+            # appear in the run's own training data. Until this line the loop warned, at the end of
+            # every run, that its mints were real and unusable.
+            prev_n = len(ids)
+            sysm.segmentation = tok_api.tokenize(
+                tok_cfg, vocab, sysm.stream.bytes, sysm.stream.labels,
+                regularize=True, seed=int(run_cfg.seed))
+            ids = sysm.segmentation.ids
+            # THE LENGTH ARRIVES AS A COUNT OF WINDOWS, which is begin_epoch's own requirement --
+            # "never as a byte budget divided by a token window" -- and the division is named once,
+            # at compose.py::_windows_in_epoch, because what separates the right form from the
+            # wrong one is WHICH STREAM was divided and no type states that.
+            clock.begin_epoch(_windows_in_epoch_of(sysm))
+            # AN EPOCH RESAMPLE IS A SELF-INFLICTED SHIFT, AND THIS IS THE FIRST THING IN THE TREE
+            # EVER TO STAMP ONE. fabric/api.py::grow_check suppresses BOTH growth legs for
+            # `cooldown` windows after a shift, because "A SHIFT WE CAUSED IS NOT NEW MATERIAL"
+            # (Q-FAB-6) -- and until this line fab.shift_notifications read 0 on every run, which
+            # that counter declares to mean the blackout is UNREACHABLE rather than armed.
+            # compose.py names three stamping sites; this is the E draw row's.
+            sysm.shift_at_windows = U.Windows(int(clock.step))
+            # AND MEM IS TOLD, because every context it holds is token ids under a segmentation
+            # that no longer exists. maintain's `resegment` arm drops and retakes the rekey
+            # snapshot and counts the event; it deliberately does NOT rewrite the stored ids,
+            # because that needs an old-id -> new-id mapping "not declared anywhere" (its words)
+            # and inventing one would rewrite every stored token under a guess. The stale ids stay
+            # visibly stale, which is what store.n_resegment_events exists to make readable.
+            resegment = sysm.segmentation
+            # A PENDING RETOK IS SATISFIED BY THIS ROLL, because the roll IS the act: the stream
+            # was just re-segmented with the vocabulary as it now stands. Cleared here so that what
+            # survives to the end of the run is only the fires no roll ever reached.
+            if sysm.retok_pending:
+                vocab.counters["tok.retok_satisfied_by_roll"] = \
+                    vocab.counters.get("tok.retok_satisfied_by_roll", 0) + 1
+                sysm.retok_pending = False
+            warnings.append(
+                f"loop: epoch {int(tick.epoch)} began -- redrew the stream and re-segmented at "
+                f"vocabulary size {int(vocab.size())} ({prev_n} -> {len(ids)} ids). Every memory "
+                f"entry written before this point holds token ids and byte offsets under the "
+                f"PREVIOUS segmentation and is NOT rewritten; MEM.maintain is told, drops its "
+                f"rekey snapshot and counts the event.")
+            continue
         if max_windows is not None and int(tick.step) >= int(max_windows):
             stopped_early = True
             warnings.append(f"loop: stopped at max_windows={int(max_windows)}, which is a DRIVER "
@@ -755,6 +903,21 @@ def run(sysm, *, max_windows=None, progress=True):
     # THIS IS SAID HERE BECAUSE NOTHING ELSE IN THE REPORT SAYS IT. tok.mint reads 18 and
     # lm.mint.rows_init_mean reads 18 and both are true; a reader adding those to "the vocabulary
     # mints" would conclude the mechanism is contributing to this run's numbers, and it is not.
+    # WHAT THE DEFERRAL ACTUALLY COST, COUNTED ONCE AT THE END. A retok raised and never reached
+    # by a roll is a fire that is gone -- Q-TOK-12's tok.due_dropped, which it says must read 0 --
+    # so the two counters are kept apart: `tok.retok_deferred` is how many were raised, and
+    # `tok.due_dropped` is how many of those the run never satisfied. At RUN_EPOCHS=1 they are
+    # equal by construction, because the only roll a single-epoch run takes is the one that also
+    # finishes it and `finished` is tested first.
+    if sysm.retok_pending:
+        vocab.counters["tok.due_dropped"] = vocab.counters.get("tok.due_dropped", 0) + 1
+        warnings.append(
+            "loop: a retok was raised and no epoch roll reached it before the run ended, so the "
+            "stream was never re-segmented with the tokens this run minted. At RUN_EPOCHS=1 that "
+            "is every retok the run raises: the single roll a one-epoch run takes is the one that "
+            "also finishes it, and Tick requires `finished` to be tested first. Raise RUN_EPOCHS "
+            "(with DATA_RESAMPLE on, which the composition root refuses to run without) to give "
+            "the mints a route into the data.")
     _minted = int(vocab.counters.get("tok.mint", 0))
     if _minted:
         warnings.append(
@@ -844,6 +1007,18 @@ def _report(sysm, elapsed_s, ctx):
     return out
 
 
+def _windows_in_epoch_of(sysm):
+    """compose.py::_windows_in_epoch, reached without importing compose at this module's top level.
+
+    THE DIVISION IS NAMED ONCE, THERE. `len(Segmentation.ids) // LM.ctx` and `stream_bytes // ctx`
+    are both ints and both would wrap as units.Windows; what separates them is WHICH STREAM was
+    divided, and no type states that -- which is why RunClock.begin_epoch takes a bare count and
+    refuses a Clock, and why this driver must not write the division itself.
+    """
+    from spine import compose as _c
+    return _c._windows_in_epoch(sysm)
+
+
 def _periods_of(sysm):
     """compose.py::_periods, reached without importing compose into this module's top level."""
     from spine import compose as _c
@@ -851,7 +1026,7 @@ def _periods_of(sysm):
 
 
 def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, vocab, clock,
-           novelty, domain_id, key_fn, sigs, dids, probe_prev):
+           novelty, domain_id, key_fn, sigs, dids, probe_prev, mem_pressure, resegment):
     cfg_world = sysm.configs["WORLD"]
     cfg_dom = sysm.configs["DOM"]
     cfg_mem = sysm.configs["MEM"]
@@ -1094,7 +1269,7 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     # declared to distinguish.
     fab_api.grow_check(fab_cfg, pop, flush_loss=mean.detach(),
                        step_windows=U.Windows(int(clock.step)), soft_cap=caps,
-                       memory_pressure=None, signature=sig_vec,
+                       memory_pressure=mem_pressure, signature=sig_vec,
                        shift_at=sysm.shift_at_windows)
 
     # ---- MEMORY -------------------------------------------------------------------------------
@@ -1176,7 +1351,7 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     # did-it-fire surface. Calling it once per flush is the shipped semantics: both periods are
     # Windows and elapsed-since-last-fire is phase-independent.
     mem_api.maintain(cfg_mem, sysm.store, now=now_w, key_fn=key_fn,
-                     probe_contexts=probe_prev, resegment=None)
+                     probe_contexts=probe_prev, resegment=resegment)
 
     # ---- THE EVENT-DRIVEN ROWS: what THIS BATCH'S Dues made due ---------------------------------
     # ACTED ON PER FLUSH, ASKED PER WINDOW. The Due was OR-ed across the batch in `run`; it is
@@ -1206,23 +1381,27 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
                 lm_api.on_mint(lm_cfg, model, mints, vocab.id2bytes, at_window=now_w2,
                                sig_emb=None)
         if due.retok:
-            # THE RETOK IS RAISED AND NOT ACTED ON, AND THE FIRE IS COUNTED AS DROPPED RATHER THAN
-            # LEFT TO LOOK LIKE A CADENCE THAT NEVER CAME DUE. Q-TOK-12 says tok.due_dropped is
-            # "0 BY CONSTRUCTION" under the OR and that "a counter that must read zero is the only
-            # way a later reader can tell which reading was actually implemented" -- that sentence
-            # is about the BATCH, where the OR really does drop nothing. This is a larger fact of
-            # the same kind: `_due` banked the step, the act did not happen, and the next retok is
-            # a full retok_every away. So the counter is bumped, which makes the claim visibly
-            # false on any run where it happens, which is the loud state.
-            # WHY IT IS NOT DRIVEN: the act is TOK.tokenize over the whole stream, producing a new
-            # Segmentation -- new ids, new byte_pos -- mid-epoch. The clock's windows_in_epoch was
-            # measured on the OLD segmentation (compose.py::_windows_in_epoch), every byte offset
-            # already written into the memory store indexes the old one, and the RetokEvent the
-            # root is supposed to distribute is a record type "no entry point's docstring returns"
-            # (compose.py's own words), with DOM.on_retokenize a stub and SIG and FAB having no
-            # retokenize entry point at all. Doing a third of it would put the run into two
-            # segmentations at once, which is worse than not doing it.
-            vocab.counters["tok.due_dropped"] = vocab.counters.get("tok.due_dropped", 0) + 1
+            # THE RETOK IS DEFERRED TO THE NEXT EPOCH ROLL, NOT DROPPED -- and that is a change
+            # from "dropped", which is what this branch did until the roll was wired.
+            # WHAT THE ACT IS: re-segment the stream with the vocabulary as it now stands, so the
+            # ids the run has been minting start appearing in its own training data. THE EPOCH
+            # ROLL ALREADY DOES EXACTLY THAT, so a pending retok is satisfied by the next roll and
+            # the only thing lost is the latency between them.
+            # WHY NOT MID-EPOCH, STATED PRECISELY BECAUSE IT IS A CONTRACT GAP AND NOT A
+            # PREFERENCE: re-segmenting mid-epoch changes how many WINDOWS the epoch holds, and
+            # RunClock decides the roll with `rolled = self._in_epoch >= self.windows_in_epoch`.
+            # The only public way to set `windows_in_epoch` is begin_epoch, and begin_epoch ZEROES
+            # `_in_epoch` -- "the only quantity a roll may zero", its own words -- so calling it
+            # here would restart the epoch and re-train on material already consumed. The archive
+            # did the other half of this ("refresh the token stream with the grown vocab; remap
+            # position by byte", self_organize.py:702) and the remap is writable here; what is not
+            # writable is telling the clock a new length while KEEPING the position. That needs a
+            # frozen-surface move on RUN -- a revise-length entry point, or an `at=` on
+            # begin_epoch -- and it is the owner's, so it is recorded rather than invented.
+            sysm.retok_pending = True
+            vocab.counters["tok.retok_deferred"] = \
+                vocab.counters.get("tok.retok_deferred", 0) + 1
+
         if due.probation:
             # THE RESIDUAL READ AND THE JUDGEMENT, IN THAT ORDER AND UNDER THE SAME GATE. The row
             # above exists so the per-token norm is NOT computed every flush for a consumer on a

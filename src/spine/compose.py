@@ -1913,6 +1913,14 @@ class System:
                  #              raises UnitError rather than being batch_windows-fold wrong. Two
                  #              typed stamps of one event is the point, not a duplication.
                  "due", "novelty", "token_seen", "shift_at_windows",
+                 # `retok_pending` IS A DUE THAT OUTLIVES ITS FLUSH. TOK's retok cadence fires at
+                 # B and the act -- re-segmenting the stream with the grown vocabulary -- can only
+                 # happen at the E stage's epoch roll, because changing the segmentation mid-epoch
+                 # changes how many windows the epoch holds and RunClock.begin_epoch cannot be told
+                 # a new length without zeroing the epoch cursor. So the event waits here, across
+                 # an arbitrary number of flushes, which is a backwards edge no `produces` column
+                 # can express -- the same reason `due` and `shift_at_windows` are on this record.
+                 "retok_pending",
                  # `process_dtype` IS AN OBSERVATION AND NOT A DECISION, and it is here because
                  # RUN_AMP had no did-it-fire surface and was inert for the life of the driver
                  # because of it. Process.amp_state says what was ASKED FOR and what
