@@ -3734,7 +3734,7 @@ field on GrowReport and one root join"*). Naming it in one place is what stops i
 differently. **What is still open and is NOT this question's to close:** `CAP.observe` stays deferred
 for `improving` and `observations`, and the root join itself is unwritten.
 
-### Q-CKPT-2 — what does the SAVE side write for the geometry gate, and who emits FAB's sidecar? — **FIRST HALF RESOLVED 2026-08-30; the residue is narrower and is HIGH, not blocking**
+### Q-CKPT-2 — what does the SAVE side write for the geometry gate, and who emits FAB's sidecar? — **FIRST HALF RESOLVED 2026-08-30; RESIDUE (1) RESOLVED 2026-09-22 — BOTH SIDECARS HAD A PRODUCER ALL ALONG. (2) STANDS.**
 
 **The first half was already answered in the tree, by the declaration a check reads.**
 `ROW_ARGUMENTS_ELSEWHERE["CKPT.save"]` says `geometry` **is** `_geometry_manifest(sysm)` — the same
@@ -3764,23 +3764,31 @@ sidecar, which is `None` on every resume). All four are frozen-Config reads and 
 `fab.slots` alone is not.) **The field count is deliberately not written here**: it stood at 15, 16
 and 20 in three live statements at once. Run `_geometry_manifest`.
 
-**The residue, still open, HIGH rather than critical:**
+**The residue:**
 
-1. **The two sidecars have no producer.** `_sidecar` reads `Snapshot.geometry[PREFIX]` and nothing
-   writes a per-prefix key, so SIG's refusal (on `width_units`, `alphabet_size`, `space`, `d`,
-   `mode`) and FAB's (on `slots`, `rank`, `dk`) are **disarmed on every resume** — and
-   `FAB.state_dict` does not even claim to emit a sidecar, so that one reads a value with no declared
-   origin at either end. Now that four of those fields are in the manifest itself, **the question is
-   whether the sidecars are still needed at all**, or whether the manifest subsumes them and the two
-   `sidecar` parameters should go. That is a frozen-signature decision and is cheap now.
+1. ~~**The two sidecars have no producer.**~~ — **RESOLVED 2026-09-22, AND THE QUESTION WAS ASKED
+   IN THE WRONG DIRECTION.** `_sidecar` read `Snapshot.geometry[PREFIX]`, a nested key a flat
+   prefixed manifest can never have, so SIG's refusal (`width_units`, `alphabet_size`, `space`, `d`,
+   `mode`) and FAB's (`slots`, `rank`, `dk`, `signature_dim`) were disarmed on every resume. But the
+   producer was never missing: **each package writes a `sidecar` key into its own payload slice**,
+   and this document's SIG section has described that in prose since the record was specified. Read
+   off a real checkpoint, `payload['SIG']['sidecar']` carries all five of SIG's fields and
+   `payload['FAB']['sidecar']` all four of FAB's, against three in the manifest's `sig.*`. So the
+   manifest does **not** subsume them and the two `sidecar` parameters stay: `width_units` cannot be
+   in the manifest at all, because `derive.signature_width_bytes` reads a **measured**
+   `bytes_per_token`. No frozen signature moved. The sentence above that `FAB.state_dict` "does not
+   even claim to emit a sidecar" was true of an earlier tree; it emits one.
+   **What re-arming it caught immediately:** pairing an early blob with the final vocabulary file
+   resolves `width_units` 197 against a recorded 192, so every centroid in that blob would have been
+   a mean of two different measurements — accepted in silence by every resume until now.
 2. **WORLD's grown population count is the one quantity that genuinely needs a live object**, so it
    cannot join the manifest — `_geometry_manifest` is computed before any package is built, which is
    the point of it. It is re-refused by `WORLD.load_into` (M43) at its own row, and whether that is
    sufficient is the remaining question.
 
-**For the owner:** (1) is a straight yes/no on whether the sidecars survive, and the answer changes
-two frozen signatures. (2) needs no decision unless you want the grown counts checked at the gate
-rather than at the row.
+**For the owner:** (1) needed no decision in the end — the tree answered it, and nothing frozen
+moved. (2) needs no decision unless you want the grown counts checked at the gate rather than at the
+row.
 
 ### Q-EVAL-10 — `EVAL.coherence` takes a `sample` and its docstring says it draws its own — **RESOLVED 2026-09-02: A FROZEN SIGNATURE MOVES**
 `coherence(ev, *, logits_fn, sample, rng)`, while `eval/api.py:162-168` says it runs "over its OWN
