@@ -3351,6 +3351,40 @@ field with it. The root additionally **cross-checks the five fields the live man
 `WORLD.geometry` both carry**, because the root is the only thing that sees both producers, and a
 field with two producers and no comparison is the shape this whole document is organised against.
 
+### Q-WORLD-10 — `WORLD.forecast` has a body and must NOT be wired yet — **HELD 2026-09-22: the body is correct and the network behind it has never been stepped. Do not give it a call site.**
+
+`forecast` was written on 2026-09-22 and is the one finished entry point in this tree that is
+deliberately left without a caller. The reason is not the body — it is what the body computes with.
+
+**Measured, at the shipped defaults, on a built `World`:**
+
+| what | reading |
+|---|---|
+| `WORLD_FEEDBACK` | **`True` — the lever already ships ON**, so the only thing withholding the forecast is the missing call site |
+| `hasattr(world, "parameters")` | **`False`** — `World` is a `__slots__` record, not an `nn.Module`, so `OPT.build` cannot reach its tensors. Every run prints this as a startup warning: *"WORLD.world exposes no parameters(), so it contributes NOTHING to the 'base' param group"* |
+| `preds` after `build` | **all zeros**, `(6, 32, 32)`, 3 slots live |
+| `max abs(pop(z) - z)` | **`1.19e-07`** — float32 round-off. `_route` is residual (`outs = z + einsum(z, preds[live])`) and `preds` is identically zero, so every live predictor returns `z` and a convex blend of identical rows is `z`. **The population half of the forecast is the identity, exactly** |
+| `world.forecast_rms` on one call | **`0.11047`** |
+
+So `world_proj(pop(z))` is `world_proj(encoder(obs_emb))` with **both maps at their random
+initialisation and no gradient path to move them**: `world/api.py:647` already records
+`max abs(delta)` over 60 windows as **exactly 0.0 for `encoder`, `qproj`, `preds` and `keys`**.
+Wiring `extra=WORLD.forecast(...)` would add a **fixed random projection of a fixed random encoding**
+of magnitude ≈0.11 to every hidden state, every flush, for the whole run — a constant-direction
+perturbation, not a prediction — while `world.forecasts` counted one fire per flush and
+`lm.encode.extra_applied` agreed with it. Every counter would read as designed and the number they
+describe would be noise. That is the wrong-measurement class this whole document is organised
+against, and it would be introduced by a wiring step that looks like finishing the job.
+
+**What has to be true before it is wired**, in this order: (1) WORLD's tensors reach a param group —
+which is a real decision, because `World` is not an `nn.Module` and the choice is between making it
+one and having `OPT.build` take an explicit tensor list; (2) a run shows `preds` moving (the
+`max abs(delta)` measurement above, re-taken and non-zero); (3) only then a call site, at which point
+`world.forecast_rms` beside `lm.encode.extra_applied` prices what it contributes. Until (1), this is
+**BUILT BUT NOT WIRED, ON PURPOSE**, and that is a third state beside `notes/07_WIP.md`'s three —
+worth naming, because the other two ways to leave it (no body, or a body and a call site) are both
+worse than this one.
+
 ### Q-TOK-10 — `TOK.save_vocabulary` takes no suffix, so M46 is not closed — **RESOLVED 2026-09-02: (b), OVERRULING THIS DOCUMENT'S OWN RECOMMENDATION (a). ⚠ A FROZEN SIGNATURE MOVED: `save_vocabulary(tok, vocab, *, suffix="")`**
 `CKPT.save` has a `suffix` and says *"THE SUFFIX APPLIES TO THE WHOLE SNAPSHOT"*;
 `save_vocabulary(tok, vocab)` has **no suffix parameter** and writes `d_vocab_save_path`, a string

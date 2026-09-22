@@ -437,9 +437,16 @@ def loss_terms(world: Config, w, obs_emb):
     loss = predict_w * pop_loss + collapse_w * (var_loss + W_COV * cov_loss)
 
     with torch.no_grad():
-        # THE BOOKS `manage` SELECTS ON, UPDATED HERE BECAUSE THIS IS THE ONLY CALL THAT HOLDS THE
-        # ROUTING TABLE. world_model.py::pop_loss updates fitness inside itself for the same
-        # reason. Leaving them at zero was the rejected alternative and it is not neutral: `mass`
+        # THE BOOKS `manage` SELECTS ON, UPDATED HERE BECAUSE THIS IS THE ONLY CALL THAT HOLDS A
+        # ROUTING TABLE *AND* A TARGET TO SCORE IT AGAINST. world_model.py::pop_loss updates
+        # fitness inside itself for the same reason.
+        # THE SECOND HALF OF THAT SENTENCE IS NEW AND THE SENTENCE WAS FALSE WITHOUT IT the day
+        # world/api.py::forecast acquired a body: forecast routes EVERY position of the same latent
+        # through the same keys, so "the only call that holds the routing table" stopped being true.
+        # What it does not hold is z_next -- it forecasts from the last position of the window too,
+        # and that target lies past the window's end -- so a fitness EMA updated there would be an
+        # error scored against nothing, and `fit` is a SELECTION key. The books stay here.
+        # Leaving them at zero was the rejected alternative and it is not neutral: `mass`
         # is what soft_cull's min_mass tests, so a population whose mass never moves is one where
         # every predictor but the last is culled on the first management pass, and `fit` is what
         # grow() clones the fittest from, so an unmoved fit makes "the fittest" mean slot 0.
@@ -490,11 +497,204 @@ def forecast(world: Config, w, obs_emb):
     LEVERS READ: feedback
     WIRES READ: none
     DID IT FIRE: World.forecasts -- the count of flushes on which a forecast was actually APPLIED
+    FOUR MORE KEYS THE BODY WRITES, declared here the way fabric/api.py::grow_check declares its
+    own additions: a key a report can read and the contract does not admit to producing is the same
+    defect as a declared key nothing writes, and this entry point needs all four to say which of
+    its three states a run was in.
+      world.forecast.calls -- how many times this function was CALLED. Without it `world.forecasts`
+        is ABSENT both when a lever refused the forecast and when nothing invoked this function at
+        all, and ON 2026-09-22 THE SECOND IS THE TRUE ONE: no row of spine/loop.py's LOOP_ORDER
+        names `forecast`, so the pair (calls present, forecasts absent) is the only shape that can
+        separate "called and declined" from "never reached".
+      world.forecast.inert -- calls that returned None, which is the denominator `world.forecasts`
+        has no other way to state.
+      world.forecast.unreachable -- WHY None, in a sentence, and it is the SAME key
+        world/api.py::loss_terms writes on the null arm for the same reason: WORLD_ENABLED=0 and
+        WORLD_FEEDBACK=0 are two different configurations that return the identical None, and a
+        subsystem that was never built and one that was built and is not listened to are the two
+        readings this package exists to keep apart.
+      world.forecast_rms -- the root-mean-square of the additive term itself. `world.forecasts`
+        counts fires and cannot tell conditioning from a no-op, and the claim this whole package
+        makes against goal A is that the forecast CHANGES an emitted token: a term of magnitude
+        1e-6 beside a hidden state of order 1 changes none of them while the fire counter reads
+        one per flush. IT IS HALF A READING AND SAYS SO -- the hidden state is not an argument
+        here, so nothing in this package can form the ratio; the other half is LM's own
+        lm.encode.extra_applied, which counts the flushes on which the term was actually added.
     """
     world = world.owned_by("WORLD")
-    raise NotImplementedError(
-        "WORLD.forecast: P4 (world) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section WORLD.")
+    # THIS ENTRY POINT HAS NO CALLER AND MUST NOT BE GIVEN ONE YET (Q-WORLD-10, HELD 2026-09-22).
+    # The body below is finished; what it computes with has never been stepped. MEASURED on a built
+    # World at the shipped defaults: `World` is a __slots__ record and not an nn.Module, so
+    # hasattr(w, "parameters") is False and OPT.build cannot reach a single tensor here -- every run
+    # already prints that as a startup warning. `preds` is all zeros out of build() and world/api.py
+    # line 647 records max|delta| over 60 windows as EXACTLY 0.0 for encoder, qproj, preds and keys,
+    # so it stays zero; _route is residual, so every live predictor returns `z` unchanged and
+    # max|pop(z) - z| measures 1.19e-07, which is float32 round-off. THE POPULATION HALF IS THE
+    # IDENTITY, and what is left is world_proj(encoder(obs_emb)) with both maps at their random
+    # initialisation -- one measured call returned world.forecast_rms 0.11047.
+    # WORLD_FEEDBACK ALREADY SHIPS True, so the missing call site is the ONLY thing withholding
+    # that term from every hidden state in the run. Wiring it would add a fixed random direction of
+    # magnitude 0.11 per flush while world.forecasts and lm.encode.extra_applied both read exactly
+    # as designed -- counters correct, quantity meaningless, which is the wrong-measurement class
+    # this tree spends its comments on. The order is: WORLD's tensors into a param group, then a
+    # run that shows preds MOVING, then a call site.
+    # THE CALL COUNT IS SEEDED BEFORE EITHER GATE BELOW DECIDES ANYTHING, which is this tree's rule
+    # about absence: ABSENT must mean the mechanism was UNREACHABLE on the arm this run took, so a
+    # counter seeded inside the else of the gate it describes is a defect rather than a detail.
+    # `world.forecasts` is deliberately NOT seeded here and is written only where a forecast is
+    # produced -- on the two arms below no forecast can EVER be produced, so a present-and-0 there
+    # would say "armed and did not fire" about a mechanism that is not armed.
+    w.counters["world.forecast.calls"] = w.counters.get("world.forecast.calls", 0) + 1
+    if not w._is_live():
+        # THE NULL WORLD ANSWERS AND ITS ANSWER IS None, not a zero tensor -- the D4 repair the
+        # class docstring states, one entry point over from loss_terms. The asymmetry with that
+        # function is deliberate and is the contract's: `loss` is a SUMMAND the composed objective
+        # adds unconditionally, so it must be a real zero; the forecast is LM.encode's `extra`,
+        # which that function already accepts as None and shape-checks when it is not
+        # (lm/api.py::encode), so None costs no caller a branch.
+        # AND A ZERO TENSOR HERE WOULD BE WORSE THAN AN ALLOCATION. lm/api.py::encode bumps
+        # lm.encode.extra_applied for every non-None `extra` it adds, so returning zeros would make
+        # a run with no world model report one conditioned hidden state per flush -- the "0 world
+        # loss from a live subsystem and 0 world loss from a null one printed the same way" defect
+        # this package's shape exists to prevent, rebuilt one package away where WORLD cannot see
+        # it.
+        w.counters["world.forecast.inert"] = w.counters.get("world.forecast.inert", 0) + 1
+        w.counters["world.forecast.unreachable"] = (
+            "WORLD_ENABLED=0: build() returned a null world, so there is no encoder to produce a "
+            "latent, no population to route it through and no world_proj to project it back into "
+            "the hidden state's width")
+        return None
+    if not bool(world.feedback):
+        # THE ONE LEVER THIS FUNCTION READS, AND THE ONLY THING IN THIS PACKAGE THAT TOUCHES GOAL A.
+        # Off, the subsystem is still built, still measured and still costed -- loss_terms runs
+        # every flush -- and not one emitted token differs from a run without it. world/levers.py
+        # records the archive's verdict on that state; this branch is where it is taken, and the
+        # sentence on the counter is what makes a report say "built and not listened to" instead of
+        # printing the same None the disabled arm prints.
+        w.counters["world.forecast.inert"] = w.counters.get("world.forecast.inert", 0) + 1
+        w.counters["world.forecast.unreachable"] = (
+            "WORLD_FEEDBACK=0: the world model is built and trains, and its forecast is "
+            "deliberately not applied -- the costed side head this lever exists to turn into a "
+            "contribution")
+        return None
+
+    # THE ENCODER RUNS A SECOND TIME ON THE SAME obs_emb, AND THE COST IS MEASURED RATHER THAN
+    # WAVED AT. loss_terms already encodes this flush's embeddings; the frozen signature takes
+    # obs_emb and not the latent, so the two calls cannot share one forward and the flush pays two
+    # encoder passes over (B, W, d_model). Measured at the shipped geometry, one window of 128
+    # tokens, threads pinned: the duplicate encoder pass is 0.075 ms and this whole entry point
+    # 0.464 ms, against 5.558 ms for the LM.encode call it conditions -- so the duplication is
+    # about 1% of the forward it rides on. A shared `z` would also have to travel from a B row that
+    # runs AFTER this one (loss_terms sits below encode in LOOP_ORDER's B block, and this call
+    # supplies encode's argument), so the sharing would invert the order before it saved anything.
+    z = w.encoder(obs_emb)
+    if z.dim() != 3:
+        # THE SAME REFUSAL loss_terms MAKES, AGAINST THE SAME ARGUMENT, because the two functions
+        # are handed the identical object by the identical row and a caller that flattened it is a
+        # caller both must refuse. Here the axis matters for a second reason: LM.encode compares
+        # `extra`'s shape against the hidden's EXACTLY, so a (N, lat) forecast would be refused one
+        # package away by a message about width rather than here by one about the window axis.
+        raise ValueError(
+            f"WORLD.forecast: obs_emb encoded to {tuple(z.shape)} and LM.encode's `extra` must be "
+            f"exactly (B, L, width). LM.embed returns (B, L, d_model); a caller that flattened it "
+            f"has removed the axis the forecast has to be laid back along.")
+    n_b, n_w, lat = int(z.shape[0]), int(z.shape[1]), int(z.shape[-1])
+
+    live = w.alive.nonzero(as_tuple=True)[0]
+    if int(live.numel()) == 0:
+        # NOT A None. An empty live population cannot route, and returning None here would be
+        # indistinguishable from WORLD_FEEDBACK=0 two branches above -- which is the one confusion
+        # this package's whole shape exists to prevent, and is why loss_terms raises on the same
+        # state rather than returning zero terms. This function runs BEFORE loss_terms in the B
+        # block, so on a run where the population has been emptied THIS is the refusal an operator
+        # sees; it names the rule that was broken rather than the symptom.
+        raise ValueError(
+            "WORLD.forecast: every predictor slot is culled (alive.sum() == 0), so nothing can "
+            "route and no forecast exists. soft_cull never takes the last live predictor, so this "
+            "state is written by something that ignored that rule -- it is not a configuration, "
+            "and a None here would read as WORLD_FEEDBACK=0.")
+
+    # EVERY POSITION IS FORECAST, NOT ONLY THE ONES loss_terms SCORES, AND THAT IS FORCED.
+    # loss_terms routes z[:, :-horizon] because it needs z[:, horizon:] as a target; `extra` has to
+    # be EXACTLY the hidden's shape (lm/api.py::encode refuses anything else rather than
+    # broadcasting), so a forecast missing the last `horizon` positions could not be the additive
+    # term at all. WHAT THAT COSTS IS WORTH WRITING DOWN: the last `horizon` position(s) of each
+    # window are conditioned on a prediction whose target lies past the window's end, so they are
+    # the positions whose forecast NOTHING in this package has ever scored. They are also the
+    # positions the LM is furthest along on, and the term is additive rather than gating, so the
+    # exposure is bounded by world_proj's own magnitude -- which is what world.forecast_rms below
+    # is for.
+    # NO HORIZON IS READ HERE AND THE LEVERS READ LINE SAYS feedback ALONE. The horizon is baked
+    # INTO the predictors by training -- loss_terms fits them to carry z_t to z_{t+K} -- so this
+    # function applies the map and has no slice to take; reading WORLD_HORIZON here would be a
+    # second declaration of one number in the one place it cannot disagree with itself yet.
+    # AND NO POSITION IS SHIFTED, WHICH IS THE CAUSALITY ARGUMENT AND IT IS MEASURED. Nothing in
+    # this expression mixes positions: the encoder is position-wise, `_route` flattens the window
+    # into rows and every row is routed and predicted on its own, so forecast[:, t] is a function
+    # of obs_emb[:, t] ALONE -- verified by perturbing obs_emb at position 40 of a 128-token window
+    # and finding position 40 and no other moved in the return. That is what makes this term safe
+    # to add to a CAUSAL model's hidden state: h[:, t] already saw x[t], so conditioning it on a
+    # map of x[t] tells it nothing it did not have. A shifted variant (laying the forecast of
+    # z_{t+K} onto position t+K) would also be causal but would be a LAGGED RE-ENCODING rather than
+    # a forecast, and the frozen docstring's expression is world_proj(pop(z)) with no shift in it.
+    weights, outs = _route(w, z.reshape(-1, lat), live)
+    # THE SAME BLEND loss_terms TAKES, spelled the same way on purpose: the forecast that
+    # conditions the LM and the forecast the prediction loss is measured on must be ONE quantity,
+    # or the subsystem is trained on one map and read through another. `_route` already skips the
+    # dead slots rather than down-weighting them (world/api.py::_route), so a culled predictor
+    # contributes nothing to what the LM sees and costs nothing to compute.
+    pred = (weights.unsqueeze(-1) * outs).sum(1)
+    # BACK ONTO THE WINDOW AXIS, THEN INTO THE HIDDEN STATE'S WIDTH. world_proj is Linear(lat,
+    # d_model) and this is the ONLY place in the package that calls it -- build constructs it,
+    # state_dict saves it, load_into restores it, and nothing else reads it.
+    out = w.world_proj(pred.reshape(n_b, n_w, lat))
+
+    # NOT DETACHED, AND THE DETACH WOULD HAVE BEEN THE DEFECT. world_proj appears in no other
+    # expression in this file, so the LM loss reaching back through this return is the ONLY
+    # gradient it can ever receive: detaching here would leave it at build()'s uniform(-0.1, 0.1)
+    # draw for the whole run while state_dict faithfully saved it, which is an untrained random
+    # projection added to every hidden state -- noise conditioning wearing a world model's name,
+    # and precisely the failure the archive records when world_proj had to be added to the
+    # checkpoint or generation ran a different network than training.
+    # MEASURED, NOT ARGUED, AND THE MEASUREMENT FOUND A SECOND THING: on a 60-window run at the
+    # shipped defaults, w.world_proj.weight.grad is None on the way out -- loss_terms ran 60 times
+    # and never touched it, so before this body existed world_proj had never received a gradient
+    # from anything at all. THE SAME RUN SHOWS THE LARGER HOLE, WHICH IS NOT THIS PACKAGE'S TO
+    # CLOSE: max|delta| over 60 windows is exactly 0.0 for encoder, qproj, preds AND keys as well,
+    # while their .grad is nonzero (the encoder's first weight accumulates a gradient sum of 19.5)
+    # -- WORLD's tensors take gradient and are never STEPPED. spine/compose.py::_base_parameters
+    # harvests each object by `getattr(obj, "parameters", None)`, and this package's World class
+    # has no such method, so the optimizer is built without a single world tensor in it and the
+    # composition root records the absence as a warning nobody has acted on. That is why nothing
+    # here may read the latent's smallness as a training outcome: at WORLD_ENABLED=1 today the
+    # encoder is still exactly build()'s uniform draw. Closing it is not this file's to do -- a
+    # `parameters()` on World would be a new public method on a public class in an api.py, which
+    # this package's own WorldStep docstring says IS an entry point.
+    # THE ENCODER AND THE POPULATION TAKE GRADIENT FROM THE LM LOSS THROUGH THIS PATH TOO, which is
+    # a real coupling and not a side effect: `feedback` on means the latent is shaped by what makes
+    # the language model better as well as by what predicts the latent forward, and that is the
+    # difference between a side head and a subsystem. It is also why the off arm above returns
+    # before the encoder runs at all rather than after -- an unread forward would still build a
+    # graph on the world model's parameters and still be paid for on the backward.
+    with torch.no_grad():
+        # THE MAGNITUDE OF WHAT IS ACTUALLY ADDED, AS A GAUGE. A fire counter cannot distinguish a
+        # forecast that conditions the LM from one that is numerically absent, and the collapsed
+        # latent is the state this subsystem has been in for every reading ever taken of it
+        # (world/levers.py carries them) -- which is exactly the state in which world_proj's output
+        # goes small. Measured on a fresh build the term is 7.5% of the hidden state's own RMS and
+        # after 60 windows 0.4%, so the number moves and is worth printing. Read off the tensor
+        # that leaves this function, detached, so the reading cannot hold the graph open past the
+        # return.
+        w.counters["world.forecast_rms"] = round(float(out.detach().pow(2).mean().sqrt()), 6)
+    # THE FIRE COUNTER, WRITTEN WHERE THE FORECAST IS PRODUCED. It counts what this package can
+    # honestly count -- forecasts RETURNED -- and its DID IT FIRE line says APPLIED, which is one
+    # package away: lm.encode.extra_applied is the other half and the two must agree flush for
+    # flush. A gap between them is a composition root that computed a forecast and dropped it, and
+    # no counter inside WORLD can see that -- which is why the pair is named here rather than left
+    # to whoever reads the report. TODAY BOTH READ ABSENT: nothing calls this function, so the
+    # honest statement is "never reached", not "reached and worth 0".
+    w.counters["world.forecasts"] = w.counters.get("world.forecasts", 0) + 1
+    return out
 
 
 def manage(world: Config, w, *, latent, plateau, add_param_group):
