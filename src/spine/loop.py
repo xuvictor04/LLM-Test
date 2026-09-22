@@ -110,7 +110,7 @@ _CALLS = frozenset({
     "DATA.draw_stream", "TOK.tokenize", "RUN.RunClock.begin_epoch",
     # ---- stage A: the cadenced maintenance block, then the per-window pair
     "MEM.census", "DOM.manage", "DOM.census", "DOM.rekey",
-    "SIG.cadence_due", "SIG.train_step",
+    "SIG.cadence_due", "SIG.train_step", "FAB.manage",
     "RUN.RunClock.advance", "SIG.encode", "DOM.observe", "TOK.on_window",
     # ---- stage B, per flush: all twenty-one
     "LM.embed", "LM.encode", "SIG.encode", "FAB.forward", "LM.decode", "LM.lm_loss",
@@ -700,10 +700,18 @@ def run(sysm, *, max_windows=None, progress=True):
             # two signature spaces that do not compare.
             if cadences.due("dom.rekey", periods["dom.rekey"], clock):
                 dom_api.rekey(dom_cfg, sysm.partition, encode=sig_encode)
-            # FAB.manage IS A STUB AND ITS CADENCE IS THEREFORE NOT ASKED. Asking it and doing nothing
-            # would CONSUME the fire -- Cadences.due RECORDS the step when it answers True -- so the
-            # ledger would show fab.manage firing on a run where no expert was ever culled. An
-            # unevaluated gate reading checks=0 is the honest state and `skipped` names it.
+            # FAB.manage: THE SELECTION PASS, AND THE LAST LOOP_ORDER ROW TO ACQUIRE A CALLER.
+            # Growth ran and pruning did not, so the population only ever ROSE -- 570 births over
+            # 634 windows at the shipped defaults, 569 of them from the spawn door, saturating
+            # FAB_SLOTS at about window 2,300 of a quarter-million-window run. Culling is what
+            # makes that a steady state instead of a ceiling.
+            # `flush_loss` IS THE LAST FLUSH'S LOSS AND None BEFORE THERE IS ONE. It feeds step 6's
+            # depth curriculum only; passing a NaN would make the plateau test compare against a
+            # value that is not a number and silently never deepen, which is the shape of defect
+            # this tree spends its comments on.
+            if cadences.due("fab.manage", periods["fab.manage"], clock):
+                fab_api.manage(fab_cfg, pop, step_windows=tick.step,
+                               flush_loss=(None if last_loss != last_loss else last_loss))
             # SIG'S OWN CADENCE AND ITS STEP, WHICH ARE ONE MECHANISM AND LAND TOGETHER. Until
             # SIG.train_step had a body neither was asked, because asking a gate RECORDS its fire
             # and a fire nobody can act on is thrown away -- tok/api.py::on_window's rule ("asking

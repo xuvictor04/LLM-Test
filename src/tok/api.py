@@ -2348,10 +2348,97 @@ def lift_vocab_cap(tok: Config, vocab, *, to: int):
     DID IT FIRE: tok.cap_lift, tok.cap_lift_refused_at_ceiling
     """
     tok = tok.owned_by("TOK")
-    _ = tok.d_vocab_ceiling                              # WIRE READ HERE -- min(to, ceiling)
-    raise NotImplementedError(
-        "TOK.lift_vocab_cap: P4 (tok) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section TOK.")
+    ceiling = int(tok.d_vocab_ceiling)                   # WIRE READ HERE -- min(to, ceiling)
+
+    c = vocab.counters
+    # BOTH ROWS SEEDED BEFORE EITHER BRANCH DECIDES ANYTHING -- this file's convention, stated by
+    # tok/api.py::mint_burst for its own seven -- and here the two states it protects are the only
+    # things a ledger can say about a valve nobody has switched on yet. PRESENT-AND-0 means this
+    # route RAN and the number it was handed moved nothing; ABSENT means nothing ever called this
+    # entry point on the arm this run took. Seeding inside the lift below would report "called and
+    # lifted nothing" as silence, which is the one reading indistinguishable from an unwired route.
+    # WHICH OF THE TWO A RUN SHOWS TODAY IS DECIDED BY THE CALL SITE, AND NEITHER OF THEM IS A
+    # LIFT: this comment will not claim the body changes a number today, because it does not.
+    # CAP.observe is DEFERRED, so capacity/api.py::caps reads the same valve.cap_vocab off the
+    # valve on every flush and the value arriving here is the same one every time --
+    # spine/compose.py::LOOP_ORDER's CAP.caps row states it outright: "THESE ARE THE STARTING
+    # CEILINGS AND NOTHING LIFTS THEM". A root that calls this once per flush reads tok.cap_lift
+    # present-and-0 for the whole run; a root that calls it only when the number changes never
+    # calls it at all and reads ABSENT. Writing the body is still the right act -- the entry point
+    # is the ROUTE, and a route that exists is what lets the valve be turned on later without a
+    # second copy of the cap rule appearing at a call site -- but nothing here lifts anything yet.
+    for _row in ("tok.cap_lift", "tok.cap_lift_refused_at_ceiling"):
+        c.setdefault(_row, 0)
+
+    # THE CLAMP IS AGAINST THE WIRE, WHICH IS THE AUTHORITY ON EVERY PATH INCLUDING A RESUME
+    # (DEFECT D-T1). `to` is the valve's position and capacity/api.py::caps says in as many words
+    # that an OPERATOR can still start a cap above the hard ceiling: the valve never lowers one and
+    # observe refuses to lift it rather than clamping it. MEASURED HERE RATHER THAN QUOTED FORWARD,
+    # because the shipped CAP_TARGETS=off hides it -- off resolves both caps to their hard ceilings,
+    # so CAP_VOCAB_START=5000 composes a valve reading 4096 and this door never sees the wide
+    # number. With the vocabulary arm actually armed, CAP_TARGETS=vocab CAP_VOCAB_START=5000
+    # composes valve.cap_vocab=5000, origin `operator (vocab_start=5000)`, and CAP.caps hands
+    # exactly that 5000 to this argument against a wire ceiling of 4096. Every id above the ceiling
+    # is a row the model does not have, so the excess is dropped HERE, at the door, rather than
+    # trusted and caught later at the mint.
+    # THE CAP HANDED IN IS THE VOCABULARY'S AND NOT THE FABRIC'S. FAB.grow_check takes a `soft_cap`
+    # too and that one is the EXPERTS' -- one word for two caps, which the same LOOP_ORDER row
+    # warns about by name. Nothing in this body reads or returns an expert count, and nothing here
+    # may: TOK cannot import capacity (O10) and the only number that crosses is this int.
+    requested = int(to)
+    target = min(requested, ceiling)
+    if requested > ceiling:
+        # THE CLAMP IS COUNTED RATHER THAN SILENT, so "the valve says 5000 and this vocabulary
+        # stopped at 4096" is one row to read instead of a difference between two reports.
+        # IT COUNTS THE CLAMP, NOT A REFUSED CALL, and is therefore NOT exclusive with
+        # tok.cap_lift: a lift from 2048 towards a requested 5000 lands at the ceiling, which is
+        # both a real lift and a refused remainder, and one call incrementing both rows is the
+        # honest reading of that flush rather than double counting.
+        c["tok.cap_lift_refused_at_ceiling"] += 1
+
+    # THE CAP IN FORCE, ASKED OF THE VOCABULARY INSTEAD OF RECOMPUTED. tok/api.py::Vocabulary._cap
+    # is where min(soft_cap, ceiling) lives and Vocabulary.at_cap calls itself "THE ONE PREDICATE"
+    # for exactly this reason; spelling that min again here would be the second copy, and it would
+    # be the copy that misses the one narrowing in the tree -- on tok.mode="fixed" build_vocabulary
+    # closes vocab.ceiling down to the achieved build size, so THIS vocabulary's ceiling can be
+    # tighter than the wire's and the wire alone does not decide what is in force.
+    before = vocab._cap()
+
+    # RAISED, NEVER LOWERED, AND THAT IS A GUARD RATHER THAN A RESTATEMENT OF CAP'S MANNERS. A cap
+    # arriving BELOW the one in force would drop min(soft_cap, ceiling) under vocab.size(), and
+    # at_cap() is then true for every candidate for the rest of the run: the ledger reads the
+    # "ZERO tokenizer.mint 0 ARMED AND INERT" line this module's header records, reached by a
+    # second route -- a live number narrowed mid-run instead of a saved one outliving the wire.
+    # The old form mutated TOK.vmax from inside the loop (self_organize.py:7427-7435) and had
+    # nowhere to put a test like this. A `to` below the cap in force is therefore a NO-OP and not
+    # an error, and it is REACHABLE ON A LEGAL TREE TODAY AND MEASURED: spine/compose.py builds the
+    # vocabulary with soft_cap=None -- "start at the hard ceiling" -- so CAP_TARGETS=vocab with
+    # CAP_VOCAB_START=1024 composes a valve whose cap_vocab is 1024 while this vocabulary's cap in
+    # force is the full 4096, and the first call lands here BELOW it and moves nothing.
+    # THAT IS NOT THIS ROUTE'S JOB TO APPLY, and the no-op is the report rather than the repair:
+    # the STARTING cap reaches TOK through build_vocabulary's soft_cap
+    # argument, which spine/compose.py::LOOP_ORDER's own vocab row says should carry CAP's
+    # `vocab_start` lever and records that the body passes None today. A lift entry point that
+    # quietly also lowered would make those two channels two ways to set one number.
+    # THE STORED POSITION IS MONOTONE TOO, not only the cap in force, and the max() is what a fixed
+    # arm needs: with a soft cap of 4096 recorded above a closed ceiling of 512, a `to` of 600 is
+    # above the cap in force and below the position already on record, and the record must not walk
+    # backwards on a call that moves nothing.
+    if target > before:
+        vocab.soft_cap = target if vocab.soft_cap is None else max(int(vocab.soft_cap), target)
+
+    # READ BACK RATHER THAN ASSUMED, which is the fixed arm's whole protection. The soft cap can
+    # rise while the cap in force does not move at all (target above vocab.ceiling), and this
+    # package's header promises that a fixed arm's "never mint again" cannot be defeated by "a
+    # soft_cap this arm does not even close" -- so the counter has to be decided by the number
+    # at_cap() will actually compare against, not by the fact that an assignment happened.
+    after = vocab._cap()
+    if after > before:
+        c["tok.cap_lift"] += 1
+    # THE CAP NOW IN FORCE -- not `target`, and not what CAP asked for. Those three numbers differ
+    # on any vocabulary whose own ceiling is tighter than the wire's, and the caller is owed the
+    # one that decides whether the next mint is refused.
+    return after
 
 
 def save_vocabulary(tok: Config, vocab, *, suffix=""):

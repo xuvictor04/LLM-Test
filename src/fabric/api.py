@@ -203,6 +203,44 @@ class FabricOut:
 
 
 @dataclasses.dataclass(frozen=True)
+class ManageReport:
+    """What ONE selection pass did. FROZEN, for GrowReport's reason: a caller that can write to this
+    can change what the run reported.
+
+    THE THREE SPARES ARE THREE FIELDS AND NOT A TOTAL, because they are three different reasons an
+    expert survived a cull it was ranked into -- it was carrying load (contrib), it was better than
+    the population (comp_protect), or it was mid-shift (shift_tol). A run where every survivor was
+    spared by the shift test is a run adapting to new material; one where every survivor was spared
+    by contrib is a run whose ranking disagrees with its own load measure. One number cannot say
+    which, and goal B is the difference.
+
+    `cull_gate` CARRIES THE ARITHMETIC AND NOT THE VERDICT, which is what lets a pass that did not
+    open the gate still be read: derive.cull_gate_open takes (n_live, slots, pressure) and TWO
+    conditions live in it -- n_live <= 2 is a FLOOR, not a pressure test -- so "the gate was shut"
+    has two causes and the string says which. It is recorded EVERY pass, open or not, because a run
+    above pressure for most of its length and below it at the end must not print "unreachable".
+
+    NO COUNTER COPY. The DID IT FIRE ledger lives on Population.counters; this record is what ONE
+    pass did, and the counters are cumulative. fab.rescued is the case that forces the distinction:
+    ISSUES P1-M57 is a gate armed on a per-pass snapshot that discarded a nonzero cumulative count.
+    """
+    merged: int = 0
+    merge_declined_grace: int = 0
+    merge_declined_residual: int = 0
+    cull_fail: int = 0
+    cull_util: int = 0
+    spared_contrib: int = 0
+    spared_comp: int = 0
+    spared_shift: int = 0
+    rescued: int = 0
+    deepened: bool = False
+    eligible: int = 0
+    cull_gate: str = ""
+    manage_every: int = 0
+    manage_period_flushes: object = None
+
+
+@dataclasses.dataclass(frozen=True)
 class GrowReport:
     """What ONE growth check asked for and what the population actually delivered. FROZEN.
 
@@ -1653,6 +1691,103 @@ def _claim_slot(pop, slot, step_n, *, parent=-1, mutscale=1.0):
     return slot
 
 
+# THE ONE DECLARED RENUMBERING LIST. Every per-expert book this package keeps, named ONCE so a
+# removal cannot leave one of them stale. fabric/api.py::state_dict says what the alternative cost:
+# "the old remove() renumbered ten of them and left `parent` and `mutscale` stale after the first
+# cull (L28), which is also why fab.distinct_parents can be trusted as a D7 reading."
+# IT IS A LIST OF NAMES AND NOT A LOOP OVER __slots__, because __slots__ also holds `cap`,
+# `n_live`, the module dict, the RNG and four cache fields, and a renumbering that walked all of
+# them would swap the population's size with an expert's birthday.
+_BOOKS = ("born", "use", "uage", "dom_of", "ef", "es", "comp", "contrib", "parent", "mutscale")
+
+
+def _remove(pop, slot):
+    """Delete one expert by SWAP-WITH-LAST, renumbering every book from `_BOOKS` and the three
+    tensors. Returns the id the survivor moved FROM, or None when the victim was already last.
+
+    SWAP-WITH-LAST AND NOT A SHIFT, because A, B and cent are (cap, ...) preallocated tensors and
+    n_live is the only thing that moves: a shift would rewrite every row above the hole on every
+    cull, and the pool exists precisely so growth never reallocates (Population's own docstring).
+    THE SURVIVOR'S ID CHANGES, AND THAT IS THE COST THIS FUNCTION MAKES VISIBLE BY RETURNING IT.
+    fabric/api.py::manage's merge paragraph is explicit that a cull already does everything a merge
+    would do to MEM -- "remove()'s swap-with-last renumbers the survivor above the hole, which moves
+    ITS expert_id % 64 too" -- so a caller that keeps expert ids across a pass has to know.
+    THE IDENTITY CACHE IS DROPPED FOR _claim_slot's REASON, verbatim: it is the wrong length now AND
+    the tensor it was embedded from has a new version, and a cache that survives a write to its own
+    source is the "backward through the graph a second time" failure with extra steps.
+    """
+    last = int(pop.n_live) - 1
+    moved = None
+    if slot != last:
+        with torch.no_grad():
+            pop.A[slot] = pop.A[last]
+            pop.B[slot] = pop.B[last]
+            pop.cent[slot] = pop.cent[last]
+        for name in _BOOKS:
+            book = getattr(pop, name)
+            book[slot] = book[last]
+        moved = last
+    with torch.no_grad():
+        pop.A[last] = 0.0
+        pop.B[last] = 0.0
+        pop.cent[last] = 0.0
+    pop.dom_of[last] = set()
+    pop.parent[last] = -1
+    pop.mutscale[last] = 1.0
+    pop.n_live = last
+    pop.ident = pop.ident_graph = pop.ident_step = None
+    pop.ident_live = -1
+    return moved
+
+
+def _merge_into(pop, a, b, rank):
+    """Consolidate expert `b` into expert `a` IN DELTA-W SPACE. Returns the truncation residual as
+    a fraction of ||dW_a + dW_b||.
+
+    THE ARITHMETIC IS THE WHOLE OF Q-FAB-2 AND THE LEGACY FORM IS WRONG, not merely cruder. The old
+    merge is `A[a] = 0.5*(A[a]+A[b]); B[a] = 0.5*(B[a]+B[b])` (self_organize.py:3083). An expert's
+    function is dW = A @ B, so averaging the FACTORS gives 0.25*(A1B1 + A1B2 + A2B1 + A2B2): the
+    intended contribution is HALVED and two cross terms are injected that correspond to no learning
+    either expert did. A and B are ZERO-INIT at birth with no shared basis, so nothing aligns
+    expert a's rank slot 3 with expert b's -- the census's headline claim, "both experts' learning
+    survives where culling destroys it", is not supported by its own arithmetic.
+    WHAT THIS DOES INSTEAD: the best rank-`rank` approximation of dW_a + dW_b, by thin QR of
+    [A_a | A_b] (d x 2r) and of [B_a | B_b]^T, then an SVD of the 2r x 2r core. O(d*r^2) -- a few
+    thousand flops at d=128, r=8.
+    RANK CANNOT BE WIDENED TO HOLD THE EXACT SUM (load_state_dict: rank is an INNER dimension), so
+    the truncation is FORCED and the residual is the honest report of what it cost. Returned rather
+    than thresholded: a threshold would be a lever with no census row, and Q-MEM-4's discipline is
+    MEASURE BEFORE RETUNING. If the residual reads high the operator lowers merge_dist.
+    """
+    with torch.no_grad():
+        Aa, Ab = pop.A[a].float(), pop.A[b].float()          # (d, r) each
+        Ba, Bb = pop.B[a].float(), pop.B[b].float()          # (r, d) each
+        Acat = torch.cat([Aa, Ab], dim=1)                    # (d, 2r)
+        Bcat = torch.cat([Ba, Bb], dim=0)                    # (2r, d)
+        qa, ra = torch.linalg.qr(Acat, mode="reduced")       # (d, 2r), (2r, 2r)
+        qb, rb = torch.linalg.qr(Bcat.t(), mode="reduced")   # (d, 2r), (2r, 2r)
+        core = ra @ rb.t()                                   # (2r, 2r)
+        u, sv, vh = torch.linalg.svd(core)
+        k = int(rank)
+        # THE RESIDUAL IS THE ENERGY THE TRUNCATION DROPS, as a fraction of the sum's own norm.
+        # Frobenius norm of a product with orthonormal factors is the norm of the core's singular
+        # values, so this needs no explicit dW anywhere -- forming (d, d) would be the one
+        # allocation this whole routine exists to avoid.
+        total = float(torch.linalg.vector_norm(sv))
+        kept = float(torch.linalg.vector_norm(sv[:k]))
+        resid = 0.0 if total <= 0.0 else max(0.0, 1.0 - (kept / total))
+        root = torch.sqrt(sv[:k])
+        pop.A[a] = (qa @ (u[:, :k] * root)).to(pop.A.dtype)
+        pop.B[a] = ((root[:, None] * vh[:k, :]) @ qb.t()).to(pop.B.dtype)
+        # THE BOOKS MERGE, WHICH IS THE OTHER HALF OF "both experts' learning survives".
+        pop.cent[a] = torch.nn.functional.normalize(
+            (pop.cent[a].float() + pop.cent[b].float()), dim=-1).to(pop.cent.dtype)
+    pop.use[a] = float(pop.use[a]) + float(pop.use[b])
+    pop.uage[a] = int(pop.uage[a]) + int(pop.uage[b])
+    pop.dom_of[a] = set(pop.dom_of[a]) | set(pop.dom_of[b])
+    return resid
+
+
 def _spawn_check(pop, query, spawn_mult, spawn_floor, step_n):
     """Spawn-by-specification: decode the router's own query into a new expert. Returns a report.
 
@@ -2960,10 +3095,257 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
                  THREE different outcomes and one number cannot carry them)
     """
     fab = fab.owned_by("FAB")
-    _ = fab.d_manage_period          # WIRE READ HERE -- both cadences reported side by side
-    raise NotImplementedError(
-        "FAB.manage: P4 (fabric) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section FAB.")
+    period = fab.d_manage_period     # WIRE READ HERE -- both cadences reported side by side
+    grace, cull_frac = int(fab.grace), float(fab.cull_frac)
+    pressure, slots = float(fab.pressure), int(fab.slots)
+    comp_protect, comp_ema = bool(fab.comp_protect), float(fab.comp_ema)
+    shift_tol, fail_tol = float(fab.shift_tol), float(fab.fail_tol)
+    rescue_frac, mut_big = float(fab.rescue), float(fab.mut_big)
+    manage_every = int(fab.manage_every)
+    depth0, hops = int(fab.depth0), int(fab.hops)
+    depth_eps, depth_patience = float(fab.depth_eps), int(fab.depth_stage_max)
+    depth_patience = int(fab.depth_patience)
+    depth_stage_max = int(fab.depth_stage_max)
+    merge_dist = float(fab.merge_dist)
+    rank = int(pop.B.shape[1])
+    counters, where = pop.counters, "FAB.manage"
+    step = U.Windows(step_windows)
+    step_n = int(step)
+
+    # SEEDED BEFORE ANY BRANCH DECIDES -- the rule fabric/api.py::_bump states and that this
+    # package's own sig sibling broke for a whole run. Every one of these is reachable on some arm.
+    for _k in ("fab.manage_passes", "fab.cull_fail", "fab.cull_util", "fab.spared_contrib",
+               "fab.spared_comp", "fab.spared_shift", "fab.rescued", "fab.deepened",
+               "fab.merged", "fab.merge_declined_grace", "fab.merge_declined_residual"):
+        counters.setdefault(_k, 0)
+    _bump(counters, "fab.manage_passes")
+    counters["fab.manage_period_flushes"] = int(period)
+    counters["fab.manage_every_windows"] = manage_every
+
+    n_live = int(pop.n_live)
+    # ELIGIBLE IS PAST-GRACE, AND EVERY RANKING AND BUDGET ON THIS PASS IS SIZED ON IT. The old
+    # budget was a fraction of n_live and removed ten where one was due (523 live / 84 eligible).
+    # `grace` is units.Selections and `uage` is the SELECTION count -- the H12/H13 split -- so this
+    # is a same-kind comparison and not a clock crossing.
+    eligible = [i for i in range(n_live) if int(pop.uage[i]) >= grace]
+    n_elig = len(eligible)
+    # fab.cull_rank_spread IS THE FALSIFIER FOR THE REPAIR ITSELF, which is why it is computed
+    # before anything is culled. Routing concentrates -- the pilot's top expert took 79.5% of
+    # traffic -- so the experts that cross grace first are the MOST-USED ones, while the cull then
+    # ranks that set by `use` ASCENDING. At a spread near 1 the ranking carries no information and
+    # H12 has survived the use/uage split in a new dress.
+    if n_elig:
+        _u = [float(pop.use[i]) for i in eligible]
+        counters["fab.cull_rank_spread"] = (max(_u) / min(_u)) if min(_u) > 0 else float("inf")
+
+    # ---- 0. MERGE, BEFORE EITHER CULL (Q-FAB-2) -------------------------------------------------
+    # THE ONLY MERGE-RATHER-THAN-KILL PATH IN EITHER POPULATION, which is why goal B keeps it.
+    # ELIGIBILITY IS ONE GRACE TEST, ON THE EXPERT THAT DISAPPEARS. Requiring both to be past grace
+    # would mean merging inside the eligible set, which sizes nothing differently; merging over the
+    # whole live set would re-absorb every replicate/xover birth, which are near-duplicates BY
+    # CONSTRUCTION, making `replicate` inert.
+    merged = declined_grace = declined_resid = 0
+    residuals = []
+    if merge_dist > 0.0 and n_live > 1:
+        with torch.no_grad():
+            cn = torch.nn.functional.normalize(pop.cent[:n_live].float(), dim=-1)
+            sim = cn @ cn.t()
+        absorbed = set()
+        # DESCENDING SIMILARITY so the closest pair merges first; a pair already consumed is
+        # skipped rather than re-merged into a survivor whose centroid has since moved.
+        pairs = []
+        for i in range(n_live):
+            for j in range(i + 1, n_live):
+                if float(1.0 - sim[i, j]) <= merge_dist:
+                    pairs.append((float(sim[i, j]), i, j))
+        pairs.sort(reverse=True)
+        for _sv, i, j in pairs:
+            if i in absorbed or j in absorbed:
+                continue
+            # `b` IS THE ONE THAT DISAPPEARS AND IT IS THE ONE GRACE TESTS.
+            a, b = (i, j) if int(pop.uage[j]) >= int(pop.uage[i]) else (j, i)
+            a, b = (b, a) if int(pop.uage[b]) < grace and int(pop.uage[a]) >= grace else (a, b)
+            if int(pop.uage[b]) < grace:
+                declined_grace += 1
+                continue
+            resid = _merge_into(pop, a, b, rank)
+            residuals.append(resid)
+            absorbed.add(b)
+            merged += 1
+        # THE REMOVALS HAPPEN AFTER THE WHOLE SCAN AND IN DESCENDING SLOT ORDER, because _remove
+        # renumbers by swap-with-last: removing a low slot first would move a later victim's id out
+        # from under the list this loop is walking.
+        for b in sorted(absorbed, reverse=True):
+            _remove(pop, b)
+        n_live = int(pop.n_live)
+    if merged:
+        _bump(counters, "fab.merged", merged)
+        rs = sorted(residuals)
+        counters["fab.merge_residual_p50"] = rs[len(rs) // 2]
+        counters["fab.merge_residual_p99"] = rs[min(len(rs) - 1, int(0.99 * len(rs)))]
+    if declined_grace:
+        _bump(counters, "fab.merge_declined_grace", declined_grace)
+
+    # ---- 1. FAILURE CULL, AT ANY OCCUPANCY ------------------------------------------------------
+    # THE GOAL-B PROTECTION AND THE ONLY CULL PATH THAT STILL RUNS ON A SMALL OR SHRINKING
+    # POPULATION. An expert is failing when BOTH error EMAs sit above the population by fail_tol
+    # AND the fast one is not above the slow one by shift_tol -- because fast >> slow is A SHIFT IN
+    # PROGRESS and that expert is ADAPTING, which is the single thing this project exists to keep.
+    cull_fail = spared_shift = 0
+    if n_elig:
+        ef_pop = sum(float(pop.ef[i]) for i in range(n_live)) / max(1, n_live)
+        es_pop = sum(float(pop.es[i]) for i in range(n_live)) / max(1, n_live)
+        failing = []
+        for i in list(eligible):
+            if i >= n_live:
+                continue          # renumbered away by the merge above
+            ef_i, es_i = float(pop.ef[i]), float(pop.es[i])
+            if ef_i > ef_pop + fail_tol and es_i > es_pop + fail_tol:
+                if ef_i - es_i > shift_tol:
+                    spared_shift += 1
+                else:
+                    failing.append(i)
+        for i in sorted(failing, reverse=True):
+            _remove(pop, i)
+            cull_fail += 1
+        n_live = int(pop.n_live)
+        eligible = [i for i in range(n_live) if int(pop.uage[i]) >= grace]
+        n_elig = len(eligible)
+
+    # ---- 2. UTILIZATION CULL, behind derive.cull_gate_open ---------------------------------------
+    # THAT FUNCTION IS CALLED, NOT RESTATED. It is already replayed against a 216-case oracle, and
+    # it is TWO conditions -- n_live <= 2 is a FLOOR, not a pressure test -- which is why people
+    # read it as one. THE ARITHMETIC IS RECORDED EVERY PASS whether it opened or not, so a run that
+    # was above pressure for most of its length and below it at the end does not print
+    # "unreachable".
+    gate_open = _derive.cull_gate_open(n_live, slots, pressure)
+    gate_str = (f"n_live={n_live} / slots={slots} = {n_live / max(1, slots):.3f} against "
+                f"FAB_PRESSURE={pressure} with the n_live<=2 floor: "
+                f"{'OPEN' if gate_open else 'SHUT'}")
+    # THE GATE'S ARITHMETIC GOES ON A Gate AND NOT INTO THE COUNTER LEDGER, and the first driven
+    # run of this body is why. `fab.cull_gate` is a DECLARED GATE NAME, and fabric/api.py::counters
+    # renders every gate by looking its name up in the ledger and calling int() on what it finds --
+    # so a string stored under that key raised ValueError from inside the REPORT PATH, after a
+    # 600-window run had already completed. The ledger is declared {name: int}; a sentence is a
+    # Gate's `reason`, which is exactly the field that exists to carry arithmetic.
+    cull_util = spared_contrib = spared_comp = 0
+    if gate_open and n_elig:
+        # THE BUDGET IS SIZED ON THE ELIGIBLE SET AND THE max(1, ...) RATCHET IS DROPPED. The budget
+        # MAY BE ZERO, and fab.cull_util == 0 under an OPEN gate is a legitimate reported outcome
+        # rather than something the code refuses to allow -- the ratchet is the pattern the
+        # DomainAssembler documents as having driven a population down to a single member.
+        budget = int(cull_frac * n_elig)
+        ranked = sorted(eligible, key=lambda i: float(pop.use[i]))
+        victims = []
+        for i in ranked:
+            if len(victims) >= budget:
+                break
+            # THE THREE SPARES, EACH ITS OWN COUNTER BECAUSE EACH IS A DIFFERENT REASON TO SURVIVE.
+            if float(pop.contrib[i]) > 0.0:
+                spared_contrib += 1
+                continue
+            if comp_protect and float(pop.comp[i]) > float(pop.comp_glob or 0.0):
+                spared_comp += 1
+                continue
+            if float(pop.ef[i]) - float(pop.es[i]) > shift_tol:
+                spared_shift += 1
+                continue
+            victims.append(i)
+        for i in sorted(victims, reverse=True):
+            _remove(pop, i)
+            cull_util += 1
+        n_live = int(pop.n_live)
+
+    # ---- 5. RESCUE: a heavy mutation instead of a deletion, inside the pressure gate -------------
+    # ONCE PER EXPERT. `mutscale` carries whether this expert has already been rescued, so a slot
+    # cannot be rescued repeatedly into noise -- and the Adam moments on A[i], B[i] are STALE after
+    # an in-place write, which this does not fix and must not pretend to.
+    rescued = 0
+    if gate_open and rescue_frac > 0.0 and n_elig:
+        worst = sorted([i for i in range(n_live) if int(pop.uage[i]) >= grace],
+                       key=lambda i: float(pop.use[i]))
+        for i in worst[:int(rescue_frac * max(1, n_elig))]:
+            if float(pop.mutscale[i]) != 1.0:
+                continue
+            with torch.no_grad():
+                for t in (pop.A, pop.B):
+                    t[i] += torch.randn(t[i].shape, generator=pop.rng.torch_generator(),
+                                        device=t.device, dtype=t.dtype) * mut_big * t[i].std()
+            pop.use[i], pop.uage[i] = 0.0, 0
+            pop.mutscale[i] = float(mut_big)
+            rescued += 1
+        pop.rescued = int(pop.rescued) + rescued
+
+    # ---- 6. maybe_deepen(flush_loss) when the curriculum is on ----------------------------------
+    # THE UNIT FAULT IS INHERITED AND REPORTED RATHER THAN SILENTLY CARRIED: depth_eps is declared
+    # BITS_PER_BYTE and flush_loss is a per-flush cross-entropy in NATS PER TOKEN. The repair is
+    # owed at the COMPARISON, not at the declaration, so the comparison converts and the counter
+    # says which unit it was made in.
+    deepened = False
+    if 0 < depth0 < hops and flush_loss is not None:
+        g = pop.growth
+        prev = g.get("depth_prev")
+        bits = float(flush_loss) / math.log(2.0)
+        counters["fab.depth_compared_in"] = "bits_per_token"
+        if prev is not None and (prev - bits) < depth_eps:
+            g["depth_wait"] = int(g.get("depth_wait", 0)) + 1
+            if g["depth_wait"] >= depth_patience and int(pop.depth_now) < min(hops,
+                                                                              depth_stage_max):
+                pop.depth_now = int(pop.depth_now) + 1
+                g["depth_wait"] = 0
+                deepened = True
+                _bump(counters, "fab.deepened")
+        else:
+            g["depth_wait"] = 0
+        g["depth_prev"] = bits
+
+    for k, v in (("fab.cull_fail", cull_fail), ("fab.cull_util", cull_util),
+                 ("fab.spared_contrib", spared_contrib), ("fab.spared_comp", spared_comp),
+                 ("fab.spared_shift", spared_shift), ("fab.rescued", rescued)):
+        if v:
+            _bump(counters, k, v)
+
+    # ---- THREE STATES, NOT TWO, FOR EVERY GATE ON THIS PASS (Q-FAB-5) ---------------------------
+    # `fabric.cull_eligible` and `fab.merged` report UNREACHABLE -- never "armed but 0" -- when the
+    # eligible set is empty, WITH THEIR OWN ARITHMETIC. This CANNOT ride
+    # derive.cadences_that_cannot_fire: that audit refuses anything that is not units.Windows and
+    # `grace` is units.Selections, so the reachability statement is FAB-owned by construction.
+    _mean_uage = sum(int(pop.uage[i]) for i in range(n_live)) / max(1, n_live)
+    _reach = (f"mean uage {_mean_uage:.1f} at n_live={n_live} after {step_n} window(s); "
+              f"grace={grace} selection(s)")
+    _gates = tuple(g for g in pop.gates
+                   if g.name not in ("fabric.cull_eligible", "fab.merged", "fab.cull_gate"))
+    pop.gates = _gates + (
+        Gate("fabric.cull_eligible", n_elig > 0, n_elig, grace,
+             reachable=n_elig > 0,
+             reason=(f"{n_elig} of {n_live} expert(s) are past grace and rankable; {_reach}"
+                     if n_elig else
+                     f"unreachable ({_reach}): NO expert has been SELECTED grace times, so the "
+                     f"eligible set is empty and every ranking, budget and spare on this pass is "
+                     f"sized on nothing. This is not 'armed and did not fire'")),
+        # RECORDED EVERY PASS WHETHER IT OPENED OR NOT, which the contract requires in as many
+        # words: "The gate's arithmetic is recorded EVERY pass whether it opened or not, so a run
+        # that was above pressure for most of its length and below it at the end does not print
+        # 'unreachable'." So this Gate is always REACHABLE -- what varies is `fired`.
+        Gate("fab.cull_gate", gate_open, n_live, pressure, reason=gate_str),
+        Gate("fab.merged", merged > 0, merged, merge_dist,
+             reachable=n_elig > 0 and merge_dist > 0.0,
+             reason=(f"{merged} pair(s) consolidated within FAB_MERGE_DIST={merge_dist} cosine; "
+                     f"residual p50/p99 "
+                     f"{counters.get('fab.merge_residual_p50', 0.0):.4f}/"
+                     f"{counters.get('fab.merge_residual_p99', 0.0):.4f}"
+                     if merged else
+                     f"FAB_MERGE_DIST={merge_dist} is 0: merging is off by configuration"
+                     if merge_dist <= 0.0 else
+                     f"unreachable ({_reach}): the absorbed expert must be past grace and no "
+                     f"expert is. {declined_grace} pair(s) were close enough and declined for it")))
+
+    return ManageReport(
+        merged=merged, merge_declined_grace=declined_grace,
+        merge_declined_residual=declined_resid, cull_fail=cull_fail, cull_util=cull_util,
+        spared_contrib=spared_contrib, spared_comp=spared_comp, spared_shift=spared_shift,
+        rescued=rescued, deepened=deepened, eligible=n_elig, cull_gate=gate_str,
+        manage_every=manage_every, manage_period_flushes=period)
 
 
 # ==================================================================================================
