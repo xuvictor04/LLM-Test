@@ -86,10 +86,22 @@ def _sentence(text):
     m = re.search(r"(?<=[a-z0-9)\]]{2})\.\s+(?=[A-Z])", flat)
     if m and m.start() > 24:
         return flat[:m.start() + 1].strip()
-    for stop in ("; ", " -- "):
-        if stop in flat and flat.index(stop) > 24:
-            return flat[:flat.index(stop)].strip()
     return flat if len(flat) <= 200 else flat[:197].rstrip() + "..."
+
+
+def _whole(text, cap=340):
+    """The WHOLE help, flattened. Used where cutting would drop the clause the section is about.
+
+    THE FIRST PASS OF THIS GENERATOR CUT AT "; " AND " -- " AND LOST EXACTLY THE SENTENCE THE ZERO
+    TABLE EXISTS FOR. Both punctuations are used mid-sentence throughout these declarations, so
+    LM_LAYERS rendered as "Depth of the base LM" with "0 means take the current arm's depth (4 for
+    transformer, 1 for gru)" cut off, and CAP_VOCAB_START lost "0 means start at the model's row
+    count" the same way -- in a table whose entire purpose is to say what a 0 means. A summariser
+    that removes the distinguishing clause is worse than no summary, because the row still looks
+    answered.
+    """
+    flat = " ".join(str(text).split()).replace("|", "\\|")
+    return flat if len(flat) <= cap else flat[:cap - 3].rstrip() + "..."
 
 
 def _unit(lv):
@@ -127,10 +139,10 @@ def defaults_markdown():
         for field, lv in sorted(sets[pfx]._levers.items()):
             env = "%s_%s" % (pfx, field.upper())
             if lv.default is False:
-                off_rows.append((env, _sentence(lv.help)))
+                off_rows.append((env, _whole(lv.help)))
             elif isinstance(lv.default, (int, float)) and not isinstance(lv.default, bool) \
                     and float(lv.default) == 0.0:
-                zero_rows.append((env, _unit(lv), _sentence(lv.help)))
+                zero_rows.append((env, _unit(lv), _whole(lv.help)))
 
     out = [HEADER, OFF_INTRO]
     out.append("\n| lever | what it turns off |\n|---|---|")
