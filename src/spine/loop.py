@@ -545,6 +545,9 @@ def run(sysm, *, max_windows=None, progress=True):
     # geometry, so a resampling run would otherwise repeat the same sentence every time a
     # draw happened to land on a multiple of ctx.
     _tail_warned = False
+    # HOW MANY TOKENS WERE MINTED BY THE TIME OF THE LAST EPOCH ROLL. 0 until a roll happens, which
+    # at RUN_EPOCHS=1 is for ever -- and that is exactly the case the end-of-run warning reports.
+    _mint_at_last_roll = 0
     # `did` IS SEEDED AT 0 AND IS NO LONGER A CONSTANT. It is overwritten by DOM.observe on every
     # window; the seed only covers the impossible case of a flush with no window in it.
     did = 0
@@ -869,6 +872,11 @@ def run(sysm, *, max_windows=None, progress=True):
             # A PENDING RETOK IS SATISFIED BY THIS ROLL, because the roll IS the act: the stream
             # was just re-segmented with the vocabulary as it now stands. Cleared here so that what
             # survives to the end of the run is only the fires no roll ever reached.
+            # THE MINT HIGH-WATER MARK AT THIS ROLL. Everything minted up to here is in the
+            # vocabulary the re-segmentation just used, so it IS in the stream from this epoch on;
+            # anything minted after the last roll is not. One number, captured where the fact is
+            # made, rather than a claim re-derived at the end of the run.
+            _mint_at_last_roll = int(vocab.counters.get("tok.mint", 0))
             if sysm.retok_pending:
                 vocab.counters["tok.retok_satisfied_by_roll"] = \
                     vocab.counters.get("tok.retok_satisfied_by_roll", 0) + 1
@@ -918,15 +926,30 @@ def run(sysm, *, max_windows=None, progress=True):
             "also finishes it, and Tick requires `finished` to be tested first. Raise RUN_EPOCHS "
             "(with DATA_RESAMPLE on, which the composition root refuses to run without) to give "
             "the mints a route into the data.")
+    # WHAT THE MINTS ACTUALLY DID, AND THE ANSWER CHANGED WHEN STAGE E LANDED. This block used to
+    # say, of every token the run minted, that NONE of them could appear in its training stream --
+    # true while the segmentation was built once and never rebuilt, and FALSE the moment the epoch
+    # roll started re-segmenting at the current vocabulary. Measured on a three-epoch run: epoch 2
+    # re-segmented at vocabulary 518 and the id count went 13,429 -> 13,202 for the same bytes,
+    # which is the minted tokens being spent.
+    # WHAT IS STILL TRUE IS NARROWER AND IS THE ONLY THING NOW CLAIMED: a token minted AFTER THE
+    # LAST ROLL has had no re-segmentation since it was born, so it is stranded exactly as before.
+    # At RUN_EPOCHS=1 that is every mint the run makes, because the one roll a single-epoch run
+    # takes is the one that also finishes it.
     _minted = int(vocab.counters.get("tok.mint", 0))
-    if _minted:
+    _stranded = _minted - _mint_at_last_roll
+    if _minted and _mint_at_last_roll:
         warnings.append(
-            f"loop: {_minted} token(s) were minted and their rows initialised, and NONE OF THEM "
-            f"CAN APPEAR IN THIS RUN'S TRAINING STREAM. Segmentation.ids was built once, before "
-            f"the first window, at the vocabulary the run entered with, and the only thing that "
-            f"re-segments it is the retok -- which this driver raises (tok.due_retok) and does not "
-            f"act on (tok.due_dropped). The mints are real, the rows are real and a resume carries "
-            f"both; what they are not is USED. Minting contributes nothing to this run's loss.")
+            f"loop: {_minted} token(s) were minted; {_mint_at_last_roll} of them were in the "
+            f"vocabulary at the last epoch roll and ARE in this run's training stream, because the "
+            f"roll re-segments at the vocabulary as it then stands.")
+    if _stranded:
+        warnings.append(
+            f"loop: {_stranded} token(s) were minted AFTER THE LAST EPOCH ROLL and cannot appear "
+            f"in this run's training stream -- their rows are initialised and a resume carries "
+            f"them, but no re-segmentation has happened since they were born. At RUN_EPOCHS=1 that "
+            f"is every mint the run makes: the single roll a one-epoch run takes is the one that "
+            f"also finishes it, and Tick requires `finished` to be tested first.")
 
     final_written = _save(sysm, clock, "final")
     for _d in dict.fromkeys(_disagree):
