@@ -885,6 +885,24 @@ def geometry(world: Config, w):
     # changing any other across a resume died inside torch on a shape mismatch naming no knob --
     # the exact failure the fabric's refusal exists to replace. Recording six and checking one is
     # the state CKPT.check_geometry reports as UNCHECKED; naming them all here is what lets it.
+    if not w._is_live():
+        # AN EMPTY GEOMETRY, WHICH IS WHAT THE CLASS DOCSTRING PROMISES AND WHAT THIS FUNCTION DID
+        # NOT DO. World's own first paragraph says the null world answers every method with the
+        # inert answer -- "zero loss terms, no forecast, an empty manage result, an empty geometry"
+        # -- and the body below dereferences w.keys.shape, which is None at WORLD_ENABLED=0. So the
+        # documented ablation arm CRASHED: AttributeError from inside the report path, after the
+        # corpus, the vocabulary and the whole run had been paid for.
+        # NOTHING COULD HAVE CAUGHT IT UNTIL SEPTEMBER, because nothing called this function
+        # (Q-CKPT-1, and the paragraph below says so at length). Wiring geometry into _save and into
+        # run.py's manifest is what made WORLD_ENABLED=0 reachable enough to fail, which is the
+        # same order of events as every other repair in this file: the call site comes first and
+        # the defect it exposes is the point of having one.
+        # WHAT {} MEANS DOWNSTREAM, and it is a reading rather than a hole: these six keys are
+        # merged into the recorded manifest, so a null world simply does not contribute them, and
+        # CKPT.check_geometry compares KEY SETS -- a parent that recorded world.* against a child
+        # that records none is a difference the gate can see. The one it cannot see is caught one
+        # row over, by world/api.py::load_into's own WORLD_ENABLED refusal.
+        return {}
     return {
         "world.lat": (int(w.lat), "EXACT", "WORLD_LAT", "the latent width every predictor maps into"),
         "world.route_d": (int(w.keys.shape[1]), "EXACT", "WORLD_ROUTE_D",
@@ -983,6 +1001,35 @@ def load_into(world: Config, w, sd):
 
     if not sd:
         return w
+    # THE TWO NULL ARMS, BEFORE ANY SHAPE IS READ. `sd` is TRUTHY on a null world -- state_dict
+    # returns a dict of Nones, not an empty one -- so the test above does not cover either of them,
+    # and `live_alloc = int(w.preds.shape[0])` below is an AttributeError at WORLD_ENABLED=0.
+    # A NULL CHILD RESUMING A TRAINED PARENT IS REFUSED, NAMING THE LEVER. It is not a load that
+    # has nothing to do: the parent's every step was taken against an objective that included
+    # `predict_w * pop_loss + collapse_w * (...)`, reaching the language model through an
+    # undetached obs_emb, and a child without those terms is optimising a different function.
+    # Continuing across that boundary and calling it one run is the measurement defect this whole
+    # package is organised against -- and turning the world model OFF is a legitimate thing to
+    # want, which is why the refusal names WORLD_ENABLED and says to start a fresh run.
+    if not w._is_live():
+        if sd.get("preds") is not None:
+            _refuse(
+                f"WORLD_ENABLED=0: the checkpoint holds a trained world model "
+                f"({int(sd['preds'].shape[0])} predictor(s)) and this run built a NULL world, so "
+                f"there is nothing here to load it into. Refused rather than skipped: the parent "
+                f"trained against an objective containing the world terms and this run's does not, "
+                f"so resuming would continue a different optimisation under the parent's name. To "
+                f"ablate the world model, start a fresh run at WORLD_ENABLED=0.")
+        return w
+    # AND THE OTHER DIRECTION, NAMED THE SAME WAY. Without this the refusal below fires on
+    # WORLD_N0/WORLD_NMAX and reports "the checkpoint allocates 0 predictors" -- true, and no help
+    # at all to an operator who turned WORLD_ENABLED back on between two runs.
+    if sd.get("preds") is None:
+        _refuse(
+            f"WORLD_ENABLED: the checkpoint was written by a run with NO world model and this run "
+            f"builds {int(w.preds.shape[0])} predictor(s). There is nothing in the blob to restore "
+            f"them from, and a silently random world model trained against a resumed language "
+            f"model is the state world/api.py::World.parameters was added to end.")
     # THE SIZE COMPARED IS THE ALLOCATED COUNT, len(preds), NOT n_live. Under Q-WORLD-8 (b)
     # `n <= nmax` is an invariant this may assert rather than hope for.
     saved_alloc = 0 if sd.get("preds") is None else int(sd["preds"].shape[0])
