@@ -353,7 +353,10 @@ ASSEMBLY_ORDER = (
                                               "at any point -- NOT CAP's "
                                               "restored ceiling, which is thirty rows away and is "
                                               "the whole of M38; the body passes None today) -- "
-                                              "MEASURES bytes/token, which three later rows need",
+                                              "MEASURES bytes/token on a fresh build and ADOPTS the "
+                                              "parent's recorded value on a resume (the width SIG "
+                                              "derives from it is fixed for the run), which three "
+                                              "later rows need",
                                               "vocab = Vocabulary -- the record itself, which TOK.restore_vocab "
                                               "and TOK.save_vocabulary both take and which nothing "
                                               "else in the tree mints; bytes_per_token -- "
@@ -1235,10 +1238,12 @@ LOOP_ORDER = (
                                       "DECLARED (data/api.py::stream_state says 'dict' and lists the contents "
                                       "in prose), so the round trip through DATA.restore_stream_"
                                       "state is unverifiable by inspection"),
-    ("C", "TOK",   "vocab_state",     "(vocab) -- retirements and probation, which "
-                                      "a save/load round trip currently UNDOES (D-T3)",
-                                      "payload['TOK'] -- keys undeclared, and D-T3 is a live defect "
-                                      "CAUSED by a key the file never had"),
+    ("C", "TOK",   "vocab_state",     "(vocab) -- retirements and probation (D-T3, which "
+                                      "restore_vocab now puts back), the pair tally and "
+                                      "tally_seen exactly, and the counters, which carry the "
+                                      "three cadence clocks",
+                                      "payload['TOK'] -- keys listed at tok/api.py::vocab_state; "
+                                      "the merges themselves travel in the vocabulary file"),
     ("C", "LM",    "state_dict",      "(model, geom)", "payload['LM']"),
     ("C", "SIG",   "state_dict",      "(st) -- and the sidecar the restore row "
                                       "above compares against, which sig/api.py::state_dict says this "
@@ -2077,7 +2082,11 @@ def compose(environ=None, *, restored=None):
 
     # -- 5. the vocabulary, which MEASURES bytes/token --------------------------------------------
     # Ordered here and not earlier because build_vocabulary needs the corpus, and ordered before
-    # DATA.data_plan and SIG.build because both need the measurement. derive.bytes_per_token is the
+    # DATA.data_plan and SIG.build because both need the measurement. ON A RESUME THE MEASUREMENT IS
+    # THE PARENT'S: build_vocabulary adopts the value the vocabulary file recorded (tok.bpt_adopted),
+    # because re-measuring on the replayed vocabulary -- grown by every online mint -- moved
+    # _signature_width's answer and SIG refused the resume (192 recorded, 194 resolved, on every
+    # default run resumed after its window-201 mint). derive.bytes_per_token is the
     # only estimator in the tree; the mean-over-vocabulary-entries form it replaces had an error
     # that changes SIGN with vocabulary size, and the signature width 614 was chosen off it.
     sysm.stage = "vocab"

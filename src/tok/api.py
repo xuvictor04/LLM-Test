@@ -656,6 +656,12 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
                  disagreed; declared here because the reverse direction of this row is a check too --
                  a counter written by a body and named in no declaration is as invisible as a
                  declaration nothing writes),
+                 tok.bpt_adopted (REPLAY ARM ONLY: 1 = bytes_per_token is the value the parent's
+                 file recorded, 0 = the file predates the field and the value was measured here),
+                 tok.bpt_mismatch, tok.bpt_mismatch_detail (REPLAY ARM, file records the value,
+                 TOK_DROPOUT=0: the re-measurement on the parent's build-time vocabulary against
+                 the recorded value -- 0 agreed to the bit, 1 disagreed and the detail names both;
+                 absent at dropout > 0, where the two are not draws from one stream position),
                  Gate tok.build_passes_advice (fires on mode="fixed" with the two numbers;
                  "unreachable (mode != fixed)" otherwise -- never silence),
                  tok.v0 -- the ACHIEVED size at the start of training, recorded once and NEVER
@@ -884,7 +890,8 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
         # itself still narrow would blame the parent for a change this run made.
         recon = {"min_pair": int(tok.min_pair), "max_tok": int(tok.max_bytes),
                  "dropout": float(tok.dropout), "vmax": vocab.ceiling}
-        replayed = _replay_merges(vocab, read_path, recon=recon)
+        rec = {}
+        replayed = _replay_merges(vocab, read_path, recon=recon, recorded=rec)
         if replayed is None:
             # A MISSING PARENT IS NOT A COLD START (round1 finding, tok/api.py::build_vocabulary). The old body
             # fell through to the fresh-build arm below and returned a freshly minted vocabulary
@@ -926,9 +933,61 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
         # THIS BRANCH TOO" comment, and this is its first use. Reusing
         # it is not a second mint -- see P1-H56 and the crash that a second mint caused on this exact
         # branch before that fix.
+        # THE PARENT'S RECORDED VALUE WINS ON THIS ARM, AND THE MEASUREMENT BELOW IS ITS CHECK
+        # (2026-09-23). bytes_per_token is what derive.signature_width_bytes turns into SIG's one
+        # width, which that function calls "FIXED FOR THE LIFETIME OF THE RUN", and a resumed run is
+        # the same run. Re-measuring here on the REPLAYED vocabulary -- which carries every token
+        # the parent minted online -- moved the width, and SIG refused the resume: a default parent
+        # run to 210 windows (6 tokens minted at window 201) recorded 1.50266 and width 192, the
+        # resume re-measured 1.51876 and resolved 194, and "SIG resume refused on width_units: the
+        # checkpoint was written at 192 and this run resolves 194" ended every resume of every
+        # default run longer than 200 windows. save_vocabulary has always written the value, so the
+        # file already carries it and every checkpoint already on disk becomes resumable with no
+        # format change. DATA.data_plan's splice gate reads the same field and so receives the
+        # parent's value too, instead of silently planning off a different one.
+        # THE MEASUREMENT STILL RUNS, ON THE PARENT'S BUILD-TIME VOCABULARY: the ids the parent
+        # minted after its build (id >= the file's v0) are masked through `retired` for this one
+        # call, which _segment skips before it draws, so the result is the segmentation the
+        # parent's own build measured. It is (a) the fallback when the file predates the field and
+        # (b) the reconciliation when it does not -- bit-exact at TOK_DROPOUT=0 on an unchanged
+        # corpus sample, and not comparable at dropout > 0, where the parent drew its measurement
+        # from a different position of the dropout stream. Its draws are the same calls this arm
+        # always made on a file with no online mints, so no stream position moves there.
         stream = vocab.dropout_rng if float(tok.dropout) > 0 else None
-        ids, _pos = _segment(vocab, sample, dropout=float(tok.dropout), stream=stream)
-        vocab.bytes_per_token = _derive.bytes_per_token(len(sample), len(ids))
+        _fv0 = rec.get("v0")
+        _born_online = (set(range(int(_fv0), vocab.size()))
+                        if _fv0 is not None and 256 <= int(_fv0) <= vocab.size() else set())
+        vocab.retired = _born_online
+        try:
+            ids, _pos = _segment(vocab, sample, dropout=float(tok.dropout), stream=stream)
+        finally:
+            vocab.retired = set()
+        measured = _derive.bytes_per_token(len(sample), len(ids))
+        c = vocab.counters
+        # tok.bpt_adopted IS SEEDED BEFORE THE BRANCH THAT DECIDES IT (G4): 1 = the file's recorded
+        # value was adopted, 0 = the file predates the field and the measurement above stands.
+        # Absent on the fresh-build and mode="bytes" arms, where there is no file to adopt from.
+        c["tok.bpt_adopted"] = 0
+        recorded_bpt = rec.get("bytes_per_token")
+        if recorded_bpt is None:
+            vocab.bytes_per_token = measured
+        else:
+            c["tok.bpt_adopted"] = 1
+            vocab.bytes_per_token = float(recorded_bpt)
+            # tok.bpt_mismatch IS PRESENT ONLY WHERE THE COMPARISON IS EXACT (dropout 0): 0 means
+            # re-measured and agreed to the bit, 1 means the build sample or the vocabulary is not
+            # the one the parent measured -- a corpus or TOK_BUILD_BYTES change across the resume --
+            # and the detail line names both numbers. The recorded value still wins: the width is
+            # a fact about the run the centroids were measured in, not about this process.
+            if float(tok.dropout) == 0.0:
+                c["tok.bpt_mismatch"] = int(measured != float(recorded_bpt))
+                if c["tok.bpt_mismatch"]:
+                    c["tok.bpt_mismatch_detail"] = (
+                        f"tok.bpt_mismatch: {read_path!r} recorded bytes_per_token="
+                        f"{float(recorded_bpt)!r}; re-measured on the parent's build-time vocabulary "
+                        f"(ids < v0={_fv0!r}) over this run's build sample it is {measured!r}. The "
+                        f"recorded value is used: SIG's width and DATA's plan stay the parent's, "
+                        f"but the build sample this run sees is not the one the parent built from.")
         # THE GATE, EVEN THOUGH NO BUILD PASS RAN HERE. build_passes_advice's predicate is about a
         # FRESH build reaching mode="fixed" at some REQUESTED pass count against the historical 8;
         # a replay never calls the build loop at all; on the offline analogue of the round1 fix that
@@ -1096,7 +1155,7 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
     return vocab
 
 
-def _replay_merges(vocab, path, *, recon=None):
+def _replay_merges(vocab, path, *, recon=None, recorded=None):
     """Replay a parent's vocabulary into `vocab`, EXACTLY or not at all. None if unreadable.
 
     IDS ARE POSITIONS IN THE EMBEDDING TABLE, so a replay that drops one entry and shifts every id
@@ -1121,6 +1180,21 @@ def _replay_merges(vocab, path, *, recon=None):
     every other DID IT FIRE row here does). A key the file does not carry is skipped rather than
     treated as a mismatch against `None`: an old save predates a field and that is not a disagreement
     about a value, it is the absence of one.
+    THE FOUR KEYS WERE NEVER WRITTEN UNTIL 2026-09-23, SO THIS COUNTER READ 0 ON EVERY RESUME. It
+    compared min_pair/max_tok/dropout/vmax and save_vocabulary wrote none of them (it wrote
+    max_bytes and ceiling), so all four comparisons were skipped and "compared and agreed" was
+    printed for a resume at TOK_MAX_BYTES=12, TOK_MIN_PAIR=7, LM_VOCAB_SLOTS=8192 against a file
+    written at 16/50/4096. save_vocabulary now writes all four from the resolved Config under these
+    names, and a file written before that is still checked for the one lever that sizes
+    LM.d_max_token_bytes: `max_tok` falls back to the file's `max_bytes`, which has always been
+    vocab.max_bytes = int(tok.max_bytes). `vmax` has NO such fallback on purpose: the file's
+    `ceiling` is vocab.ceiling, which the fixed arm narrows to the achieved build size, so reading
+    it as vmax would report a false mismatch on every fixed-mode resume.
+
+    `recorded`, WHEN GIVEN, IS FILLED WITH THE FILE'S OWN MEASUREMENT FIELDS -- `bytes_per_token`
+    and `v0`, each None when the file predates it -- so build_vocabulary can adopt the parent's
+    measurement instead of re-measuring on a vocabulary that has grown since (see the replay arm
+    there: re-measuring moved the signature width and SIG refused every resume after a mint).
     """
     import json
     import os
@@ -1129,17 +1203,26 @@ def _replay_merges(vocab, path, *, recon=None):
     with open(path, "r", encoding="utf-8") as fh:
         blob = json.load(fh)
 
+    if recorded is not None:
+        recorded["bytes_per_token"] = blob.get("bytes_per_token")
+        recorded["v0"] = blob.get("v0")
+
     if recon is not None:
         lines = []
         for key, lever_name in (("min_pair", "TOK_MIN_PAIR"), ("max_tok", "TOK_MAX_BYTES"),
                                  ("dropout", "TOK_DROPOUT"), ("vmax", "the wire d_vocab_ceiling")):
-            recorded = blob.get(key)
-            if recorded is None:
+            was = blob.get(key)
+            if was is None and key == "max_tok":
+                # A FILE WRITTEN BEFORE `max_tok` EXISTED STILL RECORDS THE SAME NUMBER as
+                # `max_bytes` (vocab.max_bytes is int(tok.max_bytes) at construction), so the one
+                # lever that sizes LM's byte tables is checked on every file this tree ever wrote.
+                was = blob.get("max_bytes")
+            if was is None:
                 continue
             resolved = recon.get(key)
-            if recorded != resolved:
+            if was != resolved:
                 lines.append(
-                    f"tok.load_reconciled: {path!r} recorded {key}={recorded!r}, this run resolves "
+                    f"tok.load_reconciled: {path!r} recorded {key}={was!r}, this run resolves "
                     f"{resolved!r} ({lever_name}) -- the file's value does not win")
         vocab.counters["tok.load_reconciled"] = len(lines)
         if lines:
@@ -1279,7 +1362,9 @@ def tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False
          and derive.signature_width_bytes(LM.ctx, bytes_per_token) (SIG's one width) and
          data_plan's splice_window threshold both move with a TOK regularizer. Both take the
          measured value and so follow correctly; whoever reads a width that changed with no SIG
-         lever set should look here first.
+         lever set should look here first. ON A RESUME the value is the PARENT's, adopted from
+         the vocabulary file rather than measured again (build_vocabulary's replay arm), because
+         the width is fixed for the lifetime of the run and a resume is the same run.
 
     `seed` IS ACCEPTED AND DELIBERATELY NOT READ, and the frozen signature keeps it (r4, found by
     reading this function end to end). The one live call site passes `seed=int(run.seed)`
@@ -2565,8 +2650,10 @@ def save_vocabulary(tok: Config, vocab, *, suffix=""):
     RECEIVES: suffix <- the same value the root hands CKPT.save on this save, on the C rows.
     RETURNS: str path, or None.
 
-    LEVERS READ: none
-    WIRES READ: d_vocab_save_path
+    LEVERS READ: min_pair, max_bytes, dropout (RECORDED in the file under min_pair, max_tok and
+                 dropout, for _replay_merges' reconciliation on the next resume)
+    WIRES READ: d_vocab_save_path, d_vocab_read_path (the refusal to overwrite the parent's file),
+                d_vocab_ceiling (recorded as vmax, for the same reconciliation)
     DID IT FIRE: tok.vocab_saved, tok.vocab_saved_suffixed (a snapshot-suffixed write; 0 means no
                  bestN save has happened, which at CKPT.best_keep=0 is "unreachable" and must say
                  so rather than read 0)
@@ -2624,7 +2711,25 @@ def save_vocabulary(tok: Config, vocab, *, suffix=""):
         "maxlen": int(vocab.maxlen),
         "max_bytes": int(vocab.max_bytes),
         "ceiling": int(vocab.ceiling),
+        # THE MEASUREMENT A RESUME ADOPTS. build_vocabulary's replay arm takes this value instead of
+        # re-measuring on the replayed (grown) vocabulary, because SIG's width is derived from it
+        # and is fixed for the lifetime of the run. It is the parent's BUILD-TIME measurement:
+        # nothing in the loop rewrites vocab.bytes_per_token, and a replay adopts it, so a chain of
+        # resumes carries the one number the first run measured.
         "bytes_per_token": float(vocab.bytes_per_token),
+        # THE RECONCILIATION KEYS, UNDER THE NAMES _replay_merges READS THEM BY. That function
+        # compared min_pair/max_tok/dropout/vmax and this blob wrote none of them, so every one of
+        # the four comparisons was skipped and tok.load_reconciled read 0 -- "compared and agreed"
+        # -- on every resume, including one at TOK_MAX_BYTES=12, TOK_MIN_PAIR=7 and
+        # LM_VOCAB_SLOTS=8192 against a file written at 16/50/4096. Taken from the RESOLVED CONFIG,
+        # never from the vocabulary object: `vmax` is the wire d_vocab_ceiling as it arrived, which
+        # is what the replay side compares against, while vocab.ceiling above is narrowed to the
+        # achieved size on the fixed arm and would report a false vmax mismatch on every fixed-mode
+        # resume.
+        "min_pair": int(tok.min_pair),
+        "max_tok": int(tok.max_bytes),
+        "dropout": float(tok.dropout),
+        "vmax": int(tok.d_vocab_ceiling),
     }
     tmp = dst + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
@@ -2634,14 +2739,49 @@ def save_vocabulary(tok: Config, vocab, *, suffix=""):
     return dst
 
 
+def _pack_pairs(table):
+    """A {(a, b): n} table as three parallel int64 arrays, in the table's own iteration order.
+
+    COMPACT AND EXACT, NOT TRUNCATED. A dict of tuple keys pickles at several times the size, and a
+    top-K or a floor would make a resumed run rank differently from an uninterrupted one: a pair
+    just under the cutoff restarts from zero and can later be overtaken, and mint_burst's
+    per-left-token marginal (the mint_pmin arm) is computed over the WHOLE tally. `array` is stdlib,
+    so this package still never touches torch.
+    """
+    import array
+    a, b, n = array.array("q"), array.array("q"), array.array("q")
+    for (x, y), k in table.items():
+        a.append(int(x))
+        b.append(int(y))
+        n.append(int(k))
+    return {"a": a, "b": b, "n": n}
+
+
+def _unpack_pairs(packed, what):
+    """The inverse of _pack_pairs, as a list of ((a, b), n) in the saved order. Refuses ragged input."""
+    a, b, n = packed["a"], packed["b"], packed["n"]
+    if not len(a) == len(b) == len(n):
+        raise LeverError(
+            f"TOK resume refused: the checkpoint's {what} arrays are ragged ({len(a)}, {len(b)}, "
+            f"{len(n)}). The payload is damaged, and restoring a partial tally would rank the "
+            f"next mint burst on evidence nobody measured.")
+    return [((int(x), int(y)), int(k)) for x, y, k in zip(a, b, n)]
+
+
 def vocab_state(tok: Config, vocab):
     """Everything a resume needs that the merge list alone does not carry: retired ids, the prov
-    table with birth steps, v0, the cadence _fired map, the soft cap, the pair tally digest, and
-    the counter vector.
+    table with birth steps, v0, the soft cap, the pair tally and tally_seen (exactly), and the
+    counter vector -- which is also where the three cadence clocks live (tok.<key>_seeded_window,
+    kept there by _due).
 
-    Today a save/load round trip UNDOES EVERY RETIREMENT, because load() replays every merge into
-    the match table including the retired ones, and `prov` does not exist in the file at all -- so
-    every token on probation at save time is silently confirmed (DEFECT D-T3).
+    A save/load round trip USED TO UNDO EVERY RETIREMENT, because the replay puts every merge into
+    the match table including the retired ones and `prov` was not in the file at all -- so every
+    token on probation at save time was silently confirmed (DEFECT D-T3). `retired` and `prov` here,
+    put back by restore_vocab, are that repair. The pair tally was the same shape of loss until
+    2026-09-23 (see its key below).
+
+    WHAT IS NOT HERE AND WHY: the merges and bytes_per_token travel in the vocabulary FILE
+    (save_vocabulary), which build_vocabulary replays and adopts before this state is restored.
 
     ALSO REPORTS THE CAP-LIFT CADENCE as a reading, so "0 lifts" is distinguishable from "the
     valve's period is longer than the run" -- round6 measured 0 vocabulary lifts on gc_real and it
@@ -2671,10 +2811,20 @@ def vocab_state(tok: Config, vocab):
         "v0": int(vocab.v0),
         "soft_cap": None if vocab.soft_cap is None else int(vocab.soft_cap),
         "merge_count": len(vocab.merges),
-        # THE PAIR TALLY DIGEST rather than the tally: it is the candidate evidence a mint draws on,
-        # and carrying the counts lets a resumed run continue accumulating instead of restarting the
-        # window that was already paid for.
-        "pair_digest": len(getattr(vocab, "pair", ()) or ()),
+        # THE PAIR TALLY ITSELF, EXACTLY, AND tally_seen BESIDE IT (2026-09-23). This key used to be
+        # "pair_digest": len(vocab.pair) -- the length of a DIFFERENT structure (the id -> pair map,
+        # 262 on a default checkpoint at window 210), which restore_vocab never read -- under a
+        # comment claiming the counts were carried. The tally is cumulative for the whole run and
+        # is the only evidence mint_burst draws on, so a resume restarted it from zero: a default
+        # parent at 160 windows resumed to 202 reached the window-201 burst with sum(tally) 5248 and
+        # 0 pairs at min_pair, and minted 0 tokens where the uninterrupted run had 25728, 62
+        # eligible pairs and minted 6 (vp, vy, cn, up, tv, wr). tally_seen is the novelty re-rank's
+        # baseline and is empty at the shipped mint_novel=0.0; it travels the same way.
+        # `tally_pairs` and `tally_sum` let restore_vocab check the arrays against themselves.
+        "tally": _pack_pairs(vocab.tally),
+        "tally_pairs": len(vocab.tally),
+        "tally_sum": int(sum(vocab.tally.values())),
+        "tally_seen": _pack_pairs(vocab.tally_seen),
         "counters": dict(vocab.counters),
         # THE CAP-LIFT CADENCE, REPORTED AS A READING. "0 lifts" and "the valve's period is longer
         # than the run" are different facts, and round6 measured 0 vocabulary lifts on gc_real when
@@ -2683,25 +2833,40 @@ def vocab_state(tok: Config, vocab):
         # own -- CAP.counters' block-reason histogram is the authority, and it now has a body.
         "cap_lift_period": int(lift_period),
     }
-    # THE CADENCE `_fired` MAP IS DECLARED ABSENT RATHER THAN OMITTED. TOK.on_window owns this
-    # package's four cadences and is still a P4 stub, so no `_fired` map exists to save. Writing the
-    # reason beats leaving the key out, because a missing key on the other side is indistinguishable
-    # from an older checkpoint -- and a resume that silently finds no cadence state restarts every
-    # one of them at zero.
-    out["fired"] = None
-    out["fired_unbuilt_reason"] = ("TOK.on_window is a P4 stub, so this package's four cadences "
-                                   "have no _fired map yet; there is no cadence state to carry")
+    # THE CADENCE CLOCKS TRAVEL IN `counters`, AND THIS KEY SAYS WHERE RATHER THAN CLAIMING THERE
+    # ARE NONE. It used to write fired=None with "TOK.on_window is a P4 stub, so this package's four
+    # cadences have no _fired map yet; there is no cadence state to carry" into every checkpoint,
+    # beside a `counters` dict that carried tok.mint_seeded_window=201 and tok.retok_seeded_window=1
+    # on a default run at window 210. on_window has a body and asks THREE cadences (mint, retok,
+    # probation) through _due, which keeps each clock in vocab.counters as tok.<key>_seeded_window
+    # -- MEM's precedent, stated in _due's docstring -- so restore_vocab's counters.update puts
+    # them back with no separate map. `fired` names those rows, so a reader of the payload finds
+    # the clocks without reading _due.
+    out["fired"] = {k: v for k, v in vocab.counters.items()
+                    if k.startswith("tok.") and k.endswith("_seeded_window")}
+    out["fired_where"] = ("the cadence clocks are the tok.<key>_seeded_window rows of `counters` "
+                          "(written by tok/api.py::_due); `fired` is a copy for reading, and "
+                          "restore_vocab restores them from `counters`")
     vocab.counters["tok.state_written"] = vocab.counters.get("tok.state_written", 0) + 1
     return out
 
 
 def restore_vocab(tok: Config, state, vocab):
-    """Put retirements, probation and the cadence clocks back, and REFUSE LOUDLY if the state's
-    merge count does not match the vocabulary just built from the file.
+    """Put retirements, probation, the pair tally and the cadence clocks back, and REFUSE LOUDLY if
+    the state's merge count does not match the vocabulary just built from the file.
+
+    THE REPLAY ARM'S OWN ROWS SURVIVE THE COUNTER RESTORE. build_vocabulary wrote
+    tok.load_reconciled(_detail) and tok.bpt_* for THIS resume before this call runs, and the
+    state's `counters` carries the PARENT's copies of the same rows whenever the parent was itself
+    a resume -- so a plain counters.update overwrote this resume's reconciliation with the parent's
+    (a grandchild that changed a lever read the parent's "0, agreed"). The parent's copies are
+    dropped and this process's are put back after the update.
 
     LEVERS READ: none
     WIRES READ: none
-    DID IT FIRE: tok.state_restored, tok.state_refused
+    DID IT FIRE: tok.state_restored, tok.state_refused, tok.tally_restored (the number of pairs put
+                 back; ABSENT when the checkpoint predates the tally field, which is the arm where
+                 the first post-resume burst ranks on post-resume windows only)
     """
     tok = tok.owned_by("TOK")
     if not state:
@@ -2728,7 +2893,34 @@ def restore_vocab(tok: Config, state, vocab):
         vocab.v0 = int(state["v0"])
     if "soft_cap" in state:
         vocab.soft_cap = None if state["soft_cap"] is None else int(state["soft_cap"])
+    # THE TALLY GOES BACK AFTER THE MERGE-COUNT CHECK ABOVE, so every id in it indexes the
+    # vocabulary it was counted against. Rebuilt in the saved order; mint_burst ranks by a total
+    # order (_cand_key) and does not depend on it, but a restored Counter that iterates like the
+    # parent's is one fewer difference to rule out.
+    if state.get("tally") is not None:
+        pairs = _unpack_pairs(state["tally"], "tally")
+        want_n, want_sum = state.get("tally_pairs"), state.get("tally_sum")
+        got_sum = sum(k for _p, k in pairs)
+        if (want_n is not None and want_n != len(pairs)) or (want_sum is not None
+                                                            and want_sum != got_sum):
+            vocab.counters["tok.state_refused"] = vocab.counters.get("tok.state_refused", 0) + 1
+            raise LeverError(
+                f"TOK resume refused: the checkpoint's tally arrays hold {len(pairs)} pairs summing "
+                f"to {got_sum}, and the same payload records {want_n} pairs summing to {want_sum}. "
+                f"The payload is damaged; restoring it would rank the next mint burst on evidence "
+                f"nobody measured.")
+        vocab.tally = collections.Counter(dict(pairs))
+        vocab.tally_seen = dict(_unpack_pairs(state.get("tally_seen") or
+                                              {"a": (), "b": (), "n": ()}, "tally_seen"))
     if state.get("counters"):
+        _replay_rows = ("tok.load_reconciled", "tok.load_reconciled_detail", "tok.bpt_adopted",
+                        "tok.bpt_mismatch", "tok.bpt_mismatch_detail", "tok.tally_restored")
+        mine = {k: vocab.counters[k] for k in _replay_rows if k in vocab.counters}
         vocab.counters.update(state["counters"])
+        for k in _replay_rows:
+            vocab.counters.pop(k, None)
+        vocab.counters.update(mine)
+    if state.get("tally") is not None:
+        vocab.counters["tok.tally_restored"] = len(vocab.tally)
     vocab.counters["tok.state_restored"] = vocab.counters.get("tok.state_restored", 0) + 1
     return vocab

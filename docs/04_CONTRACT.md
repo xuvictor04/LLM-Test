@@ -524,12 +524,19 @@ re-segmentation fired scored **4.364 against 2.175** held-out b/B.
 `d_vocab_read_path`, `d_cap_lift_period` (reporting only).
 **State:** `merges` (append-only; the merge list **is** the mint log), the `seq2id` match table
 (diverges from `id2bytes` after a retirement — which is why the retok skip test stamps
-`(size, len(seq2id))` and not `size`), the pair tally with a monotonic `version`, `prov`, `retired`,
-`soft_cap`, `v0`, the cadence `_fired` map. All checkpointed; today a save/load round trip **undoes
-every retirement** and loses probation entirely.
-**Counters:** `tok.build_pass/build_mint/v0`, `load_reconciled`, `mint` + eight mint-outcome
-counters, `retok`/`retok_noop`, `dropout_skip`, `mint_frozen_at`, `probation_*`, `cap_lift`,
-`vocab_saved`, `state_*`, and Gates `mint_pmin` and `probation_embed`.
+`(size, len(seq2id))` and not `size`), the pair tally and `tally_seen`, `prov`, `retired`,
+`soft_cap`, `v0`, and the three cadence clocks (`tok.<key>_seeded_window`, kept in `counters` by
+`_due`). **Where each crosses a checkpoint:** the merges and the measured `bytes_per_token` in the
+vocabulary FILE (`save_vocabulary`), which a resume replays and whose recorded `bytes_per_token` it
+**adopts** rather than re-measuring (Q-TOK-13); `prov`, `retired`, `soft_cap`, `v0`, the tally and
+`tally_seen` (exactly, as parallel int arrays) and the counters in `payload['TOK']` (`vocab_state`),
+put back by `restore_vocab` after its merge-count refusal. The match-table revision `rev` is
+per-process and deliberately not carried. A save/load round trip **used to undo every retirement**
+(D-T3) and **used to restart the tally from zero** (Q-TOK-13); both are carried now.
+**Counters:** `tok.build_pass/build_mint/v0`, `load_reconciled`, `bpt_adopted`/`bpt_mismatch`,
+`tally_restored`, `mint` + eight mint-outcome counters, `retok`/`retok_noop`, `dropout_skip`,
+`mint_frozen_at`, `probation_*`, `cap_lift`, `vocab_saved`, `state_*`, and Gates `mint_pmin` and
+`probation_embed`.
 
 ### LM — `src/lm/api.py` (12 levers)
 
@@ -1472,10 +1479,16 @@ against the sidecar's 192 and both warnings gone. A checkpoint whose sidecar was
 `width_units: 999` is refused by name: *"SIG resume refused on width_units: the checkpoint was
 written at 999 and this run resolves 197."* The other end fires too — `rank: 999` gives *"FAB resume
 refused on rank: the checkpoint was written at 999 and this run resolves 8. This is an INNER
-dimension … a same-shaped restore would be a different decomposition wearing the right shape."* And the 197 in that message is itself a finding — it
-came from pairing an **early** blob with the **final** vocabulary file, a combination that resolves
-a different signature width than the blob's centroids were measured at, and which every resume
-before this repair would have accepted in silence.
+dimension … a same-shaped restore would be a different decomposition wearing the right shape."* And the 197 in that message is itself a finding, **but not the one this
+paragraph first recorded.** It said the 197 came from pairing an early blob with the final
+vocabulary file. **That attribution was wrong** (corrected 2026-09-23): a checkpoint paired with its
+**own** vocabulary file resolved a different width too. The cause was `build_vocabulary`'s replay
+arm **re-measuring `bytes_per_token` on the replayed vocabulary**, which carries every token the
+parent minted online, so the width moved as soon as the parent had minted once — measured on a
+default parent at 210 windows (6 tokens minted at window 201): recorded 192, resolved 194, *"SIG
+resume refused on width_units"*, on every default run resumed after its first mint burst. The
+refusal was right to fire; the width it compared against was wrong. The replay arm now adopts the
+value the file recorded (Q-TOK-13) and the same resume passes at 192.
 
 ### 3.10 Three TOK events are produced at `A` and consumed at `B`
 
@@ -3780,9 +3793,14 @@ and 20 in three live statements at once. Run `_geometry_manifest`.
    in the manifest at all, because `derive.signature_width_bytes` reads a **measured**
    `bytes_per_token`. No frozen signature moved. The sentence above that `FAB.state_dict` "does not
    even claim to emit a sidecar" was true of an earlier tree; it emits one.
-   **What re-arming it caught immediately:** pairing an early blob with the final vocabulary file
-   resolves `width_units` 197 against a recorded 192, so every centroid in that blob would have been
-   a mean of two different measurements — accepted in silence by every resume until now.
+   **What re-arming it caught immediately:** a resume resolving `width_units` 197 against a recorded
+   192, which every resume before it had accepted in silence. This entry first blamed that on
+   pairing an early blob with the final vocabulary file; **the attribution was wrong** (corrected
+   2026-09-23). The cause was the replay arm of `build_vocabulary` **re-measuring `bytes_per_token`**
+   on a vocabulary grown by the parent's online mints, so any checkpoint written after the first
+   mint burst — paired with its own vocabulary file — resolved a different width (192 recorded, 194
+   resolved on a default parent at 210 windows). Repaired under **Q-TOK-13**: the replay adopts the
+   value the file recorded.
 2. **WORLD's grown population count is the one quantity that genuinely needs a live object**, so it
    cannot join the manifest — `_geometry_manifest` is computed before any package is built, which is
    the point of it. It is re-refused by `WORLD.load_into` (M43) at its own row, and whether that is
@@ -4170,6 +4188,59 @@ RUN 14, SIG 10, TOK 9, **WORLD 9**. LM's twelve are `anchor_term`, `build_model`
 **`embed`**, `encode`, `lm_loss`, `load_state`, `on_mint`, **`residual_ratios`**, `resolve`,
 `state_dict` — the two additions are both present and both in §7, so 121 + 2 = 123 is the arithmetic
 and the tree agrees with it in both directions.
+
+### Q-TOK-13 — a resume re-measured `bytes_per_token`, restarted the pair tally from zero, and wrote its reconciliation keys under other names — **RESOLVED 2026-09-23: THE FILE'S RECORDED MEASUREMENT WINS ON A RESUME; THE TALLY TRAVELS EXACTLY; ONE SPELLING FOR THE KEYS. NO SIGNATURE MOVES, NO FORMAT BREAKS**
+Three persistence defects in TOK, one ruling each, all driven.
+
+**(1) The width.** `build_vocabulary`'s replay arm measured `bytes_per_token` again on the replayed
+vocabulary, which carries every token the parent minted online. `_signature_width` turned the new
+value into a new `width_units` and `SIG.load_state_dict` refused: a default parent at 210 windows
+(6 minted at window 201) recorded 1.50266 / width 192, the resume measured 1.51876 / 194, and every
+default run longer than 200 windows could not be resumed. **Ruling: the value the vocabulary file
+recorded wins** (`save_vocabulary` has always written it, so every checkpoint already on disk is
+resumable with no format change), and `DATA.data_plan` receives the same recorded value because it
+reads the same field. `derive.signature_width_bytes` already says the width is *"FIXED FOR THE
+LIFETIME OF THE RUN"*, and a resume is the same run. **The measurement still runs**, on the parent's
+BUILD-TIME vocabulary (ids at or above the file's `v0` masked for that one call): it is the fallback
+for a file that predates the field (`tok.bpt_adopted` 0) and the reconciliation when it does not
+(`tok.bpt_mismatch`, present only at `TOK_DROPOUT=0`, where it is exact — measured 0 on the default
+resume, 1 at `TOK_BUILD_BYTES=20000`, 1.50384 against 1.50266). **A mismatch is reported, not
+refused**: a different corpus across a resume is a legitimate continual-learning experiment, and
+the width is a fact about the run the centroids were measured in. **Rejected:** taking `width_units`
+from SIG's sidecar (the plan would still get the re-measured value, and SIG's width refusal would
+compare the sidecar against itself); carrying the value only in `payload['TOK']` (every checkpoint
+already written would stay unresumable); refusing on a mismatch (it would forbid resuming on new
+data, which is goal B's experiment).
+
+**(2) The tally.** `vocab_state` wrote `pair_digest = len(vocab.pair)`, the length of a different
+structure, under a comment saying the counts were carried; `restore_vocab` read nothing. The tally is
+cumulative and is the only evidence `mint_burst` draws on, so a parent at 160 windows resumed to 202
+reached the window-201 burst with `sum(tally)` 5248 and 0 eligible pairs and minted **0**, where the
+uninterrupted run had 25728, 62 eligible and minted **6**. **Ruling: the whole tally and
+`tally_seen` are saved exactly**, as three parallel int64 arrays each, and restored after the
+merge-count refusal; `tally_pairs`/`tally_sum` let the restore check the arrays against themselves
+(`tok.tally_restored` counts the pairs put back and is absent on a checkpoint that predates the
+field). **Rejected:** a top-K or a count floor — a resumed run would still rank differently, since a
+pair just under the cutoff restarts from zero, and the `mint_pmin` arm's per-left-token marginal is
+computed over the whole tally. At ~1.4k pairs the payload cost is negligible; if it ever is not,
+the answer is a declared cap with a Gate, not a silent truncation.
+
+**(3) The reconciliation keys.** `_replay_merges` compared `min_pair`, `max_tok`, `dropout` and `vmax`,
+and `save_vocabulary` wrote none of them, so `tok.load_reconciled` read 0 — *compared and agreed* —
+on a resume at `TOK_MAX_BYTES=12`, `TOK_MIN_PAIR=7`, `LM_VOCAB_SLOTS=8192` against a file written at
+16/50/4096. **Ruling: `save_vocabulary` writes all four from the RESOLVED CONFIG**, and `vmax` is the
+wire `d_vocab_ceiling`, never `vocab.ceiling`, which the fixed arm narrows to the achieved size and
+would make every fixed-mode resume report a false mismatch (driven: a fixed-mode save/replay at
+unchanged levers reads 0). A file written before the keys is still checked for `max_tok`, falling
+back to its `max_bytes` — the same number. **And the reconciliation rows now survive
+`restore_vocab`**: its `counters.update` used to overwrite this resume's `tok.load_reconciled` and
+`tok.bpt_*` with the parent's copies whenever the parent was itself a resume; the parent's copies
+are dropped and this process's are kept.
+
+**Not in this ruling:** a `ckpt.pt.prev` generation has no vocabulary file of its own
+(`save_vocabulary` does not rotate, and `CKPT_RESUME=<dir>/ckpt.pt.prev` resolves a
+`d_vocab_read_path` nothing writes, so `build_vocabulary` refuses it by name). That is a property of
+the `CKPT.resume -> TOK.d_vocab_read_path` coupling, not of this package's state, and is left open.
 
 ---
 
