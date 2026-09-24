@@ -78,6 +78,13 @@ def main(argv=None):
                          "than the checkpoint's step). A DRIVER argument, not a lever: it cannot "
                          "make a run longer, and a run stopped by it says so in its warnings.")
     ap.add_argument("--quiet", action="store_true", help="suppress the progress line")
+    # THE PER-FLUSH CURVE, WRITTEN FOR A SCRIPT TO READ (2026-09-24). Nothing on stdout carries it:
+    # the progress line samples ONE flush per cadence and the summary prints the first and last, so
+    # sweep_world.sh could not form the paired last-half statistic Q-WORLD-10 names as the deciding
+    # measurement. A driver argument like --max-windows, not a lever: it changes no computation.
+    ap.add_argument("--loss-curve", default=None, metavar="PATH",
+                    help="after the run, write RunResult.loss_curve (one training loss per flush "
+                         "this process ran) to PATH as a JSON list")
     args = ap.parse_args(argv)
 
     # THE CALLER OWNS THE ENVIRONMENT, which is compose()'s own first line: `system =
@@ -210,6 +217,10 @@ def main(argv=None):
               f"(partial batches dropped at an epoch roll or left at the stop); "
               f"{result.windows_here - result.never_backward} trained")
     print(f"=== loss {result.loss_first:.4f} -> {result.loss_last:.4f}")
+    if args.loss_curve:
+        import json
+        with open(args.loss_curve, "w", encoding="utf-8") as fh:
+            json.dump([float(v) for v in result.loss_curve], fh)
     # THE PRECISION ASKED FOR AND THE PRECISION OBSERVED, ON ONE LINE, BECAUSE THEY DISAGREED FOR
     # THE LIFE OF THIS DRIVER. amp_state above is what RUN.process_setup decided; this is the dtype
     # of the tensor the step actually produced. RUN_AMP=bf16 printed "active" and ran fp32 until

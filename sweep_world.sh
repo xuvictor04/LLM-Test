@@ -50,6 +50,14 @@
 #
 #     bash sweep_world.sh                                  # 5 arms x 3 seeds
 #     SEEDS="0 1 2 3 4" WINDOWS=4000 bash sweep_world.sh
+#     SEEDS="0 1 2 3 4" ONLY=shipped,feedback_off bash sweep_world.sh   # Q-WORLD-10's deciding run
+#
+# THE WORLD_FEEDBACK DECISION IS READ OFF THE PAIRED LINE, NOT THE TABLE (2026-09-24). Q-WORLD-10
+# flips the default on "5 seeds per arm, paired by seed, mean of loss_curve differences over the
+# last half"; until then this script printed only unpaired tail means against `off` and never formed
+# shipped minus feedback_off. run.py --loss-curve now writes each run's per-flush curve beside its
+# log, and the summary prints, per seed, the mean over the last half of the flushes of
+# (shipped - feedback_off), then their mean +- SE and how many seeds are negative (shipped better).
 #     ONLY=off,shipped bash sweep_world.sh
 #     cat world_out/SUMMARY.txt
 #
@@ -85,7 +93,8 @@ arm() {
     # env -i IS NOT USED: the arms differ by the levers on their own command line and nothing else,
     # and a scrubbed environment would also drop the proxy and locale settings the corpus needs.
     env RUN_SEED="$seed" DATA_STREAM_BYTES="$BYTES" "$@" \
-        python3 run.py --max-windows "$WINDOWS" > "$log" 2>&1
+        python3 run.py --max-windows "$WINDOWS" --loss-curve "$OUT/$name.s$seed.curve.json" \
+        > "$log" 2>&1
     local rc=$?
     if [[ $rc -ne 0 ]]; then
       echo "  seed $seed: FAILED (exit $rc). Last lines:" | tee -a "$S"
@@ -147,15 +156,56 @@ if not rows:
     sys.exit(0)
 print()
 print(f"=== tail{tail_n}-mean training loss by arm (lower is better), every seed shown ===")
-base = rows.get("off") or rows.get("shipped")
+# THE BASELINE IS NAMED BY THE ARM ACTUALLY USED. It fell back to `shipped` when `off` was not run
+# and was still printed "vs off", so ONLY=shipped,feedback_off labelled a comparison against shipped
+# as one against the null world.
+bname = "off" if rows.get("off") else ("shipped" if rows.get("shipped") else None)
+base = rows.get(bname) if bname else None
 bmean = sum(v for _, v in base) / len(base) if base else None
 for name, vals in rows.items():
     vs = [v for _, v in sorted(vals)]
     mean = sum(vs) / len(vs)
     spread = max(vs) - min(vs) if len(vs) > 1 else 0.0
-    delta = f"{mean - bmean:+.4f} vs off" if bmean is not None else ""
+    delta = f"{mean - bmean:+.4f} vs {bname}" if bmean is not None else ""
     print(f"  {name:<14} mean {mean:7.4f}  spread {spread:6.4f}  "
           f"seeds {' '.join(f'{v:.4f}' for v in vs)}  {delta}")
+
+# Q-WORLD-10's DECIDING STATISTIC: shipped minus feedback_off, PAIRED BY SEED, over the last half of
+# each run's per-flush loss curve. Printed only when both arms have curves for a common seed.
+import json, math, os
+out_dir = os.path.dirname(S) or "."
+def _curve(arm, seed):
+    try:
+        with open(os.path.join(out_dir, f"{arm}.s{seed}.curve.json")) as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return None
+seeds = sorted({s for s, _ in rows.get("shipped", [])} & {s for s, _ in rows.get("feedback_off", [])})
+diffs = []
+for sd in seeds:
+    a, b = _curve("shipped", sd), _curve("feedback_off", sd)
+    if not a or not b:
+        continue
+    n = min(len(a), len(b))
+    h = n // 2
+    if n - h < 1:
+        continue
+    diffs.append((sd, sum(a[i] - b[i] for i in range(h, n)) / (n - h), n - h))
+print()
+if diffs:
+    print("=== Q-WORLD-10: shipped - feedback_off, mean over the last half of the loss curve, "
+          "paired by seed (negative = the forecast helps) ===")
+    for sd, d, k in diffs:
+        print(f"  seed {sd}: {d:+.4f}  (last {k} flushes)")
+    ds = [d for _, d, _ in diffs]
+    m = sum(ds) / len(ds)
+    se = (math.sqrt(sum((x - m) ** 2 for x in ds) / (len(ds) - 1) / len(ds))
+          if len(ds) > 1 else float("nan"))
+    print(f"  mean {m:+.4f} +- {se:.4f} (SE, {len(ds)} seeds), {sum(1 for x in ds if x < 0)}/{len(ds)} "
+          f"seeds negative. Q-WORLD-10: flip WORLD_FEEDBACK's default to 0 if this is within noise.")
+elif "shipped" in rows or "feedback_off" in rows:
+    print("=== Q-WORLD-10's paired shipped - feedback_off line needs BOTH arms on a common seed "
+          "with a loss curve; it was not formed.")
 print()
 print("A '~' beside a number means fewer progress lines than TAIL asked for; a '!' means none at")
 print("all, so that row is loss_last -- ONE flush, and exactly the noise the tail mean averages out.")
