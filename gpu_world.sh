@@ -67,9 +67,43 @@ MPS=${MPS:-auto}
 FILL=${FILL:-1}
 MAX_SEEDS=${MAX_SEEDS:-16}
 DEVICE=${DEVICE:-cuda}
+CAL_WINDOWS=${CAL_WINDOWS:-150}
+LADDER=${LADDER:-"1 2 4 8 12 16 24 32 48 64 96 128"}
 
 cd "$(dirname "$0")"
-mkdir -p "$OUT/logs" "$OUT/curves" "$OUT/smoke"
+
+# bash gpu_world.sh --status : progress and time left of a fleet that is running (or finished),
+# read off SUMMARY.txt and the logs. It changes nothing and is safe to run at any time.
+if [[ "${1:-}" == --status ]]; then
+  OUT="$OUT" python3 - <<'PY'
+import glob, os, re, datetime as dt
+out = os.environ["OUT"]
+s = open(f"{out}/SUMMARY.txt").read()
+m = re.search(r"=== (\d+) run\(s\), (\d+) at a time", s)
+if not m: raise SystemExit("the fleet has not started yet (still in the smoke or the calibration)")
+n, par = map(int, m.groups())
+win = int(re.search(r"(\d+) windows per run", s).group(1))
+hh, mm, ss = map(int, re.search(r"fleet started (\d+):(\d+):(\d+)Z", s).groups())
+now = dt.datetime.now(dt.timezone.utc)
+start = now.replace(hour=hh, minute=mm, second=ss, microsecond=0)
+if start > now: start -= dt.timedelta(days=1)
+el = (now - start).total_seconds()
+dtxt = open(f"{out}/logs/_done.txt").read() if os.path.exists(f"{out}/logs/_done.txt") else ""
+done, failed = dtxt.count("rc="), len(re.findall(r"rc=[1-9]", dtxt))
+logs = glob.glob(f"{out}/logs/*.log")
+at = [int((re.findall(r"^\[(\d+) windows\]", open(l).read(), re.M) or [0])[-1]) for l in logs]
+total, got = n * win, sum(min(a, win) for a in at)
+rate = got / el if el else 0
+left = (total - got) / rate / 3600 if rate else float("nan")
+print(f"running {el/3600:.2f} h | runs {done}/{n} ended ({failed} FAILED), {len(logs)-done} in flight ({par} slots)")
+print(f"windows {got:,}/{total:,} ({100*got/total:.0f}%) | {rate:.1f} w/s total, {rate/max(1,len(logs)-done):.2f} per run")
+print(f"time left ~{left:.1f} h (finish ~{(now+dt.timedelta(hours=left)):%H:%M} UTC)")
+for l in re.findall(r"=== ETA.*|=== parallelism.*|=== calibration.*", s): print(l)
+PY
+  exit 0
+fi
+
+mkdir -p "$OUT/logs" "$OUT/curves" "$OUT/smoke" "$OUT/cal"
 S="$OUT/SUMMARY.txt"
 : > "$S"
 say() { echo "$*" | tee -a "$S"; }
@@ -77,6 +111,30 @@ say() { echo "$*" | tee -a "$S"; }
 # ---------------------------------------------------------------- preflight
 say "=== gpu_world.sh  $(date -u +%Y-%m-%dT%H:%M:%SZ)  commit $(git rev-parse --short HEAD 2>/dev/null)"
 NCPU=$(nproc)
+# nproc READS THE CPU AFFINITY MASK, AND IN A CONTAINER THAT IS USUALLY THE HOST'S CORES. The cgroup
+# QUOTA is what this container may actually use. The first version of this script sized its
+# parallelism off nproc alone and put far more runs on the box than it had CPU for.
+CPU_QUOTA=$(python3 - <<'PY'
+def quota():
+    try:
+        a, b = open("/sys/fs/cgroup/cpu.max").read().split()
+        return None if a == "max" else int(a) / int(b)
+    except Exception:
+        pass
+    try:
+        a = int(open("/sys/fs/cgroup/cpu/cpu.cfs_quota_us").read())
+        b = int(open("/sys/fs/cgroup/cpu/cpu.cfs_period_us").read())
+        return None if a <= 0 else a / b
+    except Exception:
+        return None
+q = quota()
+print(max(1, int(q)) if q else 0)
+PY
+)
+if [[ "$CPU_QUOTA" -gt 0 && "$CPU_QUOTA" -lt "$NCPU" ]]; then
+  say "=== nproc reports $NCPU core(s) but the cgroup quota is $CPU_QUOTA: sizing by the quota"
+  NCPU=$CPU_QUOTA
+fi
 NGPU=0
 GPU_MEM_MIB=0
 if [[ "$DEVICE" == cuda ]]; then
@@ -93,6 +151,27 @@ fi
 say "=== $NCPU CPU core(s), $NGPU GPU(s), device=$DEVICE"
 say "=== $WINDOWS windows per run, DATA_STREAM_BYTES=$BYTES, seeds: $SEEDS, EXTRA='$EXTRA'"
 say ""
+
+# ---------------------------------------------------------------- 0. MPS, before anything is measured
+MPS_ON=0
+if [[ "$DEVICE" == cuda && "$MPS" != 0 ]] && command -v nvidia-cuda-mps-control >/dev/null; then
+  export CUDA_MPS_PIPE_DIRECTORY="$PWD/$OUT/mps/pipe" CUDA_MPS_LOG_DIRECTORY="$PWD/$OUT/mps/log"
+  mkdir -p "$CUDA_MPS_PIPE_DIRECTORY" "$CUDA_MPS_LOG_DIRECTORY"
+  if nvidia-cuda-mps-control -d 2>/dev/null; then
+    MPS_ON=1; say "=== CUDA MPS started (kernels from different runs execute concurrently)"
+    trap 'echo quit | nvidia-cuda-mps-control >/dev/null 2>&1' EXIT
+  else
+    unset CUDA_MPS_PIPE_DIRECTORY CUDA_MPS_LOG_DIRECTORY
+    say "=== CUDA MPS could not start (permissions or GPU mode); runs will time-slice instead"
+  fi
+elif [[ "$DEVICE" == cuda && "$MPS" != 0 ]]; then
+  say "=== nvidia-cuda-mps-control not installed; runs will time-slice the GPU instead of sharing it"
+fi
+
+# MPS SERVES AT MOST 48 CLIENT PROCESSES PER GPU (Volta and later). A client past that limit fails at
+# CUDA init, and the first version of this script launched 65 runs at once: 48 ran and 17 failed.
+MPS_CAP=0
+[[ "$MPS_ON" == 1 ]] && MPS_CAP=$(( 48 * NGPU ))
 
 # every process: one CPU thread (N processes x torch's default of one thread per core is how this
 # project once measured a 60x slowdown), the card, the seed, the stream, the shared geometry.
@@ -193,6 +272,69 @@ if echo "$SIZING" | grep -q "bad=[1-9]"; then say "!! a tripwire failed in the s
 PEAK_GIB=$(echo "$SIZING" | sed -n 's/.*peak_gib=\([0-9.]*\).*/\1/p')
 SMOKE_WPS=$(echo "$SIZING" | sed -n 's/.*wps=\([0-9.]*\).*/\1/p')
 
+# ---------------------------------------------------------------- 1b. MEASURE the parallelism
+# THE CEILING IS ARITHMETIC AND THE CHOICE IS A MEASUREMENT. Cores, GPU memory and the MPS client
+# limit say how many runs COULD share the card; none of them says how many SHOULD. The first version
+# of this script took the arithmetic ceiling as the answer: 125 slots, 65 runs at once, and the card
+# delivered 16.5 windows/s in AGGREGATE -- 0.3 per run -- because a launch-bound process starved of
+# CPU and time-sliced against 47 others is slower than the same work done a few at a time. So this
+# runs k copies of one arm for CAL_WINDOWS windows at k = 1, 2, 4, 8, ... up to the ceiling, reads
+# each run's own loop time (the "in Xs" of its summary line, which excludes startup), and takes the
+# SMALLEST k within 10% of the best aggregate windows/s. Each step costs one short run; the ladder
+# stops as soon as doubling k gains less than 10%, so the step where throughput collapses is the
+# last one paid for.
+CPU_SLOTS=$(( NCPU > 1 ? NCPU - 1 : 1 ))
+CEIL=$CPU_SLOTS
+if [[ "$DEVICE" == cuda ]]; then
+  MEM_SLOTS=$(python3 -c "print(max(1, int(0.85*$GPU_MEM_MIB/1024 / (1.5*$PEAK_GIB + 0.5)) * $NGPU))")
+  [[ "$MEM_SLOTS" -lt "$CEIL" ]] && CEIL=$MEM_SLOTS
+  [[ "$MPS_CAP" -gt 0 && "$MPS_CAP" -lt "$CEIL" ]] && CEIL=$MPS_CAP
+fi
+say "=== ceiling: $CPU_SLOTS by CPU, ${MEM_SLOTS:-n/a} by GPU memory, ${MPS_CAP/#0/no} MPS cap -> at most $CEIL at once"
+if [[ "$PAR" == auto ]]; then
+  say "---- calibration: k copies of fb_on for $CAL_WINDOWS windows, aggregate windows/s"
+  : > "$OUT/cal/table.txt"
+  prev=0
+  for k in $LADDER; do
+    [[ "$k" -gt "$CEIL" ]] && break
+    d="$OUT/cal/k$k"; mkdir -p "$d"
+    JOBS=(); for j in $(seq 1 "$k"); do add_job "cal $(( 1000 + j )) $CAL_WINDOWS"; done
+    JOB_DIR="$d" CURVE_DIR="$d" run_fleet "$k"
+    line=$(python3 - "$d" "$k" <<'PY'
+import glob, os, re, sys
+d, k = sys.argv[1], int(sys.argv[2])
+rate, n = 0.0, 0
+for log in glob.glob(os.path.join(d, "*.log")):
+    m = re.search(r"=== (\d+) windows[^\n]*? in ([\d.]+)s", open(log).read())
+    if m and float(m.group(2)) > 0:
+        rate += int(m.group(1)) / float(m.group(2)); n += 1
+fails = open(os.path.join(d, "_done.txt")).read().count("rc=") - n
+print(f"{k} {rate:.3f} {fails}")
+PY
+)
+    echo "$line" >> "$OUT/cal/table.txt"
+    set -- $line
+    say "    k=$1  aggregate $2 windows/s  ($(python3 -c "print(f'{$2/$1:.2f}')") per run)  failed $3"
+    if [[ "$3" -gt 0 ]]; then say "    runs FAILED at k=$1 -- the ladder stops below it"; sed -i '$d' "$OUT/cal/table.txt"; break; fi
+    if python3 -c "import sys; sys.exit(0 if $prev > 0 and $2 < 1.10 * $prev else 1)"; then break; fi
+    prev=$2
+  done
+  read PAR CAL_RATE < <(python3 - "$OUT/cal/table.txt" <<'PY'
+import sys
+rows = [tuple(map(float, l.split()[:2])) for l in open(sys.argv[1]) if l.strip()]
+if not rows:                      # even k=1 failed: run one at a time and let the fleet's logs say why
+    print(1, 0); raise SystemExit
+best = max(r for _, r in rows)
+k, r = min((k, r) for k, r in rows if r >= 0.9 * best)
+print(int(k), r)
+PY
+)
+  say "=== calibration: PAR=$PAR (aggregate $CAL_RATE windows/s; the smallest k within 10% of the best measured)"
+else
+  CAL_RATE=0
+  say "=== PAR=$PAR set by hand; no calibration"
+fi
+
 # ---------------------------------------------------------------- 2. the job list and its size
 JOBS=()
 for s in $SEEDS; do for a in $BASE_ARMS; do add_job "$a $s $WINDOWS $(arm_env $a)"; done; done
@@ -202,24 +344,6 @@ if [[ -n "$ARCH_ALSO" ]]; then
 fi
 if [[ "$LONG" -gt 0 ]]; then
   for a in fb_off fb_on; do add_job "${a}_long 0 $LONG $(arm_env $a)"; done
-fi
-
-# the slots: CPU cores leave one for this shell and nvidia-smi; GPU memory takes the smoke's peak
-# reserved plus a CUDA context (~0.5 GiB without MPS) with 50% headroom, since a 20,000-window run
-# grows its allocator past a 60-window one.
-if [[ "$PAR" == auto ]]; then
-  CPU_SLOTS=$(( NCPU > 1 ? NCPU - 1 : 1 ))
-  if [[ "$DEVICE" == cuda ]]; then
-    MEM_SLOTS=$(python3 -c "import math; print(max(1, int(0.85*$GPU_MEM_MIB/1024 / (1.5*$PEAK_GIB + 0.5)) * $NGPU))")
-  else
-    MEM_SLOTS=$CPU_SLOTS
-  fi
-  PAR=$(( CPU_SLOTS < MEM_SLOTS ? CPU_SLOTS : MEM_SLOTS ))
-  say "=== parallelism: $CPU_SLOTS slot(s) by CPU, $MEM_SLOTS by GPU memory -> PAR=$PAR"
-  if [[ "$CPU_SLOTS" -lt "$MEM_SLOTS" ]]; then
-    say "    CPU-bound: each process drives its own kernel launches from one core, so this box's"
-    say "    $NCPU cores, not the card's memory, cap how many runs share the GPU."
-  fi
 fi
 
 # FILL: spare slots become extra seeds, added to EVERY base arm so the pairing stays complete.
@@ -233,34 +357,18 @@ if [[ "$FILL" == 1 && "${#JOBS[@]}" -lt "$PAR" ]]; then
   [[ -n "$added" ]] && say "=== FILL: spare slots -> extra seeds$added on every base arm (now $n_seeds seeds)"
 fi
 say "=== ${#JOBS[@]} run(s), $PAR at a time"
-# THE ETA IS A FLOOR, AND SAYS SO. It is priced at the slowest per-process rate the smoke measured
-# with every arm running at once; at PAR processes the card is busier than it was in the smoke, so
-# each process runs at or below that rate. Read it as "not sooner than", not as a promise.
-python3 - "$SMOKE_WPS" "${#JOBS[@]}" "$PAR" "$WINDOWS" "$LONG" <<'PY' | tee -a "$S"
-import math, sys
-wps, jobs, par, win, long_ = float(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5])
-if wps > 0:
-    waves = math.ceil(jobs / max(par, 1))
-    hrs = waves * win / wps / 3600
-    extra = f"; the LONG pair adds at least {long_ / wps / 3600:.1f} h" if long_ else ""
-    print(f"=== ETA: at least {hrs:.1f} h ({waves} wave(s) of {par}, {win} windows each at <= {wps:.1f} windows/s per process){extra}")
+# THE ETA IS PRICED AT THE MEASURED AGGREGATE RATE at PAR, over every window the job list holds. It
+# assumes every slot stays busy, so the last partial wave makes it slightly optimistic, and the rate
+# was measured on short runs whose fabric had not grown yet.
+python3 - "${CAL_RATE:-0}" "$SMOKE_WPS" "$PAR" <<PY | tee -a "$S"
+import math
+jobs = """$(printf '%s\n' "${JOBS[@]}")""".split("\n")
+total = sum(int(j.split()[2]) for j in jobs if j.strip())
+rate, smoke, par = float("${CAL_RATE:-0}"), float("$SMOKE_WPS" or 0), int("$PAR")
+if rate <= 0: rate = smoke * par
+if rate > 0:
+    print(f"=== ETA: about {total / rate / 3600:.1f} h for {total:,} windows at {rate:.1f} windows/s aggregate")
 PY
-
-# ---------------------------------------------------------------- 3. MPS
-MPS_ON=0
-if [[ "$DEVICE" == cuda && "$MPS" != 0 ]] && command -v nvidia-cuda-mps-control >/dev/null; then
-  export CUDA_MPS_PIPE_DIRECTORY="$PWD/$OUT/mps/pipe" CUDA_MPS_LOG_DIRECTORY="$PWD/$OUT/mps/log"
-  mkdir -p "$CUDA_MPS_PIPE_DIRECTORY" "$CUDA_MPS_LOG_DIRECTORY"
-  if nvidia-cuda-mps-control -d 2>/dev/null; then
-    MPS_ON=1; say "=== CUDA MPS started (kernels from different runs execute concurrently)"
-    trap 'echo quit | nvidia-cuda-mps-control >/dev/null 2>&1' EXIT
-  else
-    unset CUDA_MPS_PIPE_DIRECTORY CUDA_MPS_LOG_DIRECTORY
-    say "=== CUDA MPS could not start (permissions or GPU mode); runs will time-slice instead"
-  fi
-elif [[ "$DEVICE" == cuda && "$MPS" != 0 ]]; then
-  say "=== nvidia-cuda-mps-control not installed; runs will time-slice the GPU instead of sharing it"
-fi
 
 # ---------------------------------------------------------------- 4. the fleet, with a sampler
 say "---- 2. fleet started $(date -u +%H:%M:%SZ)"
