@@ -4394,7 +4394,8 @@ in the tree declared the routing non-causal, and `spine/compose.py::_sample_wind
 opposite (*"a run that encodes the units AHEAD of the cursor is encoding text the model has not
 trained on"*) — the window being predicted is ahead of that cursor, because nothing has trained on it
 when its logits are computed. All three are driven by `tests/test_causality.py`, which fails four
-checks on the tree before this ruling and passes all eight after it.
+checks on the tree before this ruling and passes all eight after it (C4, added with (4) below,
+adds three more, which fail before (4) and pass after it).
 
 **(1) The signature cursor.** The loop passed `win_in_epoch` *after* its increment (the window's index
 plus one) to `_sample_window`, so the `SIG.encode` / `DOM.observe` sample ended at the **last
@@ -4405,7 +4406,13 @@ anchor could be drawn from the text the same window was about to be routed on. *
 window's own 0-based index**, so the sample is the `width_units` units ending at the window's first
 byte. Ordinal 0 — the first window of every epoch — is now called too and its sample is all pad
 (`_sample_window` left-pads what the stream does not have); that is what a generator starting cold
-holds, and it costs one window per epoch. **Rejected:** ending the sample at byte_pos[first + 1]
+holds. **It costs more than one window per epoch** (measured 2026-09-24 at `DATA_STREAM_BYTES=30000
+RUN_EPOCHS=2 DATA_RESAMPLE=1`, 315 windows): `DOM.observe` founds the run's first domain on the all-pad
+sample (windows 0 and 1, 191 and 12 pad units), the domain stays alive, and epoch 1's second window
+(17 pad units) is pulled back into it with `boundary=True`, window 159 following — `part.n_boundaries`
+34 and `n_created` 14 against 32 and 13 on the tree before this ruling, whose epoch-1 opening stayed in
+the running domain. Keeping a pad-dominated sample out of `DOM.observe` needs a domain id for a window
+DOM did not assign, so it is left to the owner; the numbers are the price of not doing it. **Rejected:** ending the sample at byte_pos[first + 1]
 (it would add x[0], which every position already sees, and it needs a second cursor arithmetic beside
 `_signature_cursor`'s ordinal one).
 
@@ -4429,7 +4436,31 @@ text at `OPT_BATCH_WINDOWS > 1`. **Ruling: the flush's first window's id (`dids[
 precedes every row. At the shipped `OPT_BATCH_WINDOWS=1` the two are one id. `FAB.observe`,
 `DOM.note_competence` and `MEM.write` book what already happened and reach no logit of the flush;
 since **Q-FAB-10** all three take one id **per window** (the first two took the last window's id for
-the whole flush until then).
+the whole flush until then). **(3) alone did not make `OPT_BATCH_WINDOWS > 1` causal; (4) did.**
+
+**(4) The two batch-wide writes inside the training forward (added 2026-09-24).** At
+`OPT_BATCH_WINDOWS > 1` row k's signature is the `width_units` bytes before row k's first byte — row
+0's own text and targets — and two mechanisms of a `training=True` pass wrote a mean over **every** row
+into state that row 0's routing then read: `fabric/api.py::_spawn_check` decoded a new expert from
+`query.mean(0)` before the hop loop, and `fabric/api.py::_ground_update` moved `pop.cent` toward
+`normalize(signature).mean(0)` between hops. Measured with `tests/test_causality.py` C4's probe (a
+2-row batch of consecutive windows after 40 training windows at `OPT_BATCH_WINDOWS=2`, each forward on a
+copy of the population, a repeat differing by exactly 0.0; replace **only row 1's signature**, read row
+0's logits): 4.8e-7 at the shipped depth (the spawn channel: 0.0 at `FAB_SPAWN=0`), 1.3e-3 at
+`FAB_DEPTH0=0 FAB_SPAWN=0` (the grounding channel) and 1.5e-4 at `FAB_DEPTH0=0` with both. The eval pass
+(`training=False`) read 0.0 throughout, which is why C2 (one row, eval) could not see either.
+**Ruling: the spawn test reads row 0's query alone, and at a batch of more than one row the grounding
+EMA is applied after the walk** — the same updates, in the same hop order, once no row is still being
+routed. At a batch of one both are the tensors they were (row 0 is the batch, and its own signature
+precedes it), so the shipped arm is bit-identical; after the ruling all three probes read exactly
+0.0. **Rejected:** grounding on row 0 alone (it throws the other rows' signatures away — a loss of
+function the deferral does not pay); spawning from the previous flush's query (it changes the shipped
+batch-of-one arm, which was already causal); deferring the spawn (a birth writes `pop.A` in place and
+must precede the graph). The per-hop routing between hops at `B > 1` no longer sees this flush's
+centroid moves; at the shipped `B = 1` it still does. The 80-window loss curves at
+`DATA_STREAM_BYTES=60000` are bit-identical at `B = 1` on both depths (sum 484.8295 shipped, 486.1608
+at `FAB_DEPTH0=0`); at `OPT_BATCH_WINDOWS=2 FAB_DEPTH0=0` the 40-flush sum moves 250.192 → 251.705
+(mean 6.255 → 6.293), one seed, which is the price of no longer training row 0 on its own targets.
 
 **What the leak was worth, measured.** On a model trained 600 windows at `DATA_STREAM_BYTES=120000`,
 the CE of 32 windows from the last 100 with their training-time signature minus the CE with the

@@ -2063,6 +2063,8 @@ def _spawn_check(pop, query, spawn_mult, spawn_floor, step_n):
     with torch.no_grad():
         weights = torch.cat([pop.A[:n].reshape(n, -1), pop.B[:n].reshape(n, -1)], -1)
         keys = F.normalize(pop.modules["eemb"](weights), dim=-1)
+        # ONE ROW SINCE 2026-09-24: FAB.forward passes row 0's query alone (Q-FAB-7 (4)), so this
+        # mean is that row. A mean over the flush put row 0's targets into the expert row 0 routes to.
         q = F.normalize(query.detach().mean(0), dim=-1)
         near = float((keys @ q).max()) if n else -1.0
         # THE SUBSAMPLE IS DRAWN ON THE FABRIC'S OWN STREAM. `torch.randperm(n)` without a generator
@@ -2435,7 +2437,17 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     if spawn_on and learn:
         with torch.no_grad():
             probe = _route_query(pop, signature, novelty)
-        spawned, spawn_gap, spawn_typ = _spawn_check(pop, probe, spawn_mult, spawn_floor, step_n)
+        # THE SPAWN TEST READS ROW 0'S QUERY ONLY, BECAUSE THE BIRTH IS ROUTED BY EVERY ROW (Q-FAB-7
+        # (4)). It read `probe.mean(0)` over the flush, and at OPT_BATCH_WINDOWS > 1 row k's
+        # signature is the width_units bytes before row k's first byte -- row 0's own text and
+        # targets -- so the expert decoded from the mean, which row 0 then routes to, carried row
+        # 0's targets into row 0's logits. Measured 2026-09-24 at OPT_BATCH_WINDOWS=2 after 40
+        # windows (tests/test_causality.py C4's probe): replacing ONLY row 1's signature moved row
+        # 0's training-pass logits by 4.8e-7; 0.0 after. Row 0's query precedes every row, which is
+        # the rule the breadth ban already follows (dids[0]). At the shipped batch of one this is
+        # the same tensor, so the default run is bit-identical.
+        spawned, spawn_gap, spawn_typ = _spawn_check(pop, probe[:1], spawn_mult, spawn_floor,
+                                                     step_n)
         # THE GAP AND THE SCALE ARE ONE STATEMENT, AND THEY ARE WRITTEN ONLY WHEN THEY WERE TAKEN.
         # The old report printed the gap with nothing to compare it against (ISSUES P1-L29), so "the
         # query was 0.31 from the nearest identity" said nothing about whether that is far. Both are
@@ -2573,6 +2585,7 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     last_idx = last_w = None
     hop_logits = []
     hops_taken = halt_clamped = explored_rows = banned_seen = discovered = 0
+    ground_later = []
     ec_any = False
 
     for _hop in range(depth):
@@ -2610,10 +2623,22 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
         bal_graph = bal_graph or (bal_term.grad_fn is not None)
         bal_acc = bal_acc + bal_term
         if learn:
-            got, slot = _ground_update(pop, signature, w, n, cent_topk, cent_ema, discover)
-            if got:
-                discovered += got
-                pop.marks.setdefault("discover", set()).add(slot)
+            # AT A BATCH OF ONE THE CENTROIDS MOVE BETWEEN HOPS; AT MORE THAN ONE THEY MOVE AFTER
+            # THE WALK (Q-FAB-7 (4)). The next hop routes against `cent`, and at OPT_BATCH_WINDOWS
+            # > 1 this update is a mean over rows whose signatures cover row 0's own targets, so
+            # moving `cent` here put row 0's targets into row 0's next-hop routing. Measured
+            # 2026-09-24 at OPT_BATCH_WINDOWS=2 FAB_DEPTH0=0 FAB_SPAWN=0 after 40 windows (C4's
+            # probe): replacing only row 1's signature moved row 0's logits by 1.3e-3; 0.0 after.
+            # Deferring keeps every row's grounding and applies the same updates in the same order
+            # once no row is still being routed. At B=1 the one row's signature precedes the one row,
+            # so the inline order is causal and is kept (the shipped arm is bit-identical).
+            if h.size(0) == 1:
+                got, slot = _ground_update(pop, signature, w, n, cent_topk, cent_ema, discover)
+                if got:
+                    discovered += got
+                    pop.marks.setdefault("discover", set()).add(slot)
+            else:
+                ground_later.append((w.detach(), n))
 
         k = max(1, min(chain_k, n))
         val, idx = w.topk(k, dim=-1)
@@ -2687,6 +2712,12 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
         mixture = (cw[:, :, None, None] * out).sum(1)
         h = pop.modules["norm"](h + alive[:, None, None] * (alpha * (mixture - h)))
         hops_taken += 1
+
+    for _w_hop, _n_hop in ground_later:
+        got, slot = _ground_update(pop, signature, _w_hop, _n_hop, cent_topk, cent_ema, discover)
+        if got:
+            discovered += got
+            pop.marks.setdefault("discover", set()).add(slot)
 
     # A COUNTERFACTUAL WALK MOVES NO COUNT. It used to move two of the most-read ones: with eight
     # leave-one-out candidates on one window, fab.route_calls read 9 for a single routed window and

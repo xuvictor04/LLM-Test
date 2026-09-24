@@ -3374,7 +3374,16 @@ def _sample_window(sysm, sig, at_window):
     ORDINAL 0 IS CALLED NOW TOO, ON THE FIRST WINDOW OF EVERY EPOCH, AND ITS SAMPLE IS ALL PAD: the
     cursor is byte_pos[0] = 0, so there is no earlier material at all and the answer below applies
     to every one of the width_units units. That is the honest signature for the opening window of a
-    text -- a generator starting cold holds exactly as much -- and it costs one window per epoch.
+    text -- a generator starting cold holds exactly as much. IT DOES NOT COST ONLY ONE WINDOW PER
+    EPOCH, which is what this sentence said until 2026-09-24: DOM.observe founds the run's first
+    domain on that all-pad signature, the domain stays alive, and at a later epoch roll the new
+    epoch's partly padded opening window is pulled back into it with boundary=True. Measured at
+    DATA_STREAM_BYTES=30000 RUN_EPOCHS=2 DATA_RESAMPLE=1 (315 windows): windows 0 (191 pad units of
+    191) and 1 (12) found and hold domain 0; window 158, epoch 1's second window (17 pad units), goes
+    back to domain 0 with a boundary and 159 follows; part.n_boundaries 34 and n_created 14, against
+    32 and 13 on the tree before Q-FAB-7 (whose window 0 had 12 pad units and whose epoch-1 opening
+    stayed in the running domain). Keeping a pad-dominated sample out of DOM.observe would need a
+    domain id for a window DOM did not assign, which is the owner's call (Q-FAB-7 (1)).
     THE HEAD IS LEFT-PADDED AND THE TAIL IS NOT, AND THE ASYMMETRY IS THE HONEST ONE. At ordinals
     0 and 1 the stream genuinely HAS no (or too few) earlier units -- the corpus has a beginning -- so this is "a real
     window whose text ran out", which spine/loop.py already distinguishes from "a caller declining

@@ -24,6 +24,14 @@ them compares a logit against the tokens that come after it:
       OPT_BATCH_WINDOWS > 1 the loop passed the LAST window's id, assigned from a sample over the
       earlier rows' own text. It must pass the FIRST window's.
 
+  C4  THE BATCH-WIDE WRITES INSIDE A TRAINING PASS (Q-FAB-7 (4)). At OPT_BATCH_WINDOWS > 1 row k's
+      signature covers row 0's own targets, and a training pass wrote a mean over every row into
+      state row 0 then routed on: the spawn test decoded an expert from query.mean(0), and the
+      grounding EMA moved the centroids between hops. Replacing ONLY row 1's signature (and tokens)
+      moved row 0's training-pass logits by 4.8e-7 at the shipped depth and 1.3e-3 at FAB_DEPTH0=0
+      FAB_SPAWN=0. C2 could not see it: one row, and an eval pass, which writes neither. Each
+      forward here runs on a copy of the population, so the repeat check reads exactly 0.0.
+
 C2 ALSO CHECKS THAT IT HAS TEETH, because "nothing moved" is also what a forward with the fabric out
 of the path reads: the perturbation must move logits AFTER t, and a different signature must move
 position 0's logits (routing reaches the output at all).
@@ -224,11 +232,72 @@ def c3():
           f"(101 = first window, causal; 102 = last, whose sample covers row 0's targets)")
 
 
+def c4():
+    """Row 0 of a 2-row TRAINING pass must not move when only row 1 changes. Three arms: the shipped
+    depth (spawn is the channel there), FAB_DEPTH0=0 FAB_SPAWN=0 (grounding between hops) and
+    FAB_DEPTH0=0 (both)."""
+    import copy
+    for arm in ({}, {"FAB_DEPTH0": 0, "FAB_SPAWN": 0}, {"FAB_DEPTH0": 0}):
+        sysm = build(OPT_BATCH_WINDOWS=2, **arm)
+        loop.run(sysm, max_windows=TRAIN_WINDOWS, progress=False)
+        pop0 = sysm.fabric
+        # THE IDENTITY CACHE CARRIES THE LAST PASS'S GRAPH, which deepcopy refuses; it is rebuilt
+        # by the next training pass, so a detached copy is the same state.
+        for c in type(pop0).__mro__:
+            for s in getattr(c, "__slots__", ()):
+                v = getattr(pop0, s, None)
+                if torch.is_tensor(v) and v.grad_fn is not None:
+                    setattr(pop0, s, v.detach())
+        lm, fab, sigc = sysm.configs["LM"], sysm.configs["FAB"], sysm.configs["SIG"]
+        ids, ctx, dev = sysm.segmentation.ids, int(lm.ctx), sysm.process.device
+        i = TRAIN_WINDOWS - 2
+
+        def xy(j):
+            return (torch.tensor([ids[j * ctx:(j + 1) * ctx]], device=dev),
+                    torch.tensor([ids[j * ctx + 1:(j + 1) * ctx + 1]], device=dev))
+
+        def sg(o):
+            return sig_api.encode(sigc, sysm.sig, [_sample_window(sysm, sysm.sig, o)])[0] \
+                .to(dev).unsqueeze(0)
+
+        x0, y0 = xy(i)
+        x1, y1 = xy(i + 1)
+        xa, ya = xy(max(0, i - 11))
+        step = [10 ** 9]
+
+        def row0(x1_, y1_, s1):
+            pop = copy.deepcopy(pop0)
+            step[0] += 1
+            with torch.no_grad():
+                h = lm_api.encode(lm, sysm.model, torch.cat([x0, x1_]))
+                out = fab_api.forward(fab, pop, h=h, signature=torch.cat([sg(i), s1]),
+                                      novelty=torch.zeros(2, device=dev), head=loop._c_head(sysm),
+                                      targets=torch.cat([y0, y1_]),
+                                      step_windows=U.Windows(step[0]), domain_id=0,
+                                      live_domains=1, training=True)
+                lg = out.logits if out.logits is not None else lm_api.decode(
+                    lm, sysm.model, out.hidden, live_vocab=int(sysm.vocab.size()),
+                    retired_ids=tuple(sysm.vocab.retired))
+            return lg
+
+        base = row0(x1, y1, sg(i + 1))
+        rep = float((base - row0(x1, y1, sg(i + 1))).abs().max())
+        other = row0(xa, ya, sg(max(0, i - 11)))
+        d0 = float((base[0] - other[0]).abs().max())
+        d1 = float((base[1] - other[1]).abs().max())
+        name = ", ".join(f"{k}={v}" for k, v in arm.items()) or "shipped depth"
+        check(f"C4 [{name}] row 0's training-pass logits ignore row 1's signature and tokens",
+              rep == 0.0 and d1 > 0.0 and d0 == 0.0,
+              f"repeat {rep:.3e} (vs 0.0); row 1 moved {d1:.3e} (teeth, > 0); "
+              f"row 0 moved {d0:.3e} (vs 0.0)")
+
+
 def main():
     sysm = build()
     c1_and_train(sysm)
     c2(sysm)
     c3()
+    c4()
     print(f"\n{len(FAILS)} FAIL(s)" + (": " + ", ".join(FAILS) if FAILS else ""))
     return 1 if FAILS else 0
 

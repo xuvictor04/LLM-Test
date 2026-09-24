@@ -1722,7 +1722,9 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     # from a signature over the bytes before the LAST window, which at OPT_BATCH_WINDOWS > 1 are the
     # earlier rows' own text -- so rows 0..B-2 were routed on a domain read off their own targets,
     # the Q-FAB-7 leak surviving the cursor repair one level up. dids[0]'s signature precedes every
-    # row. At the shipped OPT_BATCH_WINDOWS=1 the two are the same id and nothing moves. FAB.observe,
+    # row. THAT CLOSES THE BAN, NOT THE BATCH: inside FAB.forward the spawn test and the grounding
+    # EMA also wrote a mean over every row into state row 0 then routed on, and both were moved onto
+    # what precedes every row on 2026-09-24 (Q-FAB-7 (4), tests/test_causality.py C4). At the shipped OPT_BATCH_WINDOWS=1 the two are the same id and nothing moves. FAB.observe,
     # DOM.note_competence and MEM.write take `dids`, one id PER WINDOW (the first two took the last
     # window's id for the whole flush until 2026-09-24): they book what already happened and reach
     # no logit of this flush. The ban itself stays batch-wide because FAB.forward's domain_id is
