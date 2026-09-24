@@ -2495,10 +2495,10 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     # `targets` for the whole life of this body -- so every run printed fab.ind_applied 0,
     # fab.hopsup_applied 0 and fab.halt_spent_on_base 0, which G4 reads as "armed, did not fire",
     # about three mechanisms that could not run. The predicates are the ones the three gates below
-    # print as `reachable`, except that hop_sup's depth clause is taken on the CONFIGURATION (a
+    # print as `reachable` -- hop_sup's included: both take its depth clause on the CONFIGURATION (a
     # society pin or FAB_HOPS=1 can never give it a second hop) rather than on this pass's depth,
-    # which moves with the curriculum: an armed hop_sup that is still at one hop is armed-and-0,
-    # and its gate states that with the reason.
+    # which moves with the curriculum, so an armed hop_sup still at one hop is armed-and-0 in the
+    # ledger AND in its gate, whose reason names the depth that held it.
     if society and ind_w > 0.0 and head is not None and targets is not None:
         counters.setdefault("fab.ind_applied", 0)
     if (hop_sup_w > 0.0 and head is not None and targets is not None and not society
@@ -2959,21 +2959,31 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     # FAB_DEPTH0 or the 2 + n_live//2 ramp resolve to one hop. Without this clause the gate read
     # "armed, did not fire (hop_sup=0.3 vs 1 hop logits collected)" on the society arm -- a
     # mechanism that cannot fire, reported as one that ran and found nothing.
+    # REACHABILITY IS THE CONFIGURATION'S, THE DEPTH IS THIS PASS'S (2026-09-24). The gate read
+    # `len(hop_logits) > 1` as reachability, so at the shipped FAB_DEPTH0=1 with FAB_HOP_SUP>0 the
+    # report printed fab.hopsup_applied 0 (seeded on the configuration: armed) beside this gate
+    # UNREACHABLE -- two readings of one mechanism on one run. A society pin or FAB_HOPS=1 can never
+    # give a second hop (unreachable); a curriculum still at one hop can, once FAB.manage deepens it,
+    # so that pass is armed-but-zero and the reason says which depth held it.
     _sup_ok = bool(hop_sup_w > 0.0 and targets is not None and head is not None
-                   and len(hop_logits) > 1)
+                   and not society and hops > 1)
     _why_depth = ("FAB_SOCIETY=1 pins the walk at one hop" if society else
                   f"FAB_HOPS={hops}, FAB_DEPTH0={depth0}, n_live={n}")
     gates.append(Gate("fab.hop_sup", bool(hopsup_applied), value=f"hop_sup={hop_sup_w}",
                       threshold=f"{len(hop_logits)} hop logits collected over depth={depth}",
                       reachable=_sup_ok,
-                      reason="" if _sup_ok
+                      reason=(f"this pass walked depth={depth} ({_why_depth}): the last hop IS the "
+                              f"main loss, so there was no earlier hop to supervise; the term fires "
+                              f"on the first pass FAB.manage's curriculum deepens past one hop."
+                              if len(hop_logits) <= 1 else "") if _sup_ok
                              else (f"FAB_HOP_SUP={hop_sup_w}" if hop_sup_w <= 0.0 else
                                    "no targets were supplied, so a per-hop cross-entropy has "
                                    "nothing to score against" if targets is None else
                                    "no head was supplied, so no hop can produce logits"
                                    if head is None else
-                                   f"depth={depth} ({_why_depth}): the last hop IS the main loss, "
-                                   f"so a walk of one hop has no earlier hop to supervise.")))
+                                   f"{_why_depth}: the walk can never take a second hop, and the "
+                                   f"last hop IS the main loss, so there is no earlier hop to "
+                                   f"supervise.")))
     gates.append(Gate("fab.independence", bool(ind_applied), value=f"ind_w={ind_w}, ind_k={ind_k}",
                       threshold="society=True and targets supplied",
                       reachable=bool(society and ind_w > 0.0 and targets is not None
@@ -4769,7 +4779,24 @@ def own_lr_scale(fab: Config, pop, *, applied_lr):
 
 
 
-def _three_state(gates, ledger):
+# THE LEDGER KEY THAT COUNTS THE PASSES ON WHICH EACH PER-PASS GATE FIRED (2026-09-24). The
+# build's gates share their ledger key's name, so _three_state's lookup by name finds the count.
+# FAB.forward's per-pass gates mostly do not -- fab.independence's passes are fab.ind_applied,
+# fab.forward.routed's are fab.route_calls -- and the name lookup printed ('fired', 0, ...) beside
+# fab.ind_applied 60 on the same report. A gate absent here has NO per-pass fire count (its nearest
+# key counts rows, experts or clamps, not passes), and its count prints "last pass": the verdict is
+# the last training pass's and nothing cumulative stands behind it.
+_PASS_GATE_KEYS = {
+    "fab.forward.routed": "fab.route_calls", "fab.spawn": "fab.spawned",
+    "fab.balance": "fab.balance_nonzero", "fab.expert_choice": "fab.ec_applied",
+    "fab.distinctness": "fab.div_applied", "fab.discover": "fab.discovered",
+    "fab.hop_sup": "fab.hopsup_applied", "fab.independence": "fab.ind_applied",
+    "fab.identity_round_trip": "fab.ident_trained",
+    "fab.halt_spent_on_base": "fab.halt_spent_on_base",
+}
+
+
+def _three_state(gates, ledger, keys=None):
     """{name: (state, count, arithmetic)} for every DECLARED gate, in G4's three states.
 
     RENDERED FROM THE Gate OBJECTS THE PACKAGE ALREADY CARRIES, never from a second inspection of
@@ -4782,7 +4809,9 @@ def _three_state(gates, ledger):
     reachable=True` is a MEASUREMENT -- the mechanism ran and its condition was not met.
     `reachable=False` is not a measurement at all, and a report that prints them the same way says
     "0" for both. The count comes from the ledger when the ledger has a key of that name, so a
-    gate that fired N times says N rather than merely "fired".
+    gate that fired N times says N rather than merely "fired". `keys`, when given, maps each gate to
+    the ledger key that counts its fires instead, and a gate it does not name prints "last pass"
+    rather than a 0 nothing counted (the per-pass gates, _PASS_GATE_KEYS).
     """
     # BOTH CONTAINERS, BECAUSE THE TREE USES BOTH. SIG carries `gates` as a dict {name: Gate}
     # while FAB, MEM and CAP carry a tuple of Gate. Neither is wrong and this is not the place to
@@ -4794,7 +4823,12 @@ def _three_state(gates, ledger):
         gates = tuple(gates.values())
     out = {}
     for g in (gates or ()):
-        n = int(ledger.get(g.name, ledger.get(g.name + ".count", 0)) or 0)
+        if keys is None:
+            n = int(ledger.get(g.name, ledger.get(g.name + ".count", 0)) or 0)
+        elif g.name in keys:
+            n = int(ledger.get(keys[g.name], 0) or 0)
+        else:
+            n = "last pass"
         arith = f"{g.value!r} vs {g.threshold!r}"
         if not g.reachable:
             out[g.name] = ("unreachable", n, f"{arith} -- {g.reason}")
@@ -4833,17 +4867,24 @@ def counters(fab: Config, pop):
     # AND THE LAST TRAINING PASS'S GATES, which FabricOut.gates carried and nothing printed until
     # 2026-09-24 -- including the three that said "no head was supplied" on every pass of every run.
     # They are PER-PASS arithmetic (the build's are per-run), so the count beside each verdict is
-    # the cumulative ledger key of the same name where one exists and the verdict is the last pass's.
+    # the cumulative ledger key _PASS_GATE_KEYS names for it ("last pass" where no key counts
+    # passes) and the verdict is the last pass's.
     # No name collides with a build gate: fab.on / growth_armed / lr_own are build-only, and
     # cull_gate / depth_advance are build predictions that FAB.manage replaces by name.
     out.update({f"gate:{k}": v for k, v in
-                _three_state(getattr(pop, "pass_gates", ()), pop.counters).items()})
+                _three_state(getattr(pop, "pass_gates", ()), pop.counters,
+                             keys=_PASS_GATE_KEYS).items()})
     # THE LIVE POPULATION AND ITS CEILING, because every fabric gate's arithmetic is a ratio
     # against one of them and a reader with the verdict but not the denominator has a claim.
     out["fab.n_live"] = int(pop.n_live)
     out["fab.cap"] = int(pop.cap)
-    out["fab.births"] = int(pop.births)
-    out["fab.rescued"] = int(pop.rescued)
+    # BIRTHS AND RESCUES ARE THE MANAGE/GROW FAMILY'S, AND AT FAB_ON=0 THAT FAMILY IS ABSENT
+    # (Q-FAB-11 (3)). These two were read off Population state on every arm, so the off arm printed
+    # fab.births 0 and fab.rescued 0 -- G4's "armed, did not fire" -- beside gate fab.growth_armed
+    # UNREACHABLE and manage returning before it seeds. On the off arm they are left out.
+    if pop.on:
+        out["fab.births"] = int(pop.births)
+        out["fab.rescued"] = int(pop.rescued)
     return out
 
 

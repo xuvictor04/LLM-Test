@@ -4621,7 +4621,8 @@ as `loop.owners_from_domain` (seeded on those arms only) because it is a differe
 same argument name; a `None` on the routed arm is still refused. (2) `Population.parameters()` is
 **empty at `FAB_ON=0`**: the banner reads `1200072` and AdamW holds no fabric state. (3) `FAB.manage`,
 `FAB.grow_check` and `FAB.own_lr_scale` **return before seeding** at `FAB_ON=0`, so their families are
-ABSENT (G4: unreachable), and the build gates `fab.growth_armed` and `fab.lr_own` are UNREACHABLE with a
+ABSENT (G4: unreachable) — `fab.births` and `fab.rescued`, which `FAB.counters` reads off `Population`
+state rather than the ledger, included (they printed present-and-0 until a later 2026-09-24 fix) — and the build gates `fab.growth_armed` and `fab.lr_own` are UNREACHABLE with a
 `FAB_ON=0` reason. (4) **The pool is still allocated and checkpointed** at `FAB_ON=0`, so MEM's owner
 width, CAP's `n_live` and CKPT's shapes are the same on both arms; the cost is host/device memory for
 tensors nothing reads, not compute or optimizer state. `FAB.observe` is unchanged on both arms: it
