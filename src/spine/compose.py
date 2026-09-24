@@ -776,7 +776,9 @@ ASSEMBLY_ORDER = (
 # FIVE STAGES, all driven by the one RunClock:
 #   E = per EPOCH.  Runs before the first window of an epoch and again whenever RunClock.advance
 #                   returns Tick.rolled. Epoch 0's E rows are ALSO in ASSEMBLY_ORDER above, because
-#                   OPT.build and SIG.warm_up need the material before the loop starts.
+#                   OPT.build and SIG.warm_up need the material before the loop starts -- all but
+#                   DOM.on_retokenize, which is a ROLL's row only: epoch 0's segmentation is the
+#                   first, so there is no earlier one for it to have re-cut.
 #                   PRECEDENCE, AND WHAT IT COSTS AT THE SHIPPED DEFAULTS: advance() sets `rolled`
 #                   when the stream is exhausted and the epoch increments, and `finished` when
 #                   epoch >= run.epochs. RUN.epochs DEFAULTS TO 1, so the single roll a default run
@@ -844,6 +846,24 @@ LOOP_ORDER = (
                                       "is a different length each time and minting shortens every "
                                       "later one. THE LENGTH ARRIVES AS A COUNT OF WINDOWS. The "
                                       "partial batch was already dropped by the advance that rolled"),
+    ("E", "DOM",   "on_retokenize",   "(dom, part) -- THE RetokEvent's DOM DESTINATION, delivered AT "
+                                      "THE ROLL because the roll is where the re-segmentation "
+                                      "happens: a mid-epoch Due.retok is deferred to it (Q-RUN-8), "
+                                      "and TOK.tokenize above is the act. MEM hears of the same "
+                                      "event as MEM.maintain(resegment=...) on the first flush "
+                                      "after the roll. GATED ON THE MATCH TABLE HAVING MOVED since "
+                                      "the last segmentation (Vocabulary.rev, the stamp tokenize "
+                                      "itself reads): a roll at an unchanged table cuts the new "
+                                      "text into the ids DOM's token histograms were counted "
+                                      "under, and decaying them would discard valid counts "
+                                      "(Q-DOM-2). THE CALL TAKES NO EVENT PARAMETER AT ALL "
+                                      "(domains/api.py::on_retokenize), so DOM can only decay, "
+                                      "never remap; SIG and FAB have no retokenize entry point in "
+                                      "their frozen surfaces; and the event itself is a record "
+                                      "type tok/api.py::<module> declares and no entry point's "
+                                      "docstring returns. It had NO CALL SITE until 2026-09-24, "
+                                      "which left DOM_TOKC_DECAY inert in every configuration",
+                                      "no return: the decay edits part.tokc in place"),
     ("A", "MEM",   "census",          "THE MANAGEMENT PASS OPENS HERE. Cadences.due('dom.manage', "
                                       "DOM.manage_period(dom), clock) is asked ONCE and the next two "
                                       "rows run inside that one answer: due() RECORDS the fire and "
@@ -999,10 +1019,14 @@ LOOP_ORDER = (
                                       "batch_windows=16, 15 of 16 at a coprime period -- which is "
                                       "the same silent non-fire as the shared key that made minting "
                                       "never fire. The OR's cost is bounded latency, under 8% of one "
-                                      "period. Two counters, and one must read zero: tok.due_merged "
-                                      "and tok.due_dropped (0 by construction here, which is how a "
-                                      "later reader can tell which reading was implemented). At the "
-                                      "shipped batch_windows=1 the two are identical"),
+                                      "period. Two counters: tok.due_merged, seeded and bumped by "
+                                      "the root at the second window of a batch (UNREACHABLE at the "
+                                      "shipped batch_windows=1), and tok.due_dropped, whose "
+                                      "flush-discard share is 0 by construction here -- which is "
+                                      "how a later reader can tell which reading was implemented -- "
+                                      "and which also counts, one per fire, the retoks no epoch "
+                                      "roll reached (Q-RUN-8). At the shipped batch_windows=1 the "
+                                      "two readings are identical"),
     ("A", "RUN",   "RunClock.advance","appends to the accumulator; if not full, continue. THE "
                                       "ACCUMULATOR IS WHERE THE FLUSH BATCH COMES FROM and Tick "
                                       "does not carry it -- the cut is named once, at _flush_bounds. "
@@ -1223,20 +1247,16 @@ LOOP_ORDER = (
                                       "is this package's own read rather than a second retrieval is "
                                       "the reading Q-MEM-9 asks the owner to confirm"),
     ("B", "TOK",   "mint_burst",      "step=clock.step, on the Due this flush's windows produced at "
-                                      "A -> LM.on_mint(sig_emb=SIG.encoder_embedding(...)) and, if "
-                                      "Due.retok, TOK.tokenize -> a RetokEvent the root distributes. "
-                                      "THE DISTRIBUTION NAMES MORE DESTINATIONS THAN EXIST: MEM "
-                                      "takes it as maintain(resegment=...) and "
-                                      "DOM.on_retokenize(dom, part) TAKES NO EVENT PARAMETER AT ALL "
-                                      "(domains/api.py::on_retokenize), while SIG and FAB have no retokenize "
-                                      "entry point in their frozen surfaces. The event itself is a "
-                                      "record type tok/api.py::<module> declares and no entry point's "
-                                      "docstring returns. THE ROOT ALSO STAMPS "
-                                      "System.shift_at_windows HERE when Due.retok fires: the loss "
-                                      "jump after a retok is OURS, which is what note_shift(:7787) "
-                                      "said, and FAB.grow_check reads it on the NEXT flush -- this "
-                                      "row is two rows BELOW FAB's, so the ordering is right by "
-                                      "construction and the jump cannot grow an expert (Q-FAB-6)",
+                                      "A -> LM.on_mint(sig_emb=SIG.encoder_embedding(...)). "
+                                      "Due.retok IS NOT ACTED ON HERE: re-segmenting mid-epoch "
+                                      "changes the epoch's window count and RunClock cannot be told "
+                                      "a new length with its cursor kept (Q-RUN-8), so the fire is "
+                                      "counted on System.retok_pending and the next epoch roll "
+                                      "performs it -- TOK.tokenize, MEM.maintain(resegment=...) and "
+                                      "DOM.on_retokenize are the E rows, and the roll's resample is "
+                                      "the shift the root stamps on System.shift_at_windows for "
+                                      "FAB.grow_check (Q-FAB-6). This row said the retok was acted "
+                                      "on and stamped HERE until 2026-09-24",
                                       "mints = Mint -- the list LM.on_mint takes; NOT resegment: the RetokEvent is declared by no entry point's docstring, which this table says four rows above, so claiming it here would be K11's exact defect. It is named on the consuming rows' exemptions. The old claim read: the "
                                       "RetokEvent under MEM.maintain's spelling, when one is "
                                       "produced at all"),
@@ -1412,8 +1432,10 @@ LOOP_ORDER = (
     # same double standard that put a row under EVAL.curve_probe and a deferral under
     # EVAL.holdout_probe.
     ("R", "DOM",   "prior",           "(did) -- the per-domain token prior AND its weight, together. "
-                                      "At R the `did` being asked about is one of the ids "
-                                      "DOM.census's `live` list carries, not a live Assignment. The "
+                                      "At R it is asked once for EACH id DOM.census's `live` list "
+                                      "carries (it was asked for did=0 alone until 2026-09-24), not "
+                                      "for a live Assignment, and the report prints one summary "
+                                      "over them. The "
                                       "old read site is the report (:8147-8192) while the "
                                       "accumulation is per window, and the accumulated/read PAIR is "
                                       "the whole finding that the histogram was paid for every "
@@ -2056,7 +2078,8 @@ class System:
                  #              retok, probation; `frozen` from the last window, which is the same
                  #              value because it is monotone) -- Q-TOK-12, ruled 2026-09-02. The
                  #              OR is here and not at a call site because the root is the only
-                 #              thing that can see a batch. tok.due_dropped must read 0.
+                 #              thing that can see a batch. tok.due_dropped's flush-discard
+                 #              share must read 0; its other share is the retoks no roll reached.
                  #   novelty    the PREVIOUS flush's mean surprise, which is what FAB.forward's
                  #              `novelty` and MEM.write's `surprise` are (:7499). A backwards edge.
                  #   token_seen the per-token appearance counter LM.anchor_term takes under that
@@ -2064,9 +2087,11 @@ class System:
                  #              owned by the loop, returned by no entry point (C5).
                  #   shift_at_windows
                  #              THE STEP OF THE LAST SELF-INFLICTED SHIFT, as units.Windows, added
-                 #              2026-09-02 with Q-FAB-6. It is stamped at THREE sites in three
-                 #              different stages -- the E draw row's resample, the B TOK.mint_burst
-                 #              retok, and OPT's LR restart -- and consumed by FAB.grow_check's
+                 #              2026-09-02 with Q-FAB-6. Q-FAB-6 names THREE sites in three
+                 #              different stages -- the E draw row's resample, the retok, and OPT's
+                 #              LR restart -- and only the first stamps today: the retok is deferred
+                 #              to that same roll (Q-RUN-8) and the LR restart stamps nothing. It is
+                 #              consumed by FAB.grow_check's
                  #              `shift_at` on a LATER flush, which is both a backwards edge and a
                  #              cross-stage one, so no `produces` column can reach it. It is a
                  #              SECOND OBJECT for the same event: OPT.maybe_step's `shift_at` is
@@ -2090,6 +2115,11 @@ class System:
                  # a new length without zeroing the epoch cursor. So the event waits here, across
                  # an arbitrary number of flushes, which is a backwards edge no `produces` column
                  # can express -- the same reason `due` and `shift_at_windows` are on this record.
+                 # AN int, THE NUMBER OF FIRES WAITING, AND IT WAS A bool UNTIL 2026-09-24: four
+                 # fires read as one, so the roll's tok.retok_satisfied_by_roll and the end-of-run
+                 # tok.due_dropped each moved by 1 however many retoks had been raised. The roll
+                 # adds it to the first and zeroes it; the end of the run adds what is left to the
+                 # second. None until spine/loop.py::run seeds 0.
                  "retok_pending",
                  # `process_dtype` IS AN OBSERVATION AND NOT A DECISION, and it is here because
                  # RUN_AMP had no did-it-fire surface and was inert for the life of the driver

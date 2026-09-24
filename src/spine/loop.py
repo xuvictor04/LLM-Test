@@ -123,7 +123,8 @@ def _is_stub(fn):
 # that means -- not one call credited three times.
 _CALLS = {
     # ---- stage E, the epoch roll (reachable only at RUN_EPOCHS > 1)
-    "E": frozenset({"DATA.draw_stream", "TOK.tokenize", "RUN.RunClock.begin_epoch"}),
+    "E": frozenset({"DATA.draw_stream", "TOK.tokenize", "RUN.RunClock.begin_epoch",
+                    "DOM.on_retokenize"}),
     # ---- stage A: the cadenced maintenance block, then the per-window pair
     "A": frozenset({
         "MEM.census", "DOM.manage", "DOM.census", "DOM.rekey",
@@ -238,12 +239,27 @@ _WHY = {
 # PRESENT AND 0 means it was armed and did not fire, and a positive value is a fire count. So this
 # table names the gate in words and the counter to ask, and the reading is the counter's -- not a
 # second opinion computed here from levers this file does not own.
+# THE TOK ROWS READ A PER-CALL COUNT AND NOT THE CADENCE'S (2026-09-24). They read tok.due_mint and
+# tok.due_probation, which TOK.on_window bumps once per WINDOW whose Due fired -- and the root ORs a
+# batch of those into ONE call, so at OPT_BATCH_WINDOWS=4 TOK_GROW_EVERY=2 the report printed
+# "TOK.mint_burst: fired 19 time(s)" for 10 calls. tok.mint_bursts and tok.probation_calls are
+# bumped inside the two entry points and seeded by on_window on exactly the arm whose cadence can
+# raise them, so the three states still come from the package. `tok.due_mint - tok.due_merged` was
+# refused: due_merged counts a merge on ANY key, so the difference under-counts and can go negative.
+# THE `why` TEXT IS STATIC, SO IT MAY NOT STATE A LEVER'S VALUE. It read "(TOK_PROBATION_USES=0 makes
+# it unreachable)" and was printed verbatim on runs with TOK_PROBATION_USES=3; it now names the
+# conditions and leaves the arm this run took to the counter.
 _GATED = {
-    "TOK.mint_burst": ("Due.mint, TOK's grow_every cadence asked at row A", "tok.due_mint"),
-    "LM.residual_ratios": ("Due.probation (TOK_PROBATION_USES=0 makes it unreachable)",
-                           "tok.due_probation"),
-    "TOK.judge_probation": ("Due.probation (TOK_PROBATION_USES=0 makes it unreachable)",
-                            "tok.due_probation"),
+    "TOK.mint_burst": ("Due.mint, TOK's grow_every cadence asked at row A (TOK_MODE=online only), "
+                       "acted on once per flush", "tok.mint_bursts"),
+    "LM.residual_ratios": ("Due.probation, TOK's probation_deadline cadence (armed only at "
+                           "TOK_MODE=online with TOK_PROBATION_USES > 0), acted on once per flush",
+                           "tok.probation_calls"),
+    "TOK.judge_probation": ("Due.probation, TOK's probation_deadline cadence (armed only at "
+                            "TOK_MODE=online with TOK_PROBATION_USES > 0), acted on once per "
+                            "flush. A CALL IS NOT A JUDGEMENT: tok.probation_judged counts those, "
+                            "and TOK(vocab.gates)'s tok.probation_embed says when none could run",
+                            "tok.probation_calls"),
     "FAB.own_lr_scale": ("a flush on which the optimizer actually stepped", "fab.lr_calls"),
 }
 # CKPT.save IS GATED TOO AND IS NOT IN THAT TABLE, because its count is not in a counters dict this
@@ -654,6 +670,15 @@ def run(sysm, *, max_windows=None, progress=True):
     # resumed segmentation, and the end-of-run warning said all 6 "cannot appear". The roll below
     # moves the mark forward.
     _mint_at_last_roll = int(vocab.counters.get("tok.mint", 0))
+    # THE MATCH TABLE'S REVISION AT THE LAST SEGMENTATION, which decides whether an epoch roll's
+    # re-segmentation is a RETOK for DOM (see the DOM.on_retokenize call at the roll). `vocab.rev`
+    # is the monotone counter Vocabulary._add, _retire and _reinstate all bump -- tokenize's own
+    # staleness stamp reads it for the same question -- and it starts at the value compose's
+    # segmentation was cut under, a resume's included.
+    _rev_at_last_seg = int(vocab.rev)
+    # THE PENDING-RETOK COUNT, AN int AND NOT A FLAG (2026-09-24). See where _flush raises it.
+    if not sysm.retok_pending:
+        sysm.retok_pending = 0
     # `did` IS SEEDED AT 0 AND IS NO LONGER A CONSTANT. It is overwritten by DOM.observe on every
     # window; the seed only covers the impossible case of a flush with no window in it.
     did = 0
@@ -828,15 +853,6 @@ def run(sysm, *, max_windows=None, progress=True):
                 # a quarter-million flushes, to move a boolean that changes on the scale of eviction
                 # pressure.
                 mem_pressure = _c.pressure
-            # DOM.rekey RE-ENCODES EVERY DOMAIN'S RESERVOIR WITH THE LIVE ENCODER, and it is what
-            # MEASURES the acceptance radius: `radius` reads 0.0 for every domain until it runs, so on
-            # a run without it DOM_RADIUS_Q, DOM_RADIUS_MULT and DOM_RADIUS_CAP are set-but-inert and
-            # every assignment is decided on the pooled bootstrap (part.n_bootstrap_radius is the
-            # counter that says so). `encode` is the root's ONE bound SIG.encode, for the reason
-            # domains/api.py::rekey gives: a rekey that used a second encoder puts the partition into
-            # two signature spaces that do not compare.
-            if cadences.due("dom.rekey", periods["dom.rekey"], clock):
-                dom_api.rekey(dom_cfg, sysm.partition, encode=sig_encode)
             # FAB.manage: THE SELECTION PASS, AND THE LAST LOOP_ORDER ROW TO ACQUIRE A CALLER.
             # Growth ran and pruning did not, so the population only ever ROSE -- 570 births over
             # 634 windows at the shipped defaults, 569 of them from the spawn door, saturating
@@ -919,6 +935,34 @@ def run(sysm, *, max_windows=None, progress=True):
             # the ordering domains/api.py::Assignment declares, not an accident of where this sits.
             since_boundary = 0 if bool(asg.boundary) else since_boundary + 1
 
+            # DOM.rekey RE-ENCODES EVERY DOMAIN'S RESERVOIR WITH THE LIVE ENCODER, and it is what
+            # MEASURES the acceptance radius: `radius` reads 0.0 for every domain until it runs, so on
+            # a run without it DOM_RADIUS_Q, DOM_RADIUS_MULT and DOM_RADIUS_CAP are set-but-inert and
+            # every assignment is decided on the pooled bootstrap (part.n_bootstrap_radius is the
+            # counter that says so). `encode` is the root's ONE bound SIG.encode, for the reason
+            # domains/api.py::rekey gives: a rekey that used a second encoder puts the partition into
+            # two signature spaces that do not compare.
+            # HERE, AFTER DOM.observe, AND IT RAN FIRST IN THIS BLOCK UNTIL 2026-09-24 -- above
+            # FAB.manage, SIG.train_step, SIG.encode and DOM.observe, against its own row ("AFTER
+            # observe, so the window that just triggered a boundary is inside the sample its own
+            # radius is measured from"). Driven at the first fire of a default run (window 200): the
+            # order was dom.manage, rekey, train_step, encode, observe -- so the partition was re-keyed
+            # against an encoder SIG.train_step moved again within the same window, which is the drift
+            # a rekey exists to remove. After observe the rekey sees this window's reservoir sample
+            # and the encoder as this window's train step left it.
+            # AND ONLY ON THE LEARNED ARM, which is the row's second test and was not made at all:
+            # "the arm test is SIG.mode == 'learned', so BOTH are evaluated HERE" (the old line is
+            # `if SIG_MODE == "learned" and SELF_ORG: asm.rekey(enc)`, self_organize.py:6689).
+            # SIG_MODE=bigram is the frozen hashed-bigram CONTROL, and every number recorded for it
+            # was taken without a rekey; SIG_MODE=bigram over 260 windows read n_rekey_passes 1. The
+            # arm is tested BEFORE the cadence is asked, because Cadences.due RECORDS a fire when it
+            # answers True, and a fire nothing acts on would print 'dom.rekey' firing on a run where
+            # no partition was re-keyed; checks=0 is the honest ledger reading on that arm
+            # (docs/04_CONTRACT.md Q-DOM-3).
+            if (str(sig_cfg.mode) == "learned"
+                    and cadences.due("dom.rekey", periods["dom.rekey"], clock)):
+                dom_api.rekey(dom_cfg, sysm.partition, encode=sig_encode)
+
             # ---- ROW A CONTINUED: TOK'S FOUR CADENCES, ASKED ONCE PER WINDOW ------------------------
             # ASKED HERE AND ACTED ON AT THE FLUSH, which is the whole of Q-TOK-12. batch_windows Dues
             # reach one flush and the root ORs them PER CADENCE KEY, because `_due` RECORDS the step
@@ -936,13 +980,21 @@ def run(sysm, *, max_windows=None, progress=True):
                 sysm.due = due
             else:
                 prev = sysm.due
+                # tok.due_merged: A FLUSH WHERE MORE THAN ONE WINDOW RAISED THE SAME KEY.
+                # UNREACHABLE AT THE SHIPPED batch_windows=1, where no two windows share a flush, and
+                # on any arm where TOK asks no cadence at all. So it is SEEDED HERE, in the branch
+                # only a second window of a batch reaches and before the test that decides, and only
+                # when TOK seeded one of the three cadence counters -- which is TOK's own statement
+                # that a Due can be raised on this arm, read off its book rather than re-derived
+                # from its levers. TOK.on_window seeded it unconditionally until 2026-09-24, so the
+                # shipped configuration printed present-and-0 for a key this comment calls
+                # unreachable.
+                if any(k in vocab.counters for k in ("tok.due_mint", "tok.due_retok",
+                                                     "tok.due_probation")):
+                    vocab.counters.setdefault("tok.due_merged", 0)
                 merged = ((prev.mint and due.mint) or (prev.retok and due.retok)
                           or (prev.probation and due.probation))
                 if merged:
-                    # tok.due_merged: A FLUSH WHERE MORE THAN ONE WINDOW RAISED THE SAME KEY.
-                    # UNREACHABLE AT THE SHIPPED batch_windows=1, where no two windows share a flush --
-                    # which is why it is bumped here, in the branch that only a second window can reach,
-                    # rather than seeded to a number the shipped configuration cannot produce.
                     vocab.counters["tok.due_merged"] = vocab.counters.get("tok.due_merged", 0) + 1
                 sysm.due = dataclasses.replace(
                     prev, mint=prev.mint or due.mint, retok=prev.retok or due.retok,
@@ -1024,7 +1076,8 @@ def run(sysm, *, max_windows=None, progress=True):
                               "should be read as a full run.")
             break
         if tick.rolled:
-            # ---- STAGE E: THE EPOCH ROLL. DATA.draw_stream -> TOK.tokenize -> begin_epoch -------
+            # ---- STAGE E: THE EPOCH ROLL. DATA.draw_stream -> TOK.tokenize -> begin_epoch
+            # -> DOM.on_retokenize (only when the match table moved) -------------------------
             # THIS DRIVER RAN A SINGLE PASS AND STOPPED HERE UNTIL 2026-09-22, and stage E's three
             # rows were three of the six the report listed as having no call site at all.
             # IT IS TESTED AFTER `finished` AND THAT ORDER IS THE CONTRACT'S. train/api.py::Tick:
@@ -1096,24 +1149,55 @@ def run(sysm, *, max_windows=None, progress=True):
             # and inventing one would rewrite every stored token under a guess. The stale ids stay
             # visibly stale, which is what store.n_resegment_events exists to make readable.
             resegment = sysm.segmentation
-            # A PENDING RETOK IS SATISFIED BY THIS ROLL, because the roll IS the act: the stream
-            # was just re-segmented with the vocabulary as it now stands. Cleared here so that what
-            # survives to the end of the run is only the fires no roll ever reached.
+            # AND DOM IS TOLD, WHEN THE MATCH TABLE MOVED SINCE THE LAST SEGMENTATION -- the
+            # RetokEvent's DOM destination, which had no call site until 2026-09-24: this roll
+            # re-segmented at the grown vocabulary and DOM never heard, so DOM_TOKC_DECAY was inert
+            # in every configuration, DOM.prior blended counts from two segmentations, and
+            # part.n_retok_events was ABSENT on an arm that had just re-segmented -- this tree's
+            # spelling of "unreachable" (driven: RUN_EPOCHS=2 DATA_RESAMPLE=1, vocabulary 518,
+            # on_retokenize calls 0). domains/api.py::on_retokenize decays every domain's token
+            # histogram because "a retok makes the same text into DIFFERENT ids".
+            # GATED ON THE TABLE HAVING MOVED, AND MEM IS NOT, ON PURPOSE. A roll whose vocabulary
+            # did not change since the last segmentation (no mint, retirement or reinstatement:
+            # `vocab.rev` unmoved) cuts the new text into the SAME ids the histograms were counted
+            # under, so decaying them would discard counts that are still valid. MEM is told on
+            # every roll because what it holds is token ids AND BYTE OFFSETS into the previous
+            # epoch's stream, which the redraw invalidates whether or not the table moved. A roll
+            # that did not tell DOM says so in the warning below; part.n_retok_events counts the
+            # rolls that did (docs/04_CONTRACT.md Q-DOM-2).
+            _dom_told = int(vocab.rev) != _rev_at_last_seg
+            if _dom_told:
+                dom_api.on_retokenize(dom_cfg, sysm.partition)
+            _rev_at_last_seg = int(vocab.rev)
+            # EVERY PENDING RETOK IS SATISFIED BY THIS ROLL, because the roll IS the act: the
+            # stream was just re-segmented with the vocabulary as it now stands. ADDED AS A COUNT
+            # AND NOT AS ONE (2026-09-24): retok_pending counts the fires, and this counter
+            # incremented once per ROLL, so on RUN_EPOCHS=2 DATA_RESAMPLE=1 TOK_RETOK_EVERY=10 it
+            # read 1 against 41 deferred and Q-RUN-8's measurement -- compare it with
+            # tok.retok_deferred -- could not be taken. Zeroed here so that what survives to the
+            # end of the run is only the fires no roll ever reached, and
+            # retok_satisfied_by_roll + that remainder == tok.retok_deferred.
             # THE MINT HIGH-WATER MARK AT THIS ROLL. Everything minted up to here is in the
             # vocabulary the re-segmentation just used, so it IS in the stream from this epoch on;
             # anything minted after the last roll is not. One number, captured where the fact is
             # made, rather than a claim re-derived at the end of the run.
             _mint_at_last_roll = int(vocab.counters.get("tok.mint", 0))
-            if sysm.retok_pending:
+            if "tok.retok_deferred" in vocab.counters:
                 vocab.counters["tok.retok_satisfied_by_roll"] = \
-                    vocab.counters.get("tok.retok_satisfied_by_roll", 0) + 1
-                sysm.retok_pending = False
+                    vocab.counters.get("tok.retok_satisfied_by_roll", 0) + int(sysm.retok_pending)
+            sysm.retok_pending = 0
             warnings.append(
                 f"loop: epoch {int(tick.epoch)} began -- redrew the stream and re-segmented at "
                 f"vocabulary size {int(vocab.size())} ({prev_n} -> {len(ids)} ids). Every memory "
                 f"entry written before this point holds token ids and byte offsets under the "
                 f"PREVIOUS segmentation and is NOT rewritten; MEM.maintain is told, drops its "
-                f"rekey snapshot and counts the event.")
+                f"rekey snapshot and counts the event. "
+                + ("DOM.on_retokenize is told: the match table moved since the last segmentation, "
+                   "so DOM_TOKC_DECAY is applied to every domain's token histogram."
+                   if _dom_told else
+                   "DOM.on_retokenize is NOT told: the match table has not moved since the last "
+                   "segmentation (no mint, retirement or reinstatement), so the new text is cut "
+                   "into the ids DOM's token histograms were counted under and they stay valid."))
             continue
 
     # THE FINAL SAVE, UNCONDITIONALLY, WHATEVER ENDED THE RUN. A run that stops because the epoch
@@ -1122,31 +1206,26 @@ def run(sysm, *, max_windows=None, progress=True):
     # argument the difference between a kept model and a discarded one.
     # saving_on IS NOT RE-TESTED HERE: CKPT.save asks it and returns False, counting refused_off,
     # which is the reading that makes "0 saves" distinguishable from "saving is off".
-    # WHAT THE MINTS ACTUALLY DID TO THIS RUN, WHICH IS LESS THAN "THE VOCABULARY GREW" SOUNDS.
-    # The stream is segmented ONCE, before the first window, at the vocabulary the run entered with;
-    # the only thing that re-segments it is the retok, and this driver raises that Due and does not
-    # act on it (see the Due.retok branch in _flush for why). So every id minted during the run is
-    # a row LM.on_mint initialised from its parents and NOTHING IN Segmentation.ids EVER REFERS TO
-    # IT. The merge table has it, a resume carries it, tok.mint counts it -- and no window contains
-    # it, so no gradient reaches it and the vocabulary's growth cannot show up in the loss.
-    # THIS IS SAID HERE BECAUSE NOTHING ELSE IN THE REPORT SAYS IT. tok.mint reads 18 and
-    # lm.mint.rows_init_mean reads 18 and both are true; a reader adding those to "the vocabulary
-    # mints" would conclude the mechanism is contributing to this run's numbers, and it is not.
     # WHAT THE DEFERRAL ACTUALLY COST, COUNTED ONCE AT THE END. A retok raised and never reached
     # by a roll is a fire that is gone -- Q-TOK-12's tok.due_dropped, which it says must read 0 --
     # so the two counters are kept apart: `tok.retok_deferred` is how many were raised, and
     # `tok.due_dropped` is how many of those the run never satisfied. At RUN_EPOCHS=1 they are
-    # equal by construction, because the only roll a single-epoch run takes is the one that also
-    # finishes it and `finished` is tested first.
-    if sysm.retok_pending:
-        vocab.counters["tok.due_dropped"] = vocab.counters.get("tok.due_dropped", 0) + 1
+    # equal by construction (on a fresh run), because the only roll a single-epoch run takes is the
+    # one that also finishes it and `finished` is tested first.
+    # THE REMAINDER IS ADDED AS A COUNT (2026-09-24). This added 1 when a pending FLAG was set, so
+    # TOK_RETOK_EVERY=10 over 45 windows read tok.retok_deferred 4 against tok.due_dropped 1 -- the
+    # "equal by construction" above was false on the first run anyone checked it on.
+    _unreached = int(sysm.retok_pending or 0)
+    if _unreached:
+        vocab.counters["tok.due_dropped"] = vocab.counters.get("tok.due_dropped", 0) + _unreached
         warnings.append(
-            "loop: a retok was raised and no epoch roll reached it before the run ended, so the "
-            "stream was never re-segmented with the tokens this run minted. At RUN_EPOCHS=1 that "
-            "is every retok the run raises: the single roll a one-epoch run takes is the one that "
-            "also finishes it, and Tick requires `finished` to be tested first. Raise RUN_EPOCHS "
-            "(with DATA_RESAMPLE on, which the composition root refuses to run without) to give "
-            "the mints a route into the data.")
+            f"loop: {_unreached} retok(s) were raised and no epoch roll reached them before the "
+            f"run ended, so the stream was never re-segmented for them (tok.due_dropped counts "
+            f"each). At RUN_EPOCHS=1 that is every retok the run raises: the single roll a "
+            f"one-epoch run takes is the one that also finishes it, and Tick requires `finished` "
+            f"to be tested first. Raise RUN_EPOCHS (with DATA_RESAMPLE on, which the composition "
+            f"root refuses to run without) to give the mints a route into the data.")
+        sysm.retok_pending = 0
     # WHAT THE MINTS ACTUALLY DID, AND THE ANSWER CHANGED WHEN STAGE E LANDED. This block used to
     # say, of every token the run minted, that NONE of them could appear in its training stream --
     # true while the segmentation was built once and never rebuilt, and FALSE the moment the epoch
@@ -1273,6 +1352,14 @@ def _report(sysm, elapsed_s, ctx):
     out["OPT.counters"] = opt_api.counters(cfg["OPT"], sysm.optimizer)
     out["CAP.counters"] = cap_api.counters(cfg["CAP"], sysm.valve)
     out["TOK(vocab.counters)"] = dict(sysm.vocab.counters)
+    # AND TOK'S GATES, WHICH NO ROW RENDERED (2026-09-24). tok.probation_embed is the gate
+    # judge_probation seals to say the embed test could not run -- "unreachable (no residual_ratio
+    # supplied)", ISSUES P1-M41's repair -- and with it unrendered, TOK_PROBATION_BY=embed at
+    # LM_COMPOSE=0 printed only "TOK.judge_probation: fired 2 time(s)" while no token was judged.
+    # tok.build_passes_advice rides along. Same shared three-state form as MEM's and DATA's rows.
+    out["TOK(vocab.gates)"] = (
+        {f"gate:{k}": v for k, v in _gate.three_state(sysm.vocab.gates).items()}
+        if getattr(sysm.vocab, "gates", ()) else "no TOK gates: the vocabulary carries none")
     # MEM.census(reconcile=True) IS CALLED BEFORE store.counters IS COPIED, AND THE ORDER IS THE
     # REPAIR (2026-09-24). The copy was taken first, so the census's own bump of
     # store.n_census_reconciles reached the checkpoint and not the report: the report printed
@@ -1352,7 +1439,14 @@ def _report(sysm, elapsed_s, ctx):
     # report printed that key ABSENT on a run that had just read the prior -- the key's own
     # meaning of "never called". Both calls are made first and the rows are built after.
     _dc = dom_api.census(cfg["DOM"], sysm.partition)
-    _pr, _w = dom_api.prior(cfg["DOM"], sysm.partition, did=0)
+    # DOM.prior FOR EVERY LIVE DOMAIN, AND IT WAS did=0 ALONE UNTIL 2026-09-24. The row asks for "one
+    # of the ids DOM.census's `live` list carries", and the literal 0 dated from when every window
+    # WAS domain 0: once DOM.observe assigned real ids, 0 could be a culled domain and the report
+    # printed "no histogram, weight 0.0" while every live domain's prior was accumulated and weighted
+    # at 0.15. Taken over the FULL live list, not the 32 the census row prints, so each read bumps
+    # part.n_prior_reads -- which is therefore the number of R-stage reads, one per live domain.
+    _live = [int(d) for d in _dc.live]
+    _priors = {d: dom_api.prior(cfg["DOM"], sysm.partition, did=d) for d in _live}
     out["DOM.census"] = {
         "n_live": int(_dc.n_live), "live": list(_dc.live)[:32], "boundaries": int(_dc.boundaries),
         "created": _dc.created, "merged": _dc.merged, "culled": _dc.culled, "folded": _dc.folded,
@@ -1361,11 +1455,23 @@ def _report(sysm, elapsed_s, ctx):
         "partition_off": bool(_dc.partition_off), "collapsed_at": _dc.collapsed_at,
     }
     out["DOM(part.counters)"] = dict(sysm.partition.counters)
-    # DOM.prior FOR did=0, WHICH IS EVERY WINDOW THIS RUN HAD (called above, before the copy).
-    # Rendered as the pair the entry point returns rather than as the histogram: (None, 0.0) is the
-    # real answer at the shipped DOM_PRIOR_BLEND, and it is a different fact from a histogram of
-    # zeros.
-    out["DOM.prior(0)"] = {"has_histogram": _pr is not None, "weight": float(_w)}
+    # ONE SUMMARY OVER THE LIVE DOMAINS (called above, before the copy). Rendered as counts of the
+    # pair the entry point returns rather than as the histograms: (None, 0.0) is "off" at
+    # DOM_PRIOR_BLEND=0 and "empty" above it, and both are different facts from a histogram of
+    # zeros. `weight` is the value prior() returns beside a histogram; with no live domain holding
+    # one it is None, because prior() returns 0.0 for an empty domain on EVERY arm and printing
+    # that would read as DOM_PRIOR_BLEND=0 -- the driver does not read DOM's lever to fill the gap.
+    # `consumed_by` SAYS WHAT NO OTHER LINE DOES: the prior is accumulated every window
+    # (part.n_prior_accumulated) and NOTHING BLENDS IT INTO A PREDICTION -- its consumer is the eval
+    # battery, deferred in spine/compose.py::DEFERRED_ENTRY_POINTS -- so a weight of 0.15 here is the
+    # weight it WOULD be blended at, and these R-stage reads are the only reads it gets.
+    _with = [d for d, (p, _) in _priors.items() if p is not None]
+    out["DOM.prior(live)"] = {
+        "weight": float(_priors[_with[0]][1]) if _with else None,
+        "n_live": len(_live), "n_with_histogram": len(_with), "n_empty": len(_live) - len(_with),
+        "consumed_by": "nothing in training: the histogram is read only by this R-stage row; its "
+                       "blend into a prediction belongs to the deferred eval battery",
+    }
     if sysm.retention is not None:
         out["CKPT.Retention.counters"] = sysm.retention.counters()
     bench = run_api.bench_summary(
@@ -1916,7 +2022,9 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
             # writable is telling the clock a new length while KEEPING the position. That needs a
             # frozen-surface move on RUN -- a revise-length entry point, or an `at=` on
             # begin_epoch -- and it is the owner's, so it is recorded rather than invented.
-            sysm.retok_pending = True
+            # A COUNT OF FIRES, NOT A FLAG: every fire is satisfied by the next roll or counted in
+            # tok.due_dropped at the end, one each, and a bool made four fires read as one.
+            sysm.retok_pending = int(sysm.retok_pending or 0) + 1
             vocab.counters["tok.retok_deferred"] = \
                 vocab.counters.get("tok.retok_deferred", 0) + 1
 

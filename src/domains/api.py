@@ -1628,9 +1628,11 @@ def on_retokenize(dom: Config, part):
     keep, blend = float(dom.tokc_decay), float(dom.prior_blend)
 
     # THIS ENTRY POINT TAKES NO EVENT PARAMETER, AND THAT IS NOT AN OMISSION TO WORK AROUND.
-    # spine/compose.py's TOK.mint_burst row records that the RetokEvent's distribution names more
-    # destinations than exist, that the event is a record type tok/api.py declares and no entry
-    # point's docstring returns, and that this call takes no event at all. So this body may read
+    # spine/compose.py's ("E", "DOM", "on_retokenize") row -- the epoch roll, which is where the
+    # root delivers this call since 2026-09-24, and only when the match table moved since the last
+    # segmentation -- records that SIG and FAB have no retokenize entry point, that the event is a
+    # record type tok/api.py declares and no entry point's docstring returns, and that this call
+    # takes no event at all. So this body may read
     # NOTHING about what the retok did -- not the id remap, not the new vocabulary size, not the
     # cadence -- and that is exactly WHY the mechanism is a decay and not a remap: the counts are
     # over TOKEN IDS, a retok makes the same text into DIFFERENT ids, so counts banked before it are

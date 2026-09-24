@@ -466,7 +466,10 @@ the retok arrives as a SIGNAL.**
 new `Segmentation` and a `RetokEvent`, and hands the event to `MEM.maintain(resegment=...)`,
 `DOM.on_retokenize(...)`, SIG and FAB. No package other than TOK reads `retok_every`, and no package
 other than the root knows who reacts. `LOOP_ORDER` in `spine/compose.py` is where that distribution
-is written down.
+is written down. **As built (2026-09-24):** a mid-epoch `Due.retok` is deferred to the next epoch roll
+(Q-RUN-8), and the roll is the act — `TOK.tokenize` re-segments, `MEM.maintain(resegment=...)` hears on
+the first flush after it, and `DOM.on_retokenize(dom, part)` is its own `E` row, called when the match
+table moved since the last segmentation (Q-DOM-2). SIG and FAB still have no retokenize entry point.
 
 ---
 
@@ -727,9 +730,13 @@ resume; `grace` **does**, and the asymmetry is deliberate.
 **Where they are called (§3):** `rekey` is a stage-`A` row on `Cadences.due('dom.rekey',
 MEM.rekey_every, clock)` **after** `observe` — without it `accept_rule="radius"` silently degenerates
 to the constant rule, because `rekey` is the only site that measures a radius; `census` is at `A`
-(its `live` list is `apply_domain_plan`'s `live_sources`) and at `R`; `on_retokenize` is delivered by
-the RetokEvent at `B`; `prior` is at `R`, which is where the old tree read it while paying for the
-histogram every window; `state_dict` is a stage-`C` row.
+(its `live` list is `apply_domain_plan`'s `live_sources`) and at `R`; `on_retokenize` is delivered at
+the `E` epoch roll, which is where the deferred retok is performed (Q-RUN-8), and only when the match
+table moved since the last segmentation (Q-DOM-2) — it had no call site at all until 2026-09-24;
+`prior` is at `R`, asked once per live domain, which is where the old tree read it while paying for
+the histogram every window; `state_dict` is a stage-`C` row. `rekey` runs **after** `observe` and only
+at `SIG_MODE=learned` since 2026-09-24 (Q-DOM-3); before that it ran first in the `A` block and on
+both arms.
 
 ### RUN — `src/train/api.py` (7 levers)
 
@@ -1299,7 +1306,8 @@ block uses, or take a key of its own.)
 
 Everything else that fires is **event-driven and says so**: `Retention.consider` (a curve value
 arrived — which today it never can), `SIG.train_step` (`cadence_due` said yes),
-`TOK.judge_probation` (`Due.probation`), `DOM.on_retokenize` (the RetokEvent), and the whole `C`
+`TOK.judge_probation` (`Due.probation`), `DOM.on_retokenize` (the epoch roll's re-segmentation at a
+moved match table — Q-DOM-2), and the whole `C`
 stage (a save site). **`SIG.cadence_due` is the one periodic gate that cannot go through
 `Cadences.due`** — it selects between `train_every` and `train_every_idle` on `dense_window`, and
 `due` takes one period — so it has **no ledger key**, and `SIG.counters` at stage `R` is the only
@@ -1365,10 +1373,13 @@ tables claiming one, and it names the producer each is waiting on.
   `:3004` and `:3012`, both inside `PlateauGrowth.step`, which is `grow_check` here. (The third is
   `:7397`, the loop's own capacity valve, which is `CAP.observe`'s `blackout` — see Q-FAB-6.)
   `manage` is cull-and-spare and has no cooldown to suppress.
-* **A resegment for MEM at an epoch roll.** `MEM.maintain(resegment=...)` is documented for a
-  *retokenization*. An epoch redraw is a new stream, not a new segmentation, and the old tree does
-  not resegment the store there. Inventing the call would have been the easiest row in this edit and
-  the least defensible.
+* **A resegment for MEM at an epoch roll — SUPERSEDED; the roll now re-segments and tells MEM and
+  DOM.** This entry said `MEM.maintain(resegment=...)` is documented for a *retokenization* and that
+  an epoch redraw is a new stream, not a new segmentation. Both premises moved: the roll now calls
+  `TOK.tokenize` at the vocabulary as it then stands — which is where every deferred retok is
+  performed (Q-RUN-8) — so `spine/loop.py` hands MEM `resegment=` on the first flush after every
+  roll, and `DOM.on_retokenize` when the match table moved (Q-DOM-2). Kept as the record of why the
+  call was once refused.
 * **`SIG.train_step`'s `reservoir`.** `sig/api.py:113-114` says the pairs are "drawn from ONE domain's
   reservoir by DOM", and **no DOM entry point returns reservoir windows** — `census` returns radii,
   counts and `comp_glob`. At `prototype_frac = 0.0` (the default) nothing is lost; above it,
@@ -4179,10 +4190,12 @@ re-trains on material already consumed. The archive did the other half (*"refres
 with the grown vocab; remap position by byte"*, `self_organize.py:702`) and the byte remap is
 writable in the loop today; what is not writable is **a new length with the position kept**.
 
-**What the loop does instead, and what it costs.** The Due sets `System.retok_pending`; the next
-epoch roll re-segments and satisfies it (`tok.retok_satisfied_by_roll`). A retok that no roll ever
-reaches is counted in `tok.due_dropped` — the counter Q-TOK-12 says must read 0 — with a warning
-naming why. **At `RUN_EPOCHS=1` that is every retok the run raises**, because the single roll a
+**What the loop does instead, and what it costs.** Each fire adds one to `System.retok_pending` (a
+count since 2026-09-24; it was a flag, so four fires read as one); the next epoch roll re-segments
+and adds the count to `tok.retok_satisfied_by_roll`. A retok that no roll ever reaches is counted, one
+per fire, in `tok.due_dropped` — the counter Q-TOK-12 says must read 0 from flush discards — with a
+warning naming why, so `retok_satisfied_by_roll + (due_dropped's retok share) == tok.retok_deferred`
+on a fresh run (driven: `TOK_RETOK_EVERY=10 RUN_EPOCHS=2 DATA_RESAMPLE=1`, 21 + 20 = 41). **At `RUN_EPOCHS=1` that is every retok the run raises**, because the single roll a
 one-epoch run takes is the one that also finishes it and `Tick` requires `finished` to be tested
 first. At `TOK_RETOK_EVERY=3000` over a 262,601-window run that is ~87 deferred fires, all of them
 lost.
@@ -4199,6 +4212,14 @@ length was re-measured, the run did not restart — and `(c)` leaves a shipped l
 at the shipped configuration. **It is MEASURABLE before it is decided**: run two epochs with
 `DATA_RESAMPLE=1` and compare `tok.retok_satisfied_by_roll` against `tok.retok_deferred`; if a roll
 reaches every fire at realistic epoch lengths, (c) is adequate and (a) is not worth a signature.
+
+**Measured 2026-09-24: `TOK_RETOK_EVERY` decides nothing today at ANY `RUN_EPOCHS`, not only at 1.**
+The roll re-segments at the current vocabulary whether or not a retok is pending, so the lever's
+value moves only counters: `RUN_EPOCHS=2 DATA_RESAMPLE=1 DATA_STREAM_BYTES=40000` gave a bit-identical
+418-flush loss curve at `TOK_RETOK_EVERY=0` and `=10` (sum 2243.0572657585144 both), and `0` does not
+mean what its help says ("leaves already-emitted ids alone forever"). Making `0` real needs the roll
+to segment at a vocabulary that excludes what was minted since the last segmentation, and making a
+positive value real needs (a) — both are this question, left for the owner.
 
 ### Q-TOK-12 — which window's `Due` does the flush act on? — **RESOLVED 2026-09-02: (b), THE OR, PER CADENCE KEY. IDENTICAL TO (a) AT THE SHIPPED `OPT_BATCH_WINDOWS = 1`; NO SIGNATURE MOVES**
 `TOK.on_window` is asked per WINDOW; `mint_burst`, the retok and `judge_probation` act per FLUSH
@@ -4230,8 +4251,10 @@ is consistent with `judge_probation`'s other input, the counter *this flush's wh
 (c) puts a mint inside the accumulator and invalidates the batch the model is mid-flush on.
 
 **Two counters, and one must read zero.** `tok.due_merged` (a flush where more than one window raised
-the same key; **unreachable at `batch_windows = 1`**) and `tok.due_dropped`, which is **0 by
-construction** under (b). A counter that must read zero is how a later reader can tell which reading
+the same key; **unreachable at `batch_windows = 1`**, so since 2026-09-24 the root seeds it at the
+second window of a batch rather than `TOK.on_window` seeding it on every arm — Q-TOK-14) and
+`tok.due_dropped`, whose flush-discard share is **0 by construction** under (b); its other share is
+Q-RUN-8's retoks that no roll reached, one per fire. A counter that must read zero is how a later reader can tell which reading
 was actually implemented — under (a) the same counter is the number that says what (a) cost.
 
 **Birth steps are flush-aligned, written down rather than rediscovered:** `step` handed to
@@ -4953,6 +4976,70 @@ none. **After:** `opt.shift.notifications 1`, `opt.lr.shift_warm_applied 19`, `f
 1`. The retok and LR-restart stamps remain undriven, and the gate reasons now say so instead of
 "NOBODY IS SUPPLYING shift_at". **Rejected:** clearing the stamp after maybe_step accepts it (OPT
 already keeps it; the edge belongs in the package that counts it).
+
+### Q-DOM-2 — `DOM.on_retokenize` had no call site, so `DOM_TOKC_DECAY` was inert everywhere — **RESOLVED 2026-09-24: AN `E` ROW, DELIVERED AT THE EPOCH ROLL WHEN THE MATCH TABLE MOVED SINCE THE LAST SEGMENTATION**
+The roll re-segments at the grown vocabulary and told only MEM. Driven at `RUN_EPOCHS=2
+DATA_RESAMPLE=1 DATA_STREAM_BYTES=40000`: vocabulary 518 at the roll, `on_retokenize` calls 0,
+`part.n_retok_events` ABSENT — this tree's "unreachable" on an arm that had just re-segmented — and
+the per-domain histograms mixed two segmentations. **Ruling:** `("E", "DOM", "on_retokenize")` after
+`begin_epoch`, in `_CALLS["E"]`, called when `Vocabulary.rev` (the monotone match-table revision
+`tokenize`'s own staleness stamp reads) moved since the last segmentation. **After:** events 1,
+decays 1, 12 domains decayed; with minting off (`TOK_GROW_EVERY=0`) the roll's warning says DOM was
+not told and why, and the keys stay absent. **Why gated when MEM is not:** DOM's histograms are over
+token ids, which mean the same text at an unchanged table, so a decay there discards valid counts;
+MEM holds ids AND byte offsets into the previous epoch's stream, which the redraw invalidates either
+way. **Rejected:** calling on every roll (decays valid counts; the verifier's caveat); gating on
+`tok.mint` alone (misses retirements and reinstatements, which also move the table); a loop-side
+book for skipped rolls (the roll warning already states it per roll). Only the report's
+`DOM.prior(live)` numbers move in multi-epoch runs — nothing in training reads the prior.
+
+### Q-DOM-3 — `DOM.rekey` ran before the encoder stepped, and on the frozen-bigram arm — **RESOLVED 2026-09-24: AFTER `observe`, ONLY AT `SIG_MODE=learned`, AS THE ROW ALWAYS SAID**
+The row reads "the arm test is SIG.mode == 'learned' … AFTER observe"; the loop asked the cadence
+first in the `A` block and made no arm test. Driven at the first fire of a default run: the order was
+`dom.manage, rekey, train_step, encode, observe`, so the partition was re-keyed against an encoder
+the same window's `SIG.train_step` then moved; `SIG_MODE=bigram` over 260 windows read
+`n_rekey_passes 1`, `n_radius_measured 3`. **Ruling:** the rekey block moved below `DOM.observe` and
+the `since_boundary` update, and `SIG.mode == "learned"` is tested BEFORE `Cadences.due` so no fire is
+recorded for a rekey that cannot run (`dom.rekey` reads `checks=0` on bigram, the ledger's own
+"never evaluated"). **After:** `observe, rekey, encode…` in one window; bigram `n_rekey_passes`
+ABSENT. **Cost, stated:** on `SIG_MODE=bigram` no radius is ever measured, so assignment runs on the
+pooled bootstrap — which is the archive's bigram control exactly (`if SIG_MODE == "learned" and
+SELF_ORG: asm.rekey(enc)`, `self_organize.py:6689`), and every recorded bigram number was taken so.
+**Rejected:** keeping the rekey on bigram for its radius (it would make the control differ from its
+recorded self and from the contract's row; re-opening that is a separate owner question about what
+the control controls for). **Measured on the shipped `learned` arm:** the default 300-window run's
+loss curve is bit-identical; the rekey now encodes 170 reservoir windows (the rekey window's own
+sample included) against 169, `pooled_radius` 0.05454 → 0.05455 and `n_bootstrap_radius` 3 → 2. A
+two-epoch run (`DATA_STREAM_BYTES=40000`, 418 flushes) moves in its last digits (final flush loss
+4.586279 → 4.586286).
+
+### Q-TOK-14 — the gated-call-site report counted Dues, not calls, and TOK seeded counters on arms that cannot fire — **RESOLVED 2026-09-24: PER-CALL KEYS, ONLINE-ONLY SEEDING, `due_merged` SEEDED BY THE ROOT**
+Driven: `OPT_BATCH_WINDOWS=4 TOK_GROW_EVERY=2` printed "TOK.mint_burst: fired 19 time(s)" for 10
+calls; `TOK_MODE=fixed` printed "ARMED BUT 0 … never came due in this run's length" and
+`tok.mint_frozen_at=30`; `TOK_MODE=fixed TOK_PROBATION_USES=3` printed "judge_probation: fired 1"
+beside `tok.probation_judged 0`; the gated lines printed "(TOK_PROBATION_USES=0 makes it
+unreachable)" on a run with 3; `tok.due_merged` was present-and-0 at `batch_windows=1`.
+**Ruling:** `tok.mint_bursts` and `tok.probation_calls`, bumped on entry to `mint_burst` and
+`judge_probation`, seeded by `on_window` beside their cadences and read by `spine/loop.py::_GATED`;
+every cadence counter, `tok.due_dropped` and `tok.mint_frozen_at` seeded only at `TOK_MODE=online`,
+and the probation Due AND-ed with it; `tok.due_merged` seeded by the root at the second window of a
+batch, only when TOK seeded a cadence key; `TOK(vocab.gates)` rendered at R, so
+`tok.probation_embed`'s "unreachable (no residual_ratio supplied)" reaches the report beside a
+judge_probation call count. **Rejected:** `tok.due_mint − tok.due_merged` (due_merged counts a merge on
+any key and goes negative); refusing `TOK_PROBATION_BY=embed` at `LM_COMPOSE=0` at compose (the
+tree already rules that a legal configuration, `tok/api.py::judge_probation`; the report now says
+what it did instead).
+
+### Q-CAP-4 — the R-stage `cap.clamp` said "an armed arm has room" at `CAP_TARGETS=off` — **RESOLVED 2026-09-24: THE STARTUP `dead_facts` ARE KEPT ON THE VALVE AND PASSED AT R**
+`CAP.counters` rebuilt the gate without `dead_facts`, so its UNREACHABLE branch could not open, and
+`valve.gates` (where the startup line says UNREACHABLE) is never rendered. **Ruling:**
+`Valve.clamp_dead_facts`, set by `new_valve` on every build (a resume's included) and not carried by
+`CAP.state`; `CAP.counters` passes it. **After:** UNREACHABLE at R on `off` and `vocab`, matching the
+startup gate. **Rejected:** recomputing the facts from the current caps at R (after a lift to the
+ceiling it reads `at_ceiling` and claims the startup analysis refused a lift the run took); reusing
+`valve.gates`' gate at 0/0 only (leaves the lifts > 0 clauses without the startup facts). Beside it,
+an arm `CAP_TARGETS` does not name now reads origin "off for this arm (…)" instead of the sentinel's
+"no room to earn" sentence; the cap value is unchanged.
 
 ## 6. What `tests/test_contract.py` checks
 

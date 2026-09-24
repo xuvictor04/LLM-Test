@@ -180,7 +180,9 @@ def r5():
     for env, want_cap, want_origin in (
             ({"CAP_TARGETS": "experts"}, 300, "checkpoint (lifted to 300"),
             ({"CAP_TARGETS": "off"}, 512, "off"),
-            ({"CAP_TARGETS": "vocab"}, 512, "sentinel"),
+            # AN ARM CAP_TARGETS DOES NOT NAME READS "off for this arm", not the sentinel's
+            # "no room to earn" sentence, which describes an arm the valve governs (2026-09-24).
+            ({"CAP_TARGETS": "vocab"}, 512, "off for this arm"),
             ({"CAP_TARGETS": "experts", "FAB_SLOTS": "1024"}, 300, "checkpoint (lifted to 300")):
         cfg = valve(**env)
         nv = cap_api.new_valve(cfg, restored=earned)

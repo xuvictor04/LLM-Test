@@ -1656,13 +1656,21 @@ def on_window(tok: Config, vocab, ids, *, step):
     LEVERS READ: mode, grow_every, retok_every, freeze_at, probation_deadline, probation_uses
     WIRES READ: none
     DID IT FIRE: tok.tally, tok.due_mint, tok.due_retok, tok.due_probation, tok.mint_frozen_at
-                 (the step, or unreachable when freeze_at = 0),
+                 (the step, or unreachable when freeze_at = 0) -- ALL FIVE ABSENT OFF
+                 tok.mode="online", which is the only arm that tallies, mints, retoks or judges;
+                 tok.mint_bursts and tok.probation_calls (seeded here beside their cadences and
+                 bumped by mint_burst and judge_probation, one per CALL -- due_mint and
+                 due_probation count WINDOWS, and the root ORs several into one call);
                  tok.due_merged (flushes where MORE THAN ONE window of the batch raised the same
-                 key -- unreachable at batch_windows=1, which is the shipped default),
-                 tok.due_dropped (Dues discarded by the flush: 0 BY CONSTRUCTION under the OR, and
-                 declared precisely because a counter that must read zero is the only way a later
-                 reader can tell which reading was actually implemented. Under the refused "last"
-                 reading this is the number that says what it cost)
+                 key -- unreachable at batch_windows=1, which is the shipped default, so it is
+                 seeded and bumped by the ROOT, which is the only thing that can see a batch),
+                 tok.due_dropped (online only. Dues discarded by the flush: 0 BY CONSTRUCTION under
+                 the OR, and declared precisely because a counter that must read zero is the only
+                 way a later reader can tell which reading was actually implemented -- under the
+                 refused "last" reading this is the number that says what it cost. It ALSO counts,
+                 one per fire, the retoks no epoch roll reached, which the root adds at the end of
+                 a run: docs/04_CONTRACT.md Q-RUN-8 chose that overload, so the flush-discard share
+                 is what reads 0 and the whole counter reads 0 only when every retok was reached)
     """
     tok = tok.owned_by("TOK")
     mode = str(tok.mode)
@@ -1677,42 +1685,61 @@ def on_window(tok: Config, vocab, ids, *, step):
     now_n = int(now)
     c = vocab.counters
 
+    # MINTING IS ONLINE'S ALONE, AND SO IS EVERY CADENCE BELOW. tok.mode="fixed" builds a
+    # vocabulary before the loop and never adds to it, and "bytes" has no merges at all, so there is
+    # nothing for a tally to feed, a mint cadence would be a clock for a mechanism that is off, and
+    # the retok cadence goes the same way for the same reason (the archive's gate is `if ONLINE and
+    # step % RETOK_EVERY == 0`, :702). Probation judges tokens minted ONLINE (`_prov_online`), so
+    # its cadence is online's too. COMPUTED BEFORE THE SEEDING BELOW, because the seeding is what
+    # says which arm this is.
+    online = (mode == "online")
+
     # PRESENT-AND-0 FROM THE FIRST CALL ON THE ARMS THAT CAN RUN, ABSENT ON THE ARMS THAT CANNOT --
     # this module's convention, stated by _replay_merges for tok.load_reconciled and by mint_burst
-    # for its four gate rows. `tok.due_merged` and `tok.due_dropped` are seeded HERE and written by
-    # the COMPOSITION ROOT, which is the only thing that can see a batch; they are on this entry
-    # point's DID IT FIRE line because the fires they count are this entry point's, and seeding
-    # them here is what stops a reader finding them absent on a run where the root was doing its
-    # job. tok.due_dropped MUST READ 0 -- Q-TOK-12 chose the OR precisely so that no raised Due is
-    # ever discarded, and a counter that must read zero is how a later reader can tell which of the
-    # two readings was actually implemented.
-    for _row in ("tok.tally", "tok.due_mint", "tok.due_retok", "tok.due_merged", "tok.due_dropped"):
-        c.setdefault(_row, 0)
+    # for its four gate rows. THE SEEDING IS GATED ON `online` SINCE 2026-09-24: it was
+    # unconditional, so TOK_MODE=fixed and TOK_MODE=bytes printed "TOK.mint_burst: ARMED BUT 0 ...
+    # never came due in this run's length" at 250 windows against a grow_every of 200 -- telling
+    # the operator to lengthen a run on an arm that cannot mint at any length.
+    # tok.mint_bursts and tok.probation_calls ARE PER-CALL COUNTS, bumped by mint_burst and
+    # judge_probation on entry, and they are what spine/loop.py::_GATED reads: tok.due_mint counts
+    # WINDOWS whose Due.mint was raised, and at OPT_BATCH_WINDOWS > 1 the root ORs several of those
+    # into one call (driven: 19 Dues, 10 calls, "fired 19 time(s)"). Seeded here, beside the cadence
+    # that gates each, so they are present-and-0 exactly where the call can happen.
+    # `tok.due_dropped` is seeded HERE and written by the COMPOSITION ROOT; it is on this entry
+    # point's DID IT FIRE line because the fires it counts are this entry point's. It is 0 from
+    # flush discards by construction under the OR (Q-TOK-12), and it ALSO counts, one per fire,
+    # every retok that no epoch roll reached (Q-RUN-8's overload, docs/04_CONTRACT.md).
+    # `tok.due_merged` IS NOT SEEDED HERE ANY MORE: it is reachable only when a flush holds more
+    # than one window, which is OPT_BATCH_WINDOWS and not a lever this package reads, and seeding it
+    # on every arm printed present-and-0 at the shipped batch_windows=1, where the loop's own
+    # comment calls it UNREACHABLE. The root seeds it, at the second window of a batch.
+    if online:
+        for _row in ("tok.tally", "tok.due_mint", "tok.due_retok", "tok.due_dropped",
+                     "tok.mint_bursts"):
+            c.setdefault(_row, 0)
     # THE PROBATION FAMILY IS ABSENT AT THE SHIPPED TOK_PROBATION_USES=0, which is judge_probation's
     # own arm ("the four probation counters are absent rather than 0") carried one row up to the
     # cadence that gates it. docs/04_CONTRACT.md: "TOK_PROBATION_USES = 0, so the whole probation
     # family is inert as shipped". A cadence raised for a consumer that returns on its first branch
-    # is a gate evaluated for nothing, and a 0 here would read as "the deadline never came".
-    if uses > 0:
+    # is a gate evaluated for nothing, and a 0 here would read as "the deadline never came". And it
+    # is absent off the online arm for the reason above: TOK_MODE=fixed TOK_PROBATION_USES=3 printed
+    # "TOK.judge_probation: fired 1 time(s)" beside tok.probation_judged 0.
+    if online and uses > 0:
         c.setdefault("tok.due_probation", 0)
-    # tok.mint_frozen_at IS THE STEP, OR UNREACHABLE WHEN freeze_at = 0 -- the docstring's own
-    # words, so the key is ABSENT on the shipped default and present-and-0 while the freeze is
-    # armed and has not arrived.
-    if freeze_n:
+        c.setdefault("tok.probation_calls", 0)
+    # tok.mint_frozen_at IS THE STEP, OR UNREACHABLE WHEN freeze_at = 0 OR MINTING IS NOT ONLINE --
+    # the docstring's own words, so the key is ABSENT on the shipped default and present-and-0
+    # while the freeze is armed and has not arrived. A freeze of a mechanism that never runs is not
+    # a freeze: TOK_MODE=fixed TOK_FREEZE_AT=30 printed tok.mint_frozen_at=30 until 2026-09-24.
+    if online and freeze_n:
         c.setdefault("tok.mint_frozen_at", 0)
 
     # THE FREEZE IS A STATE AND NOT AN EVENT. It is monotone by construction -- once now >= freeze
     # it is true for every later window -- which is the property Q-TOK-12's ruling rests on when it
     # takes `frozen` from the last window of a batch and calls that the same thing as the OR.
-    frozen = bool(freeze_n) and now_n >= freeze_n
+    frozen = online and bool(freeze_n) and now_n >= freeze_n
     if frozen and not c["tok.mint_frozen_at"]:
         c["tok.mint_frozen_at"] = now_n
-
-    # MINTING IS ONLINE'S ALONE. tok.mode="fixed" builds a vocabulary before the loop and never
-    # adds to it, so there is nothing for a tally to feed and a mint cadence would be a clock for a
-    # mechanism that is off; the retok cadence goes the same way for the same reason (the archive's
-    # gate is `if ONLINE and step % RETOK_EVERY == 0`, :702).
-    online = (mode == "online")
 
     # ---- THE TALLY, WHICH IS THE ONLY CANDIDATE EVIDENCE mint_burst HAS -------------------------
     # `mint_burst(tok, vocab, *, step)` TAKES NO ids, so the vocabulary is the one channel a
@@ -1742,7 +1769,7 @@ def on_window(tok: Config, vocab, ids, *, step):
     # is not spellable rather than merely avoided.
     mint = bool(online and not frozen and _due(vocab, "mint", grow_n, now))
     retok = bool(online and _due(vocab, "retok", retok_n, now))
-    probation = bool(uses > 0 and _due(vocab, "probation", deadline_n, now))
+    probation = bool(online and uses > 0 and _due(vocab, "probation", deadline_n, now))
     if mint:
         c["tok.due_mint"] += 1
     if retok:
@@ -1865,10 +1892,18 @@ def mint_burst(tok: Config, vocab, *, step):
                  tok.mint_novel_reranked (unreachable at mint_novel=0.0, the default),
                  tok.mint_skipped, tok.mint_widened, tok.mint_rescued, tok.mint_reinstated,
                  tok.mint_ceiling_refused (the row that read ZERO ... ARMED AND INERT on the first
-                 add-an-area run), tok.mint_exhausted
+                 add-an-area run), tok.mint_exhausted,
+                 tok.mint_bursts (ONE PER CALL, bumped on entry and seeded by on_window on the
+                 online arm -- the count spine/loop.py's gated-call-site report prints, because
+                 tok.due_mint counts windows and the root ORs a batch of them into one call)
     """
     tok = tok.owned_by("TOK")
     ceiling = int(tok.d_vocab_ceiling)                   # WIRE READ HERE -- the hard row count
+    # THE CALL IS COUNTED BEFORE ANYTHING CAN REFUSE IT, because what the count answers is "how many
+    # times did the root act on Due.mint", and a burst that minted nothing or raised below was
+    # still an act. `.get` and not `[]`: on_window seeds the key on the online arm, and a direct
+    # caller on another arm must not crash on a counter.
+    vocab.counters["tok.mint_bursts"] = vocab.counters.get("tok.mint_bursts", 0) + 1
 
     # THE WIRE IS THE AUTHORITY AND THE VOCABULARY'S OWN CEILING IS CHECKED AGAINST IT, ONCE, HERE
     # (DEFECT D-T1). This module's header is unconditional: the ceiling is hard, it comes from the
@@ -2276,9 +2311,14 @@ def judge_probation(tok: Config, vocab, *, step, appearances, residual_ratio=Non
     DID IT FIRE: tok.probation_judged, tok.probation_kept, tok.probation_retired,
                  tok.probation_pending (all unreachable at probation_uses = 0, the default),
                  Gate tok.probation_embed -- prints "unreachable (no residual_ratio supplied)"
-                 rather than silently running the "use" test
+                 rather than silently running the "use" test,
+                 tok.probation_calls (ONE PER CALL, bumped on entry and seeded by on_window where
+                 the probation cadence is armed -- the count spine/loop.py's gated-call-site
+                 report prints. A CALL IS NOT A JUDGEMENT: on the embed arm with no residual_ratio
+                 this counts the call and tok.probation_judged stays ABSENT, and the Gate says why)
     """
     tok = tok.owned_by("TOK")
+    vocab.counters["tok.probation_calls"] = vocab.counters.get("tok.probation_calls", 0) + 1
     # THE LEVERS, READ ONCE AND INTO BARE LOCALS -- and the deadline is TYPED HERE, at the read,
     # rather than compared as an int below. Its census row is the reason: the old name said
     # TOK_PROBATION_STEPS and the quantity is WINDOWS, so at BATCH_W=16 reading it as steps is a

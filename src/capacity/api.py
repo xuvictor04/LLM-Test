@@ -458,6 +458,16 @@ class Valve:
     origin: tuple = ()
     counters: dict = dataclasses.field(default_factory=dict)
     gates: tuple = ()
+    # THE STARTUP ANALYSIS THE cap.clamp GATE WAS BUILT ON, KEPT SO CAP.counters BUILDS ITS LINE ON
+    # THE SAME FACTS (2026-09-24). None when an arm has room to lift, else the per-arm tuple of
+    # (arm, kind, facts) new_valve's branches recorded. CAP.counters used to rebuild the gate with no
+    # dead_facts at all, so at the shipped CAP_TARGETS=off the R stage printed "An armed arm has
+    # room" beside a startup gate that said UNREACHABLE -- and the startup gate is never rendered.
+    # Recomputing the analysis at R was refused: after a lift to the hard ceiling it reads
+    # `at_ceiling` and would print "the startup analysis said no lift could be taken" about a run
+    # whose startup analysis said the opposite. NOT saved or restored by CAP.state/CAP.restore:
+    # new_valve rebuilds it on every build, a resume's included, from that build's own caps.
+    clamp_dead_facts: object = None
 
 
 
@@ -829,7 +839,9 @@ def new_valve(cap: Config, *, restored=None):
         `targets == "off"` FIRST -- the valve disabled means the starting caps are not applied
         either -- then the OPERATOR's explicit value, with an explicit 0 read as the documented
         sentinel because the sentinel is a property of the VALUE and not of where it arrived
-        from; then the CHECKPOINT's lifted cap; then the declared default sentinel LAST.
+        from; then the CHECKPOINT's lifted cap; then the declared default sentinel LAST -- whose
+        origin string reads "off for this arm" instead when `targets` does not name the arm, since
+        the sentinel's "no room to earn" describes an arm the valve governs (2026-09-24).
 
         This line read "The sentinel, the operator, and the checkpoint, in that order of
         precedence" until 2026-09-04. It named the sentinel first though it resolves last, and
@@ -892,6 +904,16 @@ def new_valve(cap: Config, *, restored=None):
             tail = "" if was_armed is not None else "; checkpoint carries no arm provenance"
             clamp = "" if taken == saved_cap else f", clamped from {saved_cap}"
             return taken, f"checkpoint (lifted to {taken}{clamp}{tail})"
+        # AN ARM `targets` DOES NOT NAME IS OFF FOR THE VALVE, AND ITS ORIGIN SAYS SO (2026-09-24).
+        # The number is the hard ceiling exactly as the sentinel's is, but the sentinel's sentence
+        # -- "start at the hard ceiling, no room to earn" -- describes an arm the valve governs, and
+        # CAP_TARGETS=vocab printed cap.origin_experts "sentinel 0 -> hard ceiling 4096" for an arm
+        # no lift can ever reach. Only the reachable-by-the-default branch is re-worded: an
+        # operator's explicit CAP_FAB_START on an untargeted arm is still applied as asked above
+        # (it is also the fabric growth clamp's operating ceiling, per the lever's own help).
+        if targets not in (arm, "both"):
+            return hard, (f"off for this arm (CAP_TARGETS={targets} does not name it; the cap is "
+                          f"the hard ceiling {hard})")
         # THE SENTINEL. 0 means START AT THE HARD CEILING -- no room to earn -- and it must be a
         # sentinel rather than a literal because lever.py refuses a default computed from another
         # lever, so the number it stands for can only arrive as the wire.
@@ -1269,8 +1291,8 @@ def new_valve(cap: Config, *, restored=None):
     # THE COUNTS ARE ZERO HERE BY CONSTRUCTION, not by measurement: this gate is built before the
     # first flush, exactly as cap.valve is, so the startup line is the "no lift was earned" state
     # and CAP.counters is where the other two reachable states are printed from the live ledger.
-    clamp = _clamp_gate(arith, 0, 0,
-                        dead_facts=None if (expert_room or vocab_room) else tuple(dead_facts))
+    valve.clamp_dead_facts = None if (expert_room or vocab_room) else tuple(dead_facts)
+    clamp = _clamp_gate(arith, 0, 0, dead_facts=valve.clamp_dead_facts)
     valve.gates = (valve_gate, vocab_arm, clamp)
     return valve
 
@@ -1825,11 +1847,18 @@ def counters(cap: Config, valve):
     # construction, so its line can only ever read "no lift was earned" or UNREACHABLE, and the two
     # readings that matter after a run -- every earned lift applied IN FULL, and M of N lifts
     # CLAMPED at the ceiling -- are reachable only from here.
-    # dead_facts IS NOT PASSED. It is the startup analysis of why an arm can never lift, and this
-    # call has the live ledger instead: if lifts were taken the arm was not dead, and if none was
-    # the startup gate already said why in its own sentence. Re-deriving it here would be that
-    # sentence written twice, which is what _clamp_gate's own docstring refuses.
-    clamp = _clamp_gate(arith, lifts, clamped)
+    # dead_facts IS THE STARTUP ANALYSIS, PASSED AS new_valve RECORDED IT ON THE VALVE, AND IT WAS
+    # NOT PASSED AT ALL UNTIL 2026-09-24. The reason given was "if none was [taken] the startup gate
+    # already said why in its own sentence" -- but valve.gates is never rendered, so this line was
+    # the only cap.clamp a report carried, and without the facts _clamp_gate's UNREACHABLE branch
+    # cannot open: at the shipped CAP_TARGETS=off every run printed "NO LIFT WAS EARNED ... An armed
+    # arm has room" beside cap.origin_experts "off (valve disabled ...)". With the recorded facts
+    # the 0/0 case reads UNREACHABLE on a dead configuration, and the lifts > 0 cases compare the
+    # live ledger against the startup analysis, which is what the "falsified" / "agrees" clauses
+    # were written to do. NOT RE-DERIVED from the current caps: after a lift to the ceiling that
+    # would read `at_ceiling` and claim the startup analysis refused a lift the run took.
+    clamp = _clamp_gate(arith, lifts, clamped,
+                        dead_facts=getattr(valve, "clamp_dead_facts", None))
 
     out = {
         "cap.targets": targets,

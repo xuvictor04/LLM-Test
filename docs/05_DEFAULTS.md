@@ -394,7 +394,7 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `TOK_PROBATION_DEADLINE` | `5000` | Windows |  | The window by which a minted token must have earned its appearances, after which it is judged. |
 | `TOK_PROBATION_RESIDUAL` | `0.1` | fraction 0..1 |  | Minimum ratio of a token's learned residual to its byte composite for the token to be judged worth its slot. |
 | `TOK_PROBATION_USES` | `0` | count |  | How many appearances a newly minted token must earn before it keeps its place in the match table; below it the merge is undone. |
-| `TOK_RETOK_EVERY` | `3000` | Windows |  | How often the unconsumed stream is re-segmented with the vocabulary as it now stands; 0 leaves already-emitted ids alone forever. |
+| `TOK_RETOK_EVERY` | `3000` | Windows |  | How often the retok cadence asks for the stream to be re-segmented with the vocabulary as it now stands; 0 disarms the ask. |
 | `TOK_SEED_VOCAB` | `512` | tokens |  | Target vocabulary size the pre-training build aims for, before any online minting. |
 
 ### WORLD (11 levers)

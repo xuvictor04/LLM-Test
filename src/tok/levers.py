@@ -277,8 +277,16 @@ class TOKLevers(LeverSet):
     # sentinel stands, declared in the help text where a reader will see it, and the honest repair is a
     # derivation inside this package that names the frozen state once.
 
-    retok_every = Lever(3000, "How often the unconsumed stream is re-segmented with the vocabulary as it "
-                              "now stands; 0 leaves already-emitted ids alone forever.", U.Windows)
+    retok_every = Lever(3000, "How often the retok cadence asks for the stream to be re-segmented with the "
+                              "vocabulary as it now stands; 0 disarms the ask. The ask waits for the next "
+                              "epoch roll, which re-segments whatever this is set to.", U.Windows)
+    # THE HELP SAID "0 leaves already-emitted ids alone forever" UNTIL 2026-09-24, AND NOTHING IN THE
+    # TREE DOES THAT. A retok is deferred to the epoch roll (docs/04_CONTRACT.md Q-RUN-8) and the roll
+    # re-segments at the current vocabulary on every roll, pending or not, so today this value moves
+    # only tok.due_retok / tok.retok_deferred / tok.retok_satisfied_by_roll / tok.due_dropped: driven
+    # at RUN_EPOCHS=2 DATA_RESAMPLE=1, the loss curve is bit-identical at 0 and at 10. The effect below
+    # is the archive's; restoring it needs Q-RUN-8's (a) or a roll that segments at an older table,
+    # and both are the owner's.
     # Census: RETOK_EVERY -> TOK_RETOK_EVERY, verdict rename, unit Windows. Field corrected (DEFECT 1).
     # THE LARGEST SINGLE EFFECT IN THE PROJECT'S RECORDS, AND THE REASON THIS LEVER MAY NOT BE QUIETLY
     # HARDCODED. Two arms with IDENTICAL vocabularies (512 minted, 441 used, 0% dead) differing only in
