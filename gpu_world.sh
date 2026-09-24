@@ -74,6 +74,160 @@ cd "$(dirname "$0")"
 
 # bash gpu_world.sh --status : progress and time left of a fleet that is running (or finished),
 # read off SUMMARY.txt and the logs. It changes nothing and is safe to run at any time.
+# THE ANALYSIS, AS A FUNCTION so --analyze can re-run it on a finished (or interrupted) fleet.
+analyze() {  # out device mps_on par ncpu
+  python3 - "$@" <<'PY'
+import glob, json, math, os, re, statistics, sys
+out, dev, mps_on, par, ncpu = sys.argv[1], sys.argv[2], sys.argv[3] == "1", int(sys.argv[4]), int(sys.argv[5])
+
+def rep(t):
+    r = {}
+    for m in re.finditer(r"^\s+([A-Za-z_][\w.@()-]*\.[\w.@()-]+)\s+(\S+)\s*$", t, re.M):
+        r[m.group(1)] = m.group(2)
+    return r
+
+runs = {}
+for log in sorted(glob.glob(os.path.join(out, "logs", "*.log"))):
+    tag = os.path.basename(log)[:-4]
+    name, seed = tag.rsplit(".s", 1)
+    t = open(log).read(); r = rep(t)
+    try: curve = json.load(open(os.path.join(out, "curves", tag + ".json")))
+    except (OSError, ValueError): curve = None
+    m = re.search(r"=== (\d+) windows[^\n]*? in ([\d.]+)s", t)
+    vocab = re.findall(r"vocab=(\d+)", t)
+    runs[(name, int(seed))] = dict(
+        curve=curve, r=r, ok=curve is not None,
+        windows=int(m.group(1)) if m else None, secs=float(m.group(2)) if m else None,
+        stopped_at_max="stopped at max_windows" in t, nonfinite="non-finite" in t.lower() and "refus" in t.lower(),
+        vocab=int(vocab[-1]) if vocab else None, mint=r.get("tok.mint"),
+        peak=(re.search(r"peak CUDA memory [\d.]+ GiB allocated, ([\d.]+) GiB reserved", t) or [None, None])[1])
+
+def half(a, b):
+    n = min(len(a), len(b)); h = n // 2
+    return (sum(a[i] - b[i] for i in range(h, n)) / (n - h), sum(a[i] - b[i] for i in range(n)) / n, n)
+
+def stat(xs):
+    m = sum(xs) / len(xs)
+    se = math.sqrt(sum((x - m) ** 2 for x in xs) / (len(xs) - 1) / len(xs)) if len(xs) > 1 else float("nan")
+    return m, se
+
+print()
+print("=== RUNS ===")
+for (name, seed), v in sorted(runs.items()):
+    wps = v["windows"] / v["secs"] if v["windows"] and v["secs"] else float("nan")
+    flags = []
+    if not v["ok"]: flags.append("NO CURVE")
+    if v["ok"] and not v["stopped_at_max"]: flags.append("RAN OUT OF STREAM (raise BYTES)")
+    if v["nonfinite"]: flags.append("NON-FINITE STOP")
+    r = v["r"]
+    print(f"  {name:<18} s{seed:<3} {v['windows'] or '?':>6} win {wps:6.2f} w/s  vocab {v['vocab']}  mint {v['mint']}"
+          f"  extra_ratio {r.get('lm.encode.extra_ratio', '-'):>9} max {r.get('lm.encode.extra_ratio_max', '-'):>9}"
+          f"  latent_std {r.get('world.latent_std', '-'):>9}  peak {v['peak'] or '-'} GiB  {' '.join(flags)}")
+
+# the run-to-run floor
+a, b = runs.get(("fb_off", 0)), runs.get(("fb_off_rerun", 0))
+floor = None
+if a and b and a["curve"] and b["curve"]:
+    n = min(len(a["curve"]), len(b["curve"]))
+    mx = max(abs(a["curve"][i] - b["curve"][i]) for i in range(n))
+    floor = abs(half(a["curve"], b["curve"])[0])
+    print()
+    print(f"=== RUN-TO-RUN FLOOR (fb_off seed 0 twice): max per-flush |diff| {mx:.3g}, "
+          f"last-half mean |diff| {floor:.4f}" + ("  -> BIT-EXACT on this card" if mx == 0 else ""))
+
+# paired comparisons against the group's fb_off
+print()
+print("=== PAIRED AGAINST fb_off (arm - fb_off, same seed; negative = the arm is better) ===")
+results = {}
+groups = {}
+for (name, seed) in runs:
+    if name == "fb_off_rerun": continue
+    base, _, suffix = name.partition("@")
+    long_ = base.endswith("_long")
+    key = ("@" + suffix) if suffix else ("_long" if long_ else "")
+    groups.setdefault(key, set()).add(name)
+for key, names in sorted(groups.items()):
+    ctrl = ("fb_off_long" if key == "_long" else "fb_off" + key)
+    for name in sorted(names):
+        if name == ctrl: continue
+        rows = []
+        for (n2, seed), v in sorted(runs.items()):
+            if n2 != name: continue
+            c = runs.get((ctrl, seed))
+            if not (v["curve"] and c and c["curve"]): continue
+            mismatch = v["vocab"] != c["vocab"] or v["mint"] != c["mint"]
+            rows.append((seed,) + half(v["curve"], c["curve"]) + (mismatch,))
+        if not rows: continue
+        lh, se = stat([r[1] for r in rows]); fr, fse = stat([r[2] for r in rows])
+        neg = sum(1 for r in rows if r[1] < 0)
+        results[name] = (lh, se, neg, len(rows))
+        print(f"  {name:<18} vs {ctrl:<12} last half {lh:+.4f} +- {se:.4f} SE   full run {fr:+.4f} +- {fse:.4f}"
+              f"   {neg}/{len(rows)} seeds negative")
+        print("      per seed (last half): " + "  ".join(f"s{r[0]} {r[1]:+.4f}" for r in rows))
+        if any(r[4] for r in rows):
+            print("      !! vocab size or tok.mint differs from fb_off on some seed: per-token nats are then not "
+                  "comparable; convert to bits per byte before trusting this row")
+
+# the decision, the judge's rule from Q-WORLD-10
+print()
+print("=== DECISION (Q-WORLD-10's rule) ===")
+fo, sk, wo = results.get("fb_on"), results.get("skip"), results.get("world_off")
+if fo:
+    lh, se, neg, n = fo
+    sig = n > 1 and lh < -2 * se
+    if floor is not None and abs(lh) < floor:
+        print(f"  fb_on - fb_off ({lh:+.4f}) is SMALLER than this card's run-to-run floor ({floor:.4f}): no decision possible.")
+    if neg >= math.ceil(0.8 * n) and sig:
+        print(f"  KEEP WORLD_FEEDBACK=True: lower in {neg}/{n} seeds and more than 2 SE below zero ({lh:+.4f} +- {se:.4f}).")
+    else:
+        print(f"  WITHIN NOISE ({neg}/{n} seeds negative, {lh:+.4f} +- {se:.4f}): the rule says set WORLD_FEEDBACK's "
+              f"default to False -- the path would cost kernel launches for nothing.")
+    if sk:
+        d = sk[0] - lh
+        if abs(d) <= max(se, sk[1]) * 2:
+            print(f"  skip ~= fb_on ({sk[0]:+.4f} vs {lh:+.4f}): the gain is CAPACITY, not world modelling -- WORLD's "
+                  f"own objectives contribute nothing measurable.")
+        elif d < 0:
+            print(f"  skip BEATS fb_on ({sk[0]:+.4f} vs {lh:+.4f}): WORLD's objectives HURT the forecast path -- revisit "
+                  f"WORLD_PREDICT_W / WORLD_COLLAPSE_W or detach the population's input.")
+        else:
+            print(f"  fb_on beats skip ({lh:+.4f} vs {sk[0]:+.4f}): WORLD's objectives add to the forecast beyond capacity.")
+    if wo and wo[0] < lh:
+        print(f"  world_off is better than fb_on ({wo[0]:+.4f} vs {lh:+.4f}): the subsystem does not earn its cost.")
+else:
+    print("  fb_on has no paired rows; nothing to decide.")
+
+# did the card fill
+if dev == "cuda":
+    print()
+    try:
+        rows = [l.strip().split(",") for l in open(os.path.join(out, "smi.csv")) if l.strip()]
+        util = [float(r[1]) for r in rows]; mem = [float(r[2]) for r in rows]; tot = float(rows[0][3])
+        k = len(util) // 10; body = util[k:len(util) - k] or util        # drop the ramp-up and tail-off
+        print(f"=== GPU: utilisation mean {statistics.mean(body):.1f}%  median {statistics.median(body):.0f}%  "
+              f">=90% on {100 * sum(u >= 90 for u in body) / len(body):.0f}% of samples  "
+              f"memory peak {max(mem) / 1024:.1f} of {tot / 1024:.1f} GiB   (MPS {'on' if mps_on else 'off'}, {par} at a time)")
+        if statistics.mean(body) < 80:
+            why = (f"parallelism is capped by this box's {ncpu} CPU cores" if par >= ncpu - 1 else
+                   "raise PAR (GPU memory allows more)")
+            print(f"    The card was NOT full: {why}." + ("" if mps_on else " Without MPS the runs time-slice; MPS=1 if it can be enabled."))
+    except (OSError, ValueError, IndexError) as e:
+        print(f"=== GPU: no utilisation samples ({e})")
+PY
+}
+
+# bash gpu_world.sh --analyze : the analysis of whatever runs are on disk, printed and written to
+# ANALYSIS.txt. For a fleet that finished but never reached its own analysis, or one that was
+# stopped part-way (the missing runs simply have no curve and are left out of the pairing).
+if [[ "${1:-}" == --analyze ]]; then
+  _par=$(sed -n 's/^=== [0-9]* run(s), \([0-9]*\) at a time.*/\1/p' "$OUT/SUMMARY.txt" 2>/dev/null | tail -1)
+  _mps=0; grep -q "CUDA MPS started" "$OUT/SUMMARY.txt" 2>/dev/null && _mps=1
+  _dev=cuda; [[ -f "$OUT/smi.csv" ]] || _dev=cpu
+  analyze "$OUT" "$_dev" "$_mps" "${_par:-1}" "$(nproc)" | tee "$OUT/ANALYSIS.txt"
+  echo "=== wrote $OUT/ANALYSIS.txt"
+  exit 0
+fi
+
 if [[ "${1:-}" == --status ]]; then
   OUT="$OUT" python3 - <<'PY'
 import glob, os, re, datetime as dt
@@ -401,143 +555,6 @@ if grep -q "rc=[1-9]" "$OUT/logs/_done.txt"; then
 fi
 
 # ---------------------------------------------------------------- 5. analysis
-python3 - "$OUT" "$DEVICE" "$MPS_ON" "$PAR" "$NCPU" >> "$S" <<'PY'
-import glob, json, math, os, re, statistics, sys
-out, dev, mps_on, par, ncpu = sys.argv[1], sys.argv[2], sys.argv[3] == "1", int(sys.argv[4]), int(sys.argv[5])
-
-def rep(t):
-    r = {}
-    for m in re.finditer(r"^\s+([A-Za-z_][\w.@()-]*\.[\w.@()-]+)\s+(\S+)\s*$", t, re.M):
-        r[m.group(1)] = m.group(2)
-    return r
-
-runs = {}
-for log in sorted(glob.glob(os.path.join(out, "logs", "*.log"))):
-    tag = os.path.basename(log)[:-4]
-    name, seed = tag.rsplit(".s", 1)
-    t = open(log).read(); r = rep(t)
-    try: curve = json.load(open(os.path.join(out, "curves", tag + ".json")))
-    except (OSError, ValueError): curve = None
-    m = re.search(r"=== (\d+) windows[^\n]*? in ([\d.]+)s", t)
-    vocab = re.findall(r"vocab=(\d+)", t)
-    runs[(name, int(seed))] = dict(
-        curve=curve, r=r, ok=curve is not None,
-        windows=int(m.group(1)) if m else None, secs=float(m.group(2)) if m else None,
-        stopped_at_max="stopped at max_windows" in t, nonfinite="non-finite" in t.lower() and "refus" in t.lower(),
-        vocab=int(vocab[-1]) if vocab else None, mint=r.get("tok.mint"),
-        peak=(re.search(r"peak CUDA memory [\d.]+ GiB allocated, ([\d.]+) GiB reserved", t) or [None, None])[1])
-
-def half(a, b):
-    n = min(len(a), len(b)); h = n // 2
-    return (sum(a[i] - b[i] for i in range(h, n)) / (n - h), sum(a[i] - b[i] for i in range(n)) / n, n)
-
-def stat(xs):
-    m = sum(xs) / len(xs)
-    se = math.sqrt(sum((x - m) ** 2 for x in xs) / (len(xs) - 1) / len(xs)) if len(xs) > 1 else float("nan")
-    return m, se
-
-print()
-print("=== RUNS ===")
-for (name, seed), v in sorted(runs.items()):
-    wps = v["windows"] / v["secs"] if v["windows"] and v["secs"] else float("nan")
-    flags = []
-    if not v["ok"]: flags.append("NO CURVE")
-    if v["ok"] and not v["stopped_at_max"]: flags.append("RAN OUT OF STREAM (raise BYTES)")
-    if v["nonfinite"]: flags.append("NON-FINITE STOP")
-    r = v["r"]
-    print(f"  {name:<18} s{seed:<3} {v['windows'] or '?':>6} win {wps:6.2f} w/s  vocab {v['vocab']}  mint {v['mint']}"
-          f"  extra_ratio {r.get('lm.encode.extra_ratio', '-'):>9} max {r.get('lm.encode.extra_ratio_max', '-'):>9}"
-          f"  latent_std {r.get('world.latent_std', '-'):>9}  peak {v['peak'] or '-'} GiB  {' '.join(flags)}")
-
-# the run-to-run floor
-a, b = runs.get(("fb_off", 0)), runs.get(("fb_off_rerun", 0))
-floor = None
-if a and b and a["curve"] and b["curve"]:
-    n = min(len(a["curve"]), len(b["curve"]))
-    mx = max(abs(a["curve"][i] - b["curve"][i]) for i in range(n))
-    floor = abs(half(a["curve"], b["curve"])[0])
-    print()
-    print(f"=== RUN-TO-RUN FLOOR (fb_off seed 0 twice): max per-flush |diff| {mx:.3g}, "
-          f"last-half mean |diff| {floor:.4f}" + ("  -> BIT-EXACT on this card" if mx == 0 else ""))
-
-# paired comparisons against the group's fb_off
-print()
-print("=== PAIRED AGAINST fb_off (arm - fb_off, same seed; negative = the arm is better) ===")
-results = {}
-groups = {}
-for (name, seed) in runs:
-    if name == "fb_off_rerun": continue
-    base, _, suffix = name.partition("@")
-    long_ = base.endswith("_long")
-    key = ("@" + suffix) if suffix else ("_long" if long_ else "")
-    groups.setdefault(key, set()).add(name)
-for key, names in sorted(groups.items()):
-    ctrl = ("fb_off_long" if key == "_long" else "fb_off" + key)
-    for name in sorted(names):
-        if name == ctrl: continue
-        rows = []
-        for (n2, seed), v in sorted(runs.items()):
-            if n2 != name: continue
-            c = runs.get((ctrl, seed))
-            if not (v["curve"] and c and c["curve"]): continue
-            mismatch = v["vocab"] != c["vocab"] or v["mint"] != c["mint"]
-            rows.append((seed,) + half(v["curve"], c["curve"]) + (mismatch,))
-        if not rows: continue
-        lh, se = stat([r[1] for r in rows]); fr, fse = stat([r[2] for r in rows])
-        neg = sum(1 for r in rows if r[1] < 0)
-        results[name] = (lh, se, neg, len(rows))
-        print(f"  {name:<18} vs {ctrl:<12} last half {lh:+.4f} +- {se:.4f} SE   full run {fr:+.4f} +- {fse:.4f}"
-              f"   {neg}/{len(rows)} seeds negative")
-        print("      per seed (last half): " + "  ".join(f"s{r[0]} {r[1]:+.4f}" for r in rows))
-        if any(r[4] for r in rows):
-            print("      !! vocab size or tok.mint differs from fb_off on some seed: per-token nats are then not "
-                  "comparable; convert to bits per byte before trusting this row")
-
-# the decision, the judge's rule from Q-WORLD-10
-print()
-print("=== DECISION (Q-WORLD-10's rule) ===")
-fo, sk, wo = results.get("fb_on"), results.get("skip"), results.get("world_off")
-if fo:
-    lh, se, neg, n = fo
-    sig = n > 1 and lh < -2 * se
-    if floor is not None and abs(lh) < floor:
-        print(f"  fb_on - fb_off ({lh:+.4f}) is SMALLER than this card's run-to-run floor ({floor:.4f}): no decision possible.")
-    if neg >= math.ceil(0.8 * n) and sig:
-        print(f"  KEEP WORLD_FEEDBACK=True: lower in {neg}/{n} seeds and more than 2 SE below zero ({lh:+.4f} +- {se:.4f}).")
-    else:
-        print(f"  WITHIN NOISE ({neg}/{n} seeds negative, {lh:+.4f} +- {se:.4f}): the rule says set WORLD_FEEDBACK's "
-              f"default to False -- the path would cost kernel launches for nothing.")
-    if sk:
-        d = sk[0] - lh
-        if abs(d) <= max(se, sk[1]) * 2:
-            print(f"  skip ~= fb_on ({sk[0]:+.4f} vs {lh:+.4f}): the gain is CAPACITY, not world modelling -- WORLD's "
-                  f"own objectives contribute nothing measurable.")
-        elif d < 0:
-            print(f"  skip BEATS fb_on ({sk[0]:+.4f} vs {lh:+.4f}): WORLD's objectives HURT the forecast path -- revisit "
-                  f"WORLD_PREDICT_W / WORLD_COLLAPSE_W or detach the population's input.")
-        else:
-            print(f"  fb_on beats skip ({lh:+.4f} vs {sk[0]:+.4f}): WORLD's objectives add to the forecast beyond capacity.")
-    if wo and wo[0] < lh:
-        print(f"  world_off is better than fb_on ({wo[0]:+.4f} vs {lh:+.4f}): the subsystem does not earn its cost.")
-else:
-    print("  fb_on has no paired rows; nothing to decide.")
-
-# did the card fill
-if dev == "cuda":
-    print()
-    try:
-        rows = [l.strip().split(",") for l in open(os.path.join(out, "smi.csv")) if l.strip()]
-        util = [float(r[1]) for r in rows]; mem = [float(r[2]) for r in rows]; tot = float(rows[0][3])
-        k = len(util) // 10; body = util[k:len(util) - k] or util        # drop the ramp-up and tail-off
-        print(f"=== GPU: utilisation mean {statistics.mean(body):.1f}%  median {statistics.median(body):.0f}%  "
-              f">=90% on {100 * sum(u >= 90 for u in body) / len(body):.0f}% of samples  "
-              f"memory peak {max(mem) / 1024:.1f} of {tot / 1024:.1f} GiB   (MPS {'on' if mps_on else 'off'}, {par} at a time)")
-        if statistics.mean(body) < 80:
-            why = (f"parallelism is capped by this box's {ncpu} CPU cores" if par >= ncpu - 1 else
-                   "raise PAR (GPU memory allows more)")
-            print(f"    The card was NOT full: {why}." + ("" if mps_on else " Without MPS the runs time-slice; MPS=1 if it can be enabled."))
-    except (OSError, ValueError, IndexError) as e:
-        print(f"=== GPU: no utilisation samples ({e})")
-PY
+analyze "$OUT" "$DEVICE" "$MPS_ON" "$PAR" "$NCPU" >> "$S"
 say "=== wrote $S"
 cat "$S" | sed -n '/=== RUNS ===/,$p'
