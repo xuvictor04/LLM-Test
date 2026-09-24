@@ -1189,7 +1189,13 @@ def run(sysm, *, max_windows=None, progress=True):
             # run. Both packages count one notification per distinct stamp, so handing the same
             # stamp over on every later flush is a re-delivery and not a new event.
             sysm.shift_at_windows = U.Windows(int(clock.step))
-            sysm.shift_at_steps = U.Steps(int(clock.opt_steps))
+            # THE STEP THE SHIFT APPLIES TO, NOT THE STEPS ALREADY TAKEN (2026-09-24). maybe_step
+            # increments st.opt_step BEFORE it prices the step, so the first step after this roll
+            # is clock.opt_steps + 1; stamping clock.opt_steps made `step - shift_at` start at 1,
+            # the ramp skip its first rung and re-warm W-1 steps, and OPT_LR_SHIFT_WARM=1 fully
+            # inert on a run whose shift was delivered (driven: notifications 1, shift_warm_applied
+            # 0). The old tree stamped the step it then priced (self_organize.py:6519, :4819).
+            sysm.shift_at_steps = U.Steps(int(clock.opt_steps) + 1)
             # AND MEM IS TOLD, because every context it holds is token ids under a segmentation
             # that no longer exists. maintain's `resegment` arm drops and retakes the rekey
             # snapshot and counts the event; it deliberately does NOT rewrite the stored ids,

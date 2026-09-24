@@ -463,6 +463,9 @@ class MEMLevers(LeverSet):
     probe_rows = Lever(
         64, "How many query rows each probe read issues; it bounds how many entries can leave probation "
             "per probe.", U.COUNT)
+    # 0 IS THE OTHER WAY TO DISARM THE PROBE, and reports as one (2026-09-24): the cadence can come due
+    # and issue no row, so memory/api.py::maintain treats it like probe_every=0 -- the probe counters
+    # ABSENT and Gate mem.probe UNREACHABLE naming this lever.
     # THE OTHER HALF OF THE SAME SIGNAL: the pair sets the read rate the whole eviction and probation
     # story depends on. At 64 rows every 25 windows that is ~2.5 extra key rows per step against a
     # WIN=256 x BATCH_W forward (:4881) -- cheap, and the reason the probe is affordable at all.

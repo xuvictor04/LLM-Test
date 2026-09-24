@@ -213,6 +213,24 @@ def m4_m6_states():
                                    "store.n_probe_hits")),
           str({k: c.get(k, "ABSENT") for k in ("store.n_probe_fired", "store.n_probe_rows")}))
 
+    # MEM_PROBE_ROWS=0 IS THE OTHER DISARMED ARM (2026-09-24): its cadence comes due and issues no
+    # row, and it read present-and-0 beside a pressure reason blaming the loop's lag.
+    sysm = build(MEM_PROBE_ROWS=0, MEM_PROBE_EVERY=5)
+    loop.run(sysm, max_windows=20, progress=False)
+    c = sysm.store.counters
+    mc = mem_api.census(sysm.configs["MEM"], sysm.store)
+    g = _gate(sysm.store, "mem.pressure")
+    p = _gate(sysm.store, "mem.probe")
+    check("M4 MEM_PROBE_ROWS=0: mem.probe UNREACHABLE naming MEM_PROBE_ROWS=0, and pressure names "
+          "NO PROMOTION PATH ON THIS CONFIGURATION",
+          p is not None and not p.reachable and p.reason.startswith("MEM_PROBE_ROWS=0")
+          and mc.pressure is None and g.reason.startswith("NO PROMOTION PATH ON THIS CONFIGURATION"),
+          f"probe: {p.reason[:80] if p else None} | pressure: {g.reason[:80]}")
+    check("M6 MEM_PROBE_ROWS=0: the probe counters are ABSENT (disarmed, not armed-but-0)",
+          not any(k in c for k in ("store.n_probe_fired", "store.n_probe_rows",
+                                   "store.n_probe_hits")),
+          str({k: c.get(k, "ABSENT") for k in ("store.n_probe_fired", "store.n_probe_rows")}))
+
     sysm = build()
     loop.run(sysm, max_windows=6, progress=False)
     mem_api.census(sysm.configs["MEM"], sysm.store)
@@ -223,6 +241,10 @@ def m4_m6_states():
     check("M4 mem.probe before any row: ARMED-BUT-0 with the lag named, not 'no producer'",
           "NO query row issued yet" in p.reason and not any(s in p.reason for s in _STALE),
           p.reason[:160])
+    # AND THE STATE SAYS WHAT THE REASON SAYS: a probe that fired and issued no row is not "fired".
+    check("M4 mem.probe before any row renders armed-but-zero, not fired",
+          p.reachable and not p.fired and sysm.store.counters.get("store.n_probe_fired", 0) > 0,
+          f"fired={p.fired} n_probe_fired={sysm.store.counters.get('store.n_probe_fired')}")
 
     # WRITE'S KEPT-NOTHING RETURN, driven directly: surprise 0 keeps nothing on the fixed gate.
     sysm = build()

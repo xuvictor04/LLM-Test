@@ -822,7 +822,8 @@ class OPTLevers(LeverSet):
     # is the report line that separates the two zero-cases, and maybe_step declares it:
     # `opt.shift.notifications` at 0 means NO SHIFT WAS STAMPED, which is a different statement
     # from lr_shift_warm == 0, and the report must make both. Corrected 2026-09-03. DRIVEN SINCE
-    # 2026-09-24: spine/loop.py stamps units.Steps(clock.opt_steps) at the epoch roll and hands it
+    # 2026-09-24: spine/loop.py stamps units.Steps(clock.opt_steps + 1) -- the first step the shift
+    # applies to, so lr_shift_warm=N re-warms exactly N steps -- at the epoch roll and hands it
     # to maybe_step, which counts one notification per distinct stamp -- until then maybe_step was
     # called with no shift_at at all and this lever was inert on every multi-epoch run
     # (RUN_EPOCHS=2 OPT_LR_SHIFT_WARM=20: 0 notifications, 0 re-warmed steps).

@@ -2120,7 +2120,8 @@ class System:
                  #              raises UnitError rather than being batch_windows-fold wrong. Two
                  #              typed stamps of one event is the point, not a duplication.
                  #   shift_at_steps
-                 #              THE SAME EVENT AS units.Steps(clock.opt_steps), for OPT.maybe_step's
+                 #              THE SAME EVENT AS units.Steps(clock.opt_steps + 1) -- the first
+                 #              step the shift applies to, which maybe_step prices -- for OPT.maybe_step's
                  #              `shift_at`, added 2026-09-24. Until then the roll stamped only the
                  #              Windows twin and maybe_step was called with no shift_at, so
                  #              OPT_LR_SHIFT_WARM was inert on every multi-epoch run (RUN_EPOCHS=2

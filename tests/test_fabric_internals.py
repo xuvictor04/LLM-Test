@@ -27,6 +27,8 @@ repository root as `python3 tests/test_fabric_internals.py`; exit 0 = every chec
       halt logit now carries +log(n) (Q-FAB-14): exactly the old column at n = 1.
   I8  the build-time fab.cull_gate read FIRED before any manage pass had run. At build it and the new
       fab.depth_advance are UNREACHABLE predictions, and a manage pass replaces both.
+  I9  the roll stamped OPT's shift at the steps already taken, one short of the step it applies to,
+      so OPT_LR_SHIFT_WARM=1 re-warmed nothing. A two-epoch loop run at WARM=1 applies it once.
 
 WHAT THIS FILE CANNOT CATCH: whether the new baselines make a LONG run better. That is a GPU-length
 measurement the owner runs; these checks pin the arithmetic each repair promises.
@@ -355,6 +357,29 @@ def check_i8_build_gates_are_predictions():
                    not findings, f"after manage: {cg.line() if cg else None}", findings)
 
 
+def check_i9_shift_warm_rewarms_n_steps():
+    """The roll's Steps stamp is the step the shift applies to, so OPT_LR_SHIFT_WARM=1 re-warms one
+    step. It stamped clock.opt_steps -- the steps already taken -- and maybe_step prices step
+    stamp+1 first, so the ramp's first rung was skipped and WARM=1 re-warmed nothing (driven:
+    notifications 1, applied 0). A real two-epoch run through the loop, because the stamp is the
+    root's."""
+    from spine import loop
+    from spine.compose import compose
+    lever._reopen_assembly()
+    rng.reset_issued()
+    sysm = compose(environ={"DATA_STREAM_BYTES": "12000", "RUN_EPOCHS": "2", "DATA_RESAMPLE": "1",
+                            "OPT_LR_SHIFT_WARM": "1"})
+    res = loop.run(sysm, max_windows=10 ** 6, progress=False)
+    c = sysm.optimizer.counters
+    got = (int(c.get("opt.shift.notifications", -1)), int(c.get("opt.lr.shift_warm_applied", -1)))
+    findings = [] if got == (1, 1) else [
+        f"OPT_LR_SHIFT_WARM=1 over one roll: notifications {got[0]}, shift_warm_applied {got[1]}; "
+        f"want 1 and 1 (the stamp must be the first step the shift applies to)"]
+    return _report("I9", "OPT_LR_SHIFT_WARM=N re-warms N steps after a roll (N=1)", not findings,
+                   f"{res.windows} windows over 2 epochs; notifications {got[0]}, applied {got[1]}",
+                   findings)
+
+
 CHECKS = (
     check_i1_failure_cull_baseline,
     check_i2_comp_protect_direction,
@@ -364,6 +389,7 @@ CHECKS = (
     check_i6_ae_rows_cover_the_population,
     check_i7_halt_competes_with_one_expert,
     check_i8_build_gates_are_predictions,
+    check_i9_shift_warm_rewarms_n_steps,
 )
 
 

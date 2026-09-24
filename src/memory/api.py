@@ -1918,7 +1918,9 @@ def maintain(mem: Config, store, *, now, key_fn, probe_contexts=None, resegment=
     WIRES READ: none
     DID IT FIRE: store.n_probe_fired, n_probe_rows, n_probe_hits (retrievals that returned at least
                  one entry -- a probe that fires and retrieves nothing is a DIFFERENT finding from
-                 a probe that never fires, and the old report could not tell them apart),
+                 a probe that never fires, and the old report could not tell them apart; all three
+                 ABSENT at MEM_PROBE_EVERY=0 or MEM_PROBE_ROWS=0, the disarmed arms; Gate
+                 mem.probe fires on n_probe_rows > 0, not on the cadence),
                  n_rekey_slices, n_rekey_passes, n_rekey_entries, n_resegment_events,
                  n_keys_at_capped_depth
     """
@@ -1956,12 +1958,18 @@ def maintain(mem: Config, store, *, now, key_fn, probe_contexts=None, resegment=
     # 1 -- THE READ PROBE. Without it evict="lru" and evict="usage" are write-order FIFO whatever
     #      they say, and probation can never promote.
     # ==============================================================================================
-    if every_p > 0:
+    # THE PROBE IS ARMED ONLY WHEN IT CAN ISSUE A ROW: a cadence AND a row budget (2026-09-24).
+    # MEM_PROBE_ROWS=0 is a legal count that issues no query at any cadence, and seeding on the
+    # cadence alone made that arm read present-and-0 -- "armed, did not fire" -- beside a
+    # mem.pressure reason blaming the loop's one-flush lag. It is the disarmed arm, like
+    # MEM_PROBE_EVERY=0, and its Gate says which lever disarmed it.
+    probe_armed = every_p > 0 and probe_rows > 0
+    if probe_armed:
         # ALL THREE PROBE COUNTERS ARE SEEDED ON THE ARMED ARM, BEFORE THE CADENCE DECIDES (G4).
         # n_probe_fired used to appear only at the first fire and n_probe_rows / n_probe_hits only
         # when a probe found material, so an armed probe that had not yet issued a row read ABSENT --
         # the tree's word for UNREACHABLE -- beside a nonzero fire count. ABSENT now means one thing:
-        # MEM_PROBE_EVERY=0, or maintain was never called. _bump(..., 0) adds nothing to a value a
+        # MEM_PROBE_EVERY=0 or MEM_PROBE_ROWS=0, or maintain was never called. _bump(..., 0) adds nothing to a value a
         # resume restored, which is why the seed is here and not in open_store's seed dict (that
         # dict's keys are skipped by the restore loop, so seeding one there would drop the parent's
         # tally).
@@ -1989,7 +1997,7 @@ def maintain(mem: Config, store, *, now, key_fn, probe_contexts=None, resegment=
             q = (None if probe_contexts is None
                  else _key_windows(probe_contexts, kwin).reshape(-1, kwin))
             n_q = 0 if q is None else int(q.shape[0])
-            if n_q and probe_rows > 0:
+            if n_q:
                 # DETERMINISTIC STRIDE, NEVER A RANDOM DRAW, AND A ROTATING OFFSET. A probe that
                 # consumed RNG draws would make the probe CADENCE change the training trajectory,
                 # and a diagnostic that silently edits the run is the class spine/rng.py exists for.
@@ -2124,16 +2132,23 @@ def maintain(mem: Config, store, *, now, key_fn, probe_contexts=None, resegment=
         f"on write-time clocks and probation cannot promote."
         if fired_p > 0 else
         f"the cadence has not come due in {w} window(s).")
+    # mem.probe FIRES ON A ROW ISSUED, NOT ON THE CADENCE (2026-09-24). It fired on n_probe_fired
+    # > 0, so a run whose probe had fired and issued nothing rendered "fired 1 vs 0" while this
+    # reason called the same state ARMED-BUT-0. The fire count stays in the arithmetic.
     _declare_gates(store, (
-        Gate("mem.probe", fired_p > 0, fired_p, 0,
+        Gate("mem.probe", rows_p > 0, f"n_probe_rows={rows_p} over n_probe_fired={fired_p}",
+             "0 rows",
              reason=f"MEM_PROBE_EVERY={every_p} windows x MEM_PROBE_ROWS={probe_rows} query rows, "
                     f"one per POSITION of the previous flush's batch; " + _probe_why)
-        if every_p > 0 else
-        Gate("mem.probe", False, every_p, 0, reachable=False,
-             reason="MEM_PROBE_EVERY=0 disarms every retrieval-based rule in this package: `use` and "
+        if probe_armed else
+        Gate("mem.probe", False, every_p if every_p <= 0 else probe_rows, 0, reachable=False,
+             reason=(("MEM_PROBE_EVERY=0" if every_p <= 0 else
+                      f"MEM_PROBE_ROWS=0 (at MEM_PROBE_EVERY={every_p}: the cadence comes due and "
+                      f"issues no query row)")
+                     + " disarms every retrieval-based rule in this package: `use` and "
                     "`last` never move off their write-time values, so MEM_EVICT's two retrieval "
                     "arms degenerate to write order and MEM_PROBATION_FRAC can never promote. The "
-                    "lever's own declaration says the report must say so."),
+                    "lever's own declaration says the report must say so.")),
         Gate("mem.rekey", passes > 0, passes, 0,
              reason=f"one full pass over the readable store every MEM_REKEY_EVERY={every_r} "
                     f"windows: {int(c.get('store.n_rekey_slices', 0))} slice(s), "
@@ -2585,10 +2600,12 @@ def census(mem: Config, store, *, reconcile=False):
     at the defaults -- measured n_promoted 24, n_evict_main 128 over 80 windows even at the
     one-query-per-probe rate that preceded Q-MEM-12.
     THE GATE REPORTS A STATE WHEN THERE IS NO VERDICT, NOT A NUMBER, and it names WHICH state,
-    because there are four and they are different facts: MEM_PROBE_EVERY=0 (no promotion path on
-    this configuration -- read off maintain's own mem.probe Gate, since this entry point reads no
-    probe lever), the probe has issued no query row yet (its contexts lag one flush), rows issued
-    and nothing promoted yet, and promotions on the board with no eviction yet (no denominator).
+    because there are five and they are different facts -- four with nothing promoted, one with no
+    denominator: MEM_PROBE_EVERY=0 or MEM_PROBE_ROWS=0 (no promotion path on this configuration --
+    read off maintain's own mem.probe Gate, since this entry point reads no probe lever), maintain
+    never called (no retrieval yet: the probe was never armed on this store), the probe has issued
+    no query row yet (its contexts lag one flush), rows issued and nothing promoted yet, and
+    promotions on the board with no eviction yet (no denominator).
     Each prints its counters, never `0.000` -- which is H33's own point read one level up, that a
     signal which cannot reach its threshold is indistinguishable from a healthy one. It prints
     probation_share/probation_frac and n_probe_fired/n_promoted beside pressure/pressure_thresh,
@@ -2746,8 +2763,10 @@ def census(mem: Config, store, *, reconcile=False):
     #       says one package over, and the two reports then agree. Arm (b) is REACHABLE on every
     #       configuration -- any census before the probe's first promotion lands in it -- and it
     #       is STRUCTURAL only at MEM_PROBE_EVERY=0; the Gate below says which of the two it is.
-    # Measured at the defaults over 80 windows: ev_p=4864, ev_m=128, n_promoted 24, so neither arm
-    # holds at R and the verdict is a number.
+    # Measured at the defaults over 80 windows (re-driven 2026-09-24 on the tree after Q-MEM-12 fed
+    # the probe its declared rows and the later fabric / TOK-DOM-CAP repairs): ev_p=4608, ev_m=512,
+    # n_promoted 621, so neither arm holds at R and the verdict is a number. (Before Q-MEM-12 the
+    # same run read 4864 / 128 / 24; on Q-MEM-12's own commit 4736 / 256 / 508.)
     pressure = None if (reading is None or promoted == 0) else bool(reading > thresh)
 
     # ==============================================================================================

@@ -4914,7 +4914,12 @@ slices' work).
 `store.n_census_reconciles` and `part.n_prior_reads` ABSENT while the final checkpoint carried 1 —
 against the save row's *"the checkpointed counter vectors are the ones the report printed"*. Both
 calls now run before the copies. And per G4, counters are seeded on the arm that can bump them,
-before the branch: `n_probe_fired/rows/hits` when `MEM_PROBE_EVERY > 0`; `n_rekey_passes/slices/
+before the branch: `n_probe_fired/rows/hits` when `MEM_PROBE_EVERY > 0` **and** `MEM_PROBE_ROWS > 0`
+(the rows clause added later on 2026-09-24: `MEM_PROBE_ROWS=0` comes due and issues no row, so it is
+the second disarmed arm — counters ABSENT, Gate `mem.probe` UNREACHABLE naming it — and it had read
+present-and-0 beside a pressure reason blaming the loop's lag; the same fix makes `mem.probe` fire on
+`n_probe_rows > 0` rather than on the cadence, so a probe that fired and issued nothing renders
+armed-but-zero, as its reason says); `n_rekey_passes/slices/
 entries` when the rekey is armed (it read ABSENT mid-pass beside 79 slices), plus
 `n_keys_at_capped_depth` only on a transformer at `key_depth > 0`; `n_dup_refused` and
 `n_src_underflow` on every commit; `n_write_truncated` only when `ctx > quota` (at the shipped 128 ≤
@@ -5040,7 +5045,7 @@ before). **Rejected:** the round trip over every live row (8x the cost the comme
 `F.mse_loss`'s mean would cut each row's gradient ~8x and silently retune `FAB_AE_W`); a seeded
 permutation (the same coverage plus a draw a lever could shift).
 
-### Q-OPT-9 — the epoch roll never reached `OPT.maybe_step`, and one roll was counted once per flush — **RESOLVED 2026-09-24: THE ROOT STAMPS `System.shift_at_steps = units.Steps(clock.opt_steps)` BESIDE THE WINDOWS TWIN; BOTH PACKAGES COUNT ONE NOTIFICATION PER DISTINCT STAMP**
+### Q-OPT-9 — the epoch roll never reached `OPT.maybe_step`, and one roll was counted once per flush — **RESOLVED 2026-09-24: THE ROOT STAMPS `System.shift_at_steps = units.Steps(clock.opt_steps + 1)` BESIDE THE WINDOWS TWIN; BOTH PACKAGES COUNT ONE NOTIFICATION PER DISTINCT STAMP**
 LOOP_ORDER's E row has always said the root stamps `clock.opt_steps` as the `shift_at` maybe_step
 consumes; the loop stamped only `System.shift_at_windows` and called `maybe_step` with no `shift_at`.
 Driven at `RUN_EPOCHS=2 DATA_RESAMPLE=1 OPT_LR_SHIFT_WARM=20 DATA_STREAM_BYTES=30000` (315 windows,
@@ -5051,7 +5056,13 @@ Q-RUN-9) and passed on every stepped flush; `maybe_step` counts a notification o
 differs from `st.shift_at`, and `grow_check` only when it differs from `pop.growth['shift_seen']`,
 where FAB now keeps the stamp — so the blackout is measured from it even when a resumed root holds
 none. **After:** `opt.shift.notifications 1`, `opt.lr.shift_warm_applied 19`, `fab.shift_notifications
-1`. The retok and LR-restart stamps remain undriven, and the gate reasons now say so instead of
+1`. **19 was one short, corrected later on 2026-09-24:** `maybe_step` increments `opt_step` before it
+prices the step, so a stamp of `clock.opt_steps` (the steps already taken) put the first post-roll
+step at `step − shift_at = 1` — the ramp skipped its first rung, re-warmed W−1 steps, and
+`OPT_LR_SHIFT_WARM=1` was fully inert (notifications 1, applied 0). The stamp is now
+`clock.opt_steps + 1`, the step the shift applies to, as the old tree stamped it; WARM=N re-warms N
+steps (driven at `DATA_STREAM_BYTES=12000 RUN_EPOCHS=2 DATA_RESAMPLE=1`: WARM=1 applied 1, was 0;
+WARM=20 applied 20; `tests/test_fabric_internals.py` I9 pins WARM=1). The retok and LR-restart stamps remain undriven, and the gate reasons now say so instead of
 "NOBODY IS SUPPLYING shift_at". **Rejected:** clearing the stamp after maybe_step accepts it (OPT
 already keeps it; the edge belongs in the package that counts it).
 
