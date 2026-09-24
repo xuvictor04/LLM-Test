@@ -1723,12 +1723,10 @@ def check_f8_manage_period_kind_and_refusal():
                 if switch:
                     findings.append(
                         f"{where}: REFUSE_NEGATIVE_PERIOD is True and FAB_MANAGE_EVERY={every} "
-                        f"reached a reader as {value!r}. Cadences.due fires when "
-                        f"`step - last_fired >= period`, so a negative period is true on the first "
-                        f"window and every window after -- the cull, the spares, replication and the "
-                        f"staged-depth check on EVERY window, while "
-                        f"spine/derive.py::cadences_that_cannot_fire reports the same value as a gate "
-                        f"that cannot fire.")
+                        f"reached a reader as {value!r}. RUN.Cadences.due DISARMS every period "
+                        f"<= 0, so the management pass would silently never run on a value "
+                        f"fabric/levers.py declares no meaning for -- the undeclared spelling of "
+                        f"'off' the owner's ruling refuses.")
                 elif not isinstance(value, U.Windows) or int(value.n) != every:
                     findings.append(
                         f"{where}: REFUSE_NEGATIVE_PERIOD is False and FAB_MANAGE_EVERY={every} "

@@ -321,7 +321,9 @@ ASSEMBLY_ORDER = (
 
     ("refuse",    "RUN",   "startup_refusals","(disk_stream=DATA.resample) -- a TWO-PACKAGE guard "
                                               "that can live in neither levers.py"),
-    ("refuse",    "WORLD", "startup_refusals","(ctx_tokens=LM.ctx)"),
+    ("refuse",    "WORLD", "startup_refusals","(ctx_tokens=LM.ctx) -- with the RUN row above, a "
+                                              "non-empty list RAISES RefusedRun here, before "
+                                              "geometry and before any model tensor"),
     ("geometry",  "LM",    "resolve",         "() -- refuses width % heads and the ctx/pos_max "
                                               "overflow BEFORE a tensor is allocated",
                                               "geom -- the LMGeometry LM.build_model, LM.load_state "
@@ -586,7 +588,11 @@ ASSEMBLY_ORDER = (
                                               "caps over new_valve's answer on every unpinned arm, "
                                               "including under CAP_TARGETS=off, while new_valve's "
                                               "own checkpoint branch read a key nothing writes"),
-    ("refuse",    "CAP",   "startup_refusals","(live_experts=Population.n_live)"),
+    ("refuse",    "CAP",   "startup_refusals","(live_experts=Population.n_live) -- RAISES "
+                                              "RefusedRun on a non-empty System.refusals, a "
+                                              "refused LM restore's included; it needs the built "
+                                              "population, so it follows allocation and precedes "
+                                              "the optimizer and the SIG warm-up"),
     ("optimizer", "OPT",   "build",           "(param_groups={'base': _base_parameters(sysm), which "
                                               "walks LM's model, FAB's population and WORLD's world "
                                               "-- THREE OBJECTS, NOT FOUR: this row said LM+FAB+"
@@ -1519,6 +1525,10 @@ LOOP_ORDER = (
 # the caller already holds: FAB.Population's two accessors, four of Vocabulary's five, and RUN.Timing's
 # two. The miscount is not cosmetic -- this table's whole claim is that every orphan is enumerated,
 # and an enumeration whose own total is wrong is one no reader re-checks.
+# SOME OF THOSE NOW HAVE A CALLER THAT IS NOT A ROW, AND THEIR ENTRIES SAY SO (2026-09-24):
+# FAB.Population.parameters and WORLD.World.parameters are called by _base_parameters on every
+# compose(), and RUN.Timing's two by spine/loop.py. They stay listed because K6 credits only a row,
+# and a helper or an instrumentation span is not one; their reasons stopped describing an absence.
 #
 # WHAT THIS COSTS, SAID PLAINLY, because a deferral that hides its cost is the shape it replaces:
 # with these seven unrowed the run has no capacity valve (nothing lifts a cap), no WORLD growth, no
@@ -1542,20 +1552,23 @@ DEFERRED_ENTRY_POINTS = {
     # one of them takes only `self` (or an id), so there is no argument without a producer: what is
     # missing is the CALLER, and that is the whole reason each line below says which one.
     "FAB.Population.parameters":
-        "P4, with OPT.build. IT IS ALREADY CALLED, by name, from this file: _base_parameters does "
-        "`getattr(obj, \"parameters\", None)` on the model, the population and the world and appends "
-        "a WARNING when it is missing -- so the row that consumes it exists and OPT.build, which "
-        "receives the list, does not. Listed here rather than credited to _base_parameters because "
-        "a helper in the composition root is not an order-table row. It takes only self, so there "
-        "is no argument without a producer. THE COST OF ITS ABSENCE IS MEASURED: without it the "
-        "expert pool contributed nothing to the base param group, so every expert's contribution "
-        "stayed exactly zero while the population grew, culled and replicated around it -- both "
-        "goals' central mechanism, inert, with every report line still printing.",
+        "CALLED ON EVERY compose(), by name, from this file: _base_parameters does "
+        "`getattr(obj, \"parameters\", None)` on the model, the population and the world, and the "
+        "list it returns is OPT.build's param_groups['base'] -- a default compose harvests 38 base "
+        "tensors (opt.build.params.base 38) with no missing-parameters warning. Listed here, and "
+        "not credited to a row, only because a helper in the composition root is not an "
+        "order-table row. It takes only self, so there is no argument without a producer. (Until "
+        "2026-09-24 this reason said OPT.build did not consume the list and described the cost of "
+        "the method's ABSENCE -- every expert's contribution exactly zero while the population "
+        "grew and culled around it. That was true before the method and the harvest landed and has "
+        "not been true since.)",
     "WORLD.World.parameters":
-        "P4, with OPT.build, and for EXACTLY the reason the FAB entry above gives: _base_parameters "
-        "in this file already calls it by name through `getattr(obj, \"parameters\", None)`, and a "
-        "helper in the composition root is not an order-table row. It takes only self. THE COST OF "
-        "ITS ABSENCE IS MEASURED AND IT IS NOT 'THE WORLD MODEL DID NOT LEARN': WORLD's loss IS in "
+        "CALLED ON EVERY compose(), for EXACTLY the reason the FAB entry above gives: "
+        "_base_parameters in this file calls it by name through `getattr(obj, \"parameters\", "
+        "None)` and hands the list to OPT.build as part of param_groups['base'], and a helper in "
+        "the composition root is not an order-table row. It takes only self. WHAT FOLLOWS IS THE "
+        "MEASURED COST OF ITS ABSENCE BEFORE IT LANDED, kept as the record of why it matters, and "
+        "it is NOT 'the world model did not learn': WORLD's loss IS in "
         "the objective -- spine/loop.py::_flush adds it to `total` -- and it is computed on "
         "LM.embed's OUTPUT rather than a detached copy, so it reaches the language model whether or "
         "not anything steps a world tensor. At initialisation, one seed, 4 windows of 64 tokens at "
@@ -1592,7 +1605,11 @@ DEFERRED_ENTRY_POINTS = {
         "Segmentation.ids the caller already holds -- TOK.tokenize produces it, and that entry "
         "point HAS a body; what is missing is the eval row that calls both.",
     "RUN.Timing.span":
-        "P4, WITH THE FLUSH BODY, AND IT ARRIVED BEFORE ITS CALLER ON PURPOSE. RUN.mode has to "
+        "CALLED BY spine/loop.py SINCE 2026-09-24, around the per-window and per-flush components "
+        "(sig.train_step, sig.encode, dom.observe, tok.on_window, fab.manage, the flush and six "
+        "calls inside it, the periodic save), outside every order-table row: a span is "
+        "instrumentation around rows, not a row, which is why it stays listed here. The text below "
+        "is its history. IT ARRIVED BEFORE ITS CALLER ON PURPOSE. RUN.mode has to "
         "return a RunMode, RunMode carries a `timing`, and the contract's RECORD TYPES block names "
         "span() and spans() as that object's surface -- so writing `mode` writes these two, one "
         "increment before the rows that call them. THE ALTERNATIVE WAS WORSE: a RunMode carrying "
@@ -1602,12 +1619,15 @@ DEFERRED_ENTRY_POINTS = {
         "HAS NO PRODUCER AND WILL NOT HAVE ONE: it is a literal written at the call site -- the "
         "label of the component being timed ('encode', 'route', 'backward') -- so it is not a value "
         "any entry point returns and no row can name a producer for it. What is missing is the "
-        "CALLER, not the argument: the flush body's per-component spans. `spans()` is read by "
-        "RUN.bench_summary, which takes `timing` and is itself a stage-R row. Both leave this table "
-        "when the loop body lands.",
+        "CALLER, not the argument: the flush body's per-component spans -- which is the caller "
+        "spine/loop.py now is. `spans()` is read by RUN.bench_summary, which takes `timing` and is "
+        "itself a stage-R row.",
     "RUN.Timing.spans":
-        "P4, with RUN.Timing.span above -- same increment, same caller. Read by RUN.bench_summary "
-        "(`timing=None` in its signature is the not-profiled case), and an EMPTY dict from it is a "
+        "CALLED at R since 2026-09-24: by RUN.bench_summary, to which spine/loop.py::_report now "
+        "passes the Timing (it passed none, so RUN_BENCH=1 RUN_PROFILE=1 printed 'RUN_PROFILE is "
+        "off'), and by _report itself as the RUN.Timing.spans row when RUN_PROFILE is on -- both "
+        "outside any order-table row. `timing=None` in bench_summary's signature is the "
+        "not-profiled case, and an EMPTY dict from it is a "
         "different statement from an absent one: 'measured nothing' versus 'did not measure'. That "
         "distinction is why RunMode always carries a Timing rather than sometimes carrying None.",
     "CKPT.Retention.consider":
@@ -2159,6 +2179,38 @@ class System:
                 f"stage={self.stage!r}>")
 
 
+class RefusedRun(RuntimeError):
+    """A System that carries startup refusals, STOPPED where the refusals were taken.
+
+    RAISED BY compose() AND NOT MERELY LISTED, SINCE 2026-09-24. RUN.startup_refusals has always
+    said "the entry point raises on a non-empty list BEFORE ANY TENSOR IS ALLOCATED", and compose()
+    appended the list to System.refusals and kept building: driven at RUN_EPOCHS=2 with resampling
+    off, it built the 10,130,057-parameter model, ran the SIG warm-up and returned
+    stage='assembled' carrying the refusal, so only a driver that read the list (run.py) stopped.
+    `system` is the PARTIALLY BUILT record, so run.py still prints the banner, every refusal and
+    exits 2; `stage` names how far the assembly got; `refusals` is the list itself.
+
+    A RuntimeError SUBCLASS, deliberately: spine/loop.py::run raises the same type on a System that
+    reaches it carrying refusals by another route (the `restored=` override, a test that appends
+    one), and a caller written against the RuntimeError it raised before keeps catching it.
+    """
+
+    def __init__(self, system, stage):
+        self.system, self.stage, self.refusals = system, stage, list(system.refusals)
+        super().__init__(
+            f"compose: {len(self.refusals)} startup refusal(s) at stage {stage!r}, so nothing past "
+            f"it was built -- " + " || ".join(self.refusals))
+
+
+def _stop_if_refused(sysm):
+    """Raise RefusedRun when the System carries a refusal. Called at the three points compose()
+    takes one: after the config-only RUN/WORLD refusals (before any model tensor), after
+    CAP.startup_refusals (which needs the built population, so it can only follow allocation),
+    and after the restore and finished-resume refusals, before the SIG warm-up."""
+    if sysm.refusals:
+        raise RefusedRun(sysm, sysm.stage)
+
+
 def plan():
     """The assembly order and the loop order, as data, WITHOUT CALLING ANYTHING.
 
@@ -2179,7 +2231,10 @@ def compose(environ=None, *, restored=None):
 
     Returns a System. Raises NotImplementedError from the first unimplemented stub, with
     System.stage on the partially built record naming how far it got -- so the failure says which
-    package owes what rather than "something is missing".
+    package owes what rather than "something is missing". Raises RefusedRun when a startup refusal
+    is taken, at the first of three points past which the refusal would otherwise be built over
+    (see _stop_if_refused), so a returned System never carries a refusal. Raises
+    spine/gate.py::NotBuilt from the package that owns a declared-and-not-built arm.
 
     `environ` is passed straight to spine.assemble.build. Pass the process environment: build()
     warns when it is None because the typo net then has nothing to scan, and this file may not name
@@ -2226,10 +2281,15 @@ def compose(environ=None, *, restored=None):
 
     # -- 3. refusals that need two packages' numbers ---------------------------------------------
     # RUN's EPOCHS>1 guard needs DATA's resample flag; WORLD's horizon ceiling needs LM's ctx.
-    # Neither can live in a levers.py, and both must fire BEFORE anything is allocated.
+    # Neither can live in a levers.py, and both must fire BEFORE anything is allocated -- WHICH IS
+    # NOW WHAT HAPPENS, AND UNTIL 2026-09-24 IT WAS ONLY WHAT THIS COMMENT SAID: the list was
+    # appended and the assembly carried on through the model build and the SIG warm-up (driven at
+    # RUN_EPOCHS=2 with resampling off: stage 'assembled', 10,130,057 parameters, 50 warm-up
+    # steps, then loop.run trained 6 windows). Both depend on Configs alone, so they stop here.
     sysm.stage = "refuse"
     sysm.refusals = list(run_api.startup_refusals(run, disk_stream=bool(data.resample)))
     sysm.refusals += list(world_api.startup_refusals(world, ctx_tokens=int(lm.ctx)))
+    _stop_if_refused(sysm)
 
     # -- 4. geometry, then the corpus -------------------------------------------------------------
     sysm.stage = "geometry"
@@ -2310,10 +2370,13 @@ def compose(environ=None, *, restored=None):
         # TOK_MAX_BYTES=12 of a 160-window parent written at 16 passed the geometry gate (the
         # manifest carries no max_token_bytes), restored 0 of 8 LM tensors, restored OPT at
         # opt_step 160, and printed 0 refusals; its first three resumed losses were 8.14 / 8.07 /
-        # 7.92 (ln 4096 = 8.32, a random model) against 7.35 / 7.40 / 7.43 on the control resume. The refusal is APPENDED rather than raised so
-        # the rows below still build the objects run.py reads before it prints refusals and stops
-        # (run.py: "REFUSALS STOP THE RUN BEFORE A TENSOR IS TRAINED"); loop.run refuses a System
-        # that carries any, so no driver reaches training past this line either.
+        # 7.92 (ln 4096 = 8.32, a random model) against 7.35 / 7.40 / 7.43 on the control resume.
+        # The refusal is APPENDED here and RAISED at the next stop point, after
+        # CAP.startup_refusals (_stop_if_refused), so the operator hears every refusal the
+        # configuration earns in one run rather than one per attempt; RefusedRun carries the
+        # partial System, and run.py prints the banner and every refusal from it and exits 2.
+        # loop.run also refuses a System that carries any, for a caller that builds one by
+        # another route.
         sysm.stage = "restore.lm"
         sysm.lm_load = lm_api.load_state(lm, sysm.model, sysm.geometry, saved["LM"])
         if sysm.lm_load.refused:
@@ -2401,6 +2464,12 @@ def compose(environ=None, *, restored=None):
         cap_api.restore(cap, sysm.valve, saved["CAP"])
     sysm.refusals += list(cap_api.startup_refusals(
         cap, sysm.valve, live_experts=sysm.fabric.n_live))
+    # THE SECOND STOP, AND IT CANNOT BE THE FIRST: CAP's refusal compares the valve against the
+    # BUILT population's n_live, so it necessarily follows the model, signature and fabric
+    # allocations above. It precedes the optimizer and the SIG warm-up, which are what a refused
+    # run used to spend before run.py read the list. A refused LM restore appended above stops
+    # here too.
+    _stop_if_refused(sysm)
 
     # -- 10. the optimizer. OPT NEVER WALKS A MODULE TREE -----------------------------------------
     # The old tree assembled `_base` by reaching into six modules at :4700-4707. Here every package
@@ -2500,6 +2569,10 @@ def compose(environ=None, *, restored=None):
             f"make no passes -- and before this refusal it trained one unrequested window and "
             f"overwrote the final checkpoint. Raise RUN_EPOCHS above {int(_c0['epoch'])} to "
             f"continue training from it.")
+    # THE THIRD STOP: a refused OPT restore (the `restore.opt` row) and a finished resume (just
+    # above) stop here, before the SIG warm-up and before the mid-epoch accounting below reads a
+    # clock that will never run.
+    _stop_if_refused(sysm)
 
     # A MID-EPOCH RESUME REPLAYS ITS EPOCH, AND THE RUN NOW SAYS SO (2026-09-24, Q-RUN-10). The
     # replay is DECLARED (train/api.py::new_clock, "A MID-EPOCH RESUME REPLAYS THE EPOCH IT WAS
@@ -2509,7 +2582,7 @@ def compose(environ=None, *, restored=None):
     # position comes from payload['RUN'] (RunClock.counters' in_epoch, written by
     # spine/loop.py::_payload); a checkpoint written before 2026-09-24 has none, and then epoch 0's
     # position is still exact (it began at step 0) while a later epoch's is unknown and said so.
-    if restored is not None and not sysm.refusals:
+    if restored is not None:
         _run_saved = saved.get("RUN") or {}
         _pos = _run_saved.get("clock") or {}
         if "in_epoch" in _pos:

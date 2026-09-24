@@ -158,7 +158,15 @@ def c4_finished_c5_epoch_draw(p):
     # on the roll records (C6 drives that stop for real).
     fin = snapshot_of(p, epoch=1)
     fin.payload["RUN"]["clock"]["in_epoch"] = 0
-    c = build(restored=fin)
+    # compose() RAISES RefusedRun (2026-09-24); the partial System, clock included, rides on it.
+    try:
+        build(restored=fin)
+        check("C4 compose raises RefusedRun on a finished resume", False, "compose returned")
+        return p
+    except C.RefusedRun as e:
+        c = e.system
+        check("C4 compose raises RefusedRun on a finished resume, before the SIG warm-up",
+              c.warmup is None and c.clock is not None, f"stage={e.stage!r}")
     named = [r for r in c.refusals if "has already completed epoch 1 of RUN_EPOCHS=1" in r]
     check("C4 a resume of a finished run is refused at compose", bool(named), c.refusals[:1])
     try:
@@ -188,9 +196,14 @@ def c4_finished_c5_epoch_draw(p):
               and not b.refusals, b.refusals[:1])
         # AT DATA_RESAMPLE=0 AN EPOCH >= 1 RESUME CANNOT TRAIN: RUN refuses RUN_EPOCHS > 1 without
         # resampling, and at RUN_EPOCHS=1 epoch 1 is the finished resume C4 refuses.
-        f1 = build(restored=fin, RUN_EPOCHS=2, DATA_RESAMPLE=0)
-        check("C5 the DATA_RESAMPLE=0 arm at epoch >= 1 is refused, so its draw trains nothing",
-              any("resampling off" in r for r in f1.refusals), f1.refusals[:1])
+        # compose() RAISES RefusedRun at its `refuse` stage (2026-09-24), before the stream row.
+        try:
+            build(restored=fin, RUN_EPOCHS=2, DATA_RESAMPLE=0)
+            check("C5 the DATA_RESAMPLE=0 arm at epoch >= 1 is refused", False, "composed")
+        except C.RefusedRun as e:
+            check("C5 the DATA_RESAMPLE=0 arm at epoch >= 1 is refused before its stream is drawn",
+                  any("resampling off" in r for r in e.refusals) and e.system.stream is None,
+                  e.refusals[:1])
     finally:
         data_api.draw_stream = real
 

@@ -204,10 +204,19 @@ class Timing:
 
     @contextlib.contextmanager
     def _timed(self, name):
+        # ON CUDA THE SPAN SYNCHRONIZES AT BOTH ENDS, which train/levers.py's `profile` names as the
+        # condition for attributing time at all: without it a span measures kernel LAUNCHES, not
+        # kernels. Only when profiling is on (this method is never entered otherwise) and only once
+        # CUDA is initialised, so a CPU run neither pays for it nor initialises CUDA to ask.
+        _sync = torch.cuda.is_available() and torch.cuda.is_initialized()
+        if _sync:
+            torch.cuda.synchronize()
         t0 = time.perf_counter()
         try:
             yield
         finally:
+            if _sync:
+                torch.cuda.synchronize()
             self._spans[name] = self._spans.get(name, 0.0) + (time.perf_counter() - t0)
 
     def span(self, name):
@@ -1141,13 +1150,17 @@ def bench_summary(run: Config, clock, *, elapsed_s, bytes_per_window, n_params, 
         # SAID RATHER THAN OMITTED. A breakdown that is simply absent reads as a breakdown that was
         # measured and found empty.
         lines.append("bench:   no per-component breakdown -- RUN_PROFILE is off, so no spans were "
-                     "timed")
+                     "timed" if timing is None or not getattr(timing, "_on", False) else
+                     "bench:   no per-component breakdown -- RUN_PROFILE is on and no span was "
+                     "entered")
     return lines
 
 
 def startup_refusals(run: Config, *, disk_stream):
-    """The guards a Lever declaration cannot express. Returns a list of refusal strings; the entry
-    point raises on a non-empty list BEFORE ANY TENSOR IS ALLOCATED.
+    """The guards a Lever declaration cannot express. Returns a list of refusal strings;
+    spine/compose.py::compose raises RefusedRun on a non-empty list at its `refuse` stage, BEFORE
+    ANY MODEL TENSOR IS ALLOCATED (and until 2026-09-24 it only appended the list and kept
+    building through the model and the SIG warm-up, which this sentence claimed it did not).
 
     (1) RUN_EPOCHS=0 resolves to 0 and the loop would run no passes. `EPOCHS = max(1, _i(...))` at
         :5467 SILENTLY REWROTE IT; a coercion at read time that makes a printed number a lie is the

@@ -36,7 +36,7 @@ import signal
 import torch
 
 from spine.lever import Config, LeverError
-from spine.gate import Gate
+from spine.gate import Gate, NonFinite
 from spine import units as U
 from spine import derive
 
@@ -256,10 +256,14 @@ def save_period(ckpt: Config):
     THE SENTENCE AND ARE SAID HERE RATHER THAN FOUND. It is now conditional on REFUSE_NEGATIVE_PERIOD at the top of this file -- the owner's
     ruling of 2026-09-04 requires the refusal to be turn-off-able, and with it False a negative
     reaches the armed-and-not-fired state again -- through a FOURTH construction of the same gate,
-    added 2026-09-05, because the two configurations are not one sentence: the `every == 0` arm
-    says the only saves are the final one and any SIGUSR1, and a negative under RUN.Cadences.due's
-    declared contract saves EVERY window, which is what the refusal below says a negative means.
-    Both arms render the value rather than spelling it, which is why both reasons are f-strings.
+    added 2026-09-05. THE REASON THAT ARM WAS SPLIT OFF IS GONE, AND THE ARM IS KEPT FOR A
+    DIFFERENT ONE (2026-09-24): it was split because a negative was said to save EVERY window under
+    RUN.Cadences.due's contract, and the body that contract got does the opposite -- `if
+    int(period) <= 0: return False`, so a negative is DISARMED exactly like 0 (driven with the
+    switch off at CKPT_EVERY=-1 over 12 windows: ledger ckpt checks=12 fires=0, and only the final
+    ckpt.pt written). The two now describe the same behaviour; the negative arm stays separate
+    because it is reached through a value the lever declares no meaning for, and its reason says
+    so. Both arms render the value rather than spelling it, which is why both reasons are f-strings.
     And it is no longer a statement about this accessor alone: the same ruling put
     the same guard, under the same switch, in eval/api.py::curve_period, domains/api.py::manage_period,
     fabric/api.py::manage_period and memory/api.py::rekey_period, so the clause in the body that used
@@ -346,8 +350,8 @@ def save_period(ckpt: Config):
                  refusal in the body is what makes 0 the only value that can reach that arm WHILE
                  REFUSE_NEGATIVE_PERIOD IS TRUE); with the owner's switch off a negative is
                  armed-and-not-fired too, on its OWN arm and with its own reason, which says a
-                 negative period saves EVERY window rather than none -- the three GATE STATES are
-                 still three, and it is the fourth CONSTRUCTION that keeps the sentence honest; and
+                 negative is DISARMED like 0 but reached through an undeclared value -- the three
+                 GATE STATES are still three; and
                  dir off is UNREACHABLE instead of a zero the ledger cannot explain. The word an
                  operator sees is owed by RUN.cadence_audit, WHICH HAS A BODY AND RUNS: this
                  sentence read "which is a stub; until it has a body this Gate is readable only
@@ -382,27 +386,24 @@ def save_period(ckpt: Config):
     # until P4, for no reason but symmetry with entry points that have real work to do.
     every = int(ckpt.every)
     # A NEGATIVE SAVE PERIOD IS REFUSED HERE, AT THE ONLY PLACE `every` IS READ (added 2026-09-04).
-    # WHAT IT IS: not a slower save and not a second spelling of "off". RUN.Cadences.due states its
-    # own contract in this tree -- "True at most once per `period` WINDOWS elapsed since this key
-    # last fired", ELAPSED-SINCE-LAST-FIRE and not modulo -- so the comparison a body writing to
-    # that contract makes is `step - _fired["ckpt"] >= period.n`. At every=-5 that is true on the
-    # FIRST window and on every window after it: a negative CKPT_EVERY is the MAXIMUM-frequency
-    # save, a checkpoint written every window, and not the absence of one. The mechanism runs
-    # backwards, which is the C30 inversion arriving through a lever VALUE, and it is the same
-    # ruling capacity/api.py::new_valve made on 2026-09-04 for a negative CAP_LIFT/CAP_LIFT_MIN.
+    # WHAT IT DOES, MEASURED ON THE BODY THAT NOW EXISTS (2026-09-24): a second, undeclared spelling
+    # of "off". RUN.Cadences.due opens with `if int(period) <= 0: return False` (train/api.py, "A
+    # NON-POSITIVE PERIOD IS DISARMED"), so a negative never fires -- driven with the switch below
+    # off at CKPT_EVERY=-1 for 12 windows: ledger ckpt checks=12 fires=0, one ckpt.pt (the final
+    # save), and RUN.cadence_audit printing 'ckpt' as DISARMED. UNTIL 2026-09-24 THIS PARAGRAPH SAID
+    # THE OPPOSITE -- that a body written to Cadences.due's contract would compare `step - last_fired
+    # >= period` and so save on EVERY window -- which was a prediction about a body not yet written,
+    # and the body that was written disarms instead. The refusal stands on the owner's ruling
+    # (REFUSE_NEGATIVE_PERIOD above), and its stated reason is now the true one: the lever's help
+    # text gives a negative no meaning, and silently reading it as a second "off" would let a typed
+    # minus sign turn periodic saving off with only the audit line to say so.
     #
-    # WHAT WAS THERE BEFORE, AND WHY IT WAS NOT A MEASUREMENT. The gate below printed
-    # "armed, did not fire (-5 vs 1) -- CKPT_EVERY=0 with CKPT_DIR set: the only saves this run
-    # makes are the FINAL one and any SIGUSR1" -- a reason naming a value the operator did not set,
-    # beside a printed value that contradicts it in the same sentence, on every CKPT_EVERY < 0
-    # (measured at -5 and -1). That sentence was ALSO an unverified claim about a body that does
-    # not exist: NOTHING in this tree disables periodic saving at a non-positive period.
-    # Cadences.due is `raise NotImplementedError`, and the one live reader of a non-positive period
-    # -- spine/derive.py::cadences_that_cannot_fire -- only REPORTS it, as ("ckpt", -5, 0). So the
-    # old arm asserted a behaviour no code implements while the only stated semantics in the tree
-    # give the opposite one. Printing the value instead of asserting it (done below) fixes the
-    # false equation; it does not fix the hazard, which is that the body P4 writes to that contract
-    # checkpoints every window on a typed minus sign, silently, with this Gate saying saving is off.
+    # WHAT WAS THERE BEFORE. The gate below printed "armed, did not fire (-5 vs 1) -- CKPT_EVERY=0
+    # with CKPT_DIR set: the only saves this run makes are the FINAL one and any SIGUSR1" -- a
+    # reason naming a value the operator did not set, beside a printed value that contradicts it in
+    # the same sentence, on every CKPT_EVERY < 0 (measured at -5 and -1). Printing the value
+    # instead of asserting it (done below) fixed that false equation. Cadences.due was a stub then;
+    # its body now disarms every non-positive period, so what a negative does is settled by code.
     #
     # IT REMOVES NO CONFIGURATION. "Never save periodically" is CKPT_EVERY=0 -- in range, the
     # declared default, and the meaning the lever's own help text gives it ("0 disables periodic
@@ -429,18 +430,15 @@ def save_period(ckpt: Config):
     if REFUSE_NEGATIVE_PERIOD and every < 0:
         raise LeverError(
             f"CKPT_EVERY={every}: a save period is a count of windows ELAPSED since the last save "
-            f"and may not run backwards. RUN.Cadences.due DECLARES its contract as 'True at "
-            f"most once per `period` WINDOWS elapsed since this key last fired' -- its body is "
-            f"still a P4 stub, so this is a statement about the contract and not about running "
-            f"code -- and a body written to that contract compares `step - last_fired >= "
-            f"period`, so a negative period is true on the first window and on every window after "
-            f"it -- {every} does not mean 'save less often' or 'do not save', it means a "
-            f"checkpoint written EVERY window, which is the opposite of what this gate reported "
-            f"for it until 2026-09-05. Neither meaning is lost: CKPT_EVERY=0 is the declared "
-            f"default and disables "
-            f"periodic saving (the final save and SIGUSR1 remain), and CKPT_EVERY=1 saves on every "
-            f"window. CKPT_DIR is not consulted here: this refuses an out-of-range value for "
-            f"CKPT's own lever, whether or not a second lever makes it moot.")
+            f"and may not be negative. RUN.Cadences.due (train/api.py) treats every period <= 0 "
+            f"as DISARMED, so {every} would never fire -- an undeclared second spelling of 'no "
+            f"periodic saves', which RUN.cadence_audit would print as DISARMED. Refused rather "
+            f"than read as off, because this lever's help text gives a negative no meaning "
+            f"(REFUSE_NEGATIVE_PERIOD at the top of ckpt/api.py is the owner's switch for this "
+            f"refusal). Neither meaning is lost: CKPT_EVERY=0 is the declared default and "
+            f"disables periodic saving (the final save and SIGUSR1 remain), and CKPT_EVERY=1 saves "
+            f"on every window. CKPT_DIR is not consulted here: this refuses an out-of-range value "
+            f"for CKPT's own lever, whether or not a second lever makes it moot.")
     period = U.Windows(every)
     # ONE PREDICATE, NOT A SECOND COPY OF THE SIX SPELLINGS OF OFF. saving_on is this package's own
     # answer to "is this run persisting anything", and re-typing its test here is the defect that
@@ -459,19 +457,13 @@ def save_period(ckpt: Config):
         # CKPT_EVERY below zero the gate rendered "armed, did not fire (-5 vs 1) -- CKPT_EVERY=0
         # ..." -- a reason naming a value the operator did not set, beside a printed value that
         # contradicts it, in one sentence. Measured at -5 and at -1 before the change. Rendering
-        # the value instead of spelling it fixed the EQUATION and left the SENTENCE wrong, which is
-        # what this split repairs: with the value rendered, `else` still handed one claim to two
-        # configurations that mean opposite things -- "the only saves are the FINAL one and any
-        # SIGUSR1" is true of 0 and false of every negative, which the REFUSE_NEGATIVE_PERIOD
-        # guard earlier in this same function says in as many words ("a checkpoint written EVERY
-        # window"). MEASURED BEFORE THE SPLIT, with
-        # REFUSE_NEGATIVE_PERIOD set False and CKPT_DIR=runs/x: at -5 and at -1 this arm rendered
-        # "armed, did not fire (-5 vs 1) -- CKPT_EVERY=-5 with CKPT_DIR set: the only saves this
-        # run makes are the FINAL one and any SIGUSR1", i.e. the printed value and the named value
-        # agreed and the CLAIM ABOUT THE MECHANISM was the opposite of this file's own reading of a
-        # negative period. The negative has its own arm below; this one is now pinned to the single
-        # value it describes, and it stays an f-string so the printed number cannot drift from the
-        # named one.
+        # the value instead of spelling it fixed the EQUATION, and the arm was then split on the
+        # belief that a negative saves EVERY window. THAT BELIEF WAS WRONG ABOUT THE BODY (see the
+        # refusal above): RUN.Cadences.due disarms every period <= 0, so "the only saves are the
+        # FINAL one and any SIGUSR1" is true of a negative too. The split stays because 0 is the
+        # declared disable state and a negative is not declared at all, and each arm's reason says
+        # which it is; this one is pinned to the single value it describes, and it stays an
+        # f-string so the printed number cannot drift from the named one.
         gate = Gate("ckpt.periodic_armed", False, every, 1,
                     reason=f"CKPT_EVERY={every} with CKPT_DIR set: 0 is this lever's declared "
                            f"disable-periodic-saving state, so the only saves this run makes are "
@@ -490,18 +482,15 @@ def save_period(ckpt: Config):
         # mechanism the operator can still configure as one no configuration reaches.
         gate = Gate("ckpt.periodic_armed", False, every, 1,
                     reason=f"CKPT_EVERY={every} with CKPT_DIR set, and this arm is reached ONLY "
-                           f"with ckpt/api.py::REFUSE_NEGATIVE_PERIOD set False: a negative is NOT "
-                           f"the disable state and this run is not saving less often than a "
-                           f"positive one. RUN.Cadences.due DECLARES its contract as 'True at most "
-                           f"once per `period` WINDOWS elapsed since this key last fired' -- its "
-                           f"body IS WRITTEN and implements exactly that -- this sentence said "
-                           f"'still a P4 stub, so this is a statement about the contract and not "
-                           f"about running code' until 2026-09-22 -- and that body "
-                           f"compares `step - last_fired >= {every}`, which is true on the FIRST "
-                           f"window and on every window after it: a checkpoint EVERY window, the "
-                           f"opposite of what the zero arm one step above prints. The refusal this "
-                           f"switch turns off says the same thing, and the two readings may not "
-                           f"share one sentence.")
+                           f"with ckpt/api.py::REFUSE_NEGATIVE_PERIOD set False. It is DISARMED "
+                           f"exactly like this lever's zero: RUN.Cadences.due returns False for "
+                           f"every period <= 0, so the only saves this run makes are the FINAL "
+                           f"one and any SIGUSR1. It is kept apart from the zero arm because "
+                           f"{every} is not a value this lever declares -- 0 is the declared "
+                           f"disable state -- so the run reached 'off' through an undeclared "
+                           f"spelling. (Until "
+                           f"2026-09-24 this reason said a negative saves EVERY window; the "
+                           f"ledger beside it read fires=0.)")
     period.gates = (gate,)
     return period
 
@@ -514,14 +503,40 @@ def save_period(ckpt: Config):
 # for exactly this hazard and says so in the same words.
 _SAVES = {"periodic": 0, "sigusr1": 0, "best": 0, "bestN": 0, "final": 0,
           "best_state_supplied": 0, "best_state_absent": 0,
-          "best_keep_by_slot": 0, "refused_off": 0}
+          "best_keep_by_slot": 0, "refused_off": 0, "refused_nonfinite": 0}
 """The DID IT FIRE ledger for CKPT.save, SEEDED AT ZERO rather than created on first use.
 
 A counter that appears only once it is non-zero cannot be read as "armed and it did not happen",
 which is the distinction this package's whole reporting surface is built on. `refused_off` is the
 one that makes "0 saves" legible: without it, a run with CKPT_DIR=off and a run whose period never
-came due print the same nothing.
+came due print the same nothing. `refused_nonfinite` (2026-09-24) counts the saves refused because
+the payload held a nan or an inf; each one also raised spine/gate.py::NonFinite.
 """
+
+
+def _non_finite_tensors(obj, path=""):
+    """[(path, n_bad, numel)] for every FLOATING tensor under `obj` holding a nan or an inf.
+
+    Walks dicts, lists and tuples; python floats are NOT checked, on purpose -- the counter dicts
+    in a payload carry legitimate float('inf') readings (fabric/api.py's fab.cull_rank_spread is
+    one), while every tensor a package persists is state a resume trains or routes on. Measured on
+    the payloads before this check shipped -- a 250-window run at the defaults, and 400-window
+    budgets at LM_ARCH=transformer OPT_BATCH_WINDOWS=4, at FAB_ON=0 DOM_ENABLED=0, and at
+    RUN_EPOCHS=2 DATA_RESAMPLE=1 FAB_MANAGE_EVERY=50 MEM_REKEY_EVERY=20: zero non-finite tensors in
+    every one, so a refusal here is a poisoned state and not a sentinel."""
+    out = []
+    if isinstance(obj, torch.Tensor):
+        if obj.is_floating_point() or obj.is_complex():
+            ok = torch.isfinite(obj)
+            if not bool(ok.all()):
+                out.append((path or "<root>", int((~ok).sum()), int(obj.numel())))
+    elif isinstance(obj, dict):
+        for k, v in obj.items():
+            out.extend(_non_finite_tensors(v, f"{path}/{k}"))
+    elif isinstance(obj, (list, tuple)):
+        for i, v in enumerate(obj):
+            out.extend(_non_finite_tensors(v, f"{path}[{i}]"))
+    return out
 
 
 def save(ckpt: Config, *, payload, geometry, step, epoch, reason, best_state=None, suffix=""):
@@ -549,7 +564,9 @@ def save(ckpt: Config, *, payload, geometry, step, epoch, reason, best_state=Non
     LEVERS READ: dir (through saving_on and the artifact path set)
     WIRES READ: none
     DID IT FIRE: Saves(periodic, sigusr1, best, best_keep_by_slot, final, refused_off) -- SIX
-                 counters, because "0 saves" cannot distinguish "never due" from "saving is off"
+                 counters, because "0 saves" cannot distinguish "never due" from "saving is off";
+                 and refused_nonfinite (2026-09-24), the saves refused because a floating tensor in
+                 the payload held a nan or an inf -- each also raises spine/gate.py::NonFinite
     TWO MORE THE BODY WRITES, DECLARED HERE for the reason fabric/api.py::forward gives (a key in
     the report the contract does not admit to producing is the same defect as a declared key nothing
     writes): best_state_supplied / best_state_absent, the pair that says whether the composition
@@ -581,6 +598,22 @@ def save(ckpt: Config, *, payload, geometry, step, epoch, reason, best_state=Non
     # A SNAPSHOT'S VOCABULARY IS PART OF THE SNAPSHOT BUT NOT PART OF `payload`: the merges live in
     # the FILE at d_vocab_save_path and build_vocabulary REPLAYS them on a resume, while
     # TOK.vocab_state carries "everything a resume needs THAT THE MERGE LIST ALONE DOES NOT CARRY".
+    # A CHECKPOINT IS NEVER WRITTEN FROM A NON-FINITE STATE (2026-09-24). Every floating tensor in
+    # the payload and in best_state is scanned before the file is touched; one nan or inf refuses
+    # the save by name and raises spine/gate.py::NonFinite. Before this, nothing in the save path
+    # looked: a run whose parameters had gone nan (one nan loss stepped AdamW, 8 of 8 LM tensors
+    # non-finite) would have written them into ckpt.pt, and every resume would inherit them. The
+    # previous generation on disk is left untouched, which is the whole value of refusing here
+    # rather than after the write.
+    _bad = _non_finite_tensors({"payload": payload, "best_state": best_state})
+    if _bad:
+        _SAVES["refused_nonfinite"] = _SAVES.get("refused_nonfinite", 0) + 1
+        raise NonFinite(
+            f"CKPT.save refused reason={reason!r} at step {int(step)}: {len(_bad)} tensor(s) in the "
+            f"payload hold a nan or an inf -- "
+            + "; ".join(f"{p} ({n} of {m})" for p, n, m in _bad[:8])
+            + (f"; and {len(_bad) - 8} more" if len(_bad) > 8 else "")
+            + ". Nothing was written; the previous generation on disk is unchanged.")
     d = str(ckpt.dir)
     os.makedirs(d, exist_ok=True)
     dst = os.path.join(d, "ckpt.pt" + (suffix or ""))

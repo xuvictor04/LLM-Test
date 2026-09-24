@@ -377,12 +377,31 @@ def build_model(lm: Config, geom, *, device, seed):
     WIRES READ: none (through geom)
     DID IT FIRE: lm.build.arm_gru / lm.build.arm_transformer (exactly one is 1),
                  lm.build.compose_on, lm.build.heads_used (0 on gru -- the armed-but-inert
-                 statement), lm.build.emb_head_allocated (must be 0 under compose -- kills L13),
+                 statement), lm.build.emb_head_allocated (1 on the emb/head arm; it would be 0
+                 under compose -- the L13 kill -- and that arm is refused below before anything is
+                 allocated, so on a built model compose_on reads 0 and emb_head_allocated 1),
                  rng.issued()["lm.init"] (NOT "lm" -- "lm" is expected to report ZERO draws
                  forever; that is the declared parent staying declared, not a mechanism failing to
-                 fire)
+                 fire). THE FIVE lm.build.* GAUGES WERE DECLARED HERE AND WRITTEN NOWHERE UNTIL
+                 2026-09-24 -- no string literal for any of them existed in src/, so on both
+                 LM_ARCH arms all five were ABSENT, which G4 reads as the build being UNREACHABLE.
+                 They are written through _set at the end of this body, into the tally counters()
+                 reads (the model has no `counters` attribute).
+
+    LM_COMPOSE=1 IS REFUSED HERE, AT STARTUP, WITH spine/gate.py::NotBuilt (2026-09-24). The
+    compose arm resolves, and until this date it built a model with no emb/head and composed on
+    ... nothing: _LM.composed_table raises NotBuilt because the ByteComposer is not built in this
+    tree, so compose() returned with 0 refusals, ran the whole SIG warm-up, and the run died at
+    its FIRST FLUSH with that exception (driven: LM_COMPOSE=1 at DATA_STREAM_BYTES=60000). The
+    refusal now fires before the first allocation, and run.py prints it as a REFUSED line and
+    exits 2, the way it prints FAB_HOP_MODE=transition's.
     """
     lm = lm.owned_by("LM")
+    if bool(geom.compose):
+        raise NotBuilt(
+            f"LM_COMPOSE=1: {_COMPOSER_UNBUILT}. Refused at LM.build_model, before any tensor is "
+            f"allocated, rather than at the first flush where _LM.composed_table would raise. Run at "
+            f"LM_COMPOSE=0, where the emb/head rows exist.")
     # A CHILD OF THE DECLARED PARENT, NOT A SECOND "lm". RUN.streams mints "lm" into the register
     # at step 0; asking for that same name again -- even with again=True, which is documented for a
     # checkpoint rebuild -- produces a SECOND live Rng replaying the identical sequence, so the
@@ -434,6 +453,10 @@ def build_model(lm: Config, geom, *, device, seed):
     # ByteComposer, not a body in this file. Declaring them reachable at
     # compose=1 would put "armed, did not fire" -- the words Gate.line reserves for a mechanism
     # that RAN -- on a mechanism that has no body to run.
+    # THE COMPOSE-ON REASON IS NOW REACHED ONLY BY A MODEL NOT BUILT HERE (2026-09-24): this body
+    # refuses LM_COMPOSE=1 with NotBuilt at its first line, so a model this function returns always
+    # carries the `_off` reason. The branch stays, so the day the ByteComposer lands and the refusal
+    # goes, the gates already say the right thing on both arms.
     # THE UNBUILT SENTENCE IS THE ONE _composer_books HANDS BACK, not a second copy of it: the gate
     # and the entry points that take the same arm say the same thing because they read the same
     # string, which is the only way two sentences about one mechanism cannot drift apart.
@@ -447,6 +470,13 @@ def build_model(lm: Config, geom, *, device, seed):
              value=geom.compose, threshold=True, reachable=False,
              reason=(_COMPOSER_UNBUILT if geom.compose else _off)),
     )
+    # THE FIVE BUILD GAUGES, through the tally counters() reads (see DID IT FIRE above).
+    _set("lm.build.arm_gru", int(geom.arch == "gru"))
+    _set("lm.build.arm_transformer", int(geom.arch == "transformer"))
+    _set("lm.build.compose_on", int(bool(geom.compose)))
+    _set("lm.build.heads_used", int(geom.heads) if geom.arch == "transformer" else 0)
+    _set("lm.build.emb_head_allocated",
+         int(getattr(model, "emb", None) is not None or getattr(model, "head", None) is not None))
     return model
 
 
@@ -1384,7 +1414,8 @@ def load_state(lm: Config, model, geom, saved):
     DID IT FIRE: lm.ckpt.loaded, lm.ckpt.rows_widened (the count, per tensor), lm.ckpt.refused
                  (with the reason string, so a refusal is a Reading and not a traceback). On a
                  load that is not refused, the parent's whole ledger (state_dict's "counters")
-                 comes back first, except lm.resolve.*, which is this process's own.
+                 comes back first, except lm.resolve.* and lm.build.*, which are this process's
+                 own.
     """
     lm = lm.owned_by("LM")
 
@@ -1482,8 +1513,10 @@ def load_state(lm: Config, model, geom, saved):
     # geometry resolution, which has already run and must not be overwritten by the parent's.
     # Restored BEFORE the two bumps below so this process's load is counted on top of any the
     # parent's ledger carried, the way opt.ckpt.loaded accumulates.
+    # lm.build.* IS EXCLUDED FOR THE SAME REASON (2026-09-24): build_model has already run in this
+    # process and its five gauges describe the model THIS process built.
     for key, value in dict(saved.get("counters") or {}).items():
-        if not str(key).startswith("lm.resolve."):
+        if not str(key).startswith(("lm.resolve.", "lm.build.")):
             _COUNTS[key] = value
 
     _bump("lm.ckpt.loaded")

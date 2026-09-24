@@ -9,8 +9,9 @@ refusal, or a piece of state that did not cross the boundary, and none of them f
 
   R1  A REFUSED LM RESTORE STOPS THE RUN. LM.load_state refuses by RETURNING a LoadReport and the
       root discarded it, so a TOK_MAX_BYTES change trained a random model under the parent's
-      optimizer, fabric and memory. The refusal must reach System.refusals, and loop.run must not
-      train a System that carries one.
+      optimizer, fabric and memory. The refusal must reach System.refusals, compose() must raise
+      RefusedRun before the optimizer and the SIG warm-up, and loop.run must not train a System
+      that carries one.
   R2  A WIDENED RESUME KEEPS ITS OPTIMIZER. FAB_SLOTS / LM_VOCAB_SLOTS widening made OPT.load_state
       refuse on param_group_shape, which the root also discarded: empty moments, opt_step 0, a
       re-run warmup. A dim-0 widening must restore with padded moments; any other shape change
@@ -34,7 +35,7 @@ from spine import lever as _lever                                  # noqa: E402
 from spine import rng                                              # noqa: E402
 from spine import loop                                             # noqa: E402
 from spine import assemble                                         # noqa: E402
-from spine.compose import compose, _geometry_manifest              # noqa: E402
+from spine.compose import compose, _geometry_manifest, RefusedRun  # noqa: E402
 from ckpt import api as ckpt_api                                   # noqa: E402
 from capacity import api as cap_api                                # noqa: E402
 from fabric import api as fab_api                                  # noqa: E402
@@ -82,7 +83,17 @@ def parent():
 
 
 def r1(snap):
-    c = build(restored=snap, TOK_MAX_BYTES=12)
+    # compose() RAISES RefusedRun ON A REFUSED RESTORE (2026-09-24) and the partial System rides on
+    # the exception; it used to return the System with the refusal on it and keep building.
+    try:
+        build(restored=snap, TOK_MAX_BYTES=12)
+        check("R1 compose raises RefusedRun on a refused LM restore", False, "compose returned")
+        return build(restored=snap)
+    except RefusedRun as e:
+        c = e.system
+        check("R1 compose raises RefusedRun on a refused LM restore, before the optimizer and "
+              "the SIG warm-up are built", c.optimizer is None and c.warmup is None,
+              f"stage={e.stage!r}")
     named = [r for r in c.refusals if r.startswith("LM.load_state refused")]
     check("R1 a refused LM restore is carried onto System.refusals",
           bool(named) and c.lm_load is not None and c.lm_load.refused, named[:1])

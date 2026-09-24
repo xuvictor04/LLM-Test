@@ -82,13 +82,16 @@ _NONFINITE_MEASURED = {
         "does refuse by name, in sig/api.py::_draw_pairs, so the gap was exactly the three "
         "non-finite spellings",
     "SIG_PROTOTYPE_FRAC":
-        "the share of the InfoNCE batch drawn from one domain's reservoir. NO LIVE READER TODAY: "
-        "sig/api.py::train_step is the only function that names it and it is a NotImplementedError "
-        "stub, so at every value this lever passes through build, encode, cadence_due and warm_up "
-        "untouched. It is refused here anyway, and the reason is the one this package states about "
-        "the same lever elsewhere -- the value FREEZES INTO THE CONFIG at startup and the report "
-        "prints it, so a nan sits in the run of record until the day the body lands and then sizes a "
-        "slice of the batch",
+        "the share of the InfoNCE batch drawn from one domain's reservoir. READ BY "
+        "sig/api.py::train_step, WHICH HAS A BODY AND IS CALLED ON SIG's CADENCE, and INERT THERE "
+        "AT EVERY VALUE: the prototype arm runs only `if proto_frac > 0.0 and reservoir`, and no DOM "
+        "entry point supplies `reservoir` (Q-SIG-1), so the root passes none and sig.prototype_pairs "
+        "stays 0 -- at nan the `> 0.0` test is False as well, so a nan changes nothing that runs "
+        "today. (This entry said until 2026-09-24 that train_step was a NotImplementedError stub; "
+        "the arm is inert for the Q-SIG-1 reason, not that one.) It is refused here anyway, and the "
+        "reason is the one this package states about the same lever elsewhere -- the value FREEZES "
+        "INTO THE CONFIG at startup and the report prints it, so a nan sits in the run of record "
+        "until the day a reservoir supplier lands and then sizes a slice of the batch",
     "SIG_VAR_WEIGHT":
         "the weight on the variance hinge, guarded by `if var_weight > 0.0` in sig/api.py::_var_cov "
         "-- which +inf PASSES. `inf * clamp(1-std, min=0).mean()` is inf, the loss is inf, and one "

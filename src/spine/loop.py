@@ -76,6 +76,7 @@ from fabric import api as fab_api
 from opt import api as opt_api
 from capacity import api as cap_api
 from spine.compose import _sample_window as _c_sample_window
+from spine.compose import RefusedRun as _c_RefusedRun
 from spine.compose import _key_fn as _c_key_fn
 from spine.compose import _sig_encode_fn as _c_sig_encode_fn
 from spine.compose import _head as _c_head
@@ -381,6 +382,10 @@ class RunResult:
     report: dict
     cadence_ledger: dict
     warnings: tuple
+    # WINDOWS THIS PROCESS COUNTED THAT NEVER REACHED A BACKWARD PASS (2026-09-24): partial batches
+    # dropped at epoch rolls (RunClock dropped_windows, the finishing roll's included) plus one
+    # left by a max_windows stop. 0 at OPT_BATCH_WINDOWS=1. run.py prints it when it is not 0.
+    never_backward: int = 0
 
 
 def _payload(sysm):
@@ -435,6 +440,11 @@ def _payload(sysm):
 # Module level rather than per-call because _save runs on a cadence and a reader needs the fact
 # once, not once per checkpoint; `run` drains it into RunResult.warnings.
 _disagree = []
+# CKPT.save's NON-FINITE REFUSALS, collected and drained into RunResult.warnings the same way
+# (2026-09-24, Q-RUN-14). A refused save is not a stop: the run's own loss guard stops a nan
+# loss, and a refusal here -- AdamW moments overflowed to inf by a huge-but-finite loss, say --
+# leaves training running with the refusal said and the previous generation on disk untouched.
+_save_refused = []
 
 
 def _save(sysm, clock, reason, suffix=""):
@@ -497,12 +507,16 @@ def _save(sysm, clock, reason, suffix=""):
     # CKPT.Retention.state names the consequence in advance. CKPT.save gained a DEFAULTED
     # `best_state` keyword for it, with a counter pair, because a defaulted argument is invisible
     # to K10.
-    wrote = ckpt_api.save(sysm.configs["CKPT"], payload=_payload(sysm),
-                          geometry=recorded, step=int(clock.step),
-                          epoch=int(clock.epoch), reason=reason,
-                          best_state=(None if sysm.retention is None
-                                      else sysm.retention.state()),
-                          suffix=suffix)
+    try:
+        wrote = ckpt_api.save(sysm.configs["CKPT"], payload=_payload(sysm),
+                              geometry=recorded, step=int(clock.step),
+                              epoch=int(clock.epoch), reason=reason,
+                              best_state=(None if sysm.retention is None
+                                          else sysm.retention.state()),
+                              suffix=suffix)
+    except _gate.NonFinite as e:
+        _save_refused.append(str(e))
+        return False
     if wrote:
         tok_api.save_vocabulary(sysm.configs["TOK"], sysm.vocab, suffix=suffix)
     return wrote
@@ -551,17 +565,14 @@ def run(sysm, *, max_windows=None, progress=True):
     this is the same predicate (RunClock.counters' epoch against epochs_target) for a caller that
     hands this function a System by another route.
 
-    A System CARRYING REFUSALS IS NOT RUN. run.py stops on System.refusals before it gets here
-    ("REFUSALS STOP THE RUN BEFORE A TENSOR IS TRAINED"), and that was the only stop: a driver
-    that called compose() and then this function trained through every refusal. Since 2026-09-24
-    the refusals include a refused LM or OPT restore, where training means a randomly initialised
-    model or cold moments under the parent's name, so the stop is enforced here as well.
+    A System CARRYING REFUSALS IS NOT RUN. Until 2026-09-24 run.py's read of System.refusals was
+    the only stop, and a driver that called compose() and then this function trained through
+    every refusal. compose() now raises spine/compose.py::RefusedRun itself, so a System it
+    returns carries none; this guard is the same stop for a System that reaches here by another
+    route (the `restored=` override, a test that appends a refusal), and it raises the same type.
     """
     if getattr(sysm, "refusals", None):
-        raise RuntimeError(
-            f"loop.run: this System carries {len(sysm.refusals)} refusal(s) and is not run -- "
-            f"compose() appends a refusal instead of raising so a report can be printed, and "
-            f"training past one is the state it exists to prevent. First: {sysm.refusals[0]}")
+        raise _c_RefusedRun(sysm, f"loop.run (System built to stage {sysm.stage!r})")
     cfg = sysm.configs
     run_cfg, lm_cfg, tok_cfg = cfg["RUN"], cfg["LM"], cfg["TOK"]
     fab_cfg, sig_cfg, dat_cfg, opt_cfg = cfg["FAB"], cfg["SIG"], cfg["DATA"], cfg["OPT"]
@@ -738,6 +749,14 @@ def run(sysm, *, max_windows=None, progress=True):
     batch = []
     ids = sysm.segmentation.ids
     stopped_early = False
+    # WHICH EXIT ENDED THE LOOP, for the unflushed-batch accounting after it (F33, 2026-09-24).
+    _end = "the loop"
+    # RUN_PROFILE's INSTRUMENT, OPENED AROUND THE COMPONENTS BELOW (2026-09-24). RUN.mode has always
+    # handed back a Timing whose span() is a shared no-op when profiling is off, and until this
+    # date nothing in this file opened one, nor passed the Timing to RUN.bench_summary -- so
+    # RUN_BENCH=1 RUN_PROFILE=1 printed "no per-component breakdown -- RUN_PROFILE is off" with
+    # RUN_PROFILE on. Off, each span is contextlib.nullcontext and the run is bit-identical.
+    _timing = sysm.mode.timing
 
     while True:
         tick = clock.advance()
@@ -870,7 +889,8 @@ def run(sysm, *, max_windows=None, progress=True):
             if cadences.due("fab.manage", periods["fab.manage"], clock):
                 _ml = (sum(manage_losses) / len(manage_losses)) if manage_losses else None
                 manage_losses = []
-                fab_api.manage(fab_cfg, pop, step_windows=tick.step, flush_loss=_ml)
+                with _timing.span("fab.manage"):
+                    fab_api.manage(fab_cfg, pop, step_windows=tick.step, flush_loss=_ml)
             # SIG'S OWN CADENCE AND ITS STEP, WHICH ARE ONE MECHANISM AND LAND TOGETHER. Until
             # SIG.train_step had a body neither was asked, because asking a gate RECORDS its fire
             # and a fire nobody can act on is thrown away -- tok/api.py::on_window's rule ("asking
@@ -893,9 +913,10 @@ def run(sysm, *, max_windows=None, progress=True):
             # its routing signature. It read `win_in_epoch` (i + 1) until 2026-09-24.
             if sig_api.cadence_due(sig_cfg, st, step_windows=tick.step,
                                    windows_since_boundary=since_boundary):
-                sig_api.train_step(sig_cfg, st, stream=sig_stream,
-                                   seen_units=_c_signature_cursor(sysm, st, i),
-                                   opt=sysm.optimizer.encoder)
+                with _timing.span("sig.train_step"):
+                    sig_api.train_step(sig_cfg, st, stream=sig_stream,
+                                       seen_units=_c_signature_cursor(sysm, st, i),
+                                       opt=sysm.optimizer.encoder)
             #
             # SIG.encode, PER WINDOW, WHICH IS WHERE THE TABLE PUTS IT -- immediately above DOM.observe.
             # It used to be called once per FLUSH from inside _flush, off a second slice of the corpus;
@@ -915,7 +936,8 @@ def run(sysm, *, max_windows=None, progress=True):
             # a generator holding the same prompt has in hand.
             sample = _c_sample_window(sysm, st, i)
             samples.append(sample)
-            sig_i = sig_api.encode(sig_cfg, st, [sample])[0]
+            with _timing.span("sig.encode"):
+                sig_i = sig_api.encode(sig_cfg, st, [sample])[0]
             if sig_i.device != sysm.process.device:
                 sig_i = sig_i.to(sysm.process.device)
             sigs.append(sig_i)
@@ -926,8 +948,10 @@ def run(sysm, *, max_windows=None, progress=True):
             # expert-to-domain affiliation (FAB.forward's and FAB.observe's `domain_id`) and
             # DOM.note_competence's `did` are all the same id under three spellings, and a loop that
             # keeps a literal 0 makes all three see one source."
-            asg = dom_api.observe(dom_cfg, sysm.partition, signature=sig_i, sample_window=sample,
-                                  tokens=ids[bounds[0]:bounds[0] + ctx], now=tick.step)
+            with _timing.span("dom.observe"):
+                asg = dom_api.observe(dom_cfg, sysm.partition, signature=sig_i,
+                                      sample_window=sample,
+                                      tokens=ids[bounds[0]:bounds[0] + ctx], now=tick.step)
             did = int(asg.did)
             dids.append(did)
             # THE BOUNDARY COUNTER SIG READS NEXT WINDOW. Zeroed on a boundary and incremented
@@ -975,7 +999,8 @@ def run(sysm, *, max_windows=None, progress=True):
             # settled the OR also said "`Due` keeps its four fields and no signature moves".
             # `frozen` COMES FROM THE LAST WINDOW, which is the same value as the OR because it is a
             # monotone STATE and not an event -- at step >= freeze_at it is True from then on.
-            due = tok_api.on_window(tok_cfg, vocab, ids[bounds[0]:bounds[1]], step=tick.step)
+            with _timing.span("tok.on_window"):
+                due = tok_api.on_window(tok_cfg, vocab, ids[bounds[0]:bounds[1]], step=tick.step)
             if sysm.due is None:
                 sysm.due = due
             else:
@@ -1003,10 +1028,30 @@ def run(sysm, *, max_windows=None, progress=True):
             if tick.flush_due:
                 if "loop.flush_mixed_domain" in books and len(set(dids)) > 1:
                     books["loop.flush_mixed_domain"] += 1
-                loss, per_window, probe_prev = _flush(
-                    sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, vocab, clock,
-                    sysm.novelty, did, key_fn, sigs, dids, probe_prev, mem_pressure, resegment,
-                    live_domains, books)
+                try:
+                    with _timing.span("flush"):
+                        loss, per_window, probe_prev = _flush(
+                            sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg,
+                            vocab, clock, sysm.novelty, did, key_fn, sigs, dids, probe_prev,
+                            mem_pressure, resegment, live_domains, books)
+                except _gate.NonFinite as _nf:
+                    # THE LAST FINITE STATE IS KEPT IF IT IS FINITE, for the reason a raising R stage
+                    # still saves (Q-RUN-9): a stop is a reason to distrust what comes next, not to
+                    # lose what came before. _flush raised before the optimizer stepped, so the
+                    # parameters and moments are the previous flush's; CKPT.save scans the payload
+                    # and refuses (NonFinite again) if anything in it is not finite -- a forward
+                    # that poisoned a FAB centroid on its way to the nan loss is caught there.
+                    _n_ref = len(_save_refused)
+                    _kept = _save(sysm, clock, "final")
+                    _why = _save_refused[_n_ref:]
+                    del _save_refused[:]
+                    raise _gate.NonFinite(
+                        f"{_nf} "
+                        + ("The pre-step state was finite and WAS saved as the final checkpoint "
+                           "(reason 'final'), so a resume at a lower OPT_LR continues from the last "
+                           "finite parameters." if _kept else
+                           f"CKPT.save REFUSED the final checkpoint as well: {_why[-1]}" if _why else
+                           "CKPT_DIR names no directory, so nothing was saved.")) from _nf
                 # `resegment` IS CONSUMED ON THE FIRST FLUSH AFTER A ROLL AND NOT ON EVERY ONE. It is
                 # an EVENT: memory/api.py::maintain drops and retakes its rekey snapshot each time it
                 # is non-None, so leaving it set would restart that walk every flush and the amortized
@@ -1044,7 +1089,8 @@ def run(sysm, *, max_windows=None, progress=True):
             # refinement, a repair. It is evaluated per window rather than per flush because the period
             # is in WINDOWS and Cadences.due is phase-independent by construction.
             if cadences.due("ckpt", periods["ckpt"], clock):
-                saves += 1 if _save(sysm, clock, "periodic") else 0
+                with _timing.span("ckpt.save"):
+                    saves += 1 if _save(sysm, clock, "periodic") else 0
             # AND THE SIGUSR1 FLAG, DRAINED ONCE PER WINDOW. CKPT.install_save_signal armed it at
             # compose; take() returns True exactly once per `kill -USR1`, so a checkpoint is written on
             # demand without the run being stopped to get one.
@@ -1058,6 +1104,7 @@ def run(sysm, *, max_windows=None, progress=True):
                       f"uncalled={len(skipped)}", flush=True)
 
         if tick.finished:
+            _end = "the finishing epoch roll"
             break
         # THE DRIVER'S STOP, TESTED BEFORE THE ROLL AND COUNTED IN THIS CALL'S WINDOWS (2026-09-24,
         # Q-RUN-10). It sat after the roll's `continue` and compared the absolute clock step, so a
@@ -1074,6 +1121,7 @@ def run(sysm, *, max_windows=None, progress=True):
                             + "), which is a DRIVER argument and not a lever -- this run is "
                               "shorter than RUN.epochs and DATA asked for, and no report line "
                               "should be read as a full run.")
+            _end = "max_windows"
             break
         if tick.rolled:
             # ---- STAGE E: THE EPOCH ROLL. DATA.draw_stream -> TOK.tokenize -> begin_epoch
@@ -1200,6 +1248,28 @@ def run(sysm, *, max_windows=None, progress=True):
                    "into the ids DOM's token histograms were counted under and they stay valid."))
             continue
 
+    # THE PARTIAL BATCH AT THE END IS SAID, WHICHEVER EXIT LEFT IT (2026-09-24). The finishing roll
+    # drops a partial batch into RunClock's dropped_windows exactly as a mid-run roll does, but
+    # `finished` is tested before `rolled`, so the mid-run roll's warning below the break was
+    # unreachable at the finish; and a max_windows stop leaves a partial batch no roll counts at
+    # all. Driven at OPT_BATCH_WINDOWS=16 DATA_STREAM_BYTES=30000: 157 windows, 9 flushes, 13
+    # windows that never reached a backward, and no line anywhere said so -- the summary printed
+    # 157 windows as the run's length and throughput. One check here covers both exits, and
+    # RunResult.never_backward carries the count run.py prints.
+    _unflushed = len(batch)
+    _dropped_here = int(clock.counters()["dropped_windows"])
+    never_backward = _dropped_here + (_unflushed if _end == "max_windows" else 0)
+    if _unflushed:
+        warnings.append(
+            f"loop: {_unflushed} window(s) were accumulated and never flushed when the run ended "
+            f"({_end}); they are counted in `windows` and never reached a backward pass. "
+            f"{never_backward} window(s) in all never reached one in this process (RunClock "
+            f"dropped_windows {_dropped_here}"
+            + (f" + {_unflushed} left by the max_windows stop" if _end == "max_windows" else "")
+            + f"). At OPT_BATCH_WINDOWS=1 this cannot happen; above 1 it costs up to "
+              f"batch_windows-1 windows per exit.")
+    batch, sigs, dids, samples = [], [], [], []
+
     # THE FINAL SAVE, UNCONDITIONALLY, WHATEVER ENDED THE RUN. A run that stops because the epoch
     # finished, because max_windows was reached, or because the stream ran out has all done the
     # same amount of training, and losing it in the last two cases would make the driver's own
@@ -1294,8 +1364,12 @@ def run(sysm, *, max_windows=None, progress=True):
     for _d in dict.fromkeys(_disagree):
         warnings.append(f"loop: recorded-geometry disagreement -- {_d}")
     _disagree.clear()
+    _refused_here = list(_save_refused)
+    del _save_refused[:]
+    for _r in _refused_here:
+        warnings.append(f"loop: a checkpoint was NOT written -- {_r}")
     saves += 1 if final_written else 0
-    if not final_written:
+    if not final_written and not _refused_here:
         warnings.append(
             "loop: no final checkpoint was written -- CKPT_DIR names no directory, so saving is "
             "off and this run's weights end with the process. Set CKPT_DIR to keep them.")
@@ -1310,7 +1384,8 @@ def run(sysm, *, max_windows=None, progress=True):
             f"CKPT.save: {saves} checkpoint(s) written by this run (periodic, SIGUSR1 and the "
             f"final one together); 0 means CKPT_DIR names no directory and saving is off",),
         report=report,
-        cadence_ledger=cadences.ledger(), warnings=tuple(warnings))
+        cadence_ledger=cadences.ledger(), warnings=tuple(warnings),
+        never_backward=never_backward)
 
 
 # ---- THE R STAGE: the did-it-fire surfaces, asked through the entry points that own them --------
@@ -1474,10 +1549,23 @@ def _report(sysm, elapsed_s, ctx):
     }
     if sysm.retention is not None:
         out["CKPT.Retention.counters"] = sysm.retention.counters()
+    # THE CLOCK'S OWN BOOK, WHICH _CALLS HAS LONG LISTED AS AN R CALL AND NOTHING RENDERED UNTIL
+    # 2026-09-24: dropped_windows (partial batches discarded at a roll, the finishing one included)
+    # and batch_len were published "so the drop is readable" (train/api.py::RunClock.counters) and
+    # reached no report, and only RUN.bench_summary -- off by default -- quoted dropped_windows.
+    out["RUN.RunClock.counters"] = {k: (int(v) if hasattr(v, "n") else v)
+                                    for k, v in sysm.clock.counters().items()}
     bench = run_api.bench_summary(
         cfg["RUN"], sysm.clock, elapsed_s=elapsed_s,
         bytes_per_window=int(ctx * float(sysm.segmentation.bytes_per_token)),
-        n_params=sum(int(t.numel()) for t in sysm.base_params))
+        n_params=sum(int(t.numel()) for t in sysm.base_params), timing=sysm.mode.timing)
+    # THE SPANS ARE RENDERED HERE TOO, because bench_summary prints nothing at RUN_BENCH=0 and
+    # RUN_PROFILE is a separate switch: profiling without bench would otherwise time the components
+    # and print them nowhere. Seconds, summed over the run; "flush/..." spans nest inside "flush".
+    if sysm.mode.profile:
+        out["RUN.Timing.spans"] = {k: round(float(v), 3)
+                                   for k, v in sorted(sysm.mode.timing.spans().items())} or (
+            "RUN_PROFILE=1 and no span was entered")
     # None IS THE OFF ARM AND IS RECORDED AS SUCH. bench_summary "PRINTS INSTEAD OF the eval
     # battery", so it returns None rather than empty lines at RUN_BENCH=0 -- a caller that got []
     # would print a heading with nothing under it.
@@ -1518,6 +1606,7 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     has already recorded which those are, by name, so this function's silence about them is not
     the report's silence about them.
     """
+    _timing = sysm.mode.timing      # RUN_PROFILE's spans; a shared no-op when profiling is off
     ids = sysm.segmentation.ids
     pairs = _flush_bounds(batch)
     # THE BATCH IS CUT ONTO THE PROCESS DEVICE, NOT ONTO THE DEFAULT ONE. RUN.process_setup
@@ -1655,11 +1744,12 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     # dom.manage pass's census -- the row's own declared staleness -- and is 1 until that pass first
     # fires (Q-FAB-9).
     with cast():
-        out = fab_api.forward(
-            fab_cfg, pop, h=h, signature=sig_vec, novelty=novelty,
-            head=_c_head(sysm), targets=y,
-            step_windows=U.Windows(int(clock.step)),
-            domain_id=route_did, live_domains=live_domains, training=True)
+        with _timing.span("flush/fab.forward"):
+            out = fab_api.forward(
+                fab_cfg, pop, h=h, signature=sig_vec, novelty=novelty,
+                head=_c_head(sysm), targets=y,
+                step_windows=U.Windows(int(clock.step)),
+                domain_id=route_did, live_domains=live_domains, training=True)
         # `hidden`, NOT `h`, AND THE FIRST DRAFT GOT THIS WRONG IN THE SAME TWO LINES AS THE SWALLOWED
         # EXCEPT ABOVE. It read `h = out.h if hasattr(out, "h") else h` -- so FabricOut, whose field is
         # `hidden`, never matched, the routed output was discarded, and the run trained on the
@@ -1737,7 +1827,46 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     # gradient has not been accumulated onto the old rows. Until 2026-09-24 nothing moved the
     # moments: a culled slot's survivor took its next step on the culled expert's exp_avg.
     opt_api.remap_rows(opt_cfg, sysm.optimizer, out.row_events)
-    n_bwd_opt = opt_api.scaled_backward(opt_cfg, sysm.optimizer, total)
+    # A NON-FINITE TRAINING LOSS STOPS THE RUN HERE, BEFORE THE OPTIMIZER STEPS ON IT (2026-09-24).
+    # The flag is formed BEFORE the backward and read AFTER it, so the host waits on the backward
+    # the next line enqueues rather than stalling between the forward and the backward; the
+    # optimizer's own grad-norm read a few lines down syncs at the same point anyway. Driven before
+    # this guard: one flush whose loss was nan stepped AdamW on nan gradients, all 8 LM parameter
+    # tensors went non-finite, and the run died a flush later inside DOM.note_competence with a
+    # message about domain competence. Stopping here leaves the parameters, the AdamW moments and
+    # every book downstream of the step (FAB.observe, grow_check, MEM.write, DOM.note_competence)
+    # as the previous flush left them; the gradients just accumulated are discarded with the run.
+    # NOT A DIVERGENCE ALARM: a finite loss of any size passes (EVAL owns that, and it is deferred).
+    _finite = torch.isfinite(total.detach())
+    with _timing.span("flush/backward"):
+        n_bwd_opt = opt_api.scaled_backward(opt_cfg, sysm.optimizer, total)
+    if not bool(_finite):
+        _terms = {"LM loss": mean, "FAB aux": aux, "WORLD loss": world_loss, "LM anchor": anchor}
+        _bad = [k for k, t in _terms.items()
+                if t is not None and not bool(torch.isfinite(t.detach()).all())]
+        _params_bad = sum(1 for t in sysm.base_params if not bool(torch.isfinite(t).all()))
+        _st = sysm.optimizer
+        _norms = list(getattr(_st, "grad_norms", ()) or ())
+        _c = clock.counters()
+        raise _gate.NonFinite(
+            f"loop: the training loss is non-finite ({float(total.detach())!r}) at window "
+            f"{int(_c['step'])}, flush {int(_c['flushes'])}, optimizer step {int(_st.opt_step)} "
+            f"(epoch {int(_c['epoch'])}); non-finite term(s): {', '.join(_bad) or 'none alone'}. "
+            f"Stopped BEFORE the optimizer stepped on it. "
+            + (f"{_params_bad} of {len(sysm.base_params)} base parameter tensor(s) are ALREADY "
+               f"non-finite: written by an earlier optimizer step, or in place during this flush's "
+               f"forward (FAB.forward updates its own rows, so a non-finite signature or hidden "
+               f"reaching the fabric writes them before any loss exists). If an earlier step, the "
+               f"likely lever is OPT_LR (the last applied rate was {float(_st.lr_prev):.4g}; last "
+               f"recorded grad norm {(_norms[-1] if _norms else float('nan')):.4g}), with "
+               f"OPT_GRAD_CLIP (0 = off) and OPT_LR_WARMUP beside it. "
+               if _params_bad else
+               f"Every base parameter was still finite, so the non-finite value arose in this "
+               f"flush's forward: the likely lever is OPT_LR (last applied rate "
+               f"{float(_st.lr_prev):.4g}, last recorded grad norm "
+               f"{(_norms[-1] if _norms else float('nan')):.4g}) if the LM loss is the term, or "
+               f"the weight lever of the term named above otherwise. ")
+            + "No checkpoint is written from a non-finite state: CKPT.save refuses one.")
 
     # THE BACKWARD IS COUNTED BY THE CLOCK, and the optimizer steps only when the
     # clock says a step is due -- derive.accum_due on a Backwards clock, never a modulo on the
@@ -1768,8 +1897,9 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
             f"this reason (Q-RUN-9).")
     # shift_at IS THE E ROLL'S Steps STAMP (None until the first roll). OPT keeps it on its own
     # state and counts it once, so it is handed over on every stepped flush rather than cleared.
-    outcome = (opt_api.maybe_step(opt_cfg, sysm.optimizer, shift_at=sysm.shift_at_steps)
-               if stepped else None)
+    with _timing.span("flush/opt.maybe_step"):
+        outcome = (opt_api.maybe_step(opt_cfg, sysm.optimizer, shift_at=sysm.shift_at_steps)
+                   if stepped else None)
 
     # THE PER-EXPERT RATES, ON THE RATE THE OPTIMIZER JUST APPLIED. LOOP_ORDER's own row says this
     # call "PRODUCES NOTHING ANY SIGNATURE ACCEPTS" -- the return is per-expert multipliers and
@@ -1863,10 +1993,11 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     # GrowReport's per-call gates -- the arithmetic of the call that evaluated them -- reached no
     # report. ONLY THE GATES TUPLE is kept, on System.grow_gates, and spine/loop.py::_report renders
     # it at R: the record itself is not held, and nothing here is on CKPT's save path.
-    _grow = fab_api.grow_check(fab_cfg, pop, flush_loss=mean.detach(),
-                               step_windows=U.Windows(int(clock.step)), soft_cap=caps,
-                               memory_pressure=mem_pressure, signature=sig_vec,
-                               shift_at=sysm.shift_at_windows)
+    with _timing.span("flush/fab.grow_check"):
+        _grow = fab_api.grow_check(fab_cfg, pop, flush_loss=mean.detach(),
+                                   step_windows=U.Windows(int(clock.step)), soft_cap=caps,
+                                   memory_pressure=mem_pressure, signature=sig_vec,
+                                   shift_at=sysm.shift_at_windows)
     sysm.grow_gates = tuple(getattr(_grow, "gates", ()) or ())
 
     # ---- MEMORY -------------------------------------------------------------------------------
@@ -1932,8 +2063,9 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
         bp = sysm.segmentation.byte_pos
         positions = torch.tensor([bp[a:a + ctx] for a, _b in pairs], dtype=torch.long, device=dev)
     now_w = U.Windows(int(clock.step))
-    mem_api.write(cfg_mem, sysm.store, contexts=x, tokens=y, surprise=surprise,
-                  sources=sources, owners=owners, positions=positions, key_fn=key_fn, now=now_w)
+    with _timing.span("flush/mem.write"):
+        mem_api.write(cfg_mem, sysm.store, contexts=x, tokens=y, surprise=surprise,
+                      sources=sources, owners=owners, positions=positions, key_fn=key_fn, now=now_w)
     # MAINTAIN, AND THE PROBE NOW HAS CONTEXTS -- WHICH IT COULD NOT HAVE UNTIL MEM.read EXISTED.
     # This block said "the None IS FORCED rather than chosen" and quoted maintain's own sentence,
     # "MEM.read is still a P4 stub, so this line raises NotImplementedError the moment a caller
@@ -1970,8 +2102,9 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     # Cadences key for them, which is why their did-it-fire surface is store.n_probe_fired /
     # n_rekey_passes and the mem.probe / mem.rekey Gates the R stage's MEM.census row renders. Calling it once per flush is the shipped semantics: both periods are
     # Windows and elapsed-since-last-fire is phase-independent.
-    mem_api.maintain(cfg_mem, sysm.store, now=now_w, key_fn=key_fn,
-                     probe_contexts=probe_prev, resegment=resegment)
+    with _timing.span("flush/mem.maintain"):
+        mem_api.maintain(cfg_mem, sysm.store, now=now_w, key_fn=key_fn,
+                         probe_contexts=probe_prev, resegment=resegment)
 
     # ---- THE EVENT-DRIVEN ROWS: what THIS BATCH'S Dues made due ---------------------------------
     # ACTED ON PER FLUSH, ASKED PER WINDOW. The Due was OR-ed across the batch in `run`; it is

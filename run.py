@@ -30,10 +30,13 @@ WHAT IT STILL DOES NOT MEASURE, AND THE RUN PRINTS BOTH LISTS RATHER THAN CLAIMI
     RUN_EPOCHS=1 NO ROLL EVER REACHES IT, because the single roll a one-epoch run takes is the one
     that also finishes it; every retok that run raises lands in tok.due_dropped with a warning
     naming why. Recorded as Q-RUN-8, with the measurement that settles it.
-  * NO EXPERT IS EVER CULLED and THE SIGNATURE ENCODER NEVER LEARNS. FAB.manage and SIG.train_step
-    are the last two LOOP_ORDER rows without bodies, so the population only ever rises and every
-    routing and domain decision for the whole run is taken on the warm-up encoder. Their cadences
-    are deliberately NOT ASKED rather than asked-and-ignored: an asked gate records its fire.
+  * THE CULL AND THE ENCODER'S TRAINING RUN ON THEIR CADENCES, AND A SHORT RUN MAY REACH NEITHER
+    FIRE. FAB.manage and SIG.train_step have bodies and are called (this bullet said until
+    2026-09-24 that neither had one, so no expert was ever culled and the encoder never learned --
+    false since both landed). fab.manage fires every FAB_MANAGE_EVERY windows, so a run shorter
+    than that period reaches none (the cadence ledger prints it, and the cadence audit warns
+    before the first window); SIG.train_step is asked every window (296 steps in 300 windows at
+    the shipped defaults).
   * FIVE ENTRY POINTS ARE DEFERRED BY THE CONTRACT, not merely unwritten -- CAP.observe,
     FAB.contribution, MEM.blend, MEM.judge and WORLD.manage. CAP.observe's absence is why no cap is
     ever lifted; FAB.contribution's is why the marginal-contribution counterfactual has no producer.
@@ -64,7 +67,8 @@ if _SRC not in sys.path:
 
 from spine.compose import compose          # noqa: E402 -- after the path repair above, on purpose
 from spine import loop                     # noqa: E402
-from spine.gate import NotBuilt            # noqa: E402
+from spine.gate import NotBuilt, NonFinite  # noqa: E402
+from spine.compose import RefusedRun      # noqa: E402
 
 
 def main(argv=None):
@@ -86,12 +90,30 @@ def main(argv=None):
     # trace a sweep script reads as a crash. It is printed and exited exactly like the startup
     # refusals below: "REFUSED: <the lever and the ruling>", rc=2. NotBuilt is NOT caught anywhere
     # else, and nothing but the message is kept -- the exception already names the lever.
+    # STARTUP REFUSALS ARRIVE THE SAME WAY SINCE 2026-09-24: compose() raises RefusedRun at the
+    # first point past which a refusal would be built over, instead of returning a System that
+    # carries the list after allocating the model and running the SIG warm-up. The exception
+    # carries the partial System, so the banner and every refusal are printed as before and the
+    # exit code is still 2.
     try:
         sysm = compose(environ=os.environ)
     except NotBuilt as e:
         print(f"REFUSED: {e}")
         print("=== refusing to run: the arm above is declared and not built in this tree; "
               "choose a built one.")
+        return 2
+    except RefusedRun as e:
+        _p = e.system.process
+        if _p is not None:
+            print(f"=== device={_p.device} amp={_p.amp_state} tf32={_p.tf32_applied} "
+                  f"torch_seed={_p.torch_seed}")
+        print(f"=== composed: stopped at stage={e.stage}, {len(e.refusals)} refusal(s), "
+              f"{len(e.system.warnings or ())} warning(s)")
+        for r in e.refusals:
+            print(f"REFUSED: {r}")
+        # REFUSALS STOP THE RUN BEFORE A TENSOR IS TRAINED. They are the guards a Lever
+        # declaration cannot express, and every one of them names the lever to change.
+        print("=== refusing to run: fix the above, or change the configuration.")
         return 2
 
     # WHAT HARDWARE AND WHAT ARITHMETIC, PRINTED BEFORE ANYTHING ELSE. A run that does not say
@@ -115,15 +137,11 @@ def main(argv=None):
     # a cpu run at one RUN_SEED start from different weights -- measured, 8.3784 against 8.3247 on
     # the first flush of otherwise identical 20-window runs. That is not a defect and it is not
     # noise: it means a cpu curve and a cuda curve are two experiments, not two samples of one.
+    # A RETURNED System CARRIES NO REFUSAL (compose raises RefusedRun instead, handled above), so
+    # the count printed here is 0 on every run that reaches this line; it stays because a reader
+    # comparing logs looks for it.
     print(f"=== composed: stage={sysm.stage}, {len(sysm.refusals)} refusal(s), "
           f"{len(sysm.warnings)} warning(s)")
-    for r in sysm.refusals:
-        print(f"REFUSED: {r}")
-    if sysm.refusals:
-        # REFUSALS STOP THE RUN BEFORE A TENSOR IS TRAINED. They are the guards a Lever declaration
-        # cannot express, and every one of them names the lever to change.
-        print("=== refusing to run: fix the above, or change the configuration.")
-        return 2
     for w in sysm.warnings:
         print(f"WARNING: {w}")
 
@@ -155,7 +173,17 @@ def main(argv=None):
         if _g.fired and _g.reason:
             print(f"        {_g.reason}")
 
-    result = loop.run(sysm, max_windows=args.max_windows, progress=not args.quiet)
+    # A NON-FINITE LOSS STOPS THE RUN BY NAME (2026-09-24). loop.run raises spine/gate.py::NonFinite
+    # before the optimizer steps on a nan/inf loss; the message names the window, the flush, the
+    # optimizer step, the non-finite term and the likely lever, and says whether the last finite
+    # state was saved. (A checkpoint CKPT.save refuses as non-finite is not a stop: the loop turns
+    # it into a WARNING line and the run continues.) Exit code 3: not a startup refusal (2) and not
+    # a crash (1).
+    try:
+        result = loop.run(sysm, max_windows=args.max_windows, progress=not args.quiet)
+    except NonFinite as e:
+        print(f"=== RUN STOPPED: {e}")
+        return 3
 
     print()
     # RUN TOTALS AND THIS PROCESS'S ARE PRINTED APART ON A RESUME (2026-09-24, Q-RUN-10). windows,
@@ -173,6 +201,14 @@ def main(argv=None):
               f"at {result.windows - _here}), {result.flushes} flushes this process, "
               f"{result.opt_steps} optimizer steps run total, {result.epochs} epoch(s) "
               f"in {result.elapsed_s:.1f}s ({_rate:.1f} w/s this process)")
+    # WINDOWS COUNTED ABOVE THAT NEVER REACHED A BACKWARD PASS, on a line of their own so the
+    # summary line above keeps the exact shape sweep_gpu.sh parses. Printed only when not 0 (it is 0
+    # at OPT_BATCH_WINDOWS=1); until 2026-09-24 nothing printed it and a 157-window run whose last
+    # 13 windows were dropped at the finishing roll reported all 157 as its length and throughput.
+    if result.never_backward:
+        print(f"=== {result.never_backward} of those window(s) never reached a backward pass "
+              f"(partial batches dropped at an epoch roll or left at the stop); "
+              f"{result.windows_here - result.never_backward} trained")
     print(f"=== loss {result.loss_first:.4f} -> {result.loss_last:.4f}")
     # THE PRECISION ASKED FOR AND THE PRECISION OBSERVED, ON ONE LINE, BECAUSE THEY DISAGREED FOR
     # THE LIFE OF THIS DRIVER. amp_state above is what RUN.process_setup decided; this is the dtype

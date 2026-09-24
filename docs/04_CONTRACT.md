@@ -4597,7 +4597,8 @@ System that carries one, so a driver that skips run.py's check cannot train thro
 LM refusal now names `TOK_MAX_BYTES (LM.d_max_token_bytes)` and `LM_CTX (LM.d_pos_max)` instead of
 upper-casing a wire's field name (`LM_MAX_TOKEN_BYTES` is not a lever). **Rejected:** raising at the
 `restore.lm` stage (run.py reads `sysm.base_params` and `sysm.process` before it prints refusals, so
-an early exit turns a named refusal into a traceback); adding `lm.max_token_bytes` to the geometry
+an early exit turns a named refusal into a traceback — **superseded by Q-RUN-13**, where the exception
+carries the System and run.py prints from it); adding `lm.max_token_bytes` to the geometry
 manifest as `EXACT` (every checkpoint written before it lacks the field, and `check_geometry` refuses a
 missing field — every existing checkpoint would become unresumable at unchanged levers).
 **State that did not cross, each driven:** (1) `LM.state_dict` wrote `"counters"` and `load_state`
@@ -5040,6 +5041,76 @@ ceiling it reads `at_ceiling` and claims the startup analysis refused a lift the
 `valve.gates`' gate at 0/0 only (leaves the lifts > 0 clauses without the startup facts). Beside it,
 an arm `CAP_TARGETS` does not name now reads origin "off for this arm (…)" instead of the sentinel's
 "no room to earn" sentence; the cap value is unchanged.
+
+### Q-RUN-13 — startup refusals were a list `compose()` built past, and two unbuilt arms died at the first flush — **RESOLVED 2026-09-24: `compose()` RAISES `RefusedRun` AT THREE STOP POINTS; `LM_COMPOSE=1` AND `MEM_KEY_SRC=frozen` ARE REFUSED AT BUILD WITH `NotBuilt`**
+`RUN.startup_refusals` said "the entry point raises on a non-empty list BEFORE ANY TENSOR IS
+ALLOCATED" and `compose()` only appended it: driven at `RUN_EPOCHS=2` with resampling off, it built
+the 10,130,057-parameter model, ran the SIG warm-up and returned `stage='assembled'`; only run.py read
+the list (the `loop.run` guard of Q-CKPT-4 stopped the training, not the build). **Ruling:**
+`spine/compose.py::RefusedRun(RuntimeError)`, carrying the partial System, raised by
+`_stop_if_refused` at (1) the `refuse` stage — RUN/WORLD refusals depend on Configs alone, so they
+now fire before geometry and before any model tensor; (2) after `CAP.startup_refusals`, which needs
+the built population and therefore cannot precede allocation (a refused LM restore stops here too);
+(3) after the finished-resume check, before the SIG warm-up (a refused OPT restore stops here). A
+System `compose()` returns carries no refusal; `loop.run` raises the same type for one built another
+way; run.py catches it, prints the banner and every `REFUSED:` line and exits 2 as before. **This
+supersedes Q-CKPT-4's rejected alternative** ("raising at the `restore.lm` stage … turns a named
+refusal into a traceback"): the exception carries the System, so nothing is lost. **Rejected:**
+raising at every append (one refusal per attempt instead of all a configuration earns); keeping the
+list and guarding only `loop.run` (the warm-up — 800 steps at the shipped `SIG_WARMUP` — is spent
+before a refused run stops). **Two declared-and-not-built arms** composed with 0 refusals and raised
+`NotBuilt` at the first flush, after the whole warm-up: `LM_COMPOSE=1` (`_LM.composed_table`) and
+`MEM_KEY_SRC=frozen` (`MEM.write`). `LM.build_model` and `MEM.open_store` now raise `NotBuilt`
+naming the lever before allocating — the owning package, the `FAB_HOP_MODE=transition` precedent
+(Q-FAB-1), and run.py already prints `NotBuilt` as `REFUSED:` with exit 2. **Rejected:** a string on
+`System.refusals` written by the root (the root would be re-deriving a package's arm).
+
+### Q-RUN-14 — a non-finite loss stepped the optimizer and nothing stopped a non-finite checkpoint — **RESOLVED 2026-09-24: THE LOOP STOPS BEFORE THE STEP; `CKPT.save` SCANS THE PAYLOAD; THE LAST FINITE STATE IS KEPT. NOT A DIVERGENCE ALARM**
+Driven before: one flush with a nan loss stepped AdamW on nan gradients, **8 of 8** LM tensors went
+non-finite, and the run died a flush later inside `DOM.note_competence` ("`bits` is nan for domain 1")
+— a refusal naming domain competence, not the loss, the step or a lever. A single finite loss of
+`1e30` completed a 20-window run and wrote `ckpt.pt` with **inf `exp_avg_sq` in every base group
+entry** (grad² overflows fp32), which freezes those parameters for every resume (`m / sqrt(inf) = 0`).
+**Ruling:** `spine/gate.py::NonFinite`. (1) `spine/loop.py::_flush` forms `isfinite(total)` before
+the backward and reads it after (the host waits on the backward it just enqueued rather than
+stalling between forward and backward; `OPT.maybe_step`'s grad-norm read syncs at the same point),
+and raises before `note_backward`/`maybe_step` with the window, flush, optimizer step, epoch, the
+non-finite terms and the likely lever (`OPT_LR` with the last applied rate and grad norm, or the term's
+own weight lever). (2) `CKPT.save` scans every floating tensor in the payload and `best_state`
+(python floats are exempt: counter dicts carry legitimate `inf` readings) and raises before the file
+is touched, counting `refused_nonfinite`; `spine/loop.py::_save` turns that into a run warning and
+the run continues (the 1e30 case above now ends with its report and "a checkpoint was NOT written
+-- … /payload/OPT/base/state/0/exp_avg_sq (16384 of 16384) …" instead of an inf-moment `ckpt.pt`). (3) On (1), the loop attempts the `final` save of the
+pre-step state — the Q-RUN-9 principle that a stop is a reason to distrust what follows, not to lose
+what came before — and (2) refuses it if the forward already poisoned something (driven: an inf
+signature wrote nan into `FAB.A`/`B`/`cent` inside `FAB.forward`, and the save named them).
+run.py prints `=== RUN STOPPED:` and exits 3. **Measured before the scan shipped:** zero non-finite
+tensors in the payloads of a 250-window default run and three other arms, so the scan refuses
+poisoned state, not sentinels. **Rejected:** checking before the backward (an extra host sync
+between forward and backward on every GPU flush); scanning only parameters (a nan MEM key, DOM
+centroid or AdamW moment is the same permanent forgetting); a divergence alarm on a finite loss
+(EVAL's, deferred — `OPT_LR=0.9` at loss 708 still runs).
+
+### Q-RUN-15 — end-of-run partial batches, `RUN_PROFILE`, and two counters present on arms that cannot reach them — **RESOLVED 2026-09-24**
+(a) **A partial batch at the end was silent.** The finishing roll drops it into `dropped_windows`
+but `finished` is tested before `rolled`, so the mid-run roll's warning was unreachable; a
+`max_windows` stop leaves one no roll counts (driven: `OPT_BATCH_WINDOWS=16`, 157 windows, 13 never
+reached a backward, and nothing said so). **Ruling:** one check after the loop covers both exits;
+`RunResult.never_backward` = `dropped_windows` + the batch a `max_windows` stop left; run.py prints
+it on its own line when non-zero, so the `=== N windows, …` line keeps the shape `sweep_gpu.sh`
+parses; `RUN.RunClock.counters` is rendered at R (it was in `_CALLS` and rendered nowhere).
+(b) **`RUN_PROFILE=1` was inert:** no span was opened and `bench_summary` got no Timing. **Ruling:**
+spans around the per-window calls, the flush and six calls inside it (`flush/…`), and the periodic
+save; the Timing reaches `bench_summary` and an R row `RUN.Timing.spans` when profiling (so profile
+without bench still prints). On CUDA a span synchronises at both ends (the lever's own condition for
+attributing kernel time). Off, every span is the shared no-op and the run is bit-identical.
+(c) **G4 on two off arms.** At `SIG_MODE=bigram` the encoder group is empty and
+`opt.lr.writes.encoder` read 12; it is now seeded only when the group holds a parameter and the
+report says UNREACHABLE. At `FAB_SPAWN=0` `fab.spawned`/`fab.spawn_declined` were present-and-0 beside
+gate `fab.spawn` reading UNREACHABLE; they are now seeded only when `FAB_SPAWN` is on. **Not changed,
+on existing rulings:** gate `fab.on` at `FAB_ON=0` (ruled a switch read false, `fabric/api.py::build`),
+`fab.lr_own` at `FAB_LR_OWN=False` ("an ARMED arm that chose not to scale", `own_lr_scale`) and
+`fab.growth_armed` at `FAB_GROW=0`, whose `grow_check` family is seeded on that arm the same way.
 
 ## 6. What `tests/test_contract.py` checks
 

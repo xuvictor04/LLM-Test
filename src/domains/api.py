@@ -1959,12 +1959,13 @@ def manage_period(dom: Config):
     # WHAT A NEGATIVE ACTUALLY DOES TODAY, MEASURED RATHER THAN ASSUMED. `assemble.build` accepts
     # DOM_MANAGE_EVERY=-5 and freezes it; this accessor returned Windows(-5); and
     # spine/derive.py::cadences_that_cannot_fire then reported ("dom.manage", -5, 0) -- the SAME
-    # shape of line it prints for a period of zero. Meanwhile RUN.Cadences.due states its contract
-    # as "True at most once per `period` WINDOWS elapsed since this key last fired", so a body
-    # written to it compares `step - last_fired >= period.n`, which at -5 is true on the FIRST
-    # window and every window after. A negative here is therefore merge-then-cull-then-fold on EVERY
-    # window -- the maximum-frequency consolidation pass, reported by the one live reader as a gate
-    # that cannot fire. That is the same false equation ckpt/api.py::save_period was repaired for.
+    # shape of line it prints for a period of zero -- AND THAT LINE IS RIGHT. RUN.Cadences.due's
+    # body opens with `if int(period) <= 0: return False`, so a negative DISARMS the management
+    # pass (driven with the switch off at DOM_MANAGE_EVERY=-1 over 12 windows: ledger dom.manage
+    # checks=12 fires=0). UNTIL 2026-09-24 THIS PARAGRAPH SAID A NEGATIVE WAS MERGE-CULL-FOLD ON
+    # EVERY WINDOW, a prediction from Cadences.due's contract made before its body existed; the
+    # body does the opposite. A negative is an undeclared spelling of "never manage", and the
+    # refusal stands on the owner's ruling for that reason.
     #
     # ZERO IS NOT TOUCHED, AND THE OFF-STATE IS NOT THIS LEVER. src/domains/levers.py carries a
     # PORT REQUIREMENT that 0 must mean NEVER behind a guard at the read site, and it is not
@@ -1978,12 +1979,12 @@ def manage_period(dom: Config):
     if REFUSE_NEGATIVE_PERIOD and every < 0:
         raise LeverError(
             f"DOM_MANAGE_EVERY={every}: a management cadence is a count of windows ELAPSED since "
-            f"the last pass and may not run backwards. RUN.Cadences.due fires when "
-            f"`step - last_fired >= period`, so a negative period is true on the first window and "
-            f"on every window after it -- {every} does not mean 'manage less often' or 'do not "
-            f"manage', it means merge, cull and fold on EVERY window, while "
-            f"spine/derive.py::cadences_that_cannot_fire reports the same value as a gate that "
-            f"cannot fire. Neither meaning an operator might have wanted is lost: DOM_MANAGE=0 is "
+            f"the last pass and may not be negative. RUN.Cadences.due (train/api.py) returns "
+            f"False for every period <= 0, so {every} would DISARM the "
+            f"merge/cull/fold pass -- an undeclared spelling of 'never manage', printed DISARMED "
+            f"by RUN.cadence_audit. Refused rather than read as off, under the owner's switch "
+            f"(REFUSE_NEGATIVE_PERIOD at the top of domains/api.py). Neither meaning an operator "
+            f"might have wanted is lost: DOM_MANAGE=0 is "
             f"the declared off-state for this package's management and DOM_MANAGE_EVERY=1 is the "
             f"every-window pass. DOM_MANAGE is not consulted here: this refuses an out-of-range "
             f"value for DOM's own cadence lever, whether or not a second lever makes it moot.")

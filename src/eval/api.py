@@ -187,13 +187,13 @@ def curve_period(ev: Config):
     # WHAT A NEGATIVE ACTUALLY DOES TODAY, MEASURED RATHER THAN ASSUMED. `assemble.build` accepts
     # EVAL_CURVE_EVERY=-5 and freezes it; this accessor returned Windows(-5); and
     # spine/derive.py::cadences_that_cannot_fire then reported ("curve", -5, 0) -- the SAME shape of
-    # line it prints for a period of zero, whose meaning is a per-package sentinel. Meanwhile
-    # RUN.Cadences.due states its own contract as "True at most once per `period` WINDOWS elapsed
-    # since this key last fired", so a body written to that contract compares `step - last_fired >=
-    # period.n`, which at -5 is true on the FIRST window and on every window after it. A negative
-    # here is therefore the MAXIMUM-frequency probe -- a full curve probe every window, across every
-    # domain -- reported by the one live reader as though the gate could not fire. That is the same
-    # false equation ckpt/api.py::save_period was repaired for, one accessor over.
+    # line it prints for a period of zero, whose meaning is a per-package sentinel -- AND FOR THE
+    # GATE THAT LINE IS RIGHT. RUN.Cadences.due's body opens with `if int(period) <= 0: return
+    # False`, so a negative DISARMS the curve gate. UNTIL 2026-09-24 THIS PARAGRAPH SAID A NEGATIVE
+    # WAS A FULL CURVE PROBE EVERY WINDOW, a prediction from Cadences.due's contract made before its
+    # body existed (the same false premise ckpt/api.py::save_period carried); the body disarms. A
+    # negative is an undeclared spelling of "never probe" and the refusal stands on the owner's
+    # ruling for that reason. (EVAL.curve_probe itself is deferred, so no probe runs at any value.)
     #
     # ZERO IS NOT TOUCHED, AND WHAT ZERO MEANS HERE IS NOT DECIDED BY THIS GUARD. Unlike CKPT.every
     # (0 disables periodic saving, in the lever's own help text) and MEM.rekey_every (0 DISARMS, in
@@ -206,12 +206,12 @@ def curve_period(ev: Config):
     if REFUSE_NEGATIVE_PERIOD and every < 0:
         raise LeverError(
             f"EVAL_CURVE_EVERY={every}: a learning-curve period is a count of windows ELAPSED "
-            f"since the last probe and may not run backwards. RUN.Cadences.due fires when "
-            f"`step - last_fired >= period`, so a negative period is true on the first window and "
-            f"on every window after it -- {every} does not mean 'probe less often' or 'do not "
-            f"probe', it means a full curve probe over every domain EVERY window, while "
-            f"spine/derive.py::cadences_that_cannot_fire reports the same value as a gate that "
-            f"cannot fire. EVAL_CURVE_EVERY=1 is the every-window probe and is in range. This "
+            f"since the last probe and may not be negative. RUN.Cadences.due (train/api.py) "
+            f"returns False for every period <= 0, so {every} would DISARM "
+            f"the curve gate -- an undeclared spelling of 'never probe', printed DISARMED by "
+            f"RUN.cadence_audit. Refused rather than read as off, under the owner's switch "
+            f"(REFUSE_NEGATIVE_PERIOD at the top of eval/api.py). EVAL_CURVE_EVERY=1 is the "
+            f"every-window probe and is in range. This "
             f"lever declares no meaning for 0 either, and 0 is deliberately left alone by this "
             f"refusal rather than folded into it.")
     return U.Windows(every)

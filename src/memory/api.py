@@ -236,6 +236,17 @@ class Store:
         return range(block * self.quota, (block + 1) * self.quota)
 
 
+_FROZEN_KEYS_UNBUILT = (
+    "the frozen byte-statistic key table is DECLARED and NOT BUILT in this tree. Nothing in src/ "
+    "computes one, no lever sizes it and no argument carries one -- `key_fn` is the live model's "
+    "encoder, which is the other arm. Writing with it anyway would put model keys in a store the "
+    "operator asked to key by bytes, which is the exact silent substitution MEM_KEY_SRC's choices= "
+    "exists to refuse. What closes this: a frozen encoder on MEM's own surface, or a second "
+    "callable argument beside key_fn -- both are signature changes and therefore the owner's call.")
+"""The one sentence MEM_KEY_SRC=frozen is refused with, at MEM.open_store (startup) and at
+MEM.write (the point of use), so the two refusals cannot drift apart."""
+
+
 def open_store(mem: Config, *, key_dim, vocab_slots, device, rng, lm_kind, restored=None):
     """Allocate the store, or restore one from a checkpoint blob.
 
@@ -290,8 +301,20 @@ def open_store(mem: Config, *, key_dim, vocab_slots, device, rng, lm_kind, resto
                  claim this function's own code cannot back)
     WIRES READ: d_capacity, d_owner_blocks, d_source_slots
     DID IT FIRE: store.n_opened, store.n_restored_entries, store.n_restore_refused
+
+    MEM_KEY_SRC=frozen IS REFUSED HERE, AT STARTUP, WITH spine/gate.py::NotBuilt (2026-09-24). The
+    frozen byte-statistic key table is declared and not built, and until this date the only
+    refusal was at the point of use, in MEM.write: compose() returned with 0 refusals, ran the whole
+    SIG warm-up and the run died at its FIRST FLUSH (driven: MEM_KEY_SRC=frozen at
+    DATA_STREAM_BYTES=60000). The store is where the key source is first decided, so the refusal
+    is here; write() keeps its own for a caller that reaches it by another route.
     """
     mem = mem.owned_by("MEM")
+    if str(mem.key_src) != "model":
+        raise NotBuilt(
+            f"MEM_KEY_SRC={str(mem.key_src)!r}: {_FROZEN_KEYS_UNBUILT} Refused at MEM.open_store, "
+            f"before the store is allocated, rather than at the first flush's MEM.write. Run at "
+            f"MEM_KEY_SRC=model.")
 
     # ==============================================================================================
     # THE STORE'S TWO GEOMETRY LEVERS, REFUSED BELOW 1 AT MEM'S OWN FIRST READ
@@ -1259,14 +1282,10 @@ def write(mem: Config, store, *, contexts, tokens, surprise, sources, owners, po
         # argument that supplies one. Writing model keys under MEM_KEY_SRC="frozen" would be the
         # silent-else this lever is named in (KEY_SRC=Model fell into the else and ran the frozen
         # baseline with no error), wearing the other sign.
-        raise NotBuilt(
-            f"MEM_KEY_SRC={ksrc!r}: the frozen byte-statistic key table is DECLARED and NOT BUILT in "
-            f"this tree. Nothing in src/ computes one, no lever sizes it and no argument carries "
-            f"one -- `key_fn` is the live model's encoder, which is the other arm. Writing with it "
-            f"anyway would put model keys in a store the operator asked to key by bytes, which is "
-            f"the exact silent substitution MEM_KEY_SRC's choices= exists to refuse. What closes "
-            f"this: a frozen encoder on MEM's own surface, or a second callable argument beside "
-            f"key_fn -- both are signature changes and therefore the owner's call.")
+        # SINCE 2026-09-24 MEM.open_store refuses this arm at startup with the same sentence, so
+        # the composition root never reaches here on it; this is the second line for a caller
+        # that holds a store opened by another route.
+        raise NotBuilt(f"MEM_KEY_SRC={ksrc!r}: {_FROZEN_KEYS_UNBUILT}")
 
     # ==============================================================================================
     # WHAT THE FLUSH HANDED OVER, CHECKED BY SHAPE AND REFUSED BY NAME
@@ -3000,16 +3019,14 @@ def rekey_period(mem: Config):
     # rather than copied: a range check over MEM's own lever at its first read, and MEM declares no
     # refusal entry point for it to live in.
     #
-    # THE SECOND READER IS ALSO WHY THIS ONE IS THE WORST OF THE FIVE TO LEAVE UNREFUSED, and this
-    # is a split a reader can check in this file rather than a hazard imagined for it. maintain
-    # arms the re-encode on `rekey_every > 0`, so a negative reads as DISARMED there; the spine's
-    # dom.rekey gate goes through RUN.Cadences.due, whose contract is "True at most once per
-    # `period` WINDOWS elapsed since this key last fired", so at -5 it is true on the FIRST window
-    # and on every window after. ONE LEVER, TWO MECHANISMS, and at a negative value they disagree
-    # about which one is running -- the store quietly stops tracking the model while the event is
-    # delivered to DOM every window. docs/04_CONTRACT.md already names this field as driving two
-    # mechanisms and two gates; a value that makes the two mean opposite things is exactly what a
-    # range check at the first read is for.
+    # THE TWO READERS AGREE AT A NEGATIVE, AND THIS PARAGRAPH SAID THEY DID NOT UNTIL 2026-09-24.
+    # maintain arms the re-encode on `rekey_every > 0`, so a negative reads as DISARMED there; the
+    # spine's dom.rekey gate goes through RUN.Cadences.due, whose body opens with `if int(period)
+    # <= 0: return False` -- DISARMED as well (driven with the switch off at MEM_REKEY_EVERY=-1 over
+    # 12 windows: ledger dom.rekey checks=12 fires=0). The old sentence predicted the gate would be
+    # true on every window from Cadences.due's contract before its body existed; the body disarms.
+    # So a negative is an undeclared second spelling of the declared DISARM (0), on both
+    # mechanisms, and the refusal stands on the owner's ruling for that reason alone.
     #
     # WHAT A NEGATIVE ACTUALLY DOES TODAY, MEASURED RATHER THAN ASSUMED. `assemble.build` accepts
     # MEM_REKEY_EVERY=-5 and freezes it; this accessor returned Windows(-5); and
@@ -3027,13 +3044,15 @@ def rekey_period(mem: Config):
     if REFUSE_NEGATIVE_PERIOD and every < 0:
         raise LeverError(
             f"MEM_REKEY_EVERY={every}: a rekey period is a count of windows ELAPSED since the last "
-            f"pass and may not run backwards. It drives TWO mechanisms and at a negative value they "
-            f"disagree: MEM.maintain arms its amortized re-encode on `rekey_every > 0`, so {every} "
-            f"reads there as DISARMED, while the spine's dom.rekey gate goes through "
-            f"RUN.Cadences.due, which fires when `step - last_fired >= period` and so is true on "
-            f"the first window and on every window after it. The store would stop tracking the "
-            f"model while the event fired every window. Neither meaning is lost: MEM_REKEY_EVERY=0 "
-            f"is the declared DISARM and MEM_REKEY_EVERY=1 re-encodes the whole readable store "
-            f"every window. MEM_KEY_SRC is not consulted here: this refuses an out-of-range value "
+            f"pass and may not be negative. Both mechanisms it drives would read {every} as "
+            f"DISARMED -- MEM.maintain arms its amortized re-encode on `rekey_every > 0`, and "
+            f"RUN.Cadences.due (train/api.py) returns False for every period <= 0, so the "
+            f"spine's dom.rekey gate never fires and RUN.cadence_audit prints it "
+            f"DISARMED -- which makes a negative an undeclared second spelling of the declared "
+            f"DISARM. Refused rather than read as off, under the owner's switch "
+            f"(REFUSE_NEGATIVE_PERIOD at the top of memory/api.py). Neither meaning is lost: "
+            f"MEM_REKEY_EVERY=0 is the declared DISARM and MEM_REKEY_EVERY=1 re-encodes the whole "
+            f"readable store every window. MEM_KEY_SRC is not consulted here: this refuses an "
+            f"out-of-range value "
             f"for MEM's own lever, whether or not a second lever makes it moot.")
     return U.Windows(every)

@@ -1804,12 +1804,14 @@ def counters(cap: Config, valve):
     statement about the STARTING caps -- "experts 3/ceiling 10/settles 5/one lift -> 10, CLAMPED at
     the ceiling from 11" -- and passing that string through to an end-of-run FIRED line prints a
     true-at-startup equation as a statement about a run whose cap has been 10 for most of its
-    length. That is the false-equation shape this package has paid for six times, and the only
-    reason it is an obligation here rather than a defect is that this entry point is still a stub.
-    The caps are on the Valve; the two hard ceilings are in the ledger this call already reads.
+    length. That is the false-equation shape this package has paid for six times. (This sentence
+    went on "and the only reason it is an obligation here rather than a defect is that this entry
+    point is still a stub" until 2026-09-24; it has had a body since P4 wrote it.) The caps are on
+    the Valve; the two hard ceilings are in the ledger this call already reads.
 
     LEVERS READ: targets, lift, lift_min, pin_windows, stall_band, fab_start, vocab_start
-    WIRES READ: none
+    WIRES READ: d_operating_population (the settling point, printed in the clamp arithmetic beside
+                the experts cap; this line said "none" until 2026-09-24 while the body read it)
     DID IT FIRE: this call IS the DID IT FIRE surface for the package
     """
     cap = cap.owned_by("CAP")

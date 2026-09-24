@@ -1101,7 +1101,6 @@ def build(opt: Config, *, param_groups, run_windows):
         "opt.restart.no_reading": 0,
         "opt.restart.readings": 0,
         "opt.lr.writes.base": 0,
-        "opt.lr.writes.encoder": 0,
         "opt.lr.in_warmup": 0,
         "opt.lr.damped_this_step": 0,
         "opt.lr.shift_warm_applied": 0,
@@ -1119,6 +1118,14 @@ def build(opt: Config, *, param_groups, run_windows):
         "opt.ckpt.backward_at_load": 0,
         "opt.ckpt.step_at_load": 0,
     }
+    # THE ENCODER'S RATE-WRITE COUNTER IS SEEDED ONLY ON THE ARM WHERE A WRITE CAN REACH A
+    # PARAMETER (2026-09-24), before maybe_step's branch that decides. At SIG_MODE=bigram the
+    # encoder group is EMPTY (opt.build.params.encoder 0) and it was seeded and incremented anyway:
+    # driven over 12 windows, opt.lr.writes.encoder=12 "(each must equal opt.step=12)" beside
+    # opt.build.params.encoder 0 -- a rate write credited to a group that holds nothing. ABSENT is
+    # G4's word for unreachable on this arm, and counters() says why beside the line.
+    if len(ordered[1][1]) > 0:
+        counters["opt.lr.writes.encoder"] = 0
 
     return OptState(
         base=base_opt, encoder=enc_opt,
@@ -1402,7 +1409,8 @@ def maybe_step(opt: Config, st, *, best_bpb=None, shift_at=None):
                  opt.lr.writes.base and opt.lr.writes.encoder (each must equal opt.step -- the
                  rate is written to both optimizers on every step; the old single counter said
                  "must equal opt.step, on BOTH optimizers" and could not distinguish a missing
-                 encoder write from a missing step),
+                 encoder write from a missing step. opt.lr.writes.encoder is ABSENT when the
+                 encoder group is empty, e.g. SIG_MODE=bigram: no write reaches a parameter),
                  opt.encoder_steps_here (MUST BE 0 -- the regression counter for Q-OPT-6. A
                  nonzero value is the double-step returning, and without a counter it returns
                  silently because both call sites look correct in isolation. It is DERIVED from the
@@ -1576,7 +1584,10 @@ def maybe_step(opt: Config, st, *, best_bpb=None, shift_at=None):
     st.counters["opt.lr.writes.base"] += 1
     for g in st.encoder.param_groups:
         g["lr"] = lr
-    st.counters["opt.lr.writes.encoder"] += 1
+    # COUNTED ONLY WHERE A PARAMETER RECEIVES IT: seeded at build on the arm whose encoder group
+    # holds one, absent (unreachable) on the arm whose group is empty.
+    if "opt.lr.writes.encoder" in st.counters:
+        st.counters["opt.lr.writes.encoder"] += 1
 
     # THE Q-OPT-6 TRIPWIRE, SAMPLED BEFORE THIS FUNCTION'S OWN STEP. Only a step taken INSIDE
     # maybe_step can move the encoder optimizer between here and the line after st.base.step(); SIG
@@ -2447,9 +2458,14 @@ def counters(opt: Config, st):
         f"opt.backward={n_bwd}  opt.step={n_step}  accum={divisor}  "
         f"batch_windows={windows_per_flush}  d_effective_batch_windows={int(effective)}  "
         f"-- the batch this run TRAINED at, printed rather than configured",
-        f"opt.lr.writes.base={st.counters['opt.lr.writes.base']}  "
-        f"opt.lr.writes.encoder={st.counters['opt.lr.writes.encoder']}  "
-        f"(each must equal opt.step={n_step})",
+        (f"opt.lr.writes.base={st.counters['opt.lr.writes.base']}  "
+         f"opt.lr.writes.encoder={st.counters['opt.lr.writes.encoder']}  "
+         f"(each must equal opt.step={n_step})"
+         if "opt.lr.writes.encoder" in st.counters else
+         f"opt.lr.writes.base={st.counters['opt.lr.writes.base']} (must equal opt.step={n_step})  "
+         f"opt.lr.writes.encoder UNREACHABLE (opt.build.params.encoder="
+         f"{st.counters['opt.build.params.encoder']}: the encoder group holds no parameter, so no "
+         f"rate write reaches one)"),
         f"opt.horizon: run_steps={int(st.horizon.run_steps)} (projected once at build, from "
         f"run_windows) vs steps_taken={n_step}; residual="
         f"{int(st.horizon.run_steps - st.opt_step)} steps. Q-OPT-5's residual is against the "
@@ -2652,6 +2668,10 @@ def load_state(opt: Config, st, saved):
     # would report the parent run's warmup clamp against this run's schedule.
     for key, value in dict(saved.get("counters", {})).items():
         if key.startswith("opt.build."):
+            continue
+        # THE ENCODER'S RATE-WRITE TALLY RETURNS ONLY TO A BUILD THAT SEEDED IT: a parent with an
+        # encoder must not make the key present on a child whose encoder group is empty.
+        if key == "opt.lr.writes.encoder" and key not in st.counters:
             continue
         st.counters[key] = value
     st.counters["opt.ckpt.loaded"] += 1

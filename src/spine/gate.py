@@ -139,3 +139,22 @@ class NotBuilt(Exception):
     run on a declared-but-unbuilt arm would be reported as a missing body, which is the confusion
     this type removes.
     """
+
+
+class NonFinite(Exception):
+    """A nan or an inf that would be TRAINED ON or PERSISTED, refused where it would cross.
+
+    ADDED 2026-09-24, and it is two refusals of one fact. spine/loop.py raises it when a flush's
+    composed training loss is non-finite, before the optimizer steps on it; ckpt/api.py::save raises
+    it when the payload it is about to write holds a non-finite floating tensor, before the file is
+    touched. Driven before either existed: a single nan in one flush's loss stepped AdamW on nan
+    gradients, left all 8 LM parameter tensors non-finite, and the run died one flush later in
+    DOM.note_competence ("`bits` is nan for domain 1") -- a refusal naming domain competence, not
+    the loss, the step or a lever. For a continual learner a poisoned parameter, store or partition
+    is permanent forgetting, and a checkpoint carries it into every resume.
+
+    WHY HERE, beside NotBuilt: it is shared vocabulary the spine and a package both raise, it reads
+    no lever and holds no state, and run.py catches it by name to print the stop rather than a
+    traceback. It is NOT a divergence alarm -- a finite loss of 700 passes both checks; that alarm
+    is EVAL's and deferred.
+    """

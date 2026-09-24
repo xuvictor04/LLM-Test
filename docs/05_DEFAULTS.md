@@ -39,7 +39,7 @@ here was never asked, and no counter in any report can say so on its own.
 | `LM_MASK_DEAD_ROWS` | Take never-minted and retired vocabulary rows out of the distribution wherever logits become one. |
 | `MEM_WRONG_SWEEP` | Whether the selected wrongness detector DELETES flagged entries or only flags them. |
 | `RUN_BENCH` | Stop immediately after the training loop and print throughput instead of running the eval battery. |
-| `RUN_PROFILE` | Per-component wall-clock attribution of the training step, dumped on the rate cadence and again in the throughput summary. |
+| `RUN_PROFILE` | Per-component wall-clock attribution of the training step, rendered at the end of the run and in the throughput summary. |
 
 11 levers ship False.
 
@@ -347,7 +347,7 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `RUN_BENCH` | `False` | on/off |  | Stop immediately after the training loop and print throughput instead of running the eval battery. |
 | `RUN_DEVICE` | `'cpu'` | name | choices `'cpu'`, `'cuda'` | The torch device every module's .to() targets, and the gate on the mixed-precision branch. |
 | `RUN_EPOCHS` | `1` | Epochs |  | How many passes over the stream the run makes; the loop's termination test. |
-| `RUN_PROFILE` | `False` | on/off |  | Per-component wall-clock attribution of the training step, dumped on the rate cadence and again in the throughput summary. |
+| `RUN_PROFILE` | `False` | on/off |  | Per-component wall-clock attribution of the training step, rendered at the end of the run and in the throughput summary. |
 | `RUN_SEED` | `0` | count |  | Root seed for the whole run; every module's initialisation and the data stream derive from it. |
 | `RUN_TF32` | `True` | on/off |  | Allow TF32 matmul and cuDNN kernels; changes how matmuls execute, not what is computed. |
 

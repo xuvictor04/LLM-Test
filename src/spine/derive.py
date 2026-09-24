@@ -583,17 +583,16 @@ def run_windows_from_epochs(n_epochs, windows_in_epoch):
     REJECTS. Minus one pass over the stream has not happened, so there is no number of windows to
     answer for it -- the ruling opt_steps_from_backwards makes at its own count end, for a count of
     events that did not occur. Epochs(0) still answers Windows(0). THIS IS NOT DEFENCE IN DEPTH
-    BEHIND AN UPSTREAM THAT ALREADY REFUSES, and the measurement is what says so:
-    train/api.py::startup_refusals tests `epochs < 1`, so it does append a refusal string for a
-    negative, but that string is RETURNED -- nothing in src/ raises on System.refusals, and
-    spine/compose.py::compose collects it and keeps building. With CAP's stub returning [],
+    BEHIND AN UPSTREAM THAT ALREADY REFUSES, and the measurement is what says so -- OF THE TREE IT
+    WAS TAKEN ON: train/api.py::startup_refusals tests `epochs < 1`, so it does append a refusal
+    string for a negative, and until 2026-09-24 that string was only RETURNED --
+    spine/compose.py::compose collected it and kept building. With CAP's stub returning [],
     RUN_EPOCHS=-1 built Windows(-634) here and OPT's horizon came out Steps(1): a
     one-optimizer-step LR schedule for a run configured to make minus one pass, with the refusal
-    sitting unread in the same System. WHERE THE ARM STANDS TODAY, NAMED RATHER THAN ASSUMED: the
-    first call is spine/compose.py::_run_windows inside the OPT.build row, and
-    capacity/api.py::startup_refusals raises NotImplementedError one row earlier, so on the tree as
-    it stands this refusal is UNREACHABLE through the composition root and reachable from any
-    direct caller.
+    sitting unread in the same System. WHERE THE ARM STANDS TODAY, NAMED RATHER THAN ASSUMED:
+    compose() now raises spine/compose.py::RefusedRun at its `refuse` stage, before geometry, so
+    RUN_EPOCHS=-1 stops there and this refusal is UNREACHABLE through the composition root; it is
+    reachable from any direct caller, which is why it stays.
 
     REFUSES A Clock AS THE RATE, like every conversion in this file: `windows_in_epoch` is a RATIO
     of two kinds and not a count of one, and `int()` on a Clock succeeds silently. See
@@ -631,15 +630,13 @@ def run_windows_from_epochs(n_epochs, windows_in_epoch):
                         f"there is no number of windows to answer for it -- the ruling "
                         f"opt_steps_from_backwards makes at its own count end, and NOT a floor: "
                         f"Epochs(0) still answers Windows(0), which is the property this function "
-                        f"exists to keep. THIS IS NOT DEFENCE IN DEPTH. train/api.py::"
-                        f"startup_refusals does test epochs < 1, so it appends a refusal string "
-                        f"for a negative -- but the string is RETURNED, nothing in src/ raises on "
-                        f"System.refusals, and spine/compose.py::compose collects it and keeps "
-                        f"building: with capacity/api.py::startup_refusals stubbed to [] so the "
-                        f"walk gets past the P4 blocker, RUN_EPOCHS=-1 built Windows(-634) here "
-                        f"and OPT's horizon came out Steps(1), a one-optimizer-step LR schedule "
-                        f"for a run configured to make minus one pass, with the refusal sitting "
-                        f"unread in the same System.")
+                        f"exists to keep. train/api.py::startup_refusals also refuses "
+                        f"epochs < 1, and spine/compose.py::compose raises RefusedRun on it "
+                        f"before geometry; this refusal is for a caller that reaches here by "
+                        f"another route. Before compose raised, RUN_EPOCHS=-1 built "
+                        f"Windows(-634) here and OPT's horizon came out Steps(1), a "
+                        f"one-optimizer-step LR schedule for a run configured to make minus one "
+                        f"pass.")
     return Windows(n_epochs.n * w)
 
 

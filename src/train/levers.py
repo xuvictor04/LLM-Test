@@ -446,8 +446,12 @@ class RUNLevers(LeverSet):
     # correctness depends on an INSTRUMENT's tick is a cross-package staleness that quietening a log would
     # reintroduce. In the rebuild bytes-per-window is one derived d_ value resolved in one place.
 
-    profile = Lever(False, "Per-component wall-clock attribution of the training step, dumped on the "
-                           "rate cadence and again in the throughput summary.", U.FLAG)
+    profile = Lever(False, "Per-component wall-clock attribution of the training step, rendered at "
+                           "the end of the run and in the throughput summary.", U.FLAG)
+    # THE HELP TEXT SAID "dumped on the rate cadence" UNTIL 2026-09-24. The rate cadence is EVAL's
+    # curve cadence, whose probe is deferred, and nothing ever dumped spans on it -- nor anywhere:
+    # spine/loop.py opened no span until that date. The spans now render at R (RUN.Timing.spans)
+    # and inside RUN.bench_summary.
     # Census: PROFILE -> RUN.RUN_PROFILE, verdict keep, default 0, unit FLAG (CENSUS.md:355). Field
     # corrected from `RUN_PROFILE` to `profile` (DEFECT 1). Declared False, as above.
     # A DIAGNOSTIC MODE, NOT A RUN MODE, AND THE DISTINCTION IS THE LEVER'S WHOLE CONTENT. On CUDA the

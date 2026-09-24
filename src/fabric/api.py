@@ -148,28 +148,60 @@ _NONFINITE_MEASURED = {
         "DURING spine/assemble.py::build by the FAB.d_operating_population coupling, which calls "
         "spine/derive.py::operating_population, so the refusal that fires is that function's and it "
         "names the quantity rather than this lever",
+    # THE FOUR FAB.manage LEVERS, ADDED 2026-09-24. The fallback below used to say their only
+    # reader was "still a P4 stub"; FAB.manage has a body and runs on the fab.manage cadence, so a
+    # non-finite value reaches its cull/spare/rescue pass. What each does there is the COMPARISON
+    # in fabric/api.py::manage EVALUATED at the value (python float arithmetic), not a driven run:
+    # this function refuses all four before manage could be reached.
+    "FAB_FAIL_TOL":
+        "the margin above the population's error by which an expert counts as FAILING, read by "
+        "FAB.manage as `ef_i > fail_base + fail_tol and es_i > fail_base + fail_tol`. At nan and at "
+        "+inf that comparison is False for every expert, so NO expert ever counts as failing and "
+        "the failure cull is silently off while the pass still runs and prints; at -inf it is True "
+        "for every expert with finite EMAs, so every eligible expert counts as failing",
+    "FAB_SHIFT_TOL":
+        "the fast-over-slow error margin that spares a failing expert as MID-SHIFT, read by "
+        "FAB.manage as `ef_i - es_i > shift_tol`. At nan (and at +inf) that is False for every "
+        "expert, so the shift spare never fires and every failing expert is culled, including the "
+        "ones the spare exists to protect during a distribution shift; at -inf it is True, so every "
+        "failing expert is spared and the failure cull never removes one",
+    "FAB_RESCUE":
+        "the fraction of the worst-used eligible experts FAB.manage rescues with a heavy mutation "
+        "instead of culling, guarded `rescue_frac > 0.0`. At nan and -inf the guard is False, so "
+        "the rescue is silently off; at +inf the guard passes and "
+        "`int(rescue_frac * max(1, n_elig))` raises a bare OverflowError from inside the manage "
+        "pass, naming neither this lever nor the value",
+    "FAB_MUT_BIG":
+        "the heavy-mutation scale. FAB.manage's rescue adds `randn * mut_big * t[i].std()` to a "
+        "rescued expert's A and B rows and stores mut_big as its mutscale, so at nan or +/-inf "
+        "every rescued expert's weights are written non-finite in place, PERMANENTLY; "
+        "FAB.grow_check's heavy-tail birth scales a child's mutation by `mut * mut_big`, so a birth "
+        "on that tail is born non-finite the same way",
 }
 """Per-lever, what a nan or an inf was MEASURED to do -- quoted into build()'s refusal for whichever
-levers the operator actually set. Nine entries against 43 float levers, and the gap is the honest
-part: the other 34 are refused on the same rule with no measurement of their own. THE SET WITHOUT A
+levers the operator actually set. Thirteen entries against 43 float levers, and the gap is the
+honest part: the other 30 are refused on the same rule with no measurement of their own. THE SET
+WITHOUT A
 LIVE READER SHRANK ON 2026-09-17 and this sentence moved with it: FAB.grow_check and
 FAB.own_lr_scale have bodies, so z, plateau, new_frac, parent_max, mut, mut_big, mut_big_p, xover,
 birth_jitter, lr_cycle, lr_gamma, lr_amin, lr_maxr and lr_boost are now read on a real flush and a
 nan in any of them reaches arithmetic rather than freezing into the Config -- WHICH IS WORSE AND NOT
-BETTER, and is exactly why the refusal above enumerates every float lever rather than a list. What
-is still unread is FAB.manage's and FAB.contribution's: the cull fraction, the merge distance and
-the two error tolerances, which freeze a nan into the Config and arm the day a body is written (one
-of them, FAB_COMP_EMA, already crosses a package boundary as DOM.d_comp_ema before this function
-runs, and is read here by FAB.observe as well). The remaining eleven are the magnitude levers whose
-nan/+inf refusal build() already carried.
+BETTER, and is exactly why the refusal above enumerates every float lever rather than a list. THE
+SET SHRANK AGAIN AND THIS PARAGRAPH SAID OTHERWISE UNTIL 2026-09-24: FAB.manage has a body and runs
+on the fab.manage cadence, so the cull fraction, the merge distance and the two error tolerances
+reach arithmetic too, and four of its levers now have entries of their own above. FAB.contribution
+is deferred, but it reads no float lever that nothing else reads (FAB_COMP_EMA is read by FAB.observe
+as well, and crosses to DOM as DOM.d_comp_ema before this function runs), so no float lever here is
+unread any more. The remaining eleven are the magnitude levers whose nan/+inf refusal build()
+already carried.
 
 WHAT THIS DOES NOT SAY, AND MUST NOT BE READ AS SAYING. Refusing nan/+inf/-inf closes FOUR VALUES
 PER LEVER AND LEAVES THE MECHANISM OPEN. A FINITE value does the same damage and worse: measured on
 this package's own sweep, FAB_ALPHA=1e26 gives aux=0.5150710 and composed=2.943258 -- an
 ordinary-looking loss pair no report would flag -- over a population whose gradient tensors are
 already 15/23 poisoned, while 1e28 and nan are indistinguishable from each other at 19/23. So no lever below is
-'safe', 'bounded' or 'validated' after this refusal; each is exactly four values less open than it
-was. A declared per-lever domain is the general answer and is the owner's open question."""
+was. A declared per-lever domain is the general answer: spine/lever.py's `domain=` exists and
+fabric/levers.py already declares one on some levers; the rest are the owner's open question."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -804,11 +836,10 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
             f"declares no float lever for which any of the three is a reading -- every declared "
             f"sentinel in fabric/levers.py::FABLevers is a ZERO. WHAT EACH ONE WAS MEASURED TO DO: "
             + " || ".join(f"{k}={v}: " + _NONFINITE_MEASURED.get(
-                k, "no measurement of its own on this table: either it is read on a live path "
-                   "whose nan was never driven (FAB.observe, FAB.grow_check and FAB.own_lr_scale "
-                   "have bodies as of 2026-09-17, so their levers reach arithmetic), or its only "
-                   "readers are FAB.manage and FAB.contribution, which are still P4 stubs -- there "
-                   "the value freezes into the Config and arms the day a body is written")
+                k, "no measurement of its own on this table: it is read on a live path whose "
+                   "non-finite value was never driven -- FAB.forward, FAB.observe, FAB.grow_check, "
+                   "FAB.own_lr_scale and FAB.manage all have bodies and run, so every float lever "
+                   "of this package reaches arithmetic on some flush")
                 for k, v in _nonfinite)
             + ". REFUSED AT STARTUP AND NOT DESCRIBED BY A GATE, because a Gate reason is a report "
               "and the mechanism still runs: at FAB_ALPHA=nan the fab.halt gate prints the verdict "
@@ -818,7 +849,8 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
               "the mechanism open. FAB_ALPHA=1e26 is finite, prints an ordinary loss pair "
               "(aux 0.5150710, composed 2.943258) and already leaves 15 of 23 gradient tensors "
               "non-finite -- worse than +inf, which at least comes back nan. Set the lever to a "
-              "finite value; a declared per-lever domain is the general answer and is open.")
+              "finite value; a declared per-lever `domain=` (spine/lever.py) is the general "
+              "answer, and fabric/levers.py declares one on some levers and not yet on the rest.")
 
     # WHAT IS NOT REFUSED, AND WHY THE RULE IS NOT "FRACTION MEANS 0..1". U.FRACTION is a LABEL the
     # census renders and not a bound -- src/sig/levers.py and src/tok/levers.py both say so of their
@@ -2385,6 +2417,15 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     # bound is the moment of the birth itself -- this door neither consults the soft cap nor reads
     # FAB_GROW, so a frozen population still drifts upward by spawn alone (the :7332-7335 defect),
     # and closing that is the first option, which is still a frozen-signature move.
+    # fab.spawned AND fab.spawn_declined ARE SEEDED ONLY WHEN FAB_SPAWN IS ON (2026-09-24), BEFORE
+    # the branch that decides. They were in the seeding loop below this block, so at FAB_SPAWN=0
+    # the report printed both present-and-0 -- "armed, did not fire" -- beside gate fab.spawn reading
+    # UNREACHABLE ('not measured' -- FAB_SPAWN=0) on the same run. A full pool or a non-learning
+    # pass is a per-pass state the gate carries, and the keys stay seeded on those; the switch is
+    # the configuration, and on it they are ABSENT.
+    if spawn_on:
+        counters.setdefault("fab.spawned", 0)
+        counters.setdefault("fab.spawn_declined", 0)
     spawned = None
     # THE REACHABILITY IS DECIDED BEFORE THE TEST RUNS, not after it. Asking "is the pool full"
     # afterwards reads the state the spawn ITSELF produced -- a birth that takes the population to
@@ -2435,7 +2476,7 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                  "fab.explore_distinct_targets", "fab.discovered", "fab.discover_targets",
                  "fab.banned_experts", "fab.ec_applied", "fab.balance_nonzero", "fab.div_applied",
                  "fab.ident_refreshed",
-                 "fab.ident_trained", "fab.holdout_applied", "fab.spawned", "fab.spawn_declined"):
+                 "fab.ident_trained", "fab.holdout_applied"):
         counters.setdefault(_key, 0)
     # THREE KEYS ARE SEEDED ONLY ON THE ARM THAT CAN REACH THEM, still before any branch decides.
     # They were in the loop above until 2026-09-24, and spine/loop.py passed no `head` and no
@@ -5102,12 +5143,12 @@ def manage_period(fab: Config):
     # TENSE BECAUSE THAT IS WHERE IT BELONGS. `assemble.build` ACCEPTED FAB_MANAGE_EVERY=-5 and
     # froze it; this accessor then returned Windows(-5); and
     # spine/derive.py::cadences_that_cannot_fire then reported ("fab.manage", -5, 0) -- the SAME
-    # shape of line it prints for a period of zero. Meanwhile RUN.Cadences.due states its contract
-    # as "True at most once per `period` WINDOWS elapsed since this key last fired", so a body
-    # written to it compares `step - last_fired >= period.n`, which at -5 is true on the FIRST
-    # window and every window after. A negative here is therefore the cull, the spares, replication
-    # and the staged-depth check on EVERY window, reported by the one live reader as a gate that
-    # cannot fire. That is the same false equation ckpt/api.py::save_period was repaired for.
+    # shape of line it prints for a period of zero -- AND THAT LINE WAS RIGHT. The paragraph here
+    # said until 2026-09-24 that a body written to RUN.Cadences.due's contract would be true on
+    # every window at a negative, so a negative meant the cull, the spares, replication and the
+    # staged-depth check on EVERY window. The body that was written opens with `if int(period) <=
+    # 0: return False`: a negative DISARMS the management pass, an undeclared spelling of "never
+    # manage". The refusal stands on the owner's ruling for that reason.
     #
     # THE THIRD READING IS THE REASON THIS ONE MATTERED MORE THAN ITS SIBLINGS, and it is measured
     # rather than feared. This field is ALSO the source of the FAB.d_manage_period wire, which
@@ -5176,15 +5217,12 @@ def manage_period(fab: Config):
     if REFUSE_NEGATIVE_PERIOD and every < 0:
         raise LeverError(
             f"FAB_MANAGE_EVERY={every}: a management cadence is a count of windows ELAPSED since "
-            f"the last pass and may not run backwards. RUN.Cadences.due DECLARES its contract as "
-            f"a long-run RATE of one fire per `period` WINDOWS, with jitter bounded by the caller's "
-            f"evaluation stride -- its body exists, so this is a statement about running code and "
-            f"not only about a contract, and that body compares "
-            f"`step - last_fired >= period`, so a negative period is true on the first window and "
-            f"on every window after it -- {every} does not mean 'manage less often' or 'do not "
-            f"manage', it means the cull, the spares, replication and the staged-depth check on "
-            f"EVERY window, while spine/derive.py::cadences_that_cannot_fire reports the same value "
-            f"as a gate that cannot fire. FAB_MANAGE_EVERY=1 is the every-window pass and is in "
+            f"the last pass and may not be negative. RUN.Cadences.due (train/api.py) returns "
+            f"False for every period <= 0, so {every} would DISARM the "
+            f"cull, the spares, replication and the staged-depth check -- an undeclared spelling "
+            f"of 'never manage', printed DISARMED by RUN.cadence_audit. Refused rather than read "
+            f"as off, under the owner's switch (REFUSE_NEGATIVE_PERIOD at the top of "
+            f"fabric/api.py). FAB_MANAGE_EVERY=1 is the every-window pass and is in "
             f"range. This lever declares no meaning for 0 either, and 0 is deliberately left alone "
             f"by this refusal rather than folded into it. No second lever is consulted here: "
             f"FAB_ON removes the fabric from the forward path and FAB_GROW freezes the population, "
