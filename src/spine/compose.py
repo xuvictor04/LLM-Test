@@ -871,7 +871,9 @@ LOOP_ORDER = (
                                       "order is :6649 then :6651, and it is what makes the lookahead "
                                       "sound: the batching interval is the span over which the "
                                       "encoder is provably frozen. stream=_signature_stream(sysm, "
-                                      "sig); seen_units=_signature_cursor(sysm, sig, clock.step), "
+                                      "sig); seen_units=_signature_cursor(sysm, sig, i) at this "
+                                      "window's epoch-local 0-based index i, so the window about to "
+                                      "be predicted is not yet drawable (Q-FAB-7), "
                                       "THE CURSOR AND NOT THE LENGTH -- _signature_units is the "
                                       "whole epoch-0 stream and is warm_up's alone, and deriving "
                                       "the cursor inline at a call site would be a Windows->bytes "
@@ -891,9 +893,12 @@ LOOP_ORDER = (
                                       "the run routes every window through a randomly initialised "
                                       "encoder while an AdamW steps it on zero gradients"),
     ("A", "SIG",   "encode",          "one signature per window, at st.width_units, always: "
-                                      "windows=_sample_window(sysm, sig, clock.step), the "
+                                      "windows=_sample_window(sysm, sig, i) with i this window's "
+                                      "epoch-local 0-based index, the "
                                       "width_units-wide slice of the unit stream ending at the "
-                                      "cursor. THE SAME OBJECT goes to DOM.observe one row below, "
+                                      "window's FIRST byte -- never at its last, which routed every "
+                                      "window on its own targets until 2026-09-24 (Q-FAB-7). "
+                                      "THE SAME OBJECT goes to DOM.observe one row below, "
                                       "because domains/api.py::observe requires it -- a second slicer at "
                                       "that call site is a defect by construction",
                                       "signature -- the (N, sig.d) unit vectors DOM.observe, "
@@ -1766,10 +1771,14 @@ ROW_ARGUMENTS_ELSEWHERE = {
         "seen_units is _signature_cursor(sysm, sig, at_window) -- how much of the unit stream the "
         "loop has REACHED, not how much exists. Confusing it with the warm-up's length would let the "
         "encoder train on material the loop has not seen, which is the leak every held-out number "
-        "would then be measured through.",
+        "would then be measured through. at_window is this window's 0-based index, so the window "
+        "about to be predicted is NOT reached (Q-FAB-7): it read index + 1 until 2026-09-24, and an "
+        "anchor could then be drawn from the text the same window's signature was about to route.",
     "SIG.encode":
         "windows is _sample_window(sysm, sig, at_window) -- the st.width_units-wide slice this window "
-        "is encoded from, the same object domains/api.py::observe receives as sample_window.",
+        "is encoded from, the same object domains/api.py::observe receives as sample_window. "
+        "at_window is the window's 0-based index, so the slice ENDS AT ITS FIRST BYTE and holds "
+        "none of its targets (Q-FAB-7).",
     "LM.lm_loss":
         "y is the same cut LM.encode's x comes from, shifted one token -- see the LM.encode entry "
         "above. Listed separately because K10 keys on the entry point and a shared reason is not a "
@@ -2837,7 +2846,9 @@ def _signature_units(sysm, sig):
 # memory-on baseline there would silently undo the C3/H11 repair.
 # WHAT IS STILL MISSING, so this stays a deferral and not a helper: FAB.forward needs `signature`,
 # `domain_id`, `novelty` and `live_domains` per row. For a HELD-OUT window the closure can encode
-# the signature itself with _sig_encode_fn and pass training=False and DOM's live count -- `novelty`
+# the signature itself with _sig_encode_fn -- off the width_units units BEFORE the scored window,
+# the slice _sample_window takes at that window's own index, and never off the window being scored,
+# which is the training-path leak Q-FAB-7 closed -- and pass training=False and DOM's live count -- `novelty`
 # is the one datum with no honest source off the training path, and it is named here rather than
 # defaulted to zero in silence. For a STORED entry the domain id is Store.src, which is why the
 # declared callable is `scorer(ctx, src) -> logits` and not `scorer(ctx)`; see MEM.judge below.
@@ -2909,9 +2920,16 @@ def _sample_window(sysm, sig, at_window):
     that is the whole reason this is a function rather than an expression written twice.
 
     THE ONE DECISION IN IT, recorded rather than left implicit: the window is the width_units units
-    ENDING AT THE CURSOR, i.e. the material just consumed. Nothing in the frozen surfaces states
+    ENDING AT THE CURSOR, i.e. the material already consumed. Nothing in the frozen surfaces states
     which end, and a run that encodes the units AHEAD of the cursor is encoding text the model has
     not trained on.
+    AND THE WINDOW BEING PREDICTED IS AHEAD OF THE CURSOR -- IT HAS NOT BEEN TRAINED ON -- SO THE
+    LOOP PASSES THAT WINDOW'S OWN 0-BASED INDEX, and the sample ends at the window's first byte
+    (Q-FAB-7). The loop passed index + 1 until 2026-09-24, reading "reached" as "cut", and the
+    paragraph above was therefore violated by its only caller: the sample ended at the LAST TARGET's
+    first byte and covered the whole window (window 149 of a default run: x bytes [28402, 28599),
+    sample [28407, 28599)), so the routing signature and the domain id FAB.forward bans on were both
+    read off the text being scored.
 
     `at_window` IS THE WINDOW ORDINAL AND NOT A TOKEN OFFSET -- _signature_cursor multiplies it by
     LM.ctx. Passing `i * ctx` returns the window `i * ctx` windows in, which is a real window of the
@@ -2925,8 +2943,12 @@ def _sample_window(sysm, sig, at_window):
     geometry, width_units is 192, so `start` is -19, the clamp took it to 0, and the first flush of
     every run handed SIG a short window. Measured across 600 ordinals: exactly one is short, and it
     is the first.
-    THE HEAD IS LEFT-PADDED AND THE TAIL IS NOT, AND THE ASYMMETRY IS THE HONEST ONE. At ordinal 1
-    the stream genuinely HAS no earlier units -- the corpus has a beginning -- so this is "a real
+    ORDINAL 0 IS CALLED NOW TOO, ON THE FIRST WINDOW OF EVERY EPOCH, AND ITS SAMPLE IS ALL PAD: the
+    cursor is byte_pos[0] = 0, so there is no earlier material at all and the answer below applies
+    to every one of the width_units units. That is the honest signature for the opening window of a
+    text -- a generator starting cold holds exactly as much -- and it costs one window per epoch.
+    THE HEAD IS LEFT-PADDED AND THE TAIL IS NOT, AND THE ASYMMETRY IS THE HONEST ONE. At ordinals
+    0 and 1 the stream genuinely HAS no (or too few) earlier units -- the corpus has a beginning -- so this is "a real
     window whose text ran out", which spine/loop.py already distinguishes from "a caller declining
     to measure" at its own tail-padding site, and the pad goes on the side the material is missing
     from. Taking the units AHEAD instead is what this docstring's own paragraph above rules out;

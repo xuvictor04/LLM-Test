@@ -788,20 +788,34 @@ def run(sysm, *, max_windows=None, progress=True):
             # domains/api.py::Assignment means by "`boundary` IS CONSUMED BACKWARDS": SIG's row
             # sits ABOVE DOM.observe's, so the count read here is the one DOM last reset and never
             # this window's own answer.
+            # `seen_units` IS THE CURSOR AT THIS WINDOW'S FIRST BYTE -- ordinal `i`, the windows reached
+            # BEFORE this one -- for the same reason the signature's is (Q-FAB-7): the window about to
+            # be predicted is not yet material the loop has trained on, so an encoder step that could
+            # draw it as an anchor would put this window's own text into the weights that then encode
+            # its routing signature. It read `win_in_epoch` (i + 1) until 2026-09-24.
             if sig_api.cadence_due(sig_cfg, st, step_windows=tick.step,
                                    windows_since_boundary=since_boundary):
                 sig_api.train_step(sig_cfg, st, stream=sig_stream,
-                                   seen_units=_c_signature_cursor(sysm, st, win_in_epoch),
+                                   seen_units=_c_signature_cursor(sysm, st, i),
                                    opt=sysm.optimizer.encoder)
             #
             # SIG.encode, PER WINDOW, WHICH IS WHERE THE TABLE PUTS IT -- immediately above DOM.observe.
             # It used to be called once per FLUSH from inside _flush, off a second slice of the corpus;
             # both of those are now here, and `sample` is the ONE object both consumers take.
             # EPOCH-LOCAL FOR THE SAME REASON THE CUT IS: _signature_cursor multiplies `at_window` by
-            # LM.ctx and indexes Segmentation.byte_pos, and `sysm.segmentation` is THIS epoch's. The
-            # ordinal is 1-based there -- it is "how many windows have been reached" -- so it is the
-            # cut's 0-based index plus one, which is `win_in_epoch` after the increment above.
-            sample = _c_sample_window(sysm, st, win_in_epoch)
+            # LM.ctx and indexes Segmentation.byte_pos, and `sysm.segmentation` is THIS epoch's.
+            # THE ORDINAL IS `i`, THE CUT'S OWN 0-BASED INDEX, SO THE SAMPLE ENDS AT THIS WINDOW'S FIRST
+            # BYTE -- AND IT WAS `win_in_epoch` (i + 1) UNTIL 2026-09-24, WHICH ROUTED EVERY WINDOW ON
+            # ITS OWN TARGETS (Q-FAB-7). The ordinal counts windows REACHED, and the window being cut
+            # here has not been reached: its logits are computed before anything trains on it. At
+            # i + 1 the sample ended at byte_pos[(i + 1) * ctx], the last target's first byte, so it
+            # covered the whole window -- measured at window 149 of a default run, x bytes
+            # [28402, 28599) against a sample over [28407, 28599). Every position was routed, and
+            # DOM.observe assigned the domain id FAB.forward bans on, from text the model was about to
+            # be scored on predicting, and no generation path can reproduce a signature of text it has
+            # not generated yet. At `i` the sample is the width_units units BEFORE the window, which
+            # a generator holding the same prompt has in hand.
+            sample = _c_sample_window(sysm, st, i)
             samples.append(sample)
             sig_i = sig_api.encode(sig_cfg, st, [sample])[0]
             if sig_i.device != sysm.process.device:
@@ -1293,22 +1307,26 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     #
     # THE UNITS ARE BYTES UNDER space="bytes", AND THE SEGMENTATION IS WHAT MAPS TO THEM.
     # byte_pos[t] is the byte offset of token t, so a window that starts at token `a` starts at
-    # byte byte_pos[a], and the signature reads width_units bytes from there -- the same text the
-    # window is made of, measured in the alphabet SIG was built for.
+    # byte byte_pos[a], and the signature reads the width_units bytes that END there -- the text
+    # BEFORE the window, in the alphabet SIG was built for. THIS PARAGRAPH USED TO SAY "the same
+    # text the window is made of", and until 2026-09-24 that was what the loop fed the router: the
+    # window's own targets (Q-FAB-7, and the paragraph at the A stage's SIG.encode call).
     # THE SIGNATURES ARE THE A STAGE'S AND ARE NOT RE-ENCODED HERE. SIG.encode is a ROW A entry
     # point sitting IMMEDIATELY ABOVE DOM.observe in LOOP_ORDER, and this function used to call it
     # itself off a second slice of the corpus -- which made the driver hold TWO SLICERS for a value
     # whose entire contract is that there is one.
     # WHAT THE TWO DISAGREED ABOUT, MEASURED: this block took `raw[byte_pos[a] : byte_pos[a] + 192]`
     # -- 192 bytes FORWARD from the window's first token -- while spine/compose.py::_sample_window
-    # takes the 192 units ENDING AT THE CURSOR. Those coincide only when a window happens to be
-    # exactly width_units bytes long; at the shipped geometry window 2's two slices differ
+    # took the 192 units ending at the cursor AFTER the window. Those coincide only when a window
+    # happens to be exactly width_units bytes long; at the shipped geometry window 2's two slices differ
     # (b'sBsCsuupqyrCtqAq' against b'rBrDqsBsCsuupqyr') and window 5's agree. _sample_window's own
     # docstring says why that cannot stand: "ONE OBJECT, TWO CONSUMERS ... because domains/api.py::
     # observe says a rekey cannot reproduce the signature otherwise -- so a second slicer at the DOM
     # call site is a defect by construction". The defect was at the SIG call site instead, and it
     # would have put the signature DOM stores in its reservoir in a different space from the one
-    # the router actually used -- exactly the drift DOM.rekey exists to prevent.
+    # the router actually used -- exactly the drift DOM.rekey exists to prevent. AND BOTH SLICES
+    # READ THE WINDOW'S OWN TEXT, so reconciling them to one left the routing seeing its targets;
+    # that is the half Q-FAB-7 repaired, by moving the cursor and not the slicer.
     sig_vec = torch.stack(sigs) if len(sigs) > 1 else sigs[0].unsqueeze(0)
     # SIG BUILDS ITS OWN TENSOR AND NEED NOT AGREE WITH THE PROCESS DEVICE, so the signature is
     # moved rather than assumed. Checked instead of called unconditionally, because `.to()` on a
@@ -1325,11 +1343,21 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
         novelty = torch.zeros(nb, device=dev)
     elif novelty.device != x.device:
         novelty = novelty.to(dev)
+    # THE DOMAIN THE ROUTER BANS ON IS THE FLUSH'S FIRST WINDOW'S, dids[0], AND IT WAS THE LAST
+    # WINDOW'S (`domain_id`) UNTIL 2026-09-24. FAB.forward takes ONE id for the whole batch, and the
+    # breadth ban it builds from it masks experts out of EVERY row. The last window's id was assigned
+    # from a signature over the bytes before the LAST window, which at OPT_BATCH_WINDOWS > 1 are the
+    # earlier rows' own text -- so rows 0..B-2 were routed on a domain read off their own targets,
+    # the Q-FAB-7 leak surviving the cursor repair one level up. dids[0]'s signature precedes every
+    # row. At the shipped OPT_BATCH_WINDOWS=1 the two are the same id and nothing moves. FAB.observe,
+    # DOM.note_competence and MEM.write keep their own ids: they book what already happened and
+    # reach no logit of this flush.
+    route_did = int(dids[0]) if dids else domain_id
     with cast():
         out = fab_api.forward(
             fab_cfg, pop, h=h, signature=sig_vec, novelty=novelty,
             step_windows=U.Windows(int(clock.step)),
-            domain_id=domain_id, live_domains=1, training=True)
+            domain_id=route_did, live_domains=1, training=True)
         # `hidden`, NOT `h`, AND THE FIRST DRAFT GOT THIS WRONG IN THE SAME TWO LINES AS THE SWALLOWED
         # EXCEPT ABOVE. It read `h = out.h if hasattr(out, "h") else h` -- so FabricOut, whose field is
         # `hidden`, never matched, the routed output was discarded, and the run trained on the

@@ -1458,9 +1458,25 @@ def _route_query(pop, signature, novelty, state=None):
     as biasing expert selection. Added to the query instead, a surprising window asks a different
     question of the population, which is what the mechanism was always described as doing.
 
-    `state` is hproj(h.mean(1)), and it is what makes hop 2 a question rather than a fixed function
-    of hop 1: without it the query is the input signature, identical at every hop, and the old tree
-    measured I(domain; (hop0,hop1)) equal to I(domain; hop0) to three decimals on every seed.
+    `state` is the hop's hidden state AT THE WINDOW'S FIRST POSITION, h[:, 0], and it is what makes
+    hop 2 a question rather than a fixed function of hop 1: without it the query is the input
+    signature, identical at every hop, and the old tree measured I(domain; (hop0,hop1)) equal to
+    I(domain; hop0) to three decimals on every seed. h[:, 0] still moves between hops -- the
+    mixture a hop adds is computed at every position, position 0 included -- so that property holds.
+    IT WAS h.mean(1) UNTIL 2026-09-24, AND THAT MADE THE WHOLE FABRIC NON-CAUSAL (Q-FAB-7). Routing
+    is ONE decision per window, applied at every position, so whatever the query reads, position 0
+    is routed on. A mean over all L positions let token t+1..L-1 choose the experts, the halt mass
+    and the mixture weights that produce position t's logits: measured through LM.encode ->
+    FAB.forward -> LM.decode with the window's tokens [t+1:] replaced, max|dlogit| at positions
+    <= t was 2.4e-6 at window 2, 1.1e-4 at window 150 and 8.2e-4 at window 600 of a default run
+    (LM.encode alone: exactly 0.0), growing as the router learned. h[:, 0] is the only per-window
+    summary of the window's own tokens that every position may see -- LM.encode's output at x[0],
+    causal on both LM arms (the GRU's first step, the transformer's causally masked first row) --
+    and a generator can form it before it emits the window's second token.
+    REJECTED: per-position routing on a causal running mean (a (B, L, n) routing distribution, the
+    expert gather L times wider, and `use`/`uage`, the halt EMA and the balance term re-denominated
+    from windows to positions -- a different fabric, not a repair); and the previous window's pooled
+    state (hop-invariant, which is exactly what this term exists not to be).
     """
     query = pop.modules["q_route"](signature) + pop.modules["nov_proj"](novelty[:, None])
     if state is not None:
@@ -2304,7 +2320,10 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
         # RE-ROUTED FROM SCRATCH EVERY HOP, WITH THE CURRENT STATE IN THE QUERY. That is what
         # hop_mode="soc" means: the second choice is not a successor of the first, there is no
         # transition matrix and no SRC anywhere on this walk.
-        query = _route_query(pop, signature, novelty, state=h.mean(1))
+        # THE STATE IS h[:, 0] AND NOT h.mean(1), BECAUSE THIS ONE DECISION ROUTES EVERY POSITION:
+        # a pooled state let tokens after t choose the experts that score token t (Q-FAB-7, and
+        # fabric/api.py::_route_query for the measurement and the rejected alternatives).
+        query = _route_query(pop, signature, novelty, state=h[:, 0])
         logits, ec_applied, banned = _entry_logits(
             pop, query=query, signature=signature, keys=keys, n=n, region_w=region_w,
             route_learn=route_learn, route_t=route_t, ec_w=ec_w, ban=ban, hold_out=hold_out)

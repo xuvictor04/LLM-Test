@@ -1102,7 +1102,7 @@ training path and 1 byte on the eval path with every check green.
 |---|---|
 | `_window_bounds` / `_flush_bounds` | the cut of `Segmentation.ids` behind `x`, `y`, `contexts`, `tokens`, `targets`, `positions` — contiguous, non-overlapping, `LM.ctx` wide, `OPT.batch_windows` per flush. Returns **bounds, not tensors**: no file in `src/` imports torch at P3 and this file runs no loop. |
 | `_signature_cursor` | `seen_units` in the loop — the CURSOR, where `_signature_units` is the whole epoch-0 stream and is `warm_up`'s alone. A unit crossing (Windows → tokens or **true bytes** off `byte_pos`), which is why it has a name. |
-| `_sample_window` | `windows` for `SIG.encode` and **the same object** as `sample_window` for `DOM.observe`, which `domains/api.py:96` requires. |
+| `_sample_window` | `windows` for `SIG.encode` and **the same object** as `sample_window` for `DOM.observe`, which `domains/api.py:96` requires. The loop passes the window's own 0-based index, so the slice **ends at the window's first byte** and holds none of its targets (Q-FAB-7). |
 | `_key_fn` / `_head` / `_sig_encode_fn` | `key_fn` (MEM ×2), `head` (FAB), `encode` (`DOM.rekey` **and**, since 2026-09-02, `EVAL.coherence` — Q-EVAL-10; the *same* callable under the *same* name, because two encoders would be two signature spaces) — entry points partially applied. The callable class of argument has no other producer. |
 | `_n_params` / `_bytes_per_window` | `RUN.bench_summary`'s two measured arguments. `_n_params` sums **both** param groups; summing only the base list undercounts by the whole encoder. |
 | `_geometry_manifest` / `_run_windows` / `_windows_in_epoch` / `_signature_width` / `_alphabet_size` / `_base_parameters` / `_sidecar` / `_signature_stream` / `_signature_units` | the assembly-side joins, unchanged except where §3.8 records a repair. |
@@ -4241,6 +4241,78 @@ are dropped and this process's are kept.
 (`save_vocabulary` does not rotate, and `CKPT_RESUME=<dir>/ckpt.pt.prev` resolves a
 `d_vocab_read_path` nothing writes, so `build_vocabulary` refuses it by name). That is a property of
 the `CKPT.resume -> TOK.d_vocab_read_path` coupling, not of this package's state, and is left open.
+
+### Q-FAB-7 — the fabric's routing saw the window's own targets — **RESOLVED 2026-09-24: THE SIGNATURE ENDS AT THE WINDOW'S FIRST BYTE, THE ROUTE STATE IS h[:, 0], AND A FLUSH ROUTES ON ITS FIRST WINDOW'S DOMAIN. ⚠ EVERY LOSS NUMBER TAKEN BEFORE THIS DATE WAS MEASURED ON A NON-CAUSAL FORWARD AND IS NOT COMPARABLE WITH ONE TAKEN AFTER IT**
+Routing is **one decision per window**, applied at every position, so whatever the decision reads,
+position 0 is scored with it. Three channels fed it text the window is scored on predicting; nothing
+in the tree declared the routing non-causal, and `spine/compose.py::_sample_window` already said the
+opposite (*"a run that encodes the units AHEAD of the cursor is encoding text the model has not
+trained on"*) — the window being predicted is ahead of that cursor, because nothing has trained on it
+when its logits are computed. All three are driven by `tests/test_causality.py`, which fails four
+checks on the tree before this ruling and passes all eight after it.
+
+**(1) The signature cursor.** The loop passed `win_in_epoch` *after* its increment (the window's index
+plus one) to `_sample_window`, so the `SIG.encode` / `DOM.observe` sample ended at the **last
+target's** first byte and covered the whole window: window 149 of a default run has x bytes
+[28402, 28599) and was routed on a sample over [28407, 28599). The domain id `FAB.forward` bans on is
+assigned from the same sample. `SIG.train_step`'s `seen_units` read the same cursor, so an encoder
+anchor could be drawn from the text the same window was about to be routed on. **Ruling: both take the
+window's own 0-based index**, so the sample is the `width_units` units ending at the window's first
+byte. Ordinal 0 — the first window of every epoch — is now called too and its sample is all pad
+(`_sample_window` left-pads what the stream does not have); that is what a generator starting cold
+holds, and it costs one window per epoch. **Rejected:** ending the sample at byte_pos[first + 1]
+(it would add x[0], which every position already sees, and it needs a second cursor arithmetic beside
+`_signature_cursor`'s ordinal one).
+
+**(2) The route state.** `fabric/api.py::_route_query` added `hproj(h.mean(1))`, a mean over every
+position. With the signature held fixed and a window's tokens [t+1:] replaced, max|Δlogit| at positions
+≤ t through `LM.encode -> FAB.forward -> LM.decode` was 2.4e-6 at window 2, 1.1e-4 at window 150 and
+8.2e-4 at window 600 (`LM.encode` alone: exactly 0.0) — growing as the router learned. **Ruling: the
+state is `h[:, 0]`**, the hop's hidden state at the window's first position: the only per-window
+summary of the window's own tokens every position may see (causal on both LM arms), and it still moves
+between hops, because each hop's mixture is added at every position, position 0 included — which is
+what the term exists for (the old tree measured I(domain; (hop0, hop1)) = I(domain; hop0) without it).
+After the ruling the same measurement reads **exactly 0.0** at windows 2, 150 and 600. **Rejected:**
+per-position routing on a causal running mean (a (B, L, n) routing distribution with an L-times-wider
+expert gather, and `use`/`uage`, the halt EMA and the balance term re-denominated from windows to
+positions — a different fabric, not a repair); the previous window's pooled state (identical at every
+hop, which is exactly what this term exists not to be).
+
+**(3) The flush's domain.** `FAB.forward` takes one `domain_id` per flush and its breadth ban masks
+every row. The loop passed the **last** window's id, assigned from a sample over the earlier rows' own
+text at `OPT_BATCH_WINDOWS > 1`. **Ruling: the flush's first window's id (`dids[0]`)**, whose sample
+precedes every row. At the shipped `OPT_BATCH_WINDOWS=1` the two are one id. `FAB.observe`,
+`DOM.note_competence` and `MEM.write` keep theirs: they book what already happened and reach no logit
+of the flush.
+
+**What the leak was worth, measured.** On a model trained 600 windows at `DATA_STREAM_BYTES=120000`,
+the CE of 32 windows from the last 100 with their training-time signature minus the CE with the
+window-start one: mean −0.264 nats, negative on 14/32, min −5.474 (area `c` −0.368, `num` +0.00003) on
+the pre-ruling tree; on a tree trained causally, −0.002 (min −0.063). **The leaky tree trained worse,
+not better**, over the same 600 windows (mean of the last 100 flush losses, RUN_SEED 0 / 1): leaky
+6.480 / 6.991; causal 4.601 / 4.846; signature repaired alone 4.650 / 4.874; route state repaired alone
+4.504 / 5.934. **The gap is all after the stream's area switch near window 450**: over windows 0–449
+the mean flush loss is leaky 4.942 / 4.955 against causal 4.954 / 4.967, and over 450–599 it is leaky
+6.412 / 7.015 against causal 4.903 / 5.625. Repairing the signature alone recovers it on both seeds
+(4.878 / 5.584); repairing the route state alone recovers it on one (4.758 / 6.371). The
+default 300-window run (`DATA_STREAM_BYTES=200000`) is **not** bit-identical: flush 0 agrees (B is zero
+at birth, so routing reaches no logit yet) and every later flush differs; mean flush loss 5.443 → 5.509,
+last 100 5.235 → 5.283, final 5.8673 → 5.1638. Two seeds on one geometry is a direction, not a result;
+the owner's GPU runs are what settle it. **Generation:** before this ruling no generation path could
+reproduce the training-time signature — it was a function of the text being generated; after it,
+the signature, the domain id, the novelty (the previous window's) and the route state are all formed
+from material a generator holds before it emits the window's second token (`EVAL.generate` itself is
+still in `DEFERRED_ENTRY_POINTS`).
+
+**Not in this ruling — the load-balance term's reach into the LM (a measurement, no change).** The
+balance/ponder aux term reaches `LM.body` and `emb` through the route state. On the pre-ruling tree
+at flush 1, ‖∂aux/∂`body.bias_ih_l0`‖ 4.777 against the LM loss's 1.376 and ‖∂aux/∂`emb.weight`‖
+0.608 against 0.306; 0.022 / 0.003 by flush 30 (≈2% and 1%). After the ruling it reaches them
+through `h[:, 0]` alone: 1.507 / 1.376 and 1.088 / 0.306 at flush 1 (the embedding share now lands on
+the first tokens' rows), 0.016 / 0.010 by flush 30. At `FAB_BALANCE=0` the flush-1 aux gradient is
+0.073 / 0.009 before and 0.023 / 0.016 after. No docstring says the routing regulariser must not reach
+the language model, so nothing is changed; if the first steps' steer matters, a `detach()` on the
+route state or a balance warm-up is the lever to measure, not to assume.
 
 ---
 
