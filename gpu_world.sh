@@ -205,8 +205,13 @@ arm_env() {  # the lever settings that define each arm
 }
 BASE_ARMS="fb_off fb_on skip world_off"
 
+# IT WAITS ON ITS OWN RUNS BY PID, NEVER WITH A BARE `wait`. The nvidia-smi sampler is a background
+# child of this shell too, and it never exits by itself: the first fleet on a real card finished all
+# 21 runs and then hung in a bare `wait` for the sampler, so the analysis never ran. `wait -n` had
+# the same exposure in reverse (any child ending counted as a slot freed).
 run_fleet() {  # runs JOBS with $1 slots, round-robin over GPUs
-  local slots="$1" i=0 running=0
+  local slots="$1" i=0 p
+  local -a pids=()
   : > "${JOB_DIR:-$OUT/logs}/_done.txt"
   for line in "${JOBS[@]}"; do
     # shellcheck disable=SC2086
@@ -214,11 +219,17 @@ run_fleet() {  # runs JOBS with $1 slots, round-robin over GPUs
     local name="$1" seed="$2" win="$3"; shift 3
     local gpu=0
     [[ "$NGPU" -gt 0 ]] && gpu=$(( i % NGPU ))
+    while :; do                                   # a free slot = fewer than $slots of OUR pids alive
+      local alive=0
+      for p in "${pids[@]}"; do kill -0 "$p" 2>/dev/null && alive=$(( alive + 1 )); done
+      [[ "$alive" -lt "$slots" ]] && break
+      sleep 2
+    done
     run_job "$name" "$seed" "$win" "$gpu" "$@" &
-    i=$(( i + 1 )); running=$(( running + 1 ))
-    if [[ "$running" -ge "$slots" ]]; then wait -n; running=$(( running - 1 )); fi
+    pids+=("$!")
+    i=$(( i + 1 ))
   done
-  wait
+  for p in "${pids[@]}"; do wait "$p"; done
 }
 
 # ---------------------------------------------------------------- 1. smoke every arm
