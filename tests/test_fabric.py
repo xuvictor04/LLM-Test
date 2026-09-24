@@ -195,10 +195,12 @@ HOW THIS FILE KEEPS ITSELF CHEAP AND STABLE, because a slow test is a test nobod
 WHAT THIS FILE CANNOT CATCH. It is not a training test: it runs single passes and never an optimizer, so
 it says nothing about whether the population LEARNS anything, which is INV-R2-1's question and is
 measured end to end in the audits rather than here. It exercises one hop_mode (`soc`; `transition` is
-refused at build by Q-FAB-1), one device (cpu) and one dtype. FAB.observe, FAB.manage, FAB.grow_check,
-FAB.own_lr_scale, FAB.counters, FAB.contribution and the checkpoint pair are not covered because they
-raise NotImplementedError; the day any of them grows a body it needs a check here, and this file's count
-will not notice on its own. It is also not a substitute for the static checks: whether a counter is
+refused at build by Q-FAB-1), one device (cpu) and one dtype. FAB.observe, FAB.grow_check,
+FAB.own_lr_scale, FAB.counters, FAB.contribution and the checkpoint pair are not covered here, and this
+file's count will not notice on its own; FAB.manage is driven once per F9 row, for the cull gate's line
+only. (This paragraph said they all "raise NotImplementedError" -- all but FAB.contribution have had
+bodies for weeks. tests/test_fabric_internals.py drives manage's selection pass, grow_check's shift
+stamp and the row events OPT.remap_rows consumes, since 2026-09-24.) It is also not a substitute for the static checks: whether a counter is
 DECLARED, whether a citation opens, and whether a lever is owned are tests/test_ownership.py's,
 tests/test_contract.py's and tests/test_census.py's.
 """
@@ -1890,6 +1892,11 @@ def check_f9_rendered_gate_lines_agree_with_their_own_arithmetic():
     before they were written down, and the FIRED direction (5/6 at FAB_PRESSURE=0.8333, printed 0.833)
     is the one no floor argument reaches.
 
+    WHICH LINE IS READ (2026-09-24). At build fab.cull_gate is now a PREDICTION reported UNREACHABLE
+    -- no fab.manage pass has run, so no cull was evaluated, and a default 80-window run printed it
+    FIRED beside a manage ledger of 0 fires -- so each row asserts that, then drives ONE FAB.manage
+    pass and reads the verdict that pass leaves on pop.gates, which is the line a report prints.
+
     WHAT IS ASSERTED. For every gate in ARITHMETIC_GATES, on every row: read the rendered line, take
     the pair off it, apply the relation the table declares, and compare that answer with the verdict
     word the same line prints. WHERE THEY DISAGREE THE LINE MUST CARRY A REASON -- that is the whole
@@ -1913,9 +1920,23 @@ def check_f9_rendered_gate_lines_agree_with_their_own_arithmetic():
     findings, examined = [], 0
     contradicting, agreeing, descriptive = 0, 0, 0
 
+    build_predictions = 0
     for n0, slots, pressure, why in CULL_ROWS:
         c = cfg(FAB_N0=n0, FAB_SLOTS=slots, FAB_PRESSURE=pressure)
         pop = population(c)
+        # AT BUILD fab.cull_gate IS A PREDICTION REPORTED UNREACHABLE (no manage pass has run, so no
+        # cull was evaluated -- 2026-09-24); the VERDICT is FAB.manage's, which replaces it by name.
+        # So the build line is required to be UNREACHABLE with a reason, and the arithmetic is read
+        # off the gate one manage pass leaves -- the line every report after the first pass prints.
+        _pred = [g for g in pop.gates if g.name == "fab.cull_gate"]
+        if not (_pred and not _pred[0].reachable and _pred[0].reason):
+            findings.append(f"FAB_N0={n0} FAB_SLOTS={slots}: the build-time fab.cull_gate is "
+                            f"{_pred[0].line() if _pred else 'absent'!r}; before any manage pass it "
+                            f"must be UNREACHABLE with its prediction in the reason.")
+        else:
+            build_predictions += 1
+        FAB.manage(c["FAB"], pop, step_windows=U.Windows(int(c["FAB"].manage_every)),
+                   flush_loss=None)
         for gate in pop.gates:
             relation = ARITHMETIC_GATES.get(gate.name)
             if relation is None:
@@ -1960,7 +1981,8 @@ def check_f9_rendered_gate_lines_agree_with_their_own_arithmetic():
                         f"distinguishing anything: a rule that fires on the whole population says "
                         f"nothing about any member of it.")
 
-    detail = (f"{examined} rendered line(s) read over {len(CULL_ROWS)} configuration(s) for the "
+    detail = (f"{build_predictions} build-time prediction(s) UNREACHABLE with a reason; "
+              f"{examined} rendered manage-pass line(s) read over {len(CULL_ROWS)} configuration(s) for the "
               f"{len(ARITHMETIC_GATES)} gate(s) whose printed pair IS an arithmetic the reader is "
               f"invited to do ({', '.join(f'{g} opens at {r}' for g, r in sorted(ARITHMETIC_GATES.items()))}); "
               f"{contradicting} line(s) where the pair disagrees with the verdict word and each one "
@@ -2005,8 +2027,9 @@ def main():
     print("These are REAL forward and backward passes over a real assembled Config, so a green tick")
     print("here is evidence about behaviour and not about the text of the tree. It is not evidence")
     print("that the population LEARNS -- no optimizer runs in this file -- and it covers one hop arm,")
-    print("one device and one dtype. FAB.observe, FAB.manage, FAB.grow_check and the checkpoint pair")
-    print("are not exercised here at all.")
+    print("one device and one dtype. FAB.observe, FAB.grow_check and the checkpoint pair are not")
+    print("exercised here; FAB.manage runs once per F9 row for the cull gate's line, and")
+    print("tests/test_fabric_internals.py drives its selection pass.")
     return 1 if failed else 0
 
 

@@ -46,10 +46,12 @@ stub so every window is domain 0; MEM.read is a stub so the store is write-only 
 rules are write-order FIFO whatever they say; MEM.census is a stub so growth's memory-pressure leg
 is unreachable. ALL THREE OF THOSE SENTENCES WERE TRUE UNTIL 2026-09-21 AND ARE NOW FALSE: observe,
 read and census have bodies, this driver calls all three, the partition assigns real ids, the probe
-retrieves and promotes, and pressure has a producer. What remains: FAB.manage and SIG.train_step
-are stubs, so no expert is ever culled and the signature encoder never learns, and their cadences
-are deliberately NOT ASKED because an asked gate records its fire; and the retok is DEFERRED TO THE
-EPOCH ROLL rather than performed mid-epoch, which at RUN_EPOCHS=1 means never (Q-RUN-8).
+retrieves and promotes, and pressure has a producer. The next sentence was true until FAB.manage and
+SIG.train_step got bodies and this driver began asking their cadences, and is false now: "FAB.manage
+and SIG.train_step are stubs, so no expert is ever culled and the signature encoder never learns".
+Both are called on their cadences (fab.manage every FAB_MANAGE_EVERY windows, which a default
+run reaches twice at 200 kB). What remains: the retok is DEFERRED TO THE EPOCH ROLL rather than
+performed mid-epoch, which at RUN_EPOCHS=1 means never (Q-RUN-8).
 
 STAGE E IS DRIVEN AS OF 2026-09-22 and it is what makes a second epoch a second epoch: the stream
 is redrawn, the segmentation is REBUILT AT THE CURRENT VOCABULARY -- the only route by which a
@@ -127,10 +129,11 @@ _CALLS = {
         "MEM.census", "DOM.manage", "DOM.census", "DOM.rekey",
         "SIG.cadence_due", "SIG.train_step", "FAB.manage",
         "RUN.RunClock.advance", "SIG.encode", "DOM.observe", "TOK.on_window"}),
-    # ---- stage B, per flush: all twenty-two
+    # ---- stage B, per flush: all twenty-three
     "B": frozenset({
         "LM.embed", "WORLD.forecast", "LM.encode", "FAB.forward", "LM.decode", "LM.lm_loss",
-        "WORLD.loss_terms", "LM.anchor_term", "OPT.scaled_backward", "RUN.RunClock.note_backward",
+        "WORLD.loss_terms", "LM.anchor_term", "OPT.remap_rows", "OPT.scaled_backward",
+        "RUN.RunClock.note_backward",
         "OPT.maybe_step", "FAB.own_lr_scale", "CAP.caps", "FAB.observe", "FAB.grow_check",
         "MEM.write", "MEM.maintain", "TOK.mint_burst", "LM.residual_ratios", "TOK.judge_probation",
         "DOM.note_competence", "CKPT.save"}),
@@ -617,7 +620,6 @@ def run(sysm, *, max_windows=None, progress=True):
     periods = {k: v for k, v in _periods_of(sysm).items()}
     model, pop, st = sysm.model, sysm.fabric, sysm.sig
     ctx = int(lm_cfg.ctx)
-    batch_w = int(opt_cfg.batch_windows)
     vocab = sysm.vocab
 
     # THE PER-TOKEN APPEARANCE COUNTER, ALLOCATED ONCE AND CARRIED ON THE SYSTEM. compose.py's row
@@ -705,6 +707,9 @@ def run(sysm, *, max_windows=None, progress=True):
     # the dense arm firing on the opening windows of a run is the intended reading.
     since_boundary = 0
     first_loss = last_loss = float("nan")
+    # THE FLUSH LOSSES SINCE THE LAST FAB.manage PASS, whose mean is what that pass's depth plateau
+    # test compares (see the manage call below for why a single flush cannot be).
+    manage_losses = []
     batch = []
     ids = sysm.segmentation.ids
     stopped_early = False
@@ -756,14 +761,13 @@ def run(sysm, *, max_windows=None, progress=True):
             # sample_window IS THE SAME OBJECT SIG.encode GETS, through the root's one slicer: a rekey
             # cannot reproduce the signature otherwise, so a second slice at this call site would be a
             # defect by construction.
-            # DOM.observe IS NOT WIRED, AND IT IS NOT ONE OF THE ELEVEN -- IT IS A TWELFTH STUB.
-            # It is the only producer of a domain id, so with no body every window is domain 0 and the
-            # fabric's per-domain books, the breadth ban and DOM.note_competence all see ONE domain.
-            # domains/api.py::observe says what that state is: "enabled == False returns did=0 for every
-            # window ... THAT IS NOT A DEGENERACY MEM HAS TO DISCOVER: 0 is a real source id that MEM
-            # sees, and the report must say 'the partition is off' rather than leaving the per-source
-            # floor to protect exactly one source in silence." The same sentence applies to a stubbed
-            # observe, and this is the loop saying it.
+            # DOM.observe IS THE ONLY PRODUCER OF A DOMAIN ID. This paragraph said "DOM.observe IS
+            # NOT WIRED ... IT IS A TWELFTH STUB" until 2026-09-24, beside the call it describes:
+            # observe has a body and is called here every window (part.n_windows equals the window
+            # count). What it still guards against is its OFF state -- domains/api.py::observe:
+            # "enabled == False returns did=0 for every window ... 0 is a real source id that MEM
+            # sees, and the report must say 'the partition is off' rather than leaving the
+            # per-source floor to protect exactly one source in silence."
             # A SECOND DEFECT WAS FOUND ON THE WAY AND IS RECORDED BECAUSE NOTHING ELSE WILL FIND IT:
             # spine/compose.py::_sample_window clamps its start at 0, so early in the stream it returns
             # a SHORT window -- 173 units against a frozen 192 on the first flush, measured -- and
@@ -838,13 +842,19 @@ def run(sysm, *, max_windows=None, progress=True):
             # 634 windows at the shipped defaults, 569 of them from the spawn door, saturating
             # FAB_SLOTS at about window 2,300 of a quarter-million-window run. Culling is what
             # makes that a steady state instead of a ceiling.
-            # `flush_loss` IS THE LAST FLUSH'S LOSS AND None BEFORE THERE IS ONE. It feeds step 6's
-            # depth curriculum only; passing a NaN would make the plateau test compare against a
-            # value that is not a number and silently never deepen, which is the shape of defect
-            # this tree spends its comments on.
+            # `flush_loss` IS THE MEAN FLUSH LOSS SINCE THE PREVIOUS PASS AND None BEFORE THERE IS
+            # ONE. It feeds step 6's depth curriculum only; passing a NaN would make the plateau
+            # test compare against a value that is not a number and silently never deepen, which is
+            # the shape of defect this tree spends its comments on. IT WAS THE LAST FLUSH'S RAW LOSS
+            # UNTIL 2026-09-24, against FAB_DEPTH_EPS's own help ("improvement in the SMOOTHED flush
+            # loss"): over the last 100 flushes of a default 300-window run one flush's loss has a
+            # standard deviation of 1.61 nats (2.32 bits) against a threshold of 0.01 bits, so the
+            # plateau test compared two draws of noise 500 windows apart. The mean over the ~500
+            # flushes between passes is the smoothing the lever names; NaN flushes are left out.
             if cadences.due("fab.manage", periods["fab.manage"], clock):
-                fab_api.manage(fab_cfg, pop, step_windows=tick.step,
-                               flush_loss=(None if last_loss != last_loss else last_loss))
+                _ml = (sum(manage_losses) / len(manage_losses)) if manage_losses else None
+                manage_losses = []
+                fab_api.manage(fab_cfg, pop, step_windows=tick.step, flush_loss=_ml)
             # SIG'S OWN CADENCE AND ITS STEP, WHICH ARE ONE MECHANISM AND LAND TOGETHER. Until
             # SIG.train_step had a body neither was asked, because asking a gate RECORDS its fire
             # and a fire nobody can act on is thrown away -- tok/api.py::on_window's rule ("asking
@@ -973,6 +983,8 @@ def run(sysm, *, max_windows=None, progress=True):
                     if curve == []:
                         first_loss = loss
                     curve.append(loss)
+                    if loss == loss:
+                        manage_losses.append(float(loss))
 
             # THE PERIODIC CHECKPOINT, THROUGH THE SAME Cadences EVERY OTHER GATE USES. A 53-minute
             # run finished with `ckpt checks=0` -- the gate was never EVALUATED, so nothing was written
@@ -1069,7 +1081,14 @@ def run(sysm, *, max_windows=None, progress=True):
             # (Q-FAB-6) -- and until this line fab.shift_notifications read 0 on every run, which
             # that counter declares to mean the blackout is UNREACHABLE rather than armed.
             # compose.py names three stamping sites; this is the E draw row's.
+            # ONE EVENT, TWO TYPED STAMPS, AND BOTH ARE NOW MADE (2026-09-24). The row has always
+            # said "the root also stamps clock.opt_steps here as the shift_at OPT.maybe_step
+            # consumes", and until this date only the Windows twin was stamped: maybe_step was
+            # called with no shift_at, so OPT_LR_SHIFT_WARM re-warmed nothing on any multi-epoch
+            # run. Both packages count one notification per distinct stamp, so handing the same
+            # stamp over on every later flush is a re-delivery and not a new event.
             sysm.shift_at_windows = U.Windows(int(clock.step))
+            sysm.shift_at_steps = U.Steps(int(clock.opt_steps))
             # AND MEM IS TOLD, because every context it holds is token ids under a segmentation
             # that no longer exists. maintain's `resegment` arm drops and retakes the rekey
             # snapshot and counts the event; it deliberately does NOT rewrite the stored ids,
@@ -1605,6 +1624,13 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     # false for the whole life of this driver. This is read off the tensor the step produced, and
     # run.py prints it beside amp_state so a reader compares two numbers instead of trusting one.
     sysm.process_dtype = str(logits.dtype)
+    # THE OPTIMIZER'S PER-ROW STATE FOLLOWS THE EXPERT ROWS FAB MOVED, BEFORE THIS BACKWARD
+    # (Q-FAB-13). FabricOut.row_events carries every move / clear / birth since the previous
+    # training pass -- the last flush's grow_check births, any manage pass's culls in between, and
+    # this forward's spawns -- and this is the one point all of those have happened and the next
+    # gradient has not been accumulated onto the old rows. Until 2026-09-24 nothing moved the
+    # moments: a culled slot's survivor took its next step on the culled expert's exp_avg.
+    opt_api.remap_rows(opt_cfg, sysm.optimizer, out.row_events)
     n_bwd_opt = opt_api.scaled_backward(opt_cfg, sysm.optimizer, total)
 
     # THE BACKWARD IS COUNTED BY THE CLOCK, and the optimizer steps only when the
@@ -1634,7 +1660,10 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
             f"and OPT.maybe_step on the second, so with them apart the optimizer steps on neither "
             f"schedule. spine/compose.py seeds the clock from OPT's restored n_backward for exactly "
             f"this reason (Q-RUN-9).")
-    outcome = opt_api.maybe_step(opt_cfg, sysm.optimizer) if stepped else None
+    # shift_at IS THE E ROLL'S Steps STAMP (None until the first roll). OPT keeps it on its own
+    # state and counts it once, so it is handed over on every stepped flush rather than cleared.
+    outcome = (opt_api.maybe_step(opt_cfg, sysm.optimizer, shift_at=sysm.shift_at_steps)
+               if stepped else None)
 
     # THE PER-EXPERT RATES, ON THE RATE THE OPTIMIZER JUST APPLIED. LOOP_ORDER's own row says this
     # call "PRODUCES NOTHING ANY SIGNATURE ACCEPTS" -- the return is per-expert multipliers and
@@ -1716,12 +1745,14 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     # it has a producer. That is a lever the owner turns, not something this driver decides.
     # shift_at RIDES THE SYSTEM AND IS None UNTIL SOMETHING STAMPS IT. Three sites are supposed to:
     # the E draw row's resample, TOK.mint_burst's retok and OPT's LR restart. ONE IS DRIVEN: the
-    # epoch-roll block in `run` stamps it when it redraws the stream. The retok is not stamped on
-    # its own -- this driver defers it to that same roll, which is the act that satisfies it -- and
-    # OPT.maybe_step is called without a shift_at, so its LR restart stamps nothing here. On a run
-    # that takes no roll before it ends (every RUN_EPOCHS=1 run) fab.shift_notifications therefore
-    # reads 0 and the blackout is UNREACHABLE rather than armed -- which is precisely what that
-    # counter was declared to distinguish.
+    # epoch-roll block in `run` stamps it when it redraws the stream, into BOTH typed twins --
+    # shift_at_windows for this call and shift_at_steps for OPT.maybe_step above. The retok is not
+    # stamped on its own -- this driver defers it to that same roll, which is the act that
+    # satisfies it -- and OPT's LR restart stamps nothing. On a run that takes no roll before it
+    # ends (every RUN_EPOCHS=1 run) fab.shift_notifications therefore reads 0 and the blackout is
+    # UNREACHABLE rather than armed -- which is precisely what that counter was declared to
+    # distinguish. The same stamp is re-delivered on every later flush and grow_check counts it
+    # ONCE (it read 158 for one roll until 2026-09-24, one per flush after it).
     # THE RECORD IS BOUND AND ITS GATES KEPT (2026-09-24). This was a bare expression statement, so
     # GrowReport's per-call gates -- the arithmetic of the call that evaluated them -- reached no
     # report. ONLY THE GATES TUPLE is kept, on System.grow_gates, and spine/loop.py::_report renders

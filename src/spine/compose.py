@@ -896,7 +896,10 @@ LOOP_ORDER = (
                                       "Q-MEM-11 RESOLVED (a), and this row is where its two renames "
                                       "are recorded"),
     ("A", "FAB",   "manage",          "Cadences.due('fab.manage', FAB.manage_period(fab), clock) -- "
-                                      "step_windows=clock.step. WORLD's growth pass used to ride "
+                                      "step_windows=clock.step; flush_loss is the MEAN of the "
+                                      "flush losses since the previous pass, computed by the loop "
+                                      "(FAB_DEPTH_EPS is declared on the SMOOTHED flush loss, and "
+                                      "one flush's loss is noise at that threshold). WORLD's growth pass used to ride "
                                       "this same one answer without saying so; that row is now "
                                       "deferred, and if it returns it must either be written INSIDE "
                                       "this answer, in the shape the management block above uses, "
@@ -1085,7 +1088,10 @@ LOOP_ORDER = (
                                       "count, and THE FOLD IS A RECORDED DEFECT (:7524-7527: expert "
                                       "ids run to FAB_NMAX while the store has MEM_OWNERS "
                                       "partitions); aux_loss -- one summand of the objective "
-                                      "OPT.scaled_backward takes"),
+                                      "OPT.scaled_backward takes; row_events -- "
+                                      "FabricOut.row_events, the expert rows FAB moved, cleared "
+                                      "or re-born since the previous training pass, which "
+                                      "OPT.remap_rows takes before the backward (Q-FAB-13)"),
     ("B", "WORLD", "loss_terms",      "obs_emb = LM.embed's return from the row above, the (B, L, "
                                       "width) token vectors. IT HAS A REAL PRODUCER as of "
                                       "2026-09-02 (Q-LM-12 RESOLVED (b)) and this row no longer "
@@ -1109,6 +1115,14 @@ LOOP_ORDER = (
                                       "owned by the loop and returned by no entry point, which is "
                                       "why the carrier is named here rather than left to the call "
                                       "site. The term arrives ALREADY MULTIPLIED BY anchor_w"),
+    ("B", "OPT",   "remap_rows",      "row_events from FAB.forward's row (FabricOut.row_events; "
+                                      "None when no row moved). BEFORE scaled_backward, because "
+                                      "every move / clear / birth since the previous backward -- "
+                                      "the last flush's grow_check births, a manage pass's culls, "
+                                      "this forward's spawns -- has happened and this flush's "
+                                      "gradient has not yet been accumulated onto the old rows. "
+                                      "IT PRODUCES NOTHING: the moments it moves are OPT's own "
+                                      "state (Q-FAB-13)"),
     ("B", "OPT",   "scaled_backward", "scaling and counting in ONE function, never 128 lines apart. "
                                       "total is the COMPOSED objective and has no single producer "
                                       "by design: it is LM.lm_loss's mean + LM.anchor_term's "
@@ -1884,9 +1898,10 @@ ROW_ARGUMENTS_ELSEWHERE = {
     # calls -- a tensor slice, a running counter, a boolean, a sum. The order tables model CALLS, so
     # a value that lives between two of them has no row to come from, and pretending otherwise by
     # inventing one would be the fabricated provenance this column exists to make impossible.
-    # Each says what computes it and why no row can. Four of them are on System.__slots__ because
+    # Each says what computes it and why no row can. Five of them are on System.__slots__ because
     # they cross a boundary the tables read forwards cannot express (the fourth is
-    # shift_at_windows, added 2026-09-02 with Q-FAB-6).
+    # shift_at_windows, added 2026-09-02 with Q-FAB-6; the fifth is its Steps twin
+    # shift_at_steps, added 2026-09-24 when OPT.maybe_step was first handed a shift_at).
     "RUN.new_cadences":
         "periods is _periods(sysm) -- the SIX gates' thresholds. Five arrive through their OWNING "
         "package's typed accessor (EVAL.curve_period, DOM.manage_period, FAB.manage_period, "
@@ -2031,7 +2046,7 @@ class System:
                  # dropped, and spine/loop.py::_report now renders them at R. None until the first
                  # flush. Not a value that crosses to a later row, and not on CKPT's save path.
                  "grow_gates",
-                 # THE FOUR VALUES THAT CROSS A BOUNDARY THE ORDER TABLES CANNOT EXPRESS, each
+                 # THE FIVE VALUES THAT CROSS A BOUNDARY THE ORDER TABLES CANNOT EXPRESS, each
                  # named by the row that consumes it. `produces` reads FORWARDS -- an argument is
                  # supplied by an EARLIER row -- so a value produced at A and consumed at B, or
                  # produced by one flush and consumed by the next, has nowhere to live but here:
@@ -2059,7 +2074,15 @@ class System:
                  #              clock.step, because FAB's cooldown is Windows and mixing them
                  #              raises UnitError rather than being batch_windows-fold wrong. Two
                  #              typed stamps of one event is the point, not a duplication.
-                 "due", "novelty", "token_seen", "shift_at_windows",
+                 #   shift_at_steps
+                 #              THE SAME EVENT AS units.Steps(clock.opt_steps), for OPT.maybe_step's
+                 #              `shift_at`, added 2026-09-24. Until then the roll stamped only the
+                 #              Windows twin and maybe_step was called with no shift_at, so
+                 #              OPT_LR_SHIFT_WARM was inert on every multi-epoch run (RUN_EPOCHS=2
+                 #              DATA_RESAMPLE=1 OPT_LR_SHIFT_WARM=20: opt.shift.notifications 0).
+                 #              clock.opt_steps is seeded from OPT's restored opt_step on resume, so
+                 #              the stamp is on the counter the schedule subtracts it from.
+                 "due", "novelty", "token_seen", "shift_at_windows", "shift_at_steps",
                  # `retok_pending` IS A DUE THAT OUTLIVES ITS FLUSH. TOK's retok cadence fires at
                  # B and the act -- re-segmenting the stream with the grown vocabulary -- can only
                  # happen at the E stage's epoch roll, because changing the segmentation mid-epoch

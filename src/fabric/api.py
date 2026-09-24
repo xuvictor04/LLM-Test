@@ -22,7 +22,10 @@ RECORD TYPES RETURNED (P4 defines them):
   Population     A, B, cent, n_live, depth_now, and the books born/use/uage/dom_of/ef/es/comp/
                  contrib/births/rescued/parent/mutscale, the growth machine, the counter ledger
                  and the package RNG stream
-  FabricOut      logits or hidden, expert_ids, weights, per_expert_logits, aux_loss, gates
+  FabricOut      logits or hidden, expert_ids, weights, per_expert_logits, aux_loss, gates,
+                 row_events
+  RowEvents      the (A, B) banks and the rows moved / cleared / re-born since the last training
+                 pass, which the root hands to OPT.remap_rows (Q-FAB-13)
   ContribReport  per-expert contribution, distinct_values, positive, negative, degenerate
   ManageReport   cull_fail, cull_util, spared_*, rescued, deepened, cull_gate arithmetic
   GrowReport     asked vs grown, per trigger; declined_cap, declined_newfrac, lineage counts, and
@@ -200,6 +203,37 @@ class FabricOut:
     per_expert_logits: object = None
     aux_loss: object = None
     gates: tuple = ()
+    # THE ROW EVENTS SINCE THE PREVIOUS TRAINING PASS (a RowEvents, or None when there were none),
+    # handed over on training passes only -- see RowEvents for what the root does with them.
+    row_events: object = None
+
+
+@dataclasses.dataclass(frozen=True)
+class RowEvents:
+    """The rows of the expert banks this package MOVED, CLEARED or RE-BORN, in the order it did so.
+
+    WHY IT LEAVES THE PACKAGE (Q-FAB-13, RESOLVED 2026-09-24). A and B are ONE (cap, ...) parameter
+    each, so AdamW keeps ONE (cap, ...) exp_avg and exp_avg_sq per bank and a row of them belongs to
+    whichever expert occupies that slot. fabric/api.py::_remove's swap-with-last copies the last
+    live expert's A/B rows into the hole and zeroes the old last slot, and nothing moved the
+    moments: driven at FAB_MANAGE_EVERY=30 FAB_GRACE=1, 154 of 154 moved experts took their next
+    step on the CULLED expert's exp_avg (0 on their own), and all 159 zeroed-and-not-reborn slots
+    had non-zero A/B again by the end of 45 windows -- the optimizer kept stepping dead rows on
+    residual momentum, and a later birth into one inherited it. FAB cannot import OPT (O10), so it
+    names the events and OPT.remap_rows applies them to the moments and to any accumulated
+    gradient.
+
+    `tensors` is (A, B): every event applies to both, row for row. `events` is a tuple of
+      ("move", src, dst)   the expert at `src` now lives at `dst` (a swap-with-last);
+      ("clear", slot)      `slot` left the live population and holds zeros;
+      ("birth", slot)      `slot` was claimed by a new expert through _claim_slot.
+    Order matters -- a slot can be cleared and re-born in one list -- and OPT applies them in order.
+    THE MERGE AND RESCUE REWRITES ARE NOT EVENTS: they rewrite a live expert in place, and Q-FAB-2
+    rules their moments stale-by-statement ("the merge does not make it worse and does not fix it");
+    the merge's REMOVAL of the absorbed expert is a _remove and is an event.
+    """
+    tensors: tuple = ()
+    events: tuple = ()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -234,6 +268,9 @@ class ManageReport:
     spared_shift: int = 0
     rescued: int = 0
     deepened: bool = False
+    # THE PAST-GRACE COUNT AT THE START OF THE PASS, before the merge and either cull removed
+    # anyone -- the set every decision on the pass was taken over. It carried the post-failure-cull
+    # remainder until 2026-09-24, which read 0 on the pass that culled all 14 eligible experts.
     eligible: int = 0
     cull_gate: str = ""
     manage_every: int = 0
@@ -308,9 +345,11 @@ class Population:
     not touch 2048 of 2048 experts.
     """
 
-    # THE LAST EIGHT ARE RE-EARNED STATE, NEVER CHECKPOINTED -- fabric/api.py::state_dict names
+    # THE LAST NINE ARE RE-EARNED STATE, NEVER CHECKPOINTED -- fabric/api.py::state_dict names
     # them as "the identity cache, halt_ema, the routing-mix samples", plus `learn_window` and
-    # `pass_gates` which that sentence now names too. They are slots rather than ad-hoc attributes because __slots__ is
+    # `pass_gates` which that sentence now names too, and `row_events` (2026-09-24), which is
+    # drained onto FabricOut on every training pass and so is empty at every checkpoint the loop
+    # takes between flushes. They are slots rather than ad-hoc attributes because __slots__ is
     # closed: `pop._kc = ...` raises AttributeError, so a cache invented at the point of use would
     # be a crash on the first routed window rather than a design. ident/ident_step/ident_live are
     # the emb_every cache the old tree carried as _kc/_kstep/_kn (self_organize.py:1938-1953);
@@ -331,7 +370,7 @@ class Population:
                  "growth", "comp_glob",
                  "modules", "counters", "rng", "on", "hop_arm", "gates", "halt_b",
                  "ident", "ident_live", "ident_step", "ident_graph", "halt_ema", "marks",
-                 "learn_window", "pass_gates")
+                 "learn_window", "pass_gates", "row_events")
 
     def __init__(self, *, cap, n0, d_model, rank, signature_dim, device, rng, on, hop_arm,
                 depth_now):
@@ -427,6 +466,9 @@ class Population:
         # present-and-0 that G4 reads as "armed, did not fire". Re-earned: the first training pass
         # of a resumed run writes it, and an empty tuple before that says no pass has run.
         self.pass_gates = ()
+        # THE ROW EVENTS NOT YET HANDED OVER (see RowEvents): appended by _remove and _claim_slot,
+        # drained by fabric/api.py::forward on its next training pass.
+        self.row_events = []
         # DISTINCT-RECIPIENT SETS, WHICH A COUNTER CANNOT HOLD. `fab.discover_targets` and
         # `fab.explore_distinct_targets` are counts of DISTINCT experts, and 1 is H14 -- discovery's
         # `min(range(N), key=use)` returns the FIRST minimum and discovery never credits use, so
@@ -601,7 +643,8 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
 
     LEVERS READ: on, norm_only, n0, slots, rank, dk, emb_hid, pressure, grow, halt, lr_own, hop_mode,
                  depth0, hops, balance, ponder, emb_var, ec_w, explore, div_w, hop_sup,
-                 ind_w, ae_w, dom_frac,
+                 ind_w, ae_w, dom_frac, depth_patience, depth_stage_max, manage_every (the last
+                 three for the fab.depth_advance prediction, 2026-09-24),
                  alpha, bal_floor, birth_jitter, cent_ema, comp_ema, cull_frac, depth_eps, discover,
                  err_fast, err_slow, fail_tol, halt_max, lr_amin, lr_boost, lr_cycle, lr_gamma,
                  lr_maxr, merge_dist, mut, mut_big, mut_big_p, new_frac, parent_max, plateau,
@@ -1162,33 +1205,39 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
     # its own -- on the arms where both apply, "the floor alone shuts this gate" is what the reader
     # needs and the third decimal is not.
     #
-    # THE RATIO IS SPELLED TWICE ON PURPOSE, here and in the `value=` f-string below, and hoisting it
-    # into one local would be a NARROWING. K16 in tests/test_contract.py -- the check named
-    # tests/test_contract.py::check_k16_verdicts_follow_their_printed_pair -- matches the printed
-    # field against the verdict's clause as UNPARSED SOURCE, so a `value=` that reads a local no
-    # longer renders `n0 / max(1, slots)`, and this Gate, the one site that check examines in this
-    # file, would drop out of its examined set and into its descriptive count. The duplication is
-    # load-bearing; the comparison below is not the render.
+    # AT BUILD THIS GATE IS A PREDICTION AND IS REPORTED AS ONE (2026-09-24). No fab.manage pass has
+    # run, so no cull was evaluated; the gate used to be FIRED here on the founding occupancy and
+    # stayed so on every run shorter than FAB_MANAGE_EVERY -- measured on a default 80-window run:
+    # "'fired', 0, '2048/4096=0.500' vs 0.45" beside a fab.manage ledger of 80 checks and 0 fires,
+    # i.e. the report said the cull gate fired on a run where the cull never ran. It is now
+    # UNREACHABLE with the prediction in the reason, and FAB.manage replaces it by name on its
+    # first pass with the verdict it actually evaluated -- which is where K16
+    # (tests/test_contract.py::check_k16_verdicts_follow_their_printed_pair) and F9
+    # (tests/test_fabric.py) now read the pair against the verdict. The floor and rounding caveats
+    # stay in the prediction because the pair printed here is still the occupancy clause alone.
     _press = float(fab.pressure)
     _occ = n0 / max(1, slots)
     _occ_shown = float(f"{_occ:.3f}")            # the digits the pair prints, which is what is read
+    _caveat = (f" n_live={n0} is at or below the FLOOR OF TWO that "
+               f"spine/derive.py::cull_gate_open applies BEFORE the occupancy test and separately "
+               f"from it -- culling a population of two can empty it -- so that clause alone would "
+               f"shut this gate, whatever the occupancy printed beside it reads."
+               if not cull_open and n0 <= 2 else
+               f" The occupancy printed beside this line is ROUNDED to three places, and the "
+               f"ratio spine/derive.py::cull_gate_open would compare against the FAB_PRESSURE "
+               f"setpoint is {_occ!r} -- which falls on the other side of that setpoint from the "
+               f"digits shown."
+               if (_occ >= _press) != (_occ_shown >= _press) else "")
     pop.gates = (
         Gate("fab.on", on, on, True,
              reason="" if on else "FAB_ON=0: the forward is the identity, so every gate below this "
                                   "one reports UNREACHABLE rather than 'armed but 0'."),
-        Gate("fab.cull_gate", cull_open,
-             f"{n0}/{max(1, slots)}={n0 / max(1, slots):.3f}", float(fab.pressure),
-             reason=(f"n_live={n0} is at or below the FLOOR OF TWO that "
-                     f"spine/derive.py::cull_gate_open applies BEFORE the occupancy test and "
-                     f"separately from it -- culling a population of two can empty it -- so that "
-                     f"clause alone shuts this gate, whatever the occupancy printed beside this "
-                     f"verdict reads. The pair on this line is the occupancy test and only it."
-                     if not cull_open and n0 <= 2 else
-                     f"the occupancy printed beside this verdict is ROUNDED to three places, and "
-                     f"the ratio spine/derive.py::cull_gate_open compared against the FAB_PRESSURE "
-                     f"setpoint is {_occ!r} -- which falls on the other side of that setpoint from "
-                     f"the digits shown."
-                     if (_occ >= _press) != (_occ_shown >= _press) else ""))
+        Gate("fab.cull_gate", False,
+             f"{n0}/{max(1, slots)}={n0 / max(1, slots):.3f}", float(fab.pressure), reachable=False,
+             reason=(f"no fab.manage pass has run yet (FAB_MANAGE_EVERY={int(fab.manage_every)} "
+                     f"window(s)), so no cull was evaluated. PREDICTION at build: the founding "
+                     f"population would {'OPEN' if cull_open else 'SHUT'} this gate.{_caveat} The "
+                     f"first manage pass replaces this line with the verdict it evaluated."))
         if on else
         Gate("fab.cull_gate", False,
              f"{n0}/{max(1, slots)}={n0 / max(1, slots):.3f}", float(fab.pressure), reachable=False,
@@ -1228,6 +1277,16 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
                     f"and the lr_maxr ratio clamp are all inert, and FAB.own_lr_scale returns None "
                     f"rather than a table of ones -- a table of ones is a schedule that ran and "
                     f"chose 1.0, which is a different statement."),
+        # THE STAGED-DEPTH CURRICULUM'S LINE, as a PREDICTION until FAB.manage replaces it by name
+        # -- the cull gate's treatment, for the cull gate's reason: nothing has been evaluated yet.
+        (_depth_gate(pop, depth0=int(fab.depth0), hops=int(fab.hops),
+                     patience=int(fab.depth_patience), stage_max=int(fab.depth_stage_max),
+                     manage_every=int(fab.manage_every))
+         if on else
+         Gate("fab.depth_advance", False, f"depth {depth_now}", f"FAB_HOPS={int(fab.hops)}",
+              reachable=False,
+              reason="FAB_ON=0: no selection pass runs on a switched-off fabric, so the staged-"
+                     "depth curriculum it carries never checks")),
     )
     # THE WIRE IS READ AND COMPARED, not merely touched: d_operating_population is the same
     # derive.operating_population call the counter above makes, computed by the assembly from the
@@ -1457,8 +1516,41 @@ def _identities(pop, n, step_n, emb_every_n, *, write=True):
     return keys, True
 
 
-def _ae_loss(pop, n, emb_var):
+_AE_ROWS = 256
+"""How many experts one round-trip pass scores. The cost cap, and only that (see _ae_rows)."""
+
+
+def _ae_rows(n, passes, device):
+    """WHICH experts this round-trip pass scores: all of them up to _AE_ROWS, else a ROTATING block.
+
+    THE CAP IS A COST SAVING AND THE PREFIX WAS NEVER CHOSEN (2026-09-24). This was A[:256] on every
+    pass of every run, so the round trip and its VICReg term reached rows 0..255 and nothing else --
+    measured by the gradient of the exact aux expression at compose: rows [256:2048) received
+    exactly 0. After 200 default windows at 120 kB those 256 founders carried 8.7x the B power of the
+    rest (4.65e-3 against 5.36e-4) and were selected 1.8x less (0.40 against 0.74 per expert), and
+    edec -- which decodes nearly every spawn -- inverted only them (relative reconstruction 0.434 on
+    the prefix against 0.842 on the rest); rotated, the two halves read 7.52e-4 / 7.93e-4, 0.68 /
+    0.72 and 0.729 / 0.723, and newborns reconstruct at 0.291 against 0.444. The block now starts at
+    (passes * _AE_ROWS) mod n and wraps, so every live row, newborns included, is scored once every
+    ceil(n / _AE_ROWS) passes, at the same cost and the same per-row gradient scale as before (so
+    FAB_AE_W needs no retune). `passes` is fab.ident_trained -- the number of round trips already
+    taken, which the checkpoint carries -- and NOT the window step, which advances batch_windows at
+    a time and would visit only n / gcd(n, batch_windows * _AE_ROWS) offsets. At n <= _AE_ROWS the
+    rows are 0..n-1, exactly what the prefix was. REJECTED: the round trip over every live row
+    (cost, and F.mse_loss's mean would cut each row's gradient ~8x and retune ae_w in silence); a
+    seeded permutation (the same coverage, plus a draw on the fabric stream a lever could shift).
+    """
+    k = min(int(n), _AE_ROWS)
+    if int(n) <= _AE_ROWS:
+        return torch.arange(k, device=device)
+    start = (int(passes) * _AE_ROWS) % int(n)
+    return (start + torch.arange(k, device=device)) % int(n)
+
+
+def _ae_loss(pop, rows, emb_var):
     """The weights -> identity -> weights round trip, plus the anti-collapse term.
+
+    `rows` is the LongTensor of experts to score (see _ae_rows), or an int n meaning rows 0..n-1.
 
     edec is used at BIRTH, which is rare, so its gradient signal from spawn alone is far too sparse
     to shape it -- this term is what keeps the decoder an actual inverse of the embedder, and without
@@ -1469,7 +1561,10 @@ def _ae_loss(pop, n, emb_var):
     at initialisation, so dL/dA through the mixture is zero on the first step, while dL/dA and dL/dB
     through this reconstruction are not.
     """
-    weights = torch.cat([pop.A[:n].reshape(n, -1), pop.B[:n].reshape(n, -1)], -1)
+    if isinstance(rows, int):
+        rows = torch.arange(rows, device=pop.A.device)
+    k = int(rows.numel())
+    weights = torch.cat([pop.A[rows].reshape(k, -1), pop.B[rows].reshape(k, -1)], -1)
     emb = pop.modules["eemb"](weights)
     var, cov = _var_cov(emb)
     return F.mse_loss(pop.modules["edec"](emb), weights) + emb_var * (var + cov)
@@ -1532,7 +1627,8 @@ def _entry_logits(pop, *, query, signature, keys, n, region_w, route_learn, rout
     is UNIFORM -- the region cosine and the learned identity term are both erased and there is no
     routing decision left -- while Gate fab.route_learned still prints "FIRED (route_learn=True vs
     route_learn=True)". Measured: aux 0.4987463653087616 against 0.5134152173995972, halt mass
-    0.3703 against 0.0139, and both batch rows selecting identical experts. FAB_ROUTE_T is now
+    0.3703 against 0.0139 (halt figures taken before Q-FAB-14 added log(n_live) to the halt
+    logit), and both batch rows selecting identical experts. FAB_ROUTE_T is now
     refused non-finite at startup by fabric/api.py::build; refusing nan and -inf costs nothing
     because 0 already spells exactly what they did. A LARGE FINITE temperature does the same thing
     more slowly and is not refused.
@@ -1570,19 +1666,36 @@ def _entry_logits(pop, *, query, signature, keys, n, region_w, route_learn, rout
     return logits, ec_applied, banned
 
 
-def _halt_logit(pop, query, route_t, halt_on, rows, device, dtype):
-    """HALT's column, on the same scale as the experts it competes with.
+def _halt_logit(pop, query, route_t, halt_on, rows, device, dtype, n=1):
+    """HALT's column, on the same scale as the experts it competes with -- ONE OF THEM, NOT ALL OF THEM.
 
     HALT owns no region, so its logit comes from the SAME place the learned expert term does -- the
     router's query in identity space, matched against halt_key -- plus the learned prior halt_b. At
     halt_on=False it is PINNED at a constant rather than derived, which is the old tree's own
     halt-off form (self_organize.py:2628) and the reason `q_entry` could be dropped: a derived
     halt column on the halt-off arm is a never-trained random projection perturbing a centroid EMA.
+
+    PLUS log(n), SO HALT COMPETES WITH THE TYPICAL EXPERT AND NOT WITH THE POPULATION'S TOTAL MASS
+    (Q-FAB-14, RESOLVED 2026-09-24). In one softmax over n expert columns and this one, halt's mass
+    is sigmoid(halt_logit - logsumexp(experts)), and logsumexp grows with log(n): at the shipped
+    n0=2048 the column barely competes -- driven over 100 default windows at 120 kB, halt mass
+    2.1e-04 at the first flush (logsumexp 9.73 against a halt logit of 1.26) and a training EMA of
+    0.00085 at the end, while the same code at FAB_N0=8 put 51% of the first flush's mass on halt
+    and ended at an EMA of 0.67. The operator's reach was set by the population size. With log(n)
+    added the mass is sigmoid(halt_logit - log-MEAN-exp(experts)): equal evidence gives halt what
+    one expert would get, at every population size, and n=1 is exactly the old column. The prior
+    moves by log(n_new / n_old) on growth -- 0.07 nats from 2048 to 2200 -- which is the correction
+    and not a drift: without it every doubling of the population halved halt's mass.
+    REJECTED: a separate sigmoid gate ph = sigmoid(cos/route_t + halt_b) outside the softmax. It is
+    n-free too, but it stops halting from competing with the experts at all -- the design this
+    function's first line states -- and at halt_b's frozen zero init (self_organize.py:1733) it would
+    start every run at ph ~ 0.5, which needs a new init and breaks what a saved halt_b means.
     """
     if not halt_on:
         return torch.full((rows, 1), _NEG, device=device, dtype=dtype)
     key = F.normalize(pop.modules["halt_key"].weight[0], dim=-1)
-    return (F.normalize(query, dim=-1) @ key[:, None]) / max(1e-3, route_t) + pop.halt_b
+    return ((F.normalize(query, dim=-1) @ key[:, None]) / max(1e-3, route_t) + pop.halt_b
+            + math.log(max(1, int(n))))
 
 
 def _ground_update(pop, signature, weights, n, cent_topk, cent_ema, discover):
@@ -1741,6 +1854,9 @@ def _claim_slot(pop, slot, step_n, *, parent=-1, mutscale=1.0):
     pop.mutscale[slot] = float(mutscale)
     pop.n_live = slot + 1
     pop.births += 1
+    # THE SLOT'S OPTIMIZER ROWS BELONG TO NOBODY YET: a recycled slot still holds the moments of
+    # the expert that last lived there (or of the one _remove moved out of it). RowEvents says so.
+    pop.row_events.append(("birth", int(slot)))
     # THE IDENTITY CACHE IS NOW STALE IN BOTH SENSES -- it is the wrong length, and the tensor it was
     # embedded from has a new version. Dropped rather than patched: a cache that survives a write to
     # its own source is the "backward through the graph a second time" failure with extra steps.
@@ -1757,6 +1873,15 @@ def _claim_slot(pop, slot, step_n, *, parent=-1, mutscale=1.0):
 # `n_live`, the module dict, the RNG and four cache fields, and a renumbering that walked all of
 # them would swap the population's size with an expert's birthday.
 _BOOKS = ("born", "use", "uage", "dom_of", "ef", "es", "comp", "contrib", "parent", "mutscale")
+
+
+def _drain_row_events(pop):
+    """Hand over and forget the row events since the last training pass: a RowEvents, or None."""
+    if not pop.row_events:
+        return None
+    ev = RowEvents(tensors=(pop.A, pop.B), events=tuple(pop.row_events))
+    pop.row_events = []
+    return ev
 
 
 def _remove(pop, slot):
@@ -1785,6 +1910,9 @@ def _remove(pop, slot):
             book = getattr(pop, name)
             book[slot] = book[last]
         moved = last
+        # THE MOMENTS MUST FOLLOW THE ROWS, and only OPT holds them (RowEvents, Q-FAB-13).
+        pop.row_events.append(("move", int(last), int(slot)))
+    pop.row_events.append(("clear", int(last)))
     with torch.no_grad():
         pop.A[last] = 0.0
         pop.B[last] = 0.0
@@ -2052,8 +2180,9 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     pass and 3, fab.ind_applied, fab.hopsup_applied and fab.halt_spent_on_base, only on the arm
     that can reach them, so that absent says UNREACHABLE for those three as G4 requires). The count is stated
     because the previous one was wrong: this body writes 24 keys, not nineteen, and it declared 14
-    distinct Gates and not thirteen when that count was taken -- 15 now, fab.halt_spent_on_base
-    being the one added with this reconciliation.
+    distinct Gates and not thirteen when that count was taken -- 15 after that, fab.halt_spent_on_base
+    being the one added with this reconciliation, and 16 now: fab.ponder (2026-09-24) says what
+    fraction of its anneal the depth charge has reached, which a default run never completes.
     A LEAVE-ONE-OUT PASS (`hold_out` set) WRITES NONE OF THEM except fab.holdout_applied, which
     exists to count leave-one-out passes. It used to write fab.route_calls and fab.hops_taken like
     any other pass, so eight candidates on one window read 9 route calls and 27 hops taken for a
@@ -2124,7 +2253,9 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
         _bump(counters, "fab.forward_identity")
         if training and hold_out is None:
             pop.pass_gates = tuple(gates)
-        return FabricOut(hidden=h, aux_loss=zero, gates=tuple(gates))
+        return FabricOut(hidden=h, aux_loss=zero, gates=tuple(gates),
+                         row_events=_drain_row_events(pop) if training and hold_out is None
+                         else None)
 
     hops, depth0 = int(fab.hops), int(fab.depth0)
     if norm_only:
@@ -2147,7 +2278,9 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                                  "fabric/api.py::Population.parameters hands OPT nothing."))
         if training and hold_out is None:
             pop.pass_gates = tuple(gates)
-        return FabricOut(hidden=out, aux_loss=zero, gates=tuple(gates))
+        return FabricOut(hidden=out, aux_loss=zero, gates=tuple(gates),
+                         row_events=_drain_row_events(pop) if training and hold_out is None
+                         else None)
 
     # ---- the levers, read once ------------------------------------------------------------------
     society = bool(fab.society)
@@ -2414,7 +2547,8 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
             route_learn=route_learn, route_t=route_t, ec_w=ec_w, ban=ban, hold_out=hold_out)
         ec_any = ec_any or ec_applied
         banned_seen = max(banned_seen, banned)
-        halt_lg = _halt_logit(pop, query, route_t, halt_on, h.size(0), h.device, logits.dtype)
+        halt_lg = _halt_logit(pop, query, route_t, halt_on, h.size(0), h.device, logits.dtype,
+                              n=n)
         full = torch.softmax(torch.cat([logits, halt_lg], -1), -1)
         if halt_on:
             raw = full[:, n]
@@ -2631,18 +2765,28 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
         if solo:
             _bump(counters, "fab.hopsup_applied")
     ident_term = 0
+    ae_rows = None
     if spawn_on and ae_w > 0.0 and learn:
         # THE ROUND TRIP TRAINS EVERY STEP, not on the embed cadence. The cadence exists because
         # RE-READING identities is O(n * 2*d*r * hid); TRAINING the embedder is capped at 256 experts
         # and is cheap. Tying the two gave the embedder one update per cadence and it stayed
         # collapsed -- and a collapsed identity space makes the spawn test fire on every query.
-        aux = aux + ae_w * _ae_loss(pop, min(n, 256), emb_var)
+        # THE 256 ARE A ROTATING BLOCK AND NOT THE PREFIX (fabric/api.py::_ae_rows, 2026-09-24).
+        ae_rows = _ae_rows(n, int(counters.get("fab.ident_trained", 0)), pop.A.device)
+        aux = aux + ae_w * _ae_loss(pop, ae_rows, emb_var)
         ident_term = 1
         _bump(counters, "fab.ident_trained")
 
     # ---- the gates that could not be evaluated until now ----------------------------------------
+    # AN ANNEAL LONGER THAN THE RUN IS SAID, NOT LEFT TO ARITHMETIC (2026-09-24). FAB_BAL_WARM=4000
+    # and FAB_PONDER_WARM=8000 are both longer than a default run (1,053 windows at 200 kB), so the
+    # balance pressure never reaches FAB_BAL_FLOOR and the depth charge ends at ~13% of its
+    # declared weight -- and the only trace was a bare `warm=` factor. The window and the anneal
+    # length now sit in the VALUE, because the R stage renders a fired gate's pair and not its
+    # reason (spine/gate.py::three_state).
     gates.append(Gate("fab.balance", balance_w > 0.0,
-                      value=f"balance={balance_w} x warm={round(bal_scale, 4)}",
+                      value=f"balance={balance_w} x warm={round(bal_scale, 4)} at window {step_n} of "
+                            f"FAB_BAL_WARM={bal_warm_n} (floor {bal_floor})",
                       threshold="> 0",
                       reason="" if balance_w > 0.0 else
                              f"FAB_BALANCE={balance_w}: no load-balance pressure. This is 'off', "
@@ -2655,6 +2799,14 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                              f"test -- -0.0 is not less than 0.0 -- and `balance_w > 0.0`, the "
                              f"verdict above, is False for it exactly as it is for +0.0, which is "
                              f"why the equation opening this sentence may print a minus sign."))
+    gates.append(Gate("fab.ponder", ponder_w > 0.0,
+                      value=f"ponder={ponder_w} x warm={round(ponder_scale, 4)} at window {step_n} "
+                            f"of FAB_PONDER_WARM={ponder_warm_n}",
+                      threshold="> 0",
+                      reason=""
+                      if ponder_w > 0.0 else
+                      f"FAB_PONDER={ponder_w}: routed depth is not charged, so nothing prices a "
+                      f"hop the chain did not need."))
     # THE DEFICIT BONUS IS ARMED ON A TABLE ONE ENTRY POINT WRITES, and that is a third state. `use`
     # is credited by fabric/api.py::observe and by nothing else, so on a run where that entry point
     # is never CALLED every expert's utilization is 0, the fair share is 0, and there is no deficit
@@ -2772,7 +2924,10 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     _ae_ok = bool(spawn_on and ae_w > 0.0 and learn)
     gates.append(Gate("fab.identity_round_trip", bool(ident_term),
                       value=f"ae_w={ae_w}, emb_var={emb_var}, "
-                            f"{min(n, 256) if ident_term else 0} embedding(s) scored",
+                            f"{int(ae_rows.numel()) if ident_term else 0} embedding(s) scored"
+                            + (f" (rows {int(ae_rows[0])}..{int(ae_rows[-1])} of {n}, wrapping; "
+                               f"every row once per {-(-n // _AE_ROWS)} pass(es))"
+                               if ident_term and n > _AE_ROWS else ""),
                       threshold=f"spawn={spawn_on}, training={training}, counterfactual={not solo}",
                       reachable=_ae_ok,
                       reason="" if _ae_ok else
@@ -2821,8 +2976,12 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
         # arithmetic would have to find it among thousands; fabric/api.py::build's gates describe
         # the BUILD, which happens once, and these describe THIS PASS. The last TRAINING pass's copy
         # REPLACES pop.pass_gates (set just above), which is what fabric/api.py::counters renders.
+        # THE ROW EVENTS ARE DRAINED ON TRAINING PASSES ONLY, AFTER this pass's own spawn: they
+        # must reach the moments before the backward this pass feeds, and an eval or
+        # counterfactual pass has no backward and must not swallow them.
         logits=logits_out, hidden=h, expert_ids=expert_ids, weights=weights,
-        per_expert_logits=per_expert, aux_loss=aux, gates=tuple(gates))
+        per_expert_logits=per_expert, aux_loss=aux, gates=tuple(gates),
+        row_events=_drain_row_events(pop) if learn else None)
 
 
 def observe(fab: Config, pop, out, *, per_window_loss, domain_id):
@@ -3108,6 +3267,56 @@ def contribution(fab: Config, pop, *, h, signature, novelty, head, targets, base
         "docs/04_CONTRACT.md, section FAB.")
 
 
+def _depth_gate(pop, *, depth0, hops, patience, stage_max, manage_every, step_n=None,
+                flush_loss_seen=True):
+    """fab.depth_advance: has the staged-depth curriculum advanced, and when can it next.
+
+    THE CURRICULUM'S OWN THREE-STATE LINE (2026-09-24). A default 1,053-window run reported
+    fab.depth_now 1 and fab.deepened 0 with nothing saying that the curriculum COULD NOT advance in
+    that length: the earliest advance is min(depth_patience + 1, depth_stage_max) manage passes in
+    (the plateau leg compares a pass against the one before it, so it needs patience + 1), which is
+    min(7, 40) x 500 = 3,500 windows at the defaults. UNREACHABLE when the curriculum is off
+    (depth0 == 0 or depth0 >= hops: depth is fixed) and before any manage pass has run; FIRED once
+    depth has advanced at least once in the run; otherwise armed, with the stage's arithmetic.
+    `step_n` None is the build-time prediction.
+    """
+    counters, g = pop.counters, pop.growth
+    depth_now = int(pop.depth_now)
+    earliest = min(int(patience) + 1, int(stage_max))
+    pair = (f"depth {depth_now} of FAB_HOPS={hops}",
+            f"wait>={patience} flat check(s) or {stage_max} check(s) per stage")
+    if not (0 < depth0 < hops):
+        return Gate("fab.depth_advance", False, *pair, reachable=False,
+                    reason=(f"FAB_DEPTH0={depth0} against FAB_HOPS={hops}: the curriculum is off "
+                            f"(depth0=0 means start at the full budget), so depth is fixed at "
+                            f"{depth_now} and nothing advances it"))
+    if step_n is None:
+        return Gate("fab.depth_advance", False, *pair, reachable=False,
+                    reason=(f"no fab.manage pass has run yet (FAB_MANAGE_EVERY={manage_every} "
+                            f"window(s)). A stage ends after FAB_DEPTH_PATIENCE={patience} flat "
+                            f"check(s) (the first check has nothing to compare against) or after "
+                            f"FAB_DEPTH_STAGE_MAX={stage_max} check(s), so the earliest advance "
+                            f"is check {earliest}, window {earliest * int(manage_every)}; a run "
+                            f"shorter than that cannot deepen past {depth_now}"))
+    deepened = int(counters.get("fab.deepened", 0))
+    forced = int(counters.get("fab.depth_forced", 0))
+    seen, wait = int(g.get("depth_seen", 0)), int(g.get("depth_wait", 0))
+    if depth_now >= hops:
+        tail = (f"depth has reached FAB_HOPS={hops}; nothing is left to advance")
+    else:
+        flat_left = max(0, int(patience) - wait) + (1 if g.get("depth_prev") is None else 0)
+        cap_left = max(0, int(stage_max) - seen)
+        tail = (f"stage check {seen} of FAB_DEPTH_STAGE_MAX={stage_max}, plateau wait {wait} of "
+                f"FAB_DEPTH_PATIENCE={patience}; the stage cap advances depth in {cap_left} more "
+                f"check(s) at the latest (window {int(step_n) + cap_left * int(manage_every)} at "
+                f"FAB_MANAGE_EVERY={manage_every}), and {flat_left} more flat check(s) would "
+                f"advance it sooner")
+    note = "" if flush_loss_seen else "; this pass had no flush loss and did not check"
+    return Gate("fab.depth_advance", deepened > 0, *pair,
+                reason=(f"{deepened} advance(s) so far, {forced} forced by the stage cap; "
+                        f"{tail}{note}"))
+
+
 def manage(fab: Config, pop, *, step_windows, flush_loss=None):
     """The selection pass: failure cull, utilization cull, three spares, rescue, staged depth.
 
@@ -3168,6 +3377,10 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
          population by fail_tol AND the fast one is not above the slow one by shift_tol -- because
          fast >> slow is a SHIFT IN PROGRESS and that expert is adapting. This is the goal-B
          protection and the only cull path that still runs on a small or shrinking population.
+         "THE POPULATION" IS comp_glob, the flush-mean loss EMA (Q-FAB-12): it was the mean over
+         every live expert, never-selected zeros included, which put the bar under every selected
+         expert and culled every past-grace expert on its first pass. A load-bearing expert
+         (contrib > 0) is spared here as on the utilization path, which is the old tree's rule.
       2. UTILIZATION CULL, only behind derive.cull_gate_open(n_live, slots, pressure). THAT
          FUNCTION IS CALLED, NOT RESTATED -- it is already replayed against a 216-case oracle, and
          it is TWO conditions (n_live <= 2 is a FLOOR, not a pressure test), which is why people
@@ -3187,10 +3400,15 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
          shift test.
       5. RESCUE: one heavy mutation at mut_big scale and a reset use-clock instead of a deletion,
          once per expert, inside the pressure gate.
-      6. maybe_deepen(flush_loss) when the curriculum is on (0 < depth0 < hops). NOTE THE UNIT
-         FAULT THIS INHERITS: depth_eps is declared BITS_PER_BYTE and is compared against a raw
-         per-flush cross-entropy in NATS PER TOKEN (:2529 against :7317). The repair is owed at the
-         COMPARISON, not at the declaration, and the report prints the unit it was compared in.
+      6. maybe_deepen(flush_loss) when the curriculum is on (0 < depth0 < hops). A stage ends
+         after depth_patience flat checks OR after depth_stage_max checks, whichever is first --
+         the old tree's `dp_wait >= patience or dp_seen >= stage_max` (self_organize.py:2533);
+         until 2026-09-24 stage_max was read only as a depth CEILING and never forced an advance.
+         `flush_loss` is the root's MEAN flush loss since the previous pass (it was one raw flush,
+         against depth_eps's "smoothed" declaration). NOTE THE UNIT FAULT THIS INHERITS: depth_eps
+         is declared BITS_PER_BYTE and is compared against a cross-entropy in NATS PER TOKEN (:2529
+         against :7317). The repair is owed at the COMPARISON, not at the declaration, and the
+         report prints the unit it was compared in.
 
     THREE STATES, NOT TWO, FOR EVERY GATE ON THIS PASS (Q-FAB-5, RESOLVED 2026-09-02).
     `fabric.cull_eligible` reports `unreachable` -- never "armed but 0" -- when the eligible set is
@@ -3201,7 +3419,7 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
     FAB-owned by construction. C11 cannot see this family and whoever answers C11 must be told.
     `fab.merged` takes the identical treatment for the identical reason (step 0).
 
-    LEVERS READ: grace, cull_frac, pressure, slots, comp_protect, comp_ema, err_fast, err_slow,
+    LEVERS READ: grace, cull_frac, pressure, slots, comp_protect, err_fast, err_slow,
                  shift_tol, fail_tol, rescue, mut_big, manage_every, depth0, depth_eps,
                  depth_patience, depth_stage_max, hops, merge_dist, on
     WIRES READ: d_manage_period (recorded on the report beside manage_every, so the WINDOW cadence
@@ -3211,7 +3429,11 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
     DID IT FIRE: fab.cull_fail, fab.cull_util, fab.spared_contrib, fab.spared_comp,
                  fab.spared_shift, fab.rescued (CUMULATIVE, and its gate arms on `rescue > 0 OR the
                  count is nonzero` -- the old row armed on cull_ran, a snapshot reassigned every
-                 pass, and discarded a nonzero count, ISSUES P1-M57), fab.deepened, fab.cull_gate,
+                 pass, and discarded a nonzero count, ISSUES P1-M57), fab.deepened,
+                 fab.depth_forced (the advances the stage cap decided rather than a plateau; seeded
+                 only when the curriculum is on, ABSENT otherwise), fab.depth_advance (a Gate, with
+                 the stage's check count and the window the cap forces the next advance at),
+                 fab.cull_gate,
                  fab.cull_rank_spread (max/min `use` INSIDE the eligible set: at ~1 the ranking
                  carries no information and H12 survived the use/uage split in a new dress, because
                  routing concentrates -- the pilot's top expert took 79.5% of traffic -- so the
@@ -3226,12 +3448,12 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
     period = fab.d_manage_period     # WIRE READ HERE -- both cadences reported side by side
     grace, cull_frac = int(fab.grace), float(fab.cull_frac)
     pressure, slots = float(fab.pressure), int(fab.slots)
-    comp_protect, comp_ema = bool(fab.comp_protect), float(fab.comp_ema)
+    comp_protect = bool(fab.comp_protect)
     shift_tol, fail_tol = float(fab.shift_tol), float(fab.fail_tol)
     rescue_frac, mut_big = float(fab.rescue), float(fab.mut_big)
     manage_every = int(fab.manage_every)
     depth0, hops = int(fab.depth0), int(fab.hops)
-    depth_eps, depth_patience = float(fab.depth_eps), int(fab.depth_stage_max)
+    depth_eps = float(fab.depth_eps)
     depth_patience = int(fab.depth_patience)
     depth_stage_max = int(fab.depth_stage_max)
     merge_dist = float(fab.merge_dist)
@@ -3266,6 +3488,13 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
     # is a same-kind comparison and not a clock crossing.
     eligible = [i for i in range(n_live) if int(pop.uage[i]) >= grace]
     n_elig = len(eligible)
+    # THE ELIGIBLE COUNT AT ENTRY IS WHAT THE REACHABILITY GATES AND THE REPORT CARRY. `n_elig` is
+    # recomputed after the failure cull for the utilization cull's budget, and until 2026-09-24 the
+    # gates read THAT: a pass that culled all 14 eligible experts then printed "NO expert has been
+    # SELECTED grace times ... This is not 'armed and did not fire'" beside fab.cull_fail=15 and
+    # fab.experts_past_grace_ever=15. Q-FAB-5 permits `unreachable` only for a set that was EMPTY,
+    # and a set this pass emptied was not.
+    n_elig_entry = n_elig
     # fab.cull_rank_spread IS THE FALSIFIER FOR THE REPAIR ITSELF, which is why it is computed
     # before anything is culled. Routing concentrates -- the pilot's top expert took 79.5% of
     # traffic -- so the experts that cross grace first are the MOST-USED ones, while the cull then
@@ -3328,18 +3557,40 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
     # POPULATION. An expert is failing when BOTH error EMAs sit above the population by fail_tol
     # AND the fast one is not above the slow one by shift_tol -- because fast >> slow is A SHIFT IN
     # PROGRESS and that expert is ADAPTING, which is the single thing this project exists to keep.
-    cull_fail = spared_shift = 0
-    if n_elig:
-        ef_pop = sum(float(pop.ef[i]) for i in range(n_live)) / max(1, n_live)
-        es_pop = sum(float(pop.es[i]) for i in range(n_live)) / max(1, n_live)
+    # THE POPULATION IS comp_glob, THE FLUSH-MEAN LOSS EMA observe() KEEPS (Q-FAB-12, RESOLVED
+    # 2026-09-24), which is the old tree's own baseline -- `failing(e, comp_glob)` at
+    # self_organize.py:2189-2194, called with `comp_glob=asm.comp_glob` at :6718. It was the mean of
+    # ef and es over EVERY live expert until that date, and observe() says in writing that ef = es =
+    # 0.0 is "never attributed", told apart from a zero loss only by the selection count. With ~30%
+    # of the population never selected the mean sat ~1.9 nats under the selected experts' (window
+    # 1001 of a default 200 kB run: 2.940 over all 2950 live, 1148 of them never selected, against
+    # 4.813 over the selected), so the bar was 3.09 and EVERY past-grace expert cleared it -- 1 of
+    # 1 at window 501, 11 of 13 at window 1001 (the other 2 spared as adapting), ef 3.32-4.79,
+    # every one below the selected mean -- and the cull deleted the fabric's most-selected experts
+    # on their first pass past grace. Against comp_glob (3.660 there) the same pass culls 3.
+    # REJECTED: the mean over experts with uage > 0 (a once-selected expert's EMA is its
+    # first window's loss, seeded early and never decayed, which put that mean ~0.9 nats above the
+    # current flush mean and made the cull nearly inert) and the mean over the eligible set (a
+    # lone eligible expert IS that mean and can never fail; it turns "worse than the population"
+    # into "worse than the other workhorses").
+    # None BEFORE THE FIRST ATTRIBUTED WINDOW, and then nothing can be judged against it.
+    cull_fail = spared_shift = spared_contrib = 0
+    fail_base = None if pop.comp_glob is None else float(pop.comp_glob)
+    if n_elig and fail_base is not None:
         failing = []
         for i in list(eligible):
             if i >= n_live:
                 continue          # renumbered away by the merge above
             ef_i, es_i = float(pop.ef[i]), float(pop.es[i])
-            if ef_i > ef_pop + fail_tol and es_i > es_pop + fail_tol:
+            if ef_i > fail_base + fail_tol and es_i > fail_base + fail_tol:
                 if ef_i - es_i > shift_tol:
                     spared_shift += 1
+                elif float(pop.contrib[i]) > 0.0:
+                    # LOAD-BEARING DESPITE THE ERROR, the old tree's failure-path spare
+                    # (self_organize.py:2241, `if protect and s.contrib.get(i, 0.0) > 0`). contrib
+                    # stays 0.0 while FAB.contribution is deferred, so this cannot fire today; it
+                    # is here so the day contribution lands both cull paths honour it.
+                    spared_contrib += 1
                 else:
                     failing.append(i)
         for i in sorted(failing, reverse=True):
@@ -3356,7 +3607,13 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
     # was above pressure for most of its length and below it at the end does not print
     # "unreachable".
     gate_open = _derive.cull_gate_open(n_live, slots, pressure)
-    gate_str = (f"n_live={n_live} / slots={slots} = {n_live / max(1, slots):.3f} against "
+    # THE UNROUNDED RATIO IS PRINTED WHEN THE THREE-PLACE ONE WOULD SIT ON THE OTHER SIDE OF THE
+    # SETPOINT, which is build's rounding caveat carried to the gate that now reports the verdict
+    # (measured there: FAB_N0=4499 FAB_SLOTS=10000 at FAB_PRESSURE=0.45 prints 0.450 and is shut).
+    _occ = n_live / max(1, slots)
+    _flip = (_occ >= pressure) != (float(f"{_occ:.3f}") >= pressure)
+    gate_str = (f"n_live={n_live} / slots={slots} = {_occ:.3f}"
+                f"{f' (unrounded {_occ!r})' if _flip else ''} against "
                 f"FAB_PRESSURE={pressure} with the n_live<=2 floor: "
                 f"{'OPEN' if gate_open else 'SHUT'}")
     # THE GATE'S ARITHMETIC GOES ON A Gate AND NOT INTO THE COUNTER LEDGER, and the first driven
@@ -3365,7 +3622,7 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
     # so a string stored under that key raised ValueError from inside the REPORT PATH, after a
     # 600-window run had already completed. The ledger is declared {name: int}; a sentence is a
     # Gate's `reason`, which is exactly the field that exists to carry arithmetic.
-    cull_util = spared_contrib = spared_comp = 0
+    cull_util = spared_comp = 0
     if gate_open and n_elig:
         # THE BUDGET IS SIZED ON THE ELIGIBLE SET AND THE max(1, ...) RATCHET IS DROPPED. The budget
         # MAY BE ZERO, and fab.cull_util == 0 under an OPEN gate is a legitimate reported outcome
@@ -3381,7 +3638,16 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
             if float(pop.contrib[i]) > 0.0:
                 spared_contrib += 1
                 continue
-            if comp_protect and float(pop.comp[i]) > float(pop.comp_glob or 0.0):
+            # comp IS A LOSS, SO "BETTER THAN THE POPULATION" IS `<`. It read `>` until 2026-09-24,
+            # which spared the experts WORSE than comp_glob and let the better ones be culled --
+            # the opposite of this lever's help string ("models its own material better than the
+            # population does") and of the old tree's `s.comp.get(i, 1e9) < comp_glob`
+            # (self_organize.py:2271). Measured at window 1001 of a default 200 kB run: comp_glob
+            # 3.660, and of the 13 eligible experts the `>` test would have spared the six at comp
+            # 3.72-8.12 and left the seven at 3.38-3.61 -- the better ones -- to the cull.
+            # comp_glob None means nothing has been attributed yet, and nothing is spared on it.
+            if (comp_protect and pop.comp_glob is not None
+                    and float(pop.comp[i]) < float(pop.comp_glob)):
                 spared_comp += 1
                 continue
             if float(pop.ef[i]) - float(pop.es[i]) > shift_tol:
@@ -3418,23 +3684,46 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
     # BITS_PER_BYTE and flush_loss is a per-flush cross-entropy in NATS PER TOKEN. The repair is
     # owed at the COMPARISON, not at the declaration, so the comparison converts and the counter
     # says which unit it was made in.
+    # A STAGE ENDS ON THE PLATEAU TEST OR AFTER depth_stage_max CHECKS, WHICHEVER COMES FIRST
+    # (2026-09-24). The lever's help is "Depth-checks after which a stage ends regardless of the
+    # plateau test", and fabric/levers.py records why it exists: "the pure plateau test cannot fire
+    # on an underfit model and left depth pinned at 1 for a whole run". The old tree counts checks
+    # per stage (`dp_seen`) and advances on `dp_wait >= patience or dp_seen >= stage_max`
+    # (self_organize.py:2523-2535). This body read the lever only as a CEILING --
+    # `depth_now < min(hops, depth_stage_max)` -- so on a falling loss depth never advanced at any
+    # stage_max (driven: 60 checks at 0.05 nats per check, depth_now 1 at stage_max 2, 40 and
+    # 1000 alike), and on a flat loss a small stage_max capped the depth instead (stage_max=2:
+    # depth 2 for ever). The count is `depth_seen` on pop.growth, which state_dict carries, so a
+    # resumed run resumes its stage. The ceiling is `hops` alone; forward still caps the walk at
+    # 2 + n_live // 2, and that cap stays there rather than entering the curriculum state.
+    # fab.depth_forced SAYS WHICH LEG DECIDED, so a report can tell a plateau from the stage cap.
     deepened = False
-    if 0 < depth0 < hops and flush_loss is not None:
-        g = pop.growth
+    curric = 0 < depth0 < hops
+    if curric:
+        counters.setdefault("fab.depth_forced", 0)
+    g = pop.growth
+    if curric and flush_loss is not None:
         prev = g.get("depth_prev")
         bits = float(flush_loss) / math.log(2.0)
         counters["fab.depth_compared_in"] = "bits_per_token"
+        g["depth_seen"] = int(g.get("depth_seen", 0)) + 1
         if prev is not None and (prev - bits) < depth_eps:
             g["depth_wait"] = int(g.get("depth_wait", 0)) + 1
-            if g["depth_wait"] >= depth_patience and int(pop.depth_now) < min(hops,
-                                                                              depth_stage_max):
-                pop.depth_now = int(pop.depth_now) + 1
-                g["depth_wait"] = 0
-                deepened = True
-                _bump(counters, "fab.deepened")
         else:
             g["depth_wait"] = 0
+        plateau = int(g["depth_wait"]) >= depth_patience
+        forced = int(g["depth_seen"]) >= depth_stage_max
+        if int(pop.depth_now) < hops and (plateau or forced):
+            pop.depth_now = int(pop.depth_now) + 1
+            g["depth_wait"] = 0
+            g["depth_seen"] = 0
+            deepened = True
+            _bump(counters, "fab.deepened")
+            if forced and not plateau:
+                _bump(counters, "fab.depth_forced")
         g["depth_prev"] = bits
+    if curric:
+        counters["fab.depth_now"] = int(pop.depth_now)
 
     for k, v in (("fab.cull_fail", cull_fail), ("fab.cull_util", cull_util),
                  ("fab.spared_contrib", spared_contrib), ("fab.spared_comp", spared_comp),
@@ -3447,16 +3736,29 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
     # eligible set is empty, WITH THEIR OWN ARITHMETIC. This CANNOT ride
     # derive.cadences_that_cannot_fire: that audit refuses anything that is not units.Windows and
     # `grace` is units.Selections, so the reachability statement is FAB-owned by construction.
+    # THE ELIGIBLE COUNT THESE GATES CARRY IS THE ONE AT ENTRY (`n_elig_entry`), and the reason
+    # says how many the pass itself removed, so a pass that culled cannot print 'unreachable'.
     _mean_uage = sum(int(pop.uage[i]) for i in range(n_live)) / max(1, n_live)
     _reach = (f"mean uage {_mean_uage:.1f} at n_live={n_live} after {step_n} window(s); "
               f"grace={grace} selection(s)")
+    _fail_note = (f"failure cull against comp_glob={fail_base:.4f} + FAB_FAIL_TOL={fail_tol}: "
+                  f"{cull_fail} culled, {spared_shift} spared as adapting, {spared_contrib} as "
+                  f"load-bearing"
+                  if fail_base is not None else
+                  "no failure cull: comp_glob is None, so no window has been attributed yet")
     _gates = tuple(g for g in pop.gates
-                   if g.name not in ("fabric.cull_eligible", "fab.merged", "fab.cull_gate"))
-    pop.gates = _gates + (
-        Gate("fabric.cull_eligible", n_elig > 0, n_elig, grace,
-             reachable=n_elig > 0,
-             reason=(f"{n_elig} of {n_live} expert(s) are past grace and rankable; {_reach}"
-                     if n_elig else
+                   if g.name not in ("fabric.cull_eligible", "fab.merged", "fab.cull_gate",
+                                     "fab.depth_advance"))
+    pop.gates = _gates + (_depth_gate(pop, depth0=depth0, hops=hops, patience=depth_patience,
+                                      stage_max=depth_stage_max, manage_every=manage_every,
+                                      step_n=step_n, flush_loss_seen=flush_loss is not None),) + (
+        Gate("fabric.cull_eligible", n_elig_entry > 0, n_elig_entry, grace,
+             reachable=n_elig_entry > 0,
+             reason=(f"{n_elig_entry} of the live expert(s) were past grace and rankable at the "
+                     f"start of this pass; {merged} merged away, {cull_fail} removed by the "
+                     f"failure cull and {cull_util} by the utilization cull, leaving "
+                     f"{n_elig - cull_util} eligible; {_fail_note}; {_reach}"
+                     if n_elig_entry else
                      f"unreachable ({_reach}): NO expert has been SELECTED grace times, so the "
                      f"eligible set is empty and every ranking, budget and spare on this pass is "
                      f"sized on nothing. This is not 'armed and did not fire'")),
@@ -3464,9 +3766,14 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
         # words: "The gate's arithmetic is recorded EVERY pass whether it opened or not, so a run
         # that was above pressure for most of its length and below it at the end does not print
         # 'unreachable'." So this Gate is always REACHABLE -- what varies is `fired`.
-        Gate("fab.cull_gate", gate_open, n_live, pressure, reason=gate_str),
+        # THE PAIR IS THE OCCUPANCY AND NOT THE HEAD COUNT (2026-09-24). It printed `n_live` against
+        # `pressure` -- 2114 vs 0.6 beside 'armed, did not fire' -- a count against a ratio, so a
+        # SHUT pass always read as a value far over its threshold. It now renders the ratio the
+        # verdict compares, as build's prediction does, and the reason carries the floor.
+        Gate("fab.cull_gate", gate_open,
+             f"{n_live}/{max(1, slots)}={n_live / max(1, slots):.3f}", pressure, reason=gate_str),
         Gate("fab.merged", merged > 0, merged, merge_dist,
-             reachable=n_elig > 0 and merge_dist > 0.0,
+             reachable=n_elig_entry > 0 and merge_dist > 0.0,
              reason=(f"{merged} pair(s) consolidated within FAB_MERGE_DIST={merge_dist} cosine; "
                      f"residual p50/p99 "
                      f"{counters.get('fab.merge_residual_p50', 0.0):.4f}/"
@@ -3474,6 +3781,14 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
                      if merged else
                      f"FAB_MERGE_DIST={merge_dist} is 0: merging is off by configuration"
                      if merge_dist <= 0.0 else
+                     # ARMED AND DID NOT FIRE IS ITS OWN SENTENCE. With past-grace experts at entry
+                     # the reason used to fall through to the 'unreachable' text below, so the
+                     # report printed ('armed-but-zero', ..., 'unreachable ...') on one line.
+                     f"{n_elig_entry} expert(s) were past grace at entry and no pair with a "
+                     f"past-grace member sat within FAB_MERGE_DIST={merge_dist} cosine; "
+                     f"{declined_grace} close pair(s) declined because the absorbed one was inside "
+                     f"grace"
+                     if n_elig_entry else
                      f"unreachable ({_reach}): the absorbed expert must be past grace and no "
                      f"expert is. {declined_grace} pair(s) were close enough and declined for it")))
 
@@ -3481,7 +3796,7 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
         merged=merged, merge_declined_grace=declined_grace,
         merge_declined_residual=declined_resid, cull_fail=cull_fail, cull_util=cull_util,
         spared_contrib=spared_contrib, spared_comp=spared_comp, spared_shift=spared_shift,
-        rescued=rescued, deepened=deepened, eligible=n_elig, cull_gate=gate_str,
+        rescued=rescued, deepened=deepened, eligible=n_elig_entry, cull_gate=gate_str,
         manage_every=manage_every, manage_period_flushes=period)
 
 
@@ -3750,9 +4065,12 @@ def grow_check(fab: Config, pop, *, flush_loss, step_windows, soft_cap, memory_p
     TWO typed clocks and passing OPT's to FAB raises UnitError instead of being 16x wrong at
     batch_windows=16. That is the type system doing its job, not a duplication.
     A DEFAULTED ARGUMENT IS INVISIBLE TO K10, so it gets the counter OPT already carries for the
-    same hazard (`opt.shift.notifications`, 0 means nobody is supplying shift_at):
-    fab.shift_notifications distinguishes "nobody wired it" from "it was wired and never fired",
-    and until it is nonzero the blackout is UNREACHABLE rather than armed.
+    same hazard (`opt.shift.notifications`, 0 means no shift was stamped):
+    fab.shift_notifications distinguishes "no shift was stamped" from "a shift was stamped", and
+    until it is nonzero the blackout is UNREACHABLE rather than armed. IT COUNTS EVENTS, NOT CALLS:
+    the root re-delivers one stamp on every flush after it, and the last stamp seen is kept on
+    pop.growth['shift_seen'] -- which is also what the blackout is measured from, so a resumed
+    process whose root holds no stamp still honours the cooldown of a shift taken before the save.
     CAP'S HALF OF THE SAME EVENT IS ANSWERED FROM HERE AND NOT BY A NEW CAP LEVER. CAP.observe
     takes a `blackout` BOOLEAN and CAP declares no blackout-window lever of its own (its seven are
     targets, fab_start, vocab_start, lift, lift_min, pin_windows, stall_band); in the old tree the
@@ -3792,9 +4110,10 @@ def grow_check(fab: Config, pop, *, flush_loss, step_windows, soft_cap, memory_p
                  fab.parent_quota_refusals, fab.distinct_parents (1 means the population is one
                  lineage wearing n hats -- which is a DIFFERENT finding from "the experts are
                  interchangeable", and D7 needs the two separated), fab.grow_mem_eligible,
-                 fab.shift_notifications (0 means NOBODY IS SUPPLYING shift_at and the blackout is
-                 unreachable, not armed -- copied verbatim from opt.shift.notifications because a
-                 defaulted keyword is invisible to K10), fab.growth_blackout_suppressed (asks the
+                 fab.shift_notifications (DISTINCT stamps, one per event however many flushes
+                 re-deliver it; 0 means no shift was stamped and the blackout is unreachable, not
+                 armed -- the twin of opt.shift.notifications because a defaulted keyword is
+                 invisible to K10), fab.growth_blackout_suppressed (asks the
                  blackout actually refused, split by leg so a suppressed REGRESSION is not filed
                  under a suppressed stall -- the two keep separate cooldown clocks above for the
                  same reason)
@@ -3911,11 +4230,20 @@ def grow_check(fab: Config, pop, *, flush_loss, step_windows, soft_cap, memory_p
     # units.Steps off clock.opt_steps, and handing that object here raises UnitError instead of
     # being batch_windows-fold wrong -- 16x at BATCH_W=16, and exactly right at 1, which is the
     # shape of every clock defect this project has recorded.
+    # ONE NOTIFICATION PER EVENT, AND THE STAMP IS KEPT HERE (2026-09-24). The root re-delivers the
+    # same stamp on every flush after the roll, and this counter used to bump on each of them: one
+    # epoch roll read fab.shift_notifications 158 while MEM counted the same event once. The last
+    # stamp seen now lives on pop.growth['shift_seen'], which state_dict carries, so (a) a repeated
+    # stamp is not a new notification and (b) the blackout survives a resume whose root starts with
+    # shift_at None -- the stamp itself is not on the root's checkpoint, and FAB's cooldown is FAB's.
     blackout_open, blackout_left = False, 0
     if shift_at is not None:
         stamp = U.Windows(shift_at)
-        _bump(counters, "fab.shift_notifications")
-        since_shift = int(step - stamp)
+        if g.get("shift_seen") is None or int(g["shift_seen"]) != int(stamp):
+            _bump(counters, "fab.shift_notifications")
+        g["shift_seen"] = int(stamp)
+    if g.get("shift_seen") is not None:
+        since_shift = int(step - U.Windows(int(g["shift_seen"])))
         if since_shift < cool_n:
             blackout_open, blackout_left = True, cool_n - since_shift
 
@@ -4153,16 +4481,44 @@ def grow_check(fab: Config, pop, *, flush_loss, step_windows, soft_cap, memory_p
              reason=("" if grow_on else
                      f"FAB_GROW={grow_on}: the regression trigger -- the only signal continual "
                      f"learning has that new material has arrived -- is not evaluated.")),
+        # THE RECOVER LOCKOUT GETS ITS OWN LINE (2026-09-24). A default 1,053-window run spent 1,050
+        # of its 1,053 grow checks in RECOVER after its first regression burst: the leg releases
+        # on |improving| < FAB_PLATEAU=0.002 and `improving` sat at 0.14-0.35 for the whole run,
+        # so the stall leg was locked out throughout -- visible only as fab.grow_recover_passes.
+        # FIRED means the lockout is in force on this check.
+        Gate("fab.grow_recover", bool(grow_on and g["state"] == "R"),
+             value=("not evaluated" if not grow_on or improving is None else
+                    f"|improving|={abs(float(improving)):.6f}"
+                    + (f", in RECOVER since window {g['t0']}, "
+                       f"{int(counters['fab.grow_recover_passes'])} of "
+                       f"{int(counters.get('fab.grow_checks', 0))} check(s) spent there"
+                       if g["state"] == "R" else "")),
+             threshold=f"plateau={plateau} after recover_min={rec_min}, or recover_max={rec_max}",
+             reachable=grow_on,
+             reason=("" if not grow_on or g["state"] != "R" else
+                     f"growth is LOCKED OUT in RECOVER since window {g['t0']} "
+                     f"({step_n - int(g['t0'] if g['t0'] is not None else step_n)} window(s)): "
+                     f"it releases when |improving| < FAB_PLATEAU={plateau} after "
+                     f"FAB_RECOVER_MIN={rec_min} window(s), or unconditionally at "
+                     f"FAB_RECOVER_MAX={rec_max} (window "
+                     f"{int(g['t0'] if g['t0'] is not None else step_n) + rec_max}); "
+                     f"{int(counters['fab.grow_recover_passes'])} of "
+                     f"{int(counters.get('fab.grow_checks', 0))} check(s) so far were spent in it. "
+                     f"A regression can still interrupt it; the stall leg cannot")
+             if grow_on else
+             f"FAB_GROW={grow_on}: there is no growth to lock out."),
         Gate("fab.growth_blackout", blackout_open,
              value=(f"{blackout_left} window(s) left" if blackout_open else
                     f"{int(counters['fab.shift_notifications'])} notification(s)"),
              threshold=f"cooldown={cool_n} windows",
              reachable=int(counters["fab.shift_notifications"]) > 0,
              reason="" if int(counters["fab.shift_notifications"]) > 0 else
-                    "NOBODY IS SUPPLYING shift_at: it is a defaulted keyword, which is invisible to "
-                    "K10, and 0 notifications means the blackout cannot open at all -- not that it "
-                    "was armed and no shift happened. The three sites that would stamp it are the "
-                    "epoch resample, TOK.mint_burst's retok and OPT's LR restart."),
+                    "NO SHIFT HAS BEEN STAMPED: shift_at is a defaulted keyword, which is invisible "
+                    "to K10, and 0 notifications means the blackout cannot open at all -- not that "
+                    "it was armed and no shift happened. ONE of the three stamping sites is driven: "
+                    "the root stamps the epoch roll (RUN_EPOCHS > 1), so a run that takes no roll "
+                    "before it ends has nothing to black out; TOK.mint_burst's retok is deferred to "
+                    "that same roll and OPT's LR restart stamps nothing."),
         Gate("fab.grow_mem_pressure", mem_eligible,
              value=f"FAB_GROW_ON_MEM_PRESSURE={mem_on}, memory_pressure={memory_pressure!r}",
              threshold="MEM's own verdict, already compared against MEM_PRESSURE_THRESH",
@@ -4171,11 +4527,11 @@ def grow_check(fab: Config, pop, *, flush_loss, step_windows, soft_cap, memory_p
                     (f"FAB_GROW_ON_MEM_PRESSURE={mem_on}: the memory-pressure signal is printed and "
                      f"does not make growth eligible."
                      if not mem_on else
-                     "memory_pressure is None: MEM.census is a P4 stub, so no verdict is produced "
-                     "at all. Even with a body it would be exactly 0.0 for every configuration "
-                     "until MEM.maintain's probe has contexts -- nothing promotes out of probation, "
-                     "so every eviction takes the probation branch (Q-MEM-4). TWO named causes, "
-                     "not one.")),
+                     "memory_pressure is None: no cadenced MEM.census has delivered a verdict "
+                     "yet, or the census could not form one -- no eviction has happened, or "
+                     "nothing has ever promoted out of probation (Q-MEM-4). The census has a body "
+                     "and the root calls it on DOM's manage cadence, so None here is a state of "
+                     "the store, not a missing producer.")),
         Gate("fab.grow_cap", declined_cap > 0,
              value=f"{declined_cap} of {ask} refused by the ceiling",
              threshold=f"Caps.headroom({n_live})={room}, pool {pool_room} of {int(pop.cap)}",
@@ -4406,7 +4762,8 @@ def counters(fab: Config, pop):
     # 2026-09-24 -- including the three that said "no head was supplied" on every pass of every run.
     # They are PER-PASS arithmetic (the build's are per-run), so the count beside each verdict is
     # the cumulative ledger key of the same name where one exists and the verdict is the last pass's.
-    # No name collides with a build gate: fab.on / cull_gate / growth_armed / lr_own are build-only.
+    # No name collides with a build gate: fab.on / growth_armed / lr_own are build-only, and
+    # cull_gate / depth_advance are build predictions that FAB.manage replaces by name.
     out.update({f"gate:{k}": v for k, v in
                 _three_state(getattr(pop, "pass_gates", ()), pop.counters).items()})
     # THE LIVE POPULATION AND ITS CEILING, because every fabric gate's arithmetic is a ratio

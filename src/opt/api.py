@@ -184,7 +184,9 @@ class OptState:
     counters, and a counter that cannot be advanced is not a counter. Every WRITE to it happens in
     exactly two functions -- scaled_backward advances n_backward, maybe_step advances everything
     else -- so "the schedule's counter, and the ONLY thing that advances it" is a property a reader
-    can check by grepping this file for `st.`.
+    can check by grepping this file for `st.`. remap_rows (2026-09-24) writes no field of this
+    record: it moves rows INSIDE the base optimizer's per-parameter state and bumps its own
+    opt.rows.* keys in `counters`.
     """
     base: object
     encoder: object
@@ -226,7 +228,7 @@ class LoadReport:
 # PRIVATE HELPERS. Underscore-prefixed so they are not entry points, and none of them takes a
 # Config: tests/test_ownership.py::check_o9_one_config_per_signature requires every function with a
 # Config-annotated parameter to assert its owner, and an owner assertion repeated in six helpers is
-# six chances to write the wrong prefix. The public seven assert once and hand values down.
+# six chances to write the wrong prefix. The public eight assert once and hand values down.
 # ==================================================================================================
 
 _FLOOR = 1e-12                       # only ever a denominator guard, never a rate
@@ -664,7 +666,7 @@ def _priced(opt, st, opt_step):
 
 
 # ==================================================================================================
-# THE SEVEN ENTRY POINTS
+# THE EIGHT ENTRY POINTS
 # ==================================================================================================
 
 def build(opt: Config, *, param_groups, run_windows):
@@ -1412,7 +1414,9 @@ def maybe_step(opt: Config, st, *, best_bpb=None, shift_at=None):
                  rendered by counters),
                  opt.clip.applied / opt.clip.armed_no_clip (grad_clip > 0 and no step exceeded it
                  -- a DIFFERENT statement from grad_clip == 0, and the report must make both),
-                 opt.shift.notifications (0 means nobody is supplying shift_at)
+                 opt.shift.notifications (DISTINCT shift stamps received -- one per event, however
+                 many flushes re-deliver it; 0 means no shift has been stamped in this run, which
+                 at RUN_EPOCHS=1 is every run: the root stamps one at each epoch roll)
     """
     opt = opt.owned_by("OPT")
     schedule_live = str(opt.lr_sched) != "none"
@@ -1461,8 +1465,15 @@ def maybe_step(opt: Config, st, *, best_bpb=None, shift_at=None):
                 f"the same number. There is no conversion to offer: a runtime instant has no "
                 f"named Windows-to-Steps function in spine.derive and inventing one here would be "
                 f"a second horizon divisor.")
+        # ONE COUNT PER EVENT, NOT PER CALL (2026-09-24). The root hands the SAME stamp over on
+        # every stepped flush after the roll, because OPT keeps it and the root does not know when
+        # OPT has consumed it; counting each call made opt.shift.notifications a count of flushes
+        # since the shift (FAB's twin read 158 for ONE epoch roll). A stamp equal to the one
+        # already held is the same event re-delivered, and st.shift_at is on OPT's state_dict, so a
+        # resumed process does not count a restored shift a second time either.
+        if st.shift_at is None or int(shift_at) != int(st.shift_at):
+            st.counters["opt.shift.notifications"] += 1
         st.shift_at = int(shift_at)
-        st.counters["opt.shift.notifications"] += 1
 
     if not derive.accum_due(st.n_backward, opt.accum):
         st.counters["opt.step.not_due"] += 1
@@ -1599,6 +1610,89 @@ def maybe_step(opt: Config, st, *, best_bpb=None, shift_at=None):
     if _encoder_step_signature(st.encoder) != encoder_before:
         st.counters["opt.encoder_steps_here"] += 1
     return StepOutcome(stepped=True, lr=float(lr), restart=restart, damped=damped)
+
+
+def remap_rows(opt: Config, st, row_events):
+    """Carry the base AdamW's per-row state with the expert rows FAB moved, cleared or re-born.
+
+    WHY THIS EXISTS (Q-FAB-13, RESOLVED 2026-09-24). FAB's expert banks are ONE parameter each, so
+    exp_avg and exp_avg_sq are (cap, ...) tensors whose row i belongs to whoever occupies slot i.
+    FAB.manage's swap-with-last cull moves an expert's A/B rows to a new slot and zeroes the old
+    one; nothing moved the moments. Driven at FAB_MANAGE_EVERY=30 FAB_GRACE=1 over 45 windows:
+    154 of 154 moved experts took their next step on the CULLED expert's exp_avg, and all 159
+    slots zeroed and not reborn held non-zero A/B again at the end (max|B| 1.1e-2) -- the optimizer
+    stepped dead rows on the momentum they were left with. FAB cannot import this package (O10), so
+    it names the events (fabric/api.py::RowEvents, drained onto FabricOut on training passes) and
+    the root hands them here BEFORE the flush's backward, which is the one point every event since
+    the previous backward -- grow_check's births, manage's culls, forward's spawns -- has happened
+    and the next accumulation has not.
+
+    `row_events` is duck-typed, never imported: `.tensors` is the banks, `.events` is an ordered
+    tuple of ("move", src, dst) / ("clear", slot) / ("birth", slot). Applied IN ORDER to exp_avg,
+    exp_avg_sq and any accumulated `.grad` of every tensor that is in the base optimizer:
+      move   the destination row takes the source's state; the source is then cleared;
+      clear  the row's state and gradient are zeroed, so AdamW's update there is 0/(0+eps) = 0 and
+             weight decay keeps a zero at zero -- a dead slot stops moving;
+      birth  the row's state and gradient are zeroed, which is EXACTLY the state a never-used slot
+             is born into (its rows receive no gradient before birth, so both moments are 0 there).
+             A newborn in a recycled slot therefore starts where every other newborn does.
+    REJECTED for births: calibrating exp_avg_sq to the parent's row or the live median, so the first
+    step is not AdamW's ~3x zero-state step. It is the better-conditioned start, but it would change
+    EVERY birth -- the ~150 spawns of a 200-window default run land in never-used slots -- which is
+    a behaviour change to the common path with no measurement behind it, not the repair of this one.
+    NOTHING HERE TOUCHES THE PARAMETER VALUES: FAB already wrote them. The per-tensor `step` is
+    shared by every row (AdamW keeps one per tensor) and is left alone.
+
+    LEVERS READ: none
+    WIRES READ: none
+    DID IT FIRE: opt.rows.remap_calls (calls that carried events), opt.rows.moved, opt.rows.cleared,
+                 opt.rows.reborn, opt.rows.not_in_optimizer (event tensors the base optimizer does
+                 not hold -- FAB_ON=0 hands OPT no fabric parameter, and there nothing can move)
+    """
+    opt = opt.owned_by("OPT")
+    c = st.counters
+    for _k in ("opt.rows.remap_calls", "opt.rows.moved", "opt.rows.cleared", "opt.rows.reborn",
+               "opt.rows.not_in_optimizer"):
+        c.setdefault(_k, 0)
+    events = tuple(getattr(row_events, "events", ()) or ())
+    if not events:
+        return None
+    c["opt.rows.remap_calls"] += 1
+    held = {id(q) for g in st.base.param_groups for q in g["params"]}
+    targets = []
+    for p in tuple(getattr(row_events, "tensors", ()) or ()):
+        if id(p) not in held:
+            c["opt.rows.not_in_optimizer"] += 1
+            continue
+        state = st.base.state.get(p, {})
+        rows = [state[k] for k in ("exp_avg", "exp_avg_sq")
+                if isinstance(state.get(k), torch.Tensor) and state[k].dim() >= 1]
+        targets.append((p, rows))
+    with torch.no_grad():
+        for ev in events:
+            kind = ev[0]
+            for p, rows in targets:
+                bufs = list(rows) + ([p.grad] if p.grad is not None else [])
+                if kind == "move":
+                    src, dst = int(ev[1]), int(ev[2])
+                    for t in bufs:
+                        t[dst] = t[src]
+                        t[src] = 0.0
+                elif kind in ("clear", "birth"):
+                    for t in bufs:
+                        t[int(ev[1])] = 0.0
+                else:
+                    raise ValueError(
+                        f"OPT.remap_rows: unknown row event {ev!r}. The kinds are move / clear / "
+                        f"birth (fabric/api.py::RowEvents); applying a guess to optimizer state "
+                        f"would move moments nobody asked to move.")
+            if kind == "move":
+                c["opt.rows.moved"] += 1
+            elif kind == "clear":
+                c["opt.rows.cleared"] += 1
+            else:
+                c["opt.rows.reborn"] += 1
+    return None
 
 
 def counters(opt: Config, st):
@@ -2263,10 +2357,13 @@ def counters(opt: Config, st):
     elif notifications == 0:
         gates.append(Gate("opt.lr.shift_warm", False, notifications, "a shift_at ever supplied",
                           reachable=False,
-                          reason=f"OPT_LR_SHIFT_WARM={shift_warm} is armed and NOBODY IS SUPPLYING "
-                                 f"shift_at (opt.shift.notifications == 0), which is a DIFFERENT "
-                                 f"statement from lr_shift_warm == 0 and the report must make "
-                                 f"both."))
+                          reason=f"OPT_LR_SHIFT_WARM={shift_warm} is armed and NO SHIFT HAS BEEN "
+                                 f"STAMPED in this run (opt.shift.notifications == 0), which is a "
+                                 f"DIFFERENT statement from lr_shift_warm == 0 and the report must "
+                                 f"make both. The root stamps shift_at at each epoch roll, so a "
+                                 f"run that takes no roll before it ends (every RUN_EPOCHS=1 run) "
+                                 f"has nothing to re-warm after; the retok and LR-restart stamps "
+                                 f"are not driven."))
     else:
         gates.append(Gate("opt.lr.shift_warm", st.counters["opt.lr.shift_warm_applied"] > 0,
                           st.counters["opt.lr.shift_warm_applied"],

@@ -1153,6 +1153,10 @@ class FABLevers(LeverSet):
 # ceiling of 1.0 permits the entire blend to halt, the experts receive no gradient, and an expert
 # that receives no gradient can never become worth routing to. The pair bounds the SPELLING of a
 # ceiling. It does not restore the barrier, and no reader may take it as having done so.
+# EVERY FIGURE IN THIS ENTRY PREDATES Q-FAB-14 (2026-09-24), which adds log(n_live) to the halt
+# logit so HALT competes with one expert rather than with the population's summed mass. At the
+# FAB_N0=4 widths above that moves the halt column by log 4 = 1.39 nats; the DIRECTION argument
+# the lo rests on is unchanged, and the numbers are not re-driven here.
 #
 # pressure -- (0.0, None), AND THE None IS THE ONLY ENTRY IN THIS BLOCK THAT HAD TO BE WALKED BACK.
 # THIS PAIR SHIPPED AS (0.0, 1.0) ON 2026-09-14 AND THAT hi REMOVED A WORKING CONFIGURATION. The

@@ -4303,10 +4303,10 @@ row and one deleted exemption. After P4 it is a coordinated edit across ten inde
 **THE COUNT WAS RE-VERIFIED BY SCRIPT ON 2026-09-03, NOT COPIED FROM THIS DOCUMENT**, because
 `Q-TOK-11` and this question collided on it once already and a fifth stale count would be the sixth
 time. Running `test_contract.api_signatures()` — K1's own AST walk, the same oracle the check uses —
-over `src/` returns **136 entry points**, against **136 declared** in §7's ```contract block, all
-distinct. Per package: CAP 7, CKPT 11, DATA 5, DOM 10, EVAL 9, FAB 11, **LM 12**, MEM 10, OPT 7,
+over `src/` returns **137 entry points**, against **137 declared** in §7's ```contract block, all
+distinct. Per package: CAP 7, CKPT 11, DATA 5, DOM 10, EVAL 9, FAB 11, **LM 12**, MEM 10, OPT 8,
 RUN 16, SIG 10, TOK 9, **WORLD 9** (RUN's two since 2026-09-24 are `Cadences.state` and
-`Cadences.restore`, Q-RUN-9). LM's twelve are `anchor_term`, `build_model`, `counters`, `decode`,
+`Cadences.restore`, Q-RUN-9; OPT's eighth, the same day, is `remap_rows`, Q-FAB-13). LM's twelve are `anchor_term`, `build_model`, `counters`, `decode`,
 **`embed`**, `encode`, `lm_loss`, `load_state`, `on_mint`, **`residual_ratios`**, `resolve`,
 `state_dict` — the two additions are both present and both in §7, so 121 + 2 = 123 is the arithmetic
 and the tree agrees with it in both directions.
@@ -4824,6 +4824,136 @@ seeds the eviction and floor counters beside `n_writes_committed`. None of these
 
 ---
 
+### Q-FAB-12 — the failure cull judged "above the population" against a mean that counted never-selected experts as perfect — **RESOLVED 2026-09-24: THE POPULATION IS `comp_glob`; `comp_protect` SPARES THE BETTER EXPERT; THE REACHABILITY GATES CARRY THE ENTRY COUNT**
+`FAB.manage` formed `ef_pop` / `es_pop` as the mean over **every** live expert, and `observe` says in
+writing that `ef = es = 0.0` is "never attributed", told apart from a zero loss only by the selection
+count. Driven on a default 200 kB run: at window 1001, 1148 of 2950 live experts had never been
+selected, the all-live mean was 2.940 against 4.813 over the selected, so the bar sat at 3.09 and
+**11 of 13** eligible experts were culled (the other 2 spared as adapting), every one of them *below*
+the selected mean; at window 501 the one eligible expert was culled. The same pass printed
+`fabric.cull_eligible` as `2 vs 48` (the post-cull remainder) and `fab.merged` as armed-but-zero with
+an "unreachable" reason. The documented criterion — "both error EMAs sit above the population by
+fail_tol" (`fabric/levers.py`, `FAB.manage` step 1) — does intend to cull a well-selected expert
+that is still failing; what it does not intend is a baseline under every selected expert.
+**Ruling:** (1) the baseline is **`comp_glob`**, the flush-mean loss EMA `observe` keeps — the old
+tree's own `failing(e, comp_glob)` (self_organize.py:2189-2194, fed `asm.comp_glob` at :6718); at
+window 1001 above (comp_glob 3.660) the same pass culls 3 of 13. `comp_glob` None (nothing attributed
+yet) means no failure cull. The additive `fail_tol` is unchanged. (2) the failure path also spares
+`contrib > 0`, the old tree's rule (inert while `FAB.contribution` is deferred). (3) the
+**`comp_protect` spare compared `comp > comp_glob`**; comp is a LOSS, so it spared the worse experts
+(at window 1001 it would have spared the six at comp 3.72-8.12 and left the seven at 3.38-3.61 to the
+cull). It is `<` now, as the lever's help and the old tree's :2271 say. (4) `fabric.cull_eligible`,
+`fab.merged`'s reachability and `ManageReport.eligible` carry the eligible count **at entry**, and the
+reason says how many the pass removed, so a pass that culled cannot print 'unreachable' (Q-FAB-5's
+own condition); `fab.merged` has its own armed-and-did-not-fire sentence. **Rejected:** the mean over
+experts with `uage > 0` (a once-selected expert's EMA is its first window's loss, seeded early and
+never decayed — that mean sat ~0.9 nats over the flush mean and made the cull nearly inert); the mean
+over the eligible set (a lone eligible expert IS the mean and can never fail); extending
+`comp_protect` to the failure path (after (3) a failing expert is by construction above `comp_glob`).
+
+### Q-FAB-13 — AdamW's moments did not move with the expert rows the fabric moved — **RESOLVED 2026-09-24: FAB NAMES ROW EVENTS ON `FabricOut.row_events`; THE NEW `OPT.remap_rows(opt, st, row_events)` APPLIES THEM BEFORE THE BACKWARD. A FROZEN SURFACE GREW BY ONE ENTRY POINT AND ONE RECORD FIELD**
+FAB's banks are one `(cap, …)` parameter each, so `exp_avg` / `exp_avg_sq` row *i* belongs to whoever
+occupies slot *i*. `_remove`'s swap-with-last moved an expert's A/B rows and zeroed the old slot;
+nothing moved the moments. Driven at `FAB_MANAGE_EVERY=30 FAB_GRACE=1`, 45 windows: **154 of 154**
+moved experts took their next step on the culled expert's `exp_avg`, and all **159** slots zeroed and
+not reborn held non-zero A/B again (max|B| 1.1e-2) — dead rows stepped on residual momentum, and a
+birth into one inherited it. **Ruling:** `_remove` and `_claim_slot` append `("move", src, dst)`,
+`("clear", slot)`, `("birth", slot)` to `Population.row_events`; `FAB.forward` drains them on
+TRAINING passes only into `FabricOut.row_events` (a `RowEvents(tensors=(A, B), events)`); the root
+calls `OPT.remap_rows` between the forward and `OPT.scaled_backward` — the one point every event since
+the previous backward (grow_check's births, manage's culls, forward's spawns) has happened and the
+next gradient has not landed. OPT applies them in order to both moments and any accumulated `.grad`:
+move copies then zeroes the source; clear and birth zero the row. **After** (same arm): 71 of 74
+checked moves carry their own moments at the next step (the 3 others are the intermediate slot of an
+expert moved twice in one pass, which the in-order application lands at its final slot —
+tests/test_fabric_internals.py I5 pins the chain), 0 of 66 dead slots non-zero, `opt.rows.moved 77`.
+**A birth gets zero moments**, which is exactly what a never-used slot is born with (it receives no
+gradient before birth), so at the default 300 windows — no manage pass, every birth into a fresh
+slot — the remap changes nothing. **Rejected:** calibrating a newborn's `exp_avg_sq` to its parent's
+row or the live median (a better-conditioned first step than AdamW's ~3x zero-state step, but it
+changes every one of the ~150 spawns in a 200-window run — a behaviour change to the common path with
+no measurement behind it); remapping the merge's and rescue's in-place rewrites (Q-FAB-2 rules their
+moments stale-by-statement; the merge's removal of the absorbed expert IS a `_remove` and IS remapped);
+events on `ManageReport` / `GrowReport` (manage runs on windows, not flushes, and the root would need
+a new System slot to carry them to the next backward).
+
+### Q-FAB-14 — HALT competed with the whole population's mass — **RESOLVED 2026-09-24: THE HALT LOGIT CARRIES +log(n_live), SO HALT COMPETES WITH ONE EXPERT. ⚠ THE SHIPPED DEFAULT BEHAVIOUR CHANGED: HALT MASS AT n0=2048 GOES FROM ~1e-3 TO TENS OF PERCENT**
+`FAB.forward` scored HALT as one more column of the softmax over the n live experts, so its mass is
+sigmoid(halt_logit − logsumexp(experts)) and logsumexp grows with log n. Driven over 100 default
+windows at 120 kB: halt mass 2.1e-04 at the first flush (logsumexp 9.73 against a halt logit of
+1.26), training EMA 0.00085 at the end; the same code at `FAB_N0=8` put 51% of the first flush's mass
+on halt and ended at an EMA of 0.67. `FAB_HALT` ("HALT as a real operator") and `FAB_PONDER` were
+live at test widths and near-inert at the shipped population. **Ruling:** `_halt_logit` adds
+`log(n_live)`, so halt's mass is sigmoid(halt_logit − log-MEAN-exp(experts)): equal evidence gives
+halt what one expert gets, at every population size, and n = 1 is the old column exactly. `halt_b`'s
+zero init and the halt-off pin are unchanged. **After** (same 100 windows): 30% at the first flush,
+and at depth 1 — where `hop_vote` makes the vote independent of the halt mass, so only the ponder
+charge pulls on it — the mass climbs to the `halt_max` clamp (EMA 0.50, 15 clamped rows); with
+`FAB_PONDER=0.5` unannealed, EMA 0.63. At full depth (`FAB_DEPTH0=0`, 150 windows) the operator
+responds to the LM loss instead (mass 0.02-0.32, EMA 0.30, 0 clamped), and FAB_HALT on/off differ by
+0.015 nats in the mean of the last 50 flushes (4.8105 / 4.7960) — inside this run length's noise,
+where one flush's loss has a 1.6-nat standard deviation. **At depth 1 the prediction does not depend
+on the halt mass** (the vote spends `ph` and `1 − ph` on the same hop), so the shipped default's loss
+moves only through the ponder term's small gradient into the shared query modules. **FOR THE OWNER:**
+once staged depth advances, a halt mass sitting at the clamp means hop 1 answers ~90% of the vote
+until the LM loss pulls it down; `FAB_HALT=0` is the one-lever ablation and a long GPU run at
+`FAB_DEPTH0=0` is the measurement that settles whether this operator pays. **Rejected:** a separate
+sigmoid gate outside the softmax (n-free too, but halting would no longer compete with the experts,
+and at the frozen zero init of `halt_b` it would start every run at ph ≈ 0.5 — a new init that changes
+what a saved `halt_b` means); `log(n / chain_k)` (a coupling of halt's prior to a routing width
+nothing rules on).
+
+### Q-FAB-15 — `FAB_DEPTH_STAGE_MAX` capped depth instead of ending a stage, and the plateau test compared one flush with another — **RESOLVED 2026-09-24: A STAGE ENDS ON THE PLATEAU TEST OR AFTER `depth_stage_max` CHECKS; `flush_loss` IS THE MEAN SINCE THE PREVIOUS PASS; `fab.depth_advance` SAYS WHEN**
+The lever's help is "Depth-checks after which a stage ends regardless of the plateau test" and
+`fabric/levers.py` records it as the fix for depth pinned at 1 on an underfit model; `FAB.manage` read
+it only as `depth_now < min(hops, depth_stage_max)`. Driven over 60 checks on a loss falling 0.05 nats
+per check: depth 1 at stage_max 2, 40 and 1000 alike; on a flat loss stage_max=2 capped depth at 2.
+**Ruling:** the old tree's rule (self_organize.py:2533): a per-stage check count `depth_seen` on
+`pop.growth` (so it crosses a resume), advance when `depth_wait >= depth_patience` OR
+`depth_seen >= depth_stage_max`, ceiling `hops` alone (forward keeps its own `2 + n_live // 2` walk
+cap). `fab.depth_forced` (seeded only when the curriculum is on) counts the advances the cap decided;
+`fab.depth_now` on the ledger now follows the population. **After:** falling loss, stage_max 40 →
+depth 2 at check 40 (forced); stage_max 2 → depth 4 by check 7; flat loss at stage_max 2 → depth 4.
+**The plateau test's input** was one raw flush loss 500 windows from the previous one, against
+`FAB_DEPTH_EPS`'s own "smoothed flush loss": over the last 100 flushes of a default 300-window run one
+flush's loss has a standard deviation of 1.61 nats (2.32 bits) against a 0.01-bit threshold. The root
+now passes the **mean of the flush losses since the previous pass**. **The new gate
+`fab.depth_advance`** is an UNREACHABLE prediction at build ("no fab.manage pass has run yet … the
+earliest advance is check 7, window 3500") and after each pass prints the stage's check count and
+the window by which the cap forces the next advance, so a default run reads why it stayed at one hop.
+**Rejected:** reading `pop.growth['slow']` as the smoothed loss (it is not advanced at `FAB_GROW=0`);
+adding the `2 + n_live // 2` cap to `depth_now` (it would couple curriculum state to population size).
+Changing the ceiling is a behaviour change for anyone who used a small stage_max as a depth cap.
+
+### Q-FAB-16 — the identity round trip trained a fixed prefix of 256 experts — **RESOLVED 2026-09-24: A ROTATING BLOCK OF 256, KEYED ON `fab.ident_trained`**
+`aux += ae_w * _ae_loss(pop, min(n, 256), …)` scored `A[:256]` on every pass: the gradient of the exact
+aux expression reached rows 0..255 and nothing else. After 200 default windows the prefix carried
+4.65e-3 B power against 5.36e-4 for rows 256..2047, was selected 0.40 against 0.74 per expert, and
+`edec` — which decodes nearly every spawn — reconstructed the prefix at 0.434 relative error and the
+rest at 0.842. **Ruling:** `_ae_rows(n, passes)` takes rows `(passes*256 + 0..255) mod n`, `passes`
+being `fab.ident_trained` (checkpointed, and not the window step, which advances `batch_windows` at a
+time and would visit few offsets). Every live row is scored once per ceil(n/256) passes; at n ≤ 256 it
+is exactly the old prefix, so every test-width result is unchanged. **After** (same run): B power
+7.52e-4 / 7.93e-4, selections 0.68 / 0.72, reconstruction 0.729 / 0.723, newborns 0.291 (0.444
+before). **Rejected:** the round trip over every live row (8x the cost the comment capped, and
+`F.mse_loss`'s mean would cut each row's gradient ~8x and silently retune `FAB_AE_W`); a seeded
+permutation (the same coverage plus a draw a lever could shift).
+
+### Q-OPT-9 — the epoch roll never reached `OPT.maybe_step`, and one roll was counted once per flush — **RESOLVED 2026-09-24: THE ROOT STAMPS `System.shift_at_steps = units.Steps(clock.opt_steps)` BESIDE THE WINDOWS TWIN; BOTH PACKAGES COUNT ONE NOTIFICATION PER DISTINCT STAMP**
+LOOP_ORDER's E row has always said the root stamps `clock.opt_steps` as the `shift_at` maybe_step
+consumes; the loop stamped only `System.shift_at_windows` and called `maybe_step` with no `shift_at`.
+Driven at `RUN_EPOCHS=2 DATA_RESAMPLE=1 OPT_LR_SHIFT_WARM=20 DATA_STREAM_BYTES=30000` (315 windows,
+roll at 157): `opt.shift.notifications 0`, `opt.lr.shift_warm_applied 0`, while
+`fab.shift_notifications` read **158** for the one roll. **Ruling:** a fifth System slot,
+`shift_at_steps`, stamped at the roll off `clock.opt_steps` (seeded from OPT's restored count since
+Q-RUN-9) and passed on every stepped flush; `maybe_step` counts a notification only when the stamp
+differs from `st.shift_at`, and `grow_check` only when it differs from `pop.growth['shift_seen']`,
+where FAB now keeps the stamp — so the blackout is measured from it even when a resumed root holds
+none. **After:** `opt.shift.notifications 1`, `opt.lr.shift_warm_applied 19`, `fab.shift_notifications
+1`. The retok and LR-restart stamps remain undriven, and the gate reasons now say so instead of
+"NOBODY IS SUPPLYING shift_at". **Rejected:** clearing the stamp after maybe_step accepts it (OPT
+already keeps it; the edge belongs in the package that counts it).
+
 ## 6. What `tests/test_contract.py` checks
 
 | check | what it proves | how it can fail |
@@ -4887,16 +5017,18 @@ nobody has watched fail is indistinguishable from a check that cannot fail.
 
 ## 7. THE FROZEN SIGNATURE SET
 
-Everything above is prose about these 136 entry points — 121 until 2026-09-02, when Q-TOK-11 added
+Everything above is prose about these 137 entry points — 121 until 2026-09-02, when Q-TOK-11 added
 `LM.residual_ratios` (122) and Q-LM-12 added `LM.embed` (123); 133 from 2026-09-15, when P4 wrote
 `CAP.caps` and the `Caps` record it returns brought `Caps.headroom(n)` with it; **134 since
 2026-09-22, when `World.parameters(self)` closed the hole `spine/compose.py::_base_parameters` had
 been warning about on every run** — WORLD's tensors took gradient from a loss that was in the
 objective and were never STEPPED, because that helper harvests by
 `getattr(obj, "parameters", None)` and `World` had no such method. It is the same shape as
-`FAB: Population.parameters(self)`, which is in this block for the same reason. **136 since
+`FAB: Population.parameters(self)`, which is in this block for the same reason. **136 from
 2026-09-24**, when RUN's `Cadences.state(self)` and `Cadences.restore(self, state)` carried every
-cadenced gate's schedule across a resume (Q-RUN-9). Neither of the two before them
+cadenced gate's schedule across a resume (Q-RUN-9); **137 since later that day**, when
+`OPT.remap_rows(opt, st, row_events)` gave AdamW's per-row moments a way to follow the expert rows
+FAB moves (Q-FAB-13). Neither of the two before them
 is a new ruling: this document has said since the record was specified that "`Caps.headroom(n)`
 exists so the negative clamp (C30) **cannot be written** at a call site", and it became an ENTRY
 POINT the moment a body existed to carry it. A record's public method is public surface, which K1
@@ -5001,6 +5133,7 @@ OPT: build(opt: Config, *, param_groups, run_windows)
 OPT: lr_at(opt: Config, st, opt_step)
 OPT: scaled_backward(opt: Config, st, total)
 OPT: maybe_step(opt: Config, st, *, best_bpb=None, shift_at=None)
+OPT: remap_rows(opt: Config, st, row_events)
 OPT: counters(opt: Config, st)
 OPT: state_dict(opt: Config, st)
 OPT: load_state(opt: Config, st, saved)

@@ -820,8 +820,12 @@ class OPTLevers(LeverSet):
     # composition root at the epoch-resample / retok / add-area events, and FAB.grow_check takes the same
     # event as its own `shift_at` (Q-FAB-6). So the lever HAS something to fire on. What it still needs
     # is the report line that separates the two zero-cases, and maybe_step declares it:
-    # `opt.shift.notifications` at 0 means NOBODY IS SUPPLYING shift_at, which is a different statement
-    # from lr_shift_warm == 0, and the report must make both. Corrected 2026-09-03.
+    # `opt.shift.notifications` at 0 means NO SHIFT WAS STAMPED, which is a different statement
+    # from lr_shift_warm == 0, and the report must make both. Corrected 2026-09-03. DRIVEN SINCE
+    # 2026-09-24: spine/loop.py stamps units.Steps(clock.opt_steps) at the epoch roll and hands it
+    # to maybe_step, which counts one notification per distinct stamp -- until then maybe_step was
+    # called with no shift_at at all and this lever was inert on every multi-epoch run
+    # (RUN_EPOCHS=2 OPT_LR_SHIFT_WARM=20: 0 notifications, 0 re-warmed steps).
 
     # ==============================================================================================
     # 5. WHAT ONE OPTIMIZER STEP IS TAKEN OVER
