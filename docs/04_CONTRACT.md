@@ -4387,6 +4387,21 @@ are dropped and this process's are kept.
 `d_vocab_read_path` nothing writes, so `build_vocabulary` refuses it by name). That is a property of
 the `CKPT.resume -> TOK.d_vocab_read_path` coupling, not of this package's state, and is left open.
 
+**Not in this ruling, and OPEN — the tally round-trips exactly, the mint bursts after a mid-epoch
+resume still do not match the uninterrupted run.** (2) makes the pair tally the parent's to the count,
+but `TOK.on_window` is then fed different ids from the ones the uninterrupted run tallies at the same
+step, so the first post-resume mint burst ranks different pairs (on the commit that made (2): vp vy
+up wr px tv resumed, against vp vy cn up tv wr uninterrupted). Driven 2026-09-24 at `DATA_STREAM_BYTES=150000`, a 160-window parent: the uninterrupted run
+feeds step 161 `[479, 100, 100, 470, 285, 111]`, step 162 `[106, 104, 373, 375, 431, 439]`; the resume
+feeds step 161 `[477, 429, 419, 489, 68, 117]`, step 162 `[454, 121, 112, 121, 268, 121]`, and its
+step 161 is window **0** of its epoch (`loop._window_bounds` called with `i=0`). That is Q-RUN-10's
+declared mid-epoch replay, on a stream re-segmented at the saved vocabulary: the child restarts the
+epoch rather than resuming at the parent's stream position. **Nothing TOK holds can close it**; it
+closes when DATA and the loop restore the stream position (the byte-cursor remap, Q-RUN-8 option
+(a)). Until then a goal-B resume is the same run in its state and **not** in the text it trains on
+next, and any comparison of post-resume vocabulary growth against an uninterrupted run is comparing
+two different streams.
+
 ### Q-FAB-7 — the fabric's routing saw the window's own targets — **RESOLVED 2026-09-24: THE SIGNATURE ENDS AT THE WINDOW'S FIRST BYTE, THE ROUTE STATE IS h[:, 0], AND A FLUSH ROUTES ON ITS FIRST WINDOW'S DOMAIN. ⚠ EVERY LOSS NUMBER TAKEN BEFORE THIS DATE WAS MEASURED ON A NON-CAUSAL FORWARD AND IS NOT COMPARABLE WITH ONE TAKEN AFTER IT**
 Routing is **one decision per window**, applied at every position, so whatever the decision reads,
 position 0 is scored with it. Three channels fed it text the window is scored on predicting; nothing

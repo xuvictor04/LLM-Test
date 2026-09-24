@@ -29,7 +29,8 @@ because nothing here saved and replayed a vocabulary:
 WHAT IT CANNOT SEE: whether a resumed LOOP feeds on_window the same windows the uninterrupted run
 would have. It does not today -- the first post-resume window's ids differ from the uninterrupted
 run's window at the same step -- and that is a stream-position property of the loop and DATA, not of
-this package's state; P3 checks that TOK carries what it was given, exactly.
+this package's state (Q-RUN-10's declared mid-epoch replay; recorded OPEN in Q-TOK-13's second 'Not
+in this ruling'); P3 checks that TOK carries what it was given, exactly.
 """
 import json
 import os
