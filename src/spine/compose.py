@@ -1518,12 +1518,13 @@ LOOP_ORDER = (
 # THE COUNT ABOVE SAID SEVEN EVAL ENTRIES UNTIL 2026-09-04, AND THERE HAVE BEEN EIGHT SINCE THE
 # COMMIT THAT WROTE THE SENTENCE: EVAL.curve_probe moved into this table from a row in the very edit
 # that added this paragraph, and the count was taken before it landed. The table now holds
-# twenty-three entries and they divide the way the two sentences above do rather than by package.
+# twenty-four entries and they divide the way the two sentences above do rather than by package.
 # FIFTEEN are deferred because a required argument has no producer: the eight EVAL entries, the six
 # non-EVAL rows named above, and CKPT.Retention.consider, whose `curve_bpb` is the output of a
-# deferred entry point. EIGHT are deferred because the CALLER is missing while every argument is one
-# the caller already holds: FAB.Population's two accessors, four of Vocabulary's five, and RUN.Timing's
-# two. The miscount is not cosmetic -- this table's whole claim is that every orphan is enumerated,
+# deferred entry point. NINE are deferred because the CALLER is missing while every argument is one
+# the caller already holds: FAB.Population's two accessors, WORLD.World.parameters, four of
+# Vocabulary's five, and RUN.Timing's two. (This said twenty-three and EIGHT, leaving
+# WORLD.World.parameters out of the enumeration, until 2026-09-24.) The miscount is not cosmetic -- this table's whole claim is that every orphan is enumerated,
 # and an enumeration whose own total is wrong is one no reader re-checks.
 # SOME OF THOSE NOW HAVE A CALLER THAT IS NOT A ROW, AND THEIR ENTRIES SAY SO (2026-09-24):
 # FAB.Population.parameters and WORLD.World.parameters are called by _base_parameters on every
@@ -2142,6 +2143,15 @@ class System:
                  # adds it to the first and zeroes it; the end of the run adds what is left to the
                  # second. None until spine/loop.py::run seeds 0.
                  "retok_pending",
+                 # `rev_at_last_seg` IS THE MATCH-TABLE REVISION DOM's TOKEN HISTOGRAMS WERE COUNTED
+                 # UNDER (2026-09-24), mirrored off spine/loop.py::run's local so the checkpoint can
+                 # say whether the table moved since the last segmentation. A resume re-segments at
+                 # the SAVED (grown) vocabulary, so when it had moved the restored histograms were
+                 # counted under a table the child's stream is not cut at; compose then sets -1, which
+                 # no revision equals, so the first roll tells DOM. None: a fresh run, or a checkpoint
+                 # that predates the record (the loop then starts from the live revision and the roll
+                 # warning says the provenance is unknown).
+                 "rev_at_last_seg",
                  # `process_dtype` IS AN OBSERVATION AND NOT A DECISION, and it is here because
                  # RUN_AMP had no did-it-fire surface and was inert for the life of the driver
                  # because of it. Process.amp_state says what was ASKED FOR and what
@@ -2188,8 +2198,10 @@ class RefusedRun(RuntimeError):
     appended the list to System.refusals and kept building: driven at RUN_EPOCHS=2 with resampling
     off, it built the 10,130,057-parameter model, ran the SIG warm-up and returned
     stage='assembled' carrying the refusal, so only a driver that read the list (run.py) stopped.
-    `system` is the PARTIALLY BUILT record, so run.py still prints the banner, every refusal and
-    exits 2; `stage` names how far the assembly got; `refusals` is the list itself.
+    `system` is the PARTIALLY BUILT record, so run.py still prints the banner, every refusal taken
+    UP TO THIS STOP and exits 2; `stage` names how far the assembly got; `refusals` is the list
+    itself. A later stop's refusals (CAP's, the restores', the finished resume) are not on it when
+    an earlier stop raised: each stop pre-empts the ones after it (Q-RUN-13).
 
     A RuntimeError SUBCLASS, deliberately: spine/loop.py::run raises the same type on a System that
     reaches it carrying refusals by another route (the `restored=` override, a test that appends
@@ -2376,9 +2388,10 @@ def compose(environ=None, *, restored=None):
         # tables, so with compose off LM.load_state restores all 8 tensors and names the move, and
         # the elif below warns (Q-CKPT-4). Every other geometry refusal takes this path.
         # The refusal is APPENDED here and RAISED at the next stop point, after
-        # CAP.startup_refusals (_stop_if_refused), so the operator hears every refusal the
-        # configuration earns in one run rather than one per attempt; RefusedRun carries the
-        # partial System, and run.py prints the banner and every refusal from it and exits 2.
+        # CAP.startup_refusals (_stop_if_refused), so the operator hears every refusal earned UP TO
+        # THAT STOP in one run -- a RUN/WORLD refusal raised at the `refuse` stop pre-empts this one
+        # and the CAP one, which appear on the next attempt (Q-RUN-13); RefusedRun carries the
+        # partial System, and run.py prints the banner and every refusal on it and exits 2.
         # loop.run also refuses a System that carries any, for a caller that builds one by
         # another route.
         sysm.stage = "restore.lm"
@@ -2540,6 +2553,15 @@ def compose(environ=None, *, restored=None):
         _n = min(int(_seen.shape[0]), int(_live.shape[0]))
         _live[:_n] = _seen[:_n]
         sysm.token_seen = _live.to(sysm.process.device)
+    # WERE DOM's RESTORED HISTOGRAMS COUNTED UNDER THE TABLE THIS STREAM IS CUT AT? (2026-09-24) The
+    # parent's loop records whether the match table moved since its last segmentation; this
+    # process re-segments at the saved vocabulary, so a moved table means they were not. Driven: a
+    # 150-window parent with 2 mints since its segmentation resumed with 0 counts for the minted
+    # ids in its restored histograms, 168 occurrences of them in its first 150 windows, and a roll
+    # warning that called the histograms valid. -1 makes the loop's first roll tell DOM.
+    if restored is not None:
+        _moved = _loop.get("seg_table_moved")
+        sysm.rev_at_last_seg = -1 if _moved else (-2 if _moved is None else None)
 
     # -- 11. the clocks, epoch 0's length, and the encoder warm-up --------------------------------
     # resume_backwards / resume_opt_steps ARE OPT'S RESTORED COUNTS, read off the two declared

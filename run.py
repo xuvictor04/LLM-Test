@@ -100,8 +100,9 @@ def main(argv=None):
     # STARTUP REFUSALS ARRIVE THE SAME WAY SINCE 2026-09-24: compose() raises RefusedRun at the
     # first point past which a refusal would be built over, instead of returning a System that
     # carries the list after allocating the model and running the SIG warm-up. The exception
-    # carries the partial System, so the banner and every refusal are printed as before and the
-    # exit code is still 2.
+    # carries the partial System, so the banner and every refusal taken up to that stop point are
+    # printed and the exit code is still 2 -- an earlier stop pre-empts a later one's refusals,
+    # which appear on the next attempt (Q-RUN-13).
     try:
         sysm = compose(environ=os.environ)
     except NotBuilt as e:

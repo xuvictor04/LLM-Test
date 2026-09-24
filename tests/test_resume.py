@@ -22,6 +22,10 @@ refusal, or a piece of state that did not cross the boundary, and none of them f
   R5  THE CAPACITY VALVE: a checkpoint's cap is taken only on an arm armed now AND when it was
       saved, under the key CAP.state writes; CAP.restore no longer writes caps.
   R6  FAB'S SIDECAR RECORDS dk AND emb_hid, not d_model under dk's name, and refuses on them.
+  R7  ROW EVENTS PENDING AT A SAVE (a manage pass on a window that ends no batch) are checkpointed
+      and handed to OPT.remap_rows by the child's first training pass.
+  R8  THE BUILD-TIME PREDICTION GATES (fab.cull_gate, fab.depth_advance) ARE RE-RENDERED FROM THE
+      RESTORED POPULATION, not left at the founding one until the child's first manage pass.
 """
 import os
 import sys
@@ -297,14 +301,71 @@ def r6(snap):
         check("R6 an old-format sidecar (dk meaning d_model) still restores", False, str(e)[:160])
 
 
+def r7():
+    """PENDING ROW EVENTS CROSS A SAVE ON A WINDOW THAT ENDS NO BATCH (2026-09-24). At
+    OPT_BATCH_WINDOWS > 1 FAB.manage can run on a non-flush window; its moves wait in
+    Population.row_events for the next training pass, and a checkpoint there held moved A/B beside
+    un-moved moments. The payload must carry them and the child's first pass must hand them to
+    OPT.remap_rows."""
+    # THE SHIPPED POPULATION, because the utilisation cull that produces the moves needs the
+    # shipped occupancy; manage every 30 windows, stopped at 31, which ends no batch of 4.
+    env = dict(OPT_BATCH_WINDOWS=4, FAB_MANAGE_EVERY=30, FAB_GRACE=1, FAB_N0=2048, FAB_SLOTS=4096,
+               DATA_STREAM_BYTES=120000)
+    p = build(**env)
+    loop.run(p, max_windows=31, progress=False)
+    pending = list(p.fabric.row_events)
+    check("R7 control: a manage pass left row events pending between flushes",
+          bool(pending), f"{len(pending)} pending after 31 windows: {pending[:2]}")
+    if not pending:
+        return
+    snap = snapshot_of(p, int(p.clock.counters()["step"]))
+    carried = [tuple(e) for e in snap.payload["FAB"].get("row_events", [])]
+    check("R7 FAB.state_dict carries the pending row events", carried == pending,
+          f"{len(carried)} carried of {len(pending)}")
+    c = build(restored=snap, **env)
+    check("R7 FAB.load_state_dict restores them", list(c.fabric.row_events) == pending,
+          f"{len(c.fabric.row_events)} restored")
+    seen = []
+    orig = loop.opt_api.remap_rows
+
+    def spy(cfg, st, ev):
+        if ev is not None:
+            seen.extend(ev.events)
+        return orig(cfg, st, ev)
+    loop.opt_api.remap_rows = spy
+    try:
+        loop.run(c, max_windows=4, progress=False)
+    finally:
+        loop.opt_api.remap_rows = orig
+    check("R7 the child's first training pass hands them to OPT.remap_rows",
+          list(seen[:len(pending)]) == pending, f"{len(seen)} event(s) remapped")
+
+
+def r8(p, c):
+    """THE BUILD-TIME PREDICTION GATES ARE RE-RENDERED FROM THE RESTORED POPULATION (2026-09-24):
+    they printed the founding occupancy and a depth stage counted from zero until the child's
+    first manage pass."""
+    fc = fab_api.counters(c.configs["FAB"], c.fabric)
+    cull, depth = fc.get("gate:fab.cull_gate", ("",) * 3), fc.get("gate:fab.depth_advance", ("",) * 3)
+    n, cap = int(c.fabric.n_live), int(c.fabric.cap)
+    check("R8 the restored cull prediction reads the restored population, not the founding one",
+          str(cull[2]).startswith(f"'{n}/{cap}=") and "RESTORED" in str(cull[2]),
+          f"parent n_live {int(p.fabric.n_live)}, child {n}: {str(cull[2])[:90]}")
+    check("R8 the restored depth gate reads the restored stage books",
+          "RESTORED" in str(depth[2]) and f"depth {int(c.fabric.depth_now)} of" in str(depth[2]),
+          str(depth[2])[:120])
+
+
 def main():
     p, snap = parent()
     c = r1(snap)
     r3(p, snap, c)
+    r8(p, c)
     r4(p, snap, c)
     r2(snap)
     r5()
     r6(snap)
+    r7()
     print(f"=== {len(FAILS)} failing" + (f": {FAILS}" if FAILS else ""))
     return 1 if FAILS else 0
 

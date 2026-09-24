@@ -83,7 +83,7 @@ import torch
 from spine.lever import Config, LeverError
 from spine import derive
 from spine import units as U
-from spine.gate import Gate
+from spine.gate import Gate, NonFinite
 
 
 # ==================================================================================================
@@ -1386,7 +1386,11 @@ def maybe_step(opt: Config, st, *, best_bpb=None, shift_at=None):
                  schedule reads, through the shared unpack in _priced)
     WIRES READ: none
     DID IT FIRE: opt.step (BASE optimizer steps -- the encoder's are sig.train_stepped and live in
-                 SIG), opt.step.not_due, opt.restart.detected, opt.restart.damped,
+                 SIG), opt.step.not_due, opt.step.refused_nonfinite (a due step refused because its
+                 gradient norm would overflow AdamW's second moment; seeded 0 on the first due
+                 step, and a nonzero value is seen only in a stopping run's final checkpoint,
+                 because the run stops on it),
+                 opt.restart.detected, opt.restart.damped,
                  opt.restart.damp_refused_n1,
                  opt.lr.in_warmup, opt.lr.damped_this_step, opt.lr.shift_warm_applied,
                  opt.lr.envelope_applied (the n_cycles > 1 gate, the old _nenv) and
@@ -1505,6 +1509,33 @@ def maybe_step(opt: Config, st, *, best_bpb=None, shift_at=None):
         # ruling. The group is the only thing that knows the answer, and it needs no new state.
         return StepOutcome(stepped=False, lr=_applied_lr(st), restart=False, damped=False)
 
+    # 0. THE GRADIENT NORM, READ BEFORE ANYTHING MOVES, AND A STEP THAT WOULD POISON THE MOMENTS IS
+    #    REFUSED (2026-09-24). A huge-but-finite loss passes the loop's finite-loss guard, and its
+    #    gradients' squares overflow fp32 inside AdamW's exp_avg_sq update: driven, a loss x1e30 at
+    #    flush 10 left 29 of 123 optimizer state tensors non-finite, the run went on with rc=0 at
+    #    the default CKPT_DIR, and every later save was refused -- the permanent forgetting Q-RUN-14
+    #    names, detected only on the save path. The norm was already read here (one host read per
+    #    tensor, before the clip), so the test costs no extra sync: a non-finite norm, or one at or
+    #    above sqrt(the parameters' dtype max) with the clip off, means some g*g overflows. Raised
+    #    BEFORE opt_step advances or the rate is written, so the loop's NonFinite path saves the
+    #    last finite parameters, moments and schedule.
+    base_params = _params_of(st.base)
+    norm = _global_grad_norm(base_params)
+    _clip = float(opt.grad_clip)
+    _limit = min((float(torch.finfo(p.dtype).max) ** 0.5 for p in base_params
+                  if p.dtype.is_floating_point), default=float("inf"))
+    st.counters.setdefault("opt.step.refused_nonfinite", 0)      # G4: seeded before the test
+    if not math.isfinite(norm) or (_clip <= 0.0 and norm >= _limit):
+        st.counters["opt.step.refused_nonfinite"] += 1
+        raise NonFinite(
+            f"OPT.maybe_step: the base group's gradient norm is {norm!r} at optimizer step "
+            f"{int(st.opt_step) + 1}; stepping AdamW on it would write a non-finite second moment "
+            f"(g*g overflows above {_limit:.4g} in the parameters' dtype) and freeze those "
+            f"parameters for the rest of the run. Stopped BEFORE the step: parameters, moments and "
+            f"the schedule are the previous step's. Likely levers: OPT_LR (last applied rate "
+            f"{float(st.lr_prev):.4g}), OPT_GRAD_CLIP (0 = off, which is what let the norm through), "
+            f"OPT_LR_WARMUP.")
+
     # 1. the schedule's counter, and the ONLY thing that advances it.
     st.opt_step = st.opt_step + U.Steps(1)
     st.counters["opt.step"] = int(st.opt_step)
@@ -1603,11 +1634,9 @@ def maybe_step(opt: Config, st, *, best_bpb=None, shift_at=None):
     # which is what makes the tripwire specific to the defect instead of firing on every correct run.
     encoder_before = _encoder_step_signature(st.encoder)
 
-    base_params = _params_of(st.base)
-    norm = _global_grad_norm(base_params)
     st.grad_norms.append(norm)
 
-    clip = float(opt.grad_clip)
+    clip = _clip
     if clip > 0.0:
         # AFTER the norm is recorded and BEFORE the step: an instrument that measures its own
         # remedy answers nothing. Clip-by-norm, never clip-by-value.

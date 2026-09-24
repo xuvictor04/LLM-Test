@@ -254,6 +254,35 @@ def g9_nonfinite():
                   os.path.exists(os.path.join(d, "ckpt.pt")) and "WAS saved" in str(e))
         finally:
             loop.lm_api.lm_loss = real
+        # THE STOPPING SAVE'S BACKWARD COUNT IS THE CLOCK'S (2026-09-24): scaled_backward had
+        # counted the nan pass and the clock had not, so the final checkpoint carried one more.
+        st = s.optimizer
+        check("G9 the discarded nan backward is un-counted: OPT n_backward equals the clock's",
+              int(st.n_backward) == int(s.clock.counters()["backwards"])
+              and st.counters.get("opt.backward") == int(st.n_backward),
+              f"OPT {int(st.n_backward)}, clock {int(s.clock.counters()['backwards'])}")
+        # A HUGE-BUT-FINITE LOSS IS REFUSED BY OPT BEFORE THE STEP WOULD POISON ITS MOMENTS.
+        big = [0]
+
+        def huge(*a, **k):
+            pw, m = real(*a, **k)
+            big[0] += 1
+            return (pw, m * 1e30) if big[0] == 3 else (pw, m)
+        s2 = build()
+        loop.lm_api.lm_loss = huge
+        try:
+            loop.run(s2, max_windows=6, progress=False)
+            check("G9 a 1e30 loss is refused before the optimizer steps on it", False, "returned")
+        except NonFinite as e:
+            bad = sum(1 for v in s2.optimizer.base.state.values() for t in v.values()
+                      if torch.is_tensor(t) and t.is_floating_point()
+                      and not bool(torch.isfinite(t).all()))
+            check("G9 a 1e30 loss is refused by OPT.maybe_step before the step, moments finite",
+                  "OPT.maybe_step" in str(e) and bad == 0
+                  and s2.optimizer.counters.get("opt.step.refused_nonfinite") == 1,
+                  f"{bad} non-finite optimizer tensors; {str(e)[:80]}")
+        finally:
+            loop.lm_api.lm_loss = real
         before = ckpt_api._SAVES.get("refused_nonfinite", 0)
         try:
             ckpt_api.save(s.configs["CKPT"], payload={"X": {"w": torch.tensor([1.0, math.inf])}},

@@ -4221,7 +4221,8 @@ reaches every fire at realistic epoch lengths, (c) is adequate and (a) is not wo
 **Measured 2026-09-24: `TOK_RETOK_EVERY` decides nothing today at ANY `RUN_EPOCHS`, not only at 1.**
 The roll re-segments at the current vocabulary whether or not a retok is pending, so the lever's
 value moves only counters: `RUN_EPOCHS=2 DATA_RESAMPLE=1 DATA_STREAM_BYTES=40000` gave a bit-identical
-418-flush loss curve at `TOK_RETOK_EVERY=0` and `=10` (sum 2243.0572657585144 both), and `0` does not
+418-flush loss curve at `TOK_RETOK_EVERY=0` and `=10` (sum 2243.0572724342346 both, re-driven on the
+tree after Q-DOM-3's rekey reorder; 2243.0572657585144 on the commit before it), and `0` does not
 mean what its help says ("leaves already-emitted ids alone forever"). Making `0` real needs the roll
 to segment at a vocabulary that excludes what was minted since the last segmentation, and making a
 positive value real needs (a) — both are this question, left for the owner.
@@ -4982,6 +4983,15 @@ no measurement behind it); remapping the merge's and rescue's in-place rewrites 
 moments stale-by-statement; the merge's removal of the absorbed expert IS a `_remove` and IS remapped);
 events on `ManageReport` / `GrowReport` (manage runs on windows, not flushes, and the root would need
 a new System slot to carry them to the next backward).
+**Pending events cross a checkpoint (added later on 2026-09-24).** Because manage runs on windows,
+at `OPT_BATCH_WINDOWS > 1` it can fire on a window that ends no batch, and a periodic save there held
+A/B with the experts moved beside moments still at the old rows; `Population.row_events` was not in
+`FAB.state_dict`, so the resumed process never applied those moves (driven, batch 4, manage every 30:
+143 pending moves at the window-91 save). `FAB.state_dict` now carries the pending list and
+`load_state_dict` restores it, so the child's first training pass hands it to `OPT.remap_rows`
+against the restored moments — what the uninterrupted run does at its next flush
+(`tests/test_resume.py` R7). **Rejected:** draining at `loop._save` (the root would need a new FAB
+entry point to drain the list, or would call a FAB private, which O10 forbids).
 
 ### Q-FAB-14 — HALT competed with the whole population's mass — **RESOLVED 2026-09-24: THE HALT LOGIT CARRIES +log(n_live), SO HALT COMPETES WITH ONE EXPERT. ⚠ THE SHIPPED DEFAULT BEHAVIOUR CHANGED: HALT MASS AT n0=2048 GOES FROM ~1e-3 TO TENS OF PERCENT**
 `FAB.forward` scored HALT as one more column of the softmax over the n live experts, so its mass is
@@ -5074,13 +5084,29 @@ the per-domain histograms mixed two segmentations. **Ruling:** `("E", "DOM", "on
 `begin_epoch`, in `_CALLS["E"]`, called when `Vocabulary.rev` (the monotone match-table revision
 `tokenize`'s own staleness stamp reads) moved since the last segmentation. **After:** events 1,
 decays 1, 12 domains decayed; with minting off (`TOK_GROW_EVERY=0`) the roll's warning says DOM was
-not told and why, and the keys stay absent. **Why gated when MEM is not:** DOM's histograms are over
+not told and why, and the keys stay absent (`part.n_retok_events` reads present-and-0 there since the
+second follow-up below). **Why gated when MEM is not:** DOM's histograms are over
 token ids, which mean the same text at an unchanged table, so a decay there discards valid counts;
 MEM holds ids AND byte offsets into the previous epoch's stream, which the redraw invalidates either
 way. **Rejected:** calling on every roll (decays valid counts; the verifier's caveat); gating on
 `tok.mint` alone (misses retirements and reinstatements, which also move the table); a loop-side
 book for skipped rolls (the roll warning already states it per roll). Only the report's
 `DOM.prior(live)` numbers move in multi-epoch runs — nothing in training reads the prior.
+**Two follow-ups (later on 2026-09-24).** (1) *A resume.* The child re-segments at the SAVED
+vocabulary, so when the parent's table had moved since its last segmentation (mints after its last
+roll) the restored histograms were counted under a table the child's stream is never cut at — and
+`_rev_at_last_seg` started from the child's own revision, so DOM was never told and the roll warning
+called the histograms valid (driven: `DATA_STREAM_BYTES=40000 RUN_EPOCHS=2 DATA_RESAMPLE=1
+TOK_GROW_EVERY=50 TOK_FREEZE_AT=120`, a 150-window parent with 2 mints; the resumed run's
+`on_retokenize` calls 0). The loop now writes `payload['LOOP']['seg_table_moved']`, and compose sets
+`System.rev_at_last_seg` to −1 when it is true, so the child's first roll tells DOM and its warning
+says the parent's histograms were under another table (after: calls 1, `n_retok_events 1`,
+`n_retok_decays 1`). The first roll and not compose, because `on_retokenize` is an `E` row; the child's
+pre-roll windows therefore add new-table counts to old-table histograms until that roll decays both.
+A checkpoint written before the field carries no answer, and the roll warning says the provenance is
+unknown. (2) *The G4 reading of a roll that did not tell DOM.* `part.n_retok_events` was ABSENT
+there — "unreachable" on an arm that could retok and had rolled. The root now seeds it at every roll
+before the test (the `tok.due_merged` precedent), so it reads present-and-0; ABSENT means no roll.
 
 ### Q-DOM-3 — `DOM.rekey` ran before the encoder stepped, and on the frozen-bigram arm — **RESOLVED 2026-09-24: AFTER `observe`, ONLY AT `SIG_MODE=learned`, AS THE ROW ALWAYS SAID**
 The row reads "the arm test is SIG.mode == 'learned' … AFTER observe"; the loop asked the cadence
@@ -5091,9 +5117,17 @@ the same window's `SIG.train_step` then moved; `SIG_MODE=bigram` over 260 window
 the `since_boundary` update, and `SIG.mode == "learned"` is tested BEFORE `Cadences.due` so no fire is
 recorded for a rekey that cannot run (`dom.rekey` reads `checks=0` on bigram, the ledger's own
 "never evaluated"). **After:** `observe, rekey, encode…` in one window; bigram `n_rekey_passes`
-ABSENT. **Cost, stated:** on `SIG_MODE=bigram` no radius is ever measured, so assignment runs on the
-pooled bootstrap — which is the archive's bigram control exactly (`if SIG_MODE == "learned" and
-SELF_ORG: asm.rekey(enc)`, `self_organize.py:6689`), and every recorded bigram number was taken so.
+ABSENT. **Cost, stated (corrected later on 2026-09-24):** on `SIG_MODE=bigram` no radius is ever
+measured **and there is no pooled radius either** — only the rekey measures one — so every radius-arm
+re-entry is decided against `DOM_SPAWN_DIST` (`part.n_bootstrap_spawn_dist`), not "the pooled
+bootstrap" this sentence first said; `DOM_RADIUS_Q`, `DOM_RADIUS_MULT` and `DOM_RADIUS_CAP` are inert on
+that arm. Driven at `SIG_MODE=bigram DATA_STREAM_BYTES=120000`, 260 windows: `n_bootstrap_radius 0`,
+`n_bootstrap_spawn_dist 98`, pooled radius 0.0 (the tree before this ruling, as driven in its review: rekey 1,
+`n_bootstrap_spawn_dist 82`, pooled 0.395; the loss curves are identical, sum 1460.0561). That is
+the archive's bigram control (`if SIG_MODE == "learned" and SELF_ORG: asm.rekey(enc)`,
+`self_organize.py:6689`): without a rekey its `_r` stayed None and re-entry fell through to the
+`NEW_DIST` threshold (`self_organize.py:3536-3546`), which is what `DOM_SPAWN_DIST` ports, and every
+recorded bigram number was taken so.
 **Rejected:** keeping the rekey on bigram for its radius (it would make the control differ from its
 recorded self and from the contract's row; re-opening that is a separate owner question about what
 the control controls for). **Measured on the shipped `learned` arm:** the default 300-window run's
@@ -5139,12 +5173,20 @@ the list (the `loop.run` guard of Q-CKPT-4 stopped the training, not the build).
 `_stop_if_refused` at (1) the `refuse` stage — RUN/WORLD refusals depend on Configs alone, so they
 now fire before geometry and before any model tensor; (2) after `CAP.startup_refusals`, which needs
 the built population and therefore cannot precede allocation (a refused LM restore stops here too);
-(3) after the finished-resume check, before the SIG warm-up (a refused OPT restore stops here). A
+(3) after the finished-resume check, before the SIG warm-up (a refused OPT restore stops here).
+**Each stop pre-empts the later ones, so "every refusal in one run" holds only within a stop point**
+(stated later on 2026-09-24; this paragraph and the code comments had claimed it for the whole
+configuration): driven at `RUN_EPOCHS=2 CAP_FAB_START=100 CAP_TARGETS=experts`, `compose` raises at
+`refuse` with the RUN refusal alone, and the CAP refusal appears only on the next attempt — the tree
+before this ruling reported both at once, after building everything. The trade is deliberate: stop
+(1) is what keeps a Config-only refusal from allocating the model, and CAP's and the restores'
+refusals need that allocation. Collecting CAP's Config-only clause (a cap ≤ 0) at stop (1) would
+recover the common pair and needs a CAP entry point split; it is left to the owner. A
 System `compose()` returns carries no refusal; `loop.run` raises the same type for one built another
 way; run.py catches it, prints the banner and every `REFUSED:` line and exits 2 as before. **This
 supersedes Q-CKPT-4's rejected alternative** ("raising at the `restore.lm` stage … turns a named
 refusal into a traceback"): the exception carries the System, so nothing is lost. **Rejected:**
-raising at every append (one refusal per attempt instead of all a configuration earns); keeping the
+raising at every append (one refusal per attempt even within a stop point); keeping the
 list and guarding only `loop.run` (the warm-up — 800 steps at the shipped `SIG_WARMUP` — is spent
 before a refused run stops). **Two declared-and-not-built arms** composed with 0 refusals and raised
 `NotBuilt` at the first flush, after the whole warm-up: `LM_COMPOSE=1` (`_LM.composed_table`) and
@@ -5178,6 +5220,19 @@ poisoned state, not sentinels. **Rejected:** checking before the backward (an ex
 between forward and backward on every GPU flush); scanning only parameters (a nan MEM key, DOM
 centroid or AdamW moment is the same permanent forgetting); a divergence alarm on a finite loss
 (EVAL's, deferred — `OPT_LR=0.9` at loss 708 still runs).
+**Two follow-ups (later on 2026-09-24).** (4) *The 1e30 case was caught only on the save path*: the
+run itself trained on with 29 of 123 optimizer state tensors non-finite, silently at the default
+`CKPT_DIR` (rc 0) and with every later save refused where one was set. `OPT.maybe_step` now refuses
+a due step whose base gradient norm — the one it already read, so no new sync — is non-finite, or at
+or above √(the parameters' dtype max) with `OPT_GRAD_CLIP` off (some g² would overflow the second
+moment): it raises `NonFinite` before `opt_step` advances or a rate is written, counting
+`opt.step.refused_nonfinite`, and the loop's existing path saves the last finite state (driven: the
+1e30 flush now stops at optimizer step 10 with 0 non-finite optimizer tensors and the pre-step
+`final` checkpoint written). (5) *The stopping save's backward count was one high*: `scaled_backward`
+had counted the nan pass before the loop raised, and `note_backward` had not, so the final checkpoint
+carried OPT `n_backward` 8 against the clock's 7 (driven at `OPT_ACCUM=3`, nan at flush 8) and a
+resume, which seeds the clock from OPT, phase-shifted its first group. The loop now un-counts that
+pass (`n_backward`, `opt.backward`) and drops its gradients before the save: saved 7, clock 7.
 
 ### Q-RUN-15 — end-of-run partial batches, `RUN_PROFILE`, and two counters present on arms that cannot reach them — **RESOLVED 2026-09-24**
 (a) **A partial batch at the end was silent.** The finishing roll drops it into `dropped_windows`

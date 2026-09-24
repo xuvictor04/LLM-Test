@@ -377,11 +377,15 @@ class Population:
     not touch 2048 of 2048 experts.
     """
 
-    # THE LAST NINE ARE RE-EARNED STATE, NEVER CHECKPOINTED -- fabric/api.py::state_dict names
-    # them as "the identity cache, halt_ema, the routing-mix samples", plus `learn_window` and
-    # `pass_gates` which that sentence now names too, and `row_events` (2026-09-24), which is
-    # drained onto FabricOut on every training pass and so is empty at every checkpoint the loop
-    # takes between flushes. They are slots rather than ad-hoc attributes because __slots__ is
+    # OF THE LAST NINE, EIGHT ARE RE-EARNED STATE, NEVER CHECKPOINTED -- fabric/api.py::state_dict
+    # names them as "the identity cache, halt_ema, the routing-mix samples", plus `learn_window` and
+    # `pass_gates` which that sentence now names too. THE NINTH, `row_events` (2026-09-24), IS
+    # CHECKPOINTED: it is drained onto FabricOut by the next training pass, and at
+    # OPT_BATCH_WINDOWS > 1 FAB.manage runs on windows that end no batch, so a periodic checkpoint
+    # on such a window holds A/B with experts already moved and AdamW's moments still at the old
+    # rows (driven: 143 pending moves at the window-91 save of a batch-4 run). The resumed pass
+    # drains the restored list, and OPT.remap_rows applies it to the restored moments before the
+    # first backward -- exactly what the uninterrupted run does at its next flush. They are slots rather than ad-hoc attributes because __slots__ is
     # closed: `pop._kc = ...` raises AttributeError, so a cache invented at the point of use would
     # be a crash on the first routed window rather than a design. ident/ident_step/ident_live are
     # the emb_every cache the old tree carried as _kc/_kstep/_kn (self_organize.py:1938-1953);
@@ -3350,7 +3354,7 @@ def contribution(fab: Config, pop, *, h, signature, novelty, head, targets, base
 
 
 def _depth_gate(pop, *, depth0, hops, patience, stage_max, manage_every, step_n=None,
-                flush_loss_seen=True):
+                flush_loss_seen=True, restored=False):
     """fab.depth_advance: has the staged-depth curriculum advanced, and when can it next.
 
     THE CURRICULUM'S OWN THREE-STATE LINE (2026-09-24). A default 1,053-window run reported
@@ -3360,7 +3364,10 @@ def _depth_gate(pop, *, depth0, hops, patience, stage_max, manage_every, step_n=
     min(7, 40) x 500 = 3,500 windows at the defaults. UNREACHABLE when the curriculum is off
     (depth0 == 0 or depth0 >= hops: depth is fixed) and before any manage pass has run; FIRED once
     depth has advanced at least once in the run; otherwise armed, with the stage's arithmetic.
-    `step_n` None is the build-time prediction.
+    `step_n` None is the build-time prediction -- unless `restored`, which is a resumed population
+    before THIS process's first manage pass: its depth, stage count and plateau wait are the
+    parent's, so the gate reads them (without a window number, since no pass of this process has
+    placed the stage on this process's clock) rather than predicting a stage counted from zero.
     """
     counters, g = pop.counters, pop.growth
     depth_now = int(pop.depth_now)
@@ -3372,7 +3379,7 @@ def _depth_gate(pop, *, depth0, hops, patience, stage_max, manage_every, step_n=
                     reason=(f"FAB_DEPTH0={depth0} against FAB_HOPS={hops}: the curriculum is off "
                             f"(depth0=0 means start at the full budget), so depth is fixed at "
                             f"{depth_now} and nothing advances it"))
-    if step_n is None:
+    if step_n is None and not restored:
         return Gate("fab.depth_advance", False, *pair, reachable=False,
                     reason=(f"no fab.manage pass has run yet (FAB_MANAGE_EVERY={manage_every} "
                             f"window(s)). A stage ends after FAB_DEPTH_PATIENCE={patience} flat "
@@ -3388,12 +3395,18 @@ def _depth_gate(pop, *, depth0, hops, patience, stage_max, manage_every, step_n=
     else:
         flat_left = max(0, int(patience) - wait) + (1 if g.get("depth_prev") is None else 0)
         cap_left = max(0, int(stage_max) - seen)
+        _when = (f"window {int(step_n) + cap_left * int(manage_every)} at "
+                 f"FAB_MANAGE_EVERY={manage_every}" if step_n is not None else
+                 f"this process's manage pass {cap_left}, FAB_MANAGE_EVERY={manage_every} "
+                 f"windows apart")
         tail = (f"stage check {seen} of FAB_DEPTH_STAGE_MAX={stage_max}, plateau wait {wait} of "
                 f"FAB_DEPTH_PATIENCE={patience}; the stage cap advances depth in {cap_left} more "
-                f"check(s) at the latest (window {int(step_n) + cap_left * int(manage_every)} at "
-                f"FAB_MANAGE_EVERY={manage_every}), and {flat_left} more flat check(s) would "
+                f"check(s) at the latest ({_when}), and {flat_left} more flat check(s) would "
                 f"advance it sooner")
     note = "" if flush_loss_seen else "; this pass had no flush loss and did not check"
+    if step_n is None:
+        note += ("; RESTORED from the checkpoint -- no fab.manage pass has run in this process "
+                 "yet, so these are the parent's stage books")
     return Gate("fab.depth_advance", deepened > 0, *pair,
                 reason=(f"{deepened} advance(s) so far, {forced} forced by the stage cap; "
                         f"{tail}{note}"))
@@ -4824,7 +4837,10 @@ def _three_state(gates, ledger, keys=None):
     out = {}
     for g in (gates or ()):
         if keys is None:
-            n = int(ledger.get(g.name, ledger.get(g.name + ".count", 0)) or 0)
+            # fab.depth_advance's fires are fab.deepened: without the alias a curriculum that had
+            # advanced twice rendered ('fired', 0, ...) beside fab.deepened 2.
+            _k = "fab.deepened" if g.name == "fab.depth_advance" else g.name
+            n = int(ledger.get(_k, ledger.get(g.name + ".count", 0)) or 0)
         elif g.name in keys:
             n = int(ledger.get(keys[g.name], 0) or 0)
         else:
@@ -4996,7 +5012,8 @@ def state_dict(fab: Config, pop):
     `learn_window` -- the window index of the last gradient-carrying training pass, which is a
     statement about THIS PROCESS's clock and would only ever produce a false refusal if a
     resume restored it -- and `pass_gates`, the last training pass's gate arithmetic, which the
-    resumed run's first pass rewrites.
+    resumed run's first pass rewrites. `row_events` IS saved (since 2026-09-24): the moves, clears
+    and births no training pass has handed to OPT yet, which a save on a non-flush window holds.
 
     LEVERS READ: none
     WIRES READ: none
@@ -5041,6 +5058,9 @@ def state_dict(fab: Config, pop):
         "n_live": int(pop.n_live), "cap": int(pop.cap), "depth_now": int(pop.depth_now),
         "births": int(pop.births), "rescued": int(pop.rescued),
         "halt_ema": getattr(pop, "halt_ema", None), "learn_window": pop.learn_window,
+        # THE ROW EVENTS NOT YET HANDED TO OPT, which a save on a window that ends no batch can hold
+        # (see Population's slot note). Plain tuples of (str, int[, int]).
+        "row_events": [tuple(e) for e in pop.row_events],
         "counters": dict(pop.counters),
         "rng": (pop.rng._r.getstate(), int(pop.rng._draws)) if getattr(pop, "rng", None) else None,
         # THE SIDECAR load_state_dict REFUSES AGAINST. Three widths produced one error message in
@@ -5083,9 +5103,12 @@ def load_state_dict(fab: Config, pop, sd, *, sidecar):
     failing shape checks with no way to tell whether FAB_EMB_HID, SIG_D or D_MODEL was to blame --
     three widths, one error message (:4678-4684).
 
-    LEVERS READ: slots, n0, rank, dk, emb_hid (compared against the sidecar)
+    LEVERS READ: slots, n0, rank, dk, emb_hid (compared against the sidecar); pressure,
+                 manage_every, depth0, hops, depth_patience, depth_stage_max (to re-render the two
+                 build-time prediction gates from the restored population)
     WIRES READ: none
-    DID IT FIRE: fab.resume_widened, fab.resume_refused
+    DID IT FIRE: fab.resume_widened, fab.resume_refused; gates fab.cull_gate and
+                 fab.depth_advance re-rendered as RESTORED predictions
     """
     fab = fab.owned_by("FAB")
 
@@ -5166,6 +5189,11 @@ def load_state_dict(fab: Config, pop, sd, *, sidecar):
         pop.halt_ema = sd["halt_ema"]
     if "learn_window" in sd:
         pop.learn_window = sd["learn_window"]
+    # PENDING ROW EVENTS COME BACK (2026-09-24): the restored moments are the ones the parent held
+    # BEFORE these moves reached OPT, so the first training pass must hand them over again. A
+    # checkpoint written before the field carries none, which is what it held at every flush save.
+    if sd.get("row_events"):
+        pop.row_events = [tuple(e) for e in sd["row_events"]]
     if sd.get("counters"):
         pop.counters.update(sd["counters"])
     if sd.get("rng") and getattr(pop, "rng", None) is not None:
@@ -5173,7 +5201,36 @@ def load_state_dict(fab: Config, pop, sd, *, sidecar):
         pop.rng._r.setstate(state)
         pop.rng._draws = int(draws)
     pop.counters["fab.resume_widened"] = pop.counters.get("fab.resume_widened", 0) + widened
+    _refresh_build_predictions(fab, pop)
     return pop
+
+
+def _refresh_build_predictions(fab, pop):
+    """Re-render the two build-time PREDICTION gates from the RESTORED population (2026-09-24).
+
+    build() predicts fab.cull_gate and fab.depth_advance from the founding population, and the first
+    manage pass replaces both by name. A resume builds, THEN restores, so until this process's first
+    manage pass -- up to FAB_MANAGE_EVERY windows -- the report printed the founding occupancy
+    (2048/4096) and a depth stage counted from zero beside a restored depth_now, fab.deepened and
+    depth_seen that said otherwise (driven: parent depth_now 3, deepened 2; restored report "cannot
+    deepen past 1"). Only an ON population carries these predictions; the FAB_ON=0 lines stand.
+    """
+    if not pop.on:
+        return
+    n, slots, press = int(pop.n_live), max(1, int(pop.cap)), float(fab.pressure)
+    opens = _derive.cull_gate_open(n, slots, press)
+    cull = Gate("fab.cull_gate", False, f"{n}/{slots}={n / slots:.3f}", press, reachable=False,
+                reason=(f"RESTORED from the checkpoint, and no fab.manage pass has run in this "
+                        f"process yet (FAB_MANAGE_EVERY={int(fab.manage_every)} window(s)), so no "
+                        f"cull was evaluated here. PREDICTION from the restored population: it "
+                        f"would {'OPEN' if opens else 'SHUT'} this gate (spine/derive.py::"
+                        f"cull_gate_open, which also floors the population at two). The first "
+                        f"manage pass replaces this line with the verdict it evaluated."))
+    depth = _depth_gate(pop, depth0=int(fab.depth0), hops=int(fab.hops),
+                        patience=int(fab.depth_patience), stage_max=int(fab.depth_stage_max),
+                        manage_every=int(fab.manage_every), restored=True)
+    pop.gates = tuple({"fab.cull_gate": cull, "fab.depth_advance": depth}.get(g.name, g)
+                      for g in pop.gates)
 
 
 def manage_period(fab: Config):

@@ -251,10 +251,14 @@ _WHY = {
 # it unreachable)" and was printed verbatim on runs with TOK_PROBATION_USES=3; it now names the
 # conditions and leaves the arm this run took to the counter.
 _GATED = {
-    "TOK.mint_burst": ("Due.mint, TOK's grow_every cadence asked at row A (TOK_MODE=online only), "
-                       "acted on once per flush", "tok.mint_bursts"),
+    "TOK.mint_burst": ("Due.mint, TOK's grow_every cadence asked at row A (armed only at "
+                       "TOK_MODE=online with TOK_GROW_EVERY > 0), acted on once per flush",
+                       "tok.mint_bursts"),
     "LM.residual_ratios": ("Due.probation, TOK's probation_deadline cadence (armed only at "
-                           "TOK_MODE=online with TOK_PROBATION_USES > 0), acted on once per flush",
+                           "TOK_MODE=online with TOK_PROBATION_USES > 0), acted on once per flush. "
+                           "A CALL IS NOT A READING: it returns None at LM_COMPOSE=0, the only arm "
+                           "that builds, and TOK(vocab.gates)'s tok.probation_embed says when no "
+                           "ratio was supplied; the count here is TOK's calls",
                            "tok.probation_calls"),
     "TOK.judge_probation": ("Due.probation, TOK's probation_deadline cadence (armed only at "
                             "TOK_MODE=online with TOK_PROBATION_USES > 0), acted on once per "
@@ -423,7 +427,13 @@ def _payload(sysm):
         # only thing that knows it exists, which is why the root writes it here and
         # spine/compose.py::compose puts it back.
         "LOOP": {"token_seen": (None if sysm.token_seen is None
-                                else sysm.token_seen.detach().cpu().clone())},
+                                else sysm.token_seen.detach().cpu().clone()),
+                 # WHETHER THE MATCH TABLE MOVED SINCE THE LAST SEGMENTATION (2026-09-24): a
+                 # resume re-segments at the saved table, so when this is True DOM's restored
+                 # histograms were counted under a table the child's stream is not cut at, and
+                 # the child's first roll must tell DOM (spine/compose.py, System.rev_at_last_seg).
+                 "seg_table_moved": (sysm.rev_at_last_seg is not None
+                                     and int(sysm.vocab.rev) != int(sysm.rev_at_last_seg))},
         # RUN'S STATE, THROUGH RUN'S OWN ENTRY POINTS (2026-09-24, Q-RUN-9 and Q-RUN-10). Nothing of
         # RUN crossed the boundary except the two numbers CKPT.save records itself (step, epoch), so
         # every cadenced gate re-seeded at the resumed step and fired a period late, and a resume
@@ -686,7 +696,14 @@ def run(sysm, *, max_windows=None, progress=True):
     # is the monotone counter Vocabulary._add, _retire and _reinstate all bump -- tokenize's own
     # staleness stamp reads it for the same question -- and it starts at the value compose's
     # segmentation was cut under, a resume's included.
-    _rev_at_last_seg = int(vocab.rev)
+    # ON A RESUME IT STARTS FROM WHAT THE CHECKPOINT SAID (2026-09-24): -1 when the parent's table
+    # had moved since its last segmentation, so DOM's restored histograms are under a different
+    # table from this stream's and the first roll must tell it; -2 when the checkpoint predates
+    # that record, which starts from the live revision like a fresh run but is said at the roll.
+    _seg_unknown = sysm.rev_at_last_seg == -2
+    _rev_at_last_seg = (int(vocab.rev) if sysm.rev_at_last_seg in (None, -2)
+                        else int(sysm.rev_at_last_seg))
+    sysm.rev_at_last_seg = _rev_at_last_seg
     # THE PENDING-RETOK COUNT, AN int AND NOT A FLAG (2026-09-24). See where _flush raises it.
     if not sysm.retok_pending:
         sysm.retok_pending = 0
@@ -960,10 +977,13 @@ def run(sysm, *, max_windows=None, progress=True):
             since_boundary = 0 if bool(asg.boundary) else since_boundary + 1
 
             # DOM.rekey RE-ENCODES EVERY DOMAIN'S RESERVOIR WITH THE LIVE ENCODER, and it is what
-            # MEASURES the acceptance radius: `radius` reads 0.0 for every domain until it runs, so on
-            # a run without it DOM_RADIUS_Q, DOM_RADIUS_MULT and DOM_RADIUS_CAP are set-but-inert and
-            # every assignment is decided on the pooled bootstrap (part.n_bootstrap_radius is the
-            # counter that says so). `encode` is the root's ONE bound SIG.encode, for the reason
+            # MEASURES the acceptance radius: `radius` reads 0.0 for every domain until it runs, and so
+            # does the POOLED radius, which it also measures. So on a run without it -- every
+            # SIG_MODE=bigram run, where the arm test below skips it -- DOM_RADIUS_Q, DOM_RADIUS_MULT
+            # and DOM_RADIUS_CAP are set-but-inert and every radius-arm re-entry is decided against
+            # DOM_SPAWN_DIST (part.n_bootstrap_spawn_dist is the counter that says so; driven on
+            # bigram over 260 windows: 98 of them, part.n_bootstrap_radius 0). Before this learned
+            # arm's first rekey the same holds for it. `encode` is the root's ONE bound SIG.encode, for the reason
             # domains/api.py::rekey gives: a rekey that used a second encoder puts the partition into
             # two signature spaces that do not compare.
             # HERE, AFTER DOM.observe, AND IT RAN FIRST IN THIS BLOCK UNTIL 2026-09-24 -- above
@@ -1219,10 +1239,22 @@ def run(sysm, *, max_windows=None, progress=True):
             # epoch's stream, which the redraw invalidates whether or not the table moved. A roll
             # that did not tell DOM says so in the warning below; part.n_retok_events counts the
             # rolls that did (docs/04_CONTRACT.md Q-DOM-2).
+            # part.n_retok_events IS SEEDED BY THE ROOT AT EVERY ROLL, BEFORE THE TEST (2026-09-24),
+            # as tok.due_merged is: a roll that did not re-cut the table is a delivery that was
+            # armed and did not fire, and on_retokenize seeds the key only when it is called, so
+            # that arm printed ABSENT -- "unreachable" -- on a run that could retok and had rolled.
+            sysm.partition.counters.setdefault("part.n_retok_events", 0)
+            _resumed_stale = _rev_at_last_seg == -1
             _dom_told = int(vocab.rev) != _rev_at_last_seg
             if _dom_told:
                 dom_api.on_retokenize(dom_cfg, sysm.partition)
             _rev_at_last_seg = int(vocab.rev)
+            sysm.rev_at_last_seg = _rev_at_last_seg
+            _unknown_note = (" THIS PROCESS RESUMED FROM A CHECKPOINT THAT PREDATES THE RECORD of "
+                             "whether its table moved since its last segmentation, so whether the "
+                             "restored histograms were counted under this table is UNKNOWN."
+                             if _seg_unknown else "")
+            _seg_unknown = False
             # EVERY PENDING RETOK IS SATISFIED BY THIS ROLL, because the roll IS the act: the
             # stream was just re-segmented with the vocabulary as it now stands. ADDED AS A COUNT
             # AND NOT AS ONE (2026-09-24): retok_pending counts the fires, and this counter
@@ -1246,12 +1278,18 @@ def run(sysm, *, max_windows=None, progress=True):
                 f"entry written before this point holds token ids and byte offsets under the "
                 f"PREVIOUS segmentation and is NOT rewritten; MEM.maintain is told, drops its "
                 f"rekey snapshot and counts the event. "
-                + ("DOM.on_retokenize is told: the match table moved since the last segmentation, "
+                + ("DOM.on_retokenize is told: the PARENT's histograms were counted under a match "
+                   "table this process's stream was never cut at (the resume re-segmented at the "
+                   "saved, grown vocabulary), so DOM_TOKC_DECAY is applied to every domain's token "
+                   "histogram."
+                   if _dom_told and _resumed_stale else
+                   "DOM.on_retokenize is told: the match table moved since the last segmentation, "
                    "so DOM_TOKC_DECAY is applied to every domain's token histogram."
                    if _dom_told else
                    "DOM.on_retokenize is NOT told: the match table has not moved since the last "
                    "segmentation (no mint, retirement or reinstatement), so the new text is cut "
-                   "into the ids DOM's token histograms were counted under and they stay valid."))
+                   "into the ids DOM's token histograms were counted under and they stay valid."
+                   + _unknown_note))
             continue
 
     # THE PARTIAL BATCH AT THE END IS SAID, WHICHEVER EXIT LEFT IT (2026-09-24). The finishing roll
@@ -1546,13 +1584,25 @@ def _report(sysm, elapsed_s, ctx):
     # (part.n_prior_accumulated) and NOTHING BLENDS IT INTO A PREDICTION -- its consumer is the eval
     # battery, deferred in spine/compose.py::DEFERRED_ENTRY_POINTS -- so a weight of 0.15 here is the
     # weight it WOULD be blended at, and these R-stage reads are the only reads it gets.
+    # THE OFF ARM IS READ OFF DOM's OWN BOOK AND RENDERED AS OFF (2026-09-24). At DOM_PRIOR_BLEND=0
+    # prior() returns (None, 0.0) on its off branch and never seeds part.n_prior_empty, and DOM.observe
+    # never seeds part.n_prior_accumulated -- so both are ABSENT -- yet this row printed n_empty =
+    # n_live, weight None and "read only by this R-stage row" about a histogram nobody accumulated.
     _with = [d for d, (p, _) in _priors.items() if p is not None]
-    out["DOM.prior(live)"] = {
-        "weight": float(_priors[_with[0]][1]) if _with else None,
-        "n_live": len(_live), "n_with_histogram": len(_with), "n_empty": len(_live) - len(_with),
-        "consumed_by": "nothing in training: the histogram is read only by this R-stage row; its "
-                       "blend into a prediction belongs to the deferred eval battery",
-    }
+    if "part.n_prior_accumulated" not in sysm.partition.counters:
+        out["DOM.prior(live)"] = {
+            "off": "nothing accumulated: part.n_prior_accumulated is ABSENT in DOM's book (the "
+                   "accounting switch, DOM_PRIOR_BLEND, is 0), so no domain has a prior to read",
+            "n_live": len(_live), "n_off": len(_live),
+        }
+    else:
+        out["DOM.prior(live)"] = {
+            "weight": float(_priors[_with[0]][1]) if _with else None,
+            "n_live": len(_live), "n_with_histogram": len(_with),
+            "n_empty": len(_live) - len(_with),
+            "consumed_by": "nothing in training: the histogram is read only by this R-stage row; "
+                           "its blend into a prediction belongs to the deferred eval battery",
+        }
     if sysm.retention is not None:
         out["CKPT.Retention.counters"] = sysm.retention.counters()
     # THE CLOCK'S OWN BOOK, WHICH _CALLS HAS LONG LISTED AS AN R CALL AND NOTHING RENDERED UNTIL
@@ -1855,6 +1905,16 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
         _params_bad = sum(1 for t in sysm.base_params if not bool(torch.isfinite(t).all()))
         _st = sysm.optimizer
         _norms = list(getattr(_st, "grad_norms", ()) or ())
+        # THE DISCARDED BACKWARD IS UN-COUNTED BEFORE THE FINAL SAVE (2026-09-24). scaled_backward
+        # advanced OPT's n_backward (and opt.backward) for this nan pass, the clock's note_backward
+        # has not run, and the loop's final save then persisted a count one above the clock's --
+        # driven at OPT_ACCUM=3, nan at flush 8: clock 7, OPT 8, saved 8 -- so a resume, which
+        # seeds the clock from OPT, phase-shifted its first accumulation group. The pass's nan
+        # gradients are dropped with it; the group's earlier finite passes go with them, which the
+        # resume counts as opt.ckpt.partial_accum_dropped.
+        _st.n_backward = U.Backwards(int(_st.n_backward) - 1)
+        _st.counters["opt.backward"] = int(_st.n_backward)
+        _st.base.zero_grad(set_to_none=True)
         _c = clock.counters()
         raise _gate.NonFinite(
             f"loop: the training loss is non-finite ({float(total.detach())!r}) at window "

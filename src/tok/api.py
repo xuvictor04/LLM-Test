@@ -1657,7 +1657,10 @@ def on_window(tok: Config, vocab, ids, *, step):
     WIRES READ: none
     DID IT FIRE: tok.tally, tok.due_mint, tok.due_retok, tok.due_probation, tok.mint_frozen_at
                  (the step, or unreachable when freeze_at = 0) -- ALL FIVE ABSENT OFF
-                 tok.mode="online", which is the only arm that tallies, mints, retoks or judges;
+                 tok.mode="online", which is the only arm that tallies, mints, retoks or judges,
+                 and each cadence's keys ABSENT where its period disarms it (tok.due_mint and
+                 tok.mint_bursts at grow_every <= 0, tok.due_retok at retok_every <= 0, the
+                 probation pair at probation_uses = 0);
                  tok.mint_bursts and tok.probation_calls (seeded here beside their cadences and
                  bumped by mint_burst and judge_probation, one per CALL -- due_mint and
                  due_probation count WINDOWS, and the root ORs several into one call);
@@ -1713,10 +1716,21 @@ def on_window(tok: Config, vocab, ids, *, step):
     # than one window, which is OPT_BATCH_WINDOWS and not a lever this package reads, and seeding it
     # on every arm printed present-and-0 at the shipped batch_windows=1, where the loop's own
     # comment calls it UNREACHABLE. The root seeds it, at the second window of a batch.
+    # AND EACH CADENCE'S PAIR ONLY WHERE ITS PERIOD IS POSITIVE (2026-09-24), mirroring the uses > 0
+    # gate below: _due calls a non-positive period DISARMED, and seeding tok.due_mint and
+    # tok.mint_bursts at TOK_GROW_EVERY=0 printed "TOK.mint_burst: ARMED BUT 0 ... never came due in
+    # this run's length" on an arm that cannot mint at any length -- F17's complaint on the arm its
+    # repair left open. tok.due_retok likewise at TOK_RETOK_EVERY <= 0. tok.tally and
+    # tok.due_dropped stay online-wide: the tally runs whatever the cadences are, and due_dropped is
+    # the root's book of dues that no flush or roll consumed, which is 0 on an arm that raises none.
     if online:
-        for _row in ("tok.tally", "tok.due_mint", "tok.due_retok", "tok.due_dropped",
-                     "tok.mint_bursts"):
+        for _row in ("tok.tally", "tok.due_dropped"):
             c.setdefault(_row, 0)
+        if grow_n > 0:
+            c.setdefault("tok.due_mint", 0)
+            c.setdefault("tok.mint_bursts", 0)
+        if retok_n > 0:
+            c.setdefault("tok.due_retok", 0)
     # THE PROBATION FAMILY IS ABSENT AT THE SHIPPED TOK_PROBATION_USES=0, which is judge_probation's
     # own arm ("the four probation counters are absent rather than 0") carried one row up to the
     # cadence that gates it. docs/04_CONTRACT.md: "TOK_PROBATION_USES = 0, so the whole probation

@@ -1621,7 +1621,10 @@ def on_retokenize(dom: Config, part):
       part.n_retok_events -- deliveries of the event, seeded on BOTH arms. It is the only thing that
         separates DOM_PRIOR_BLEND=0 from "the root never delivered a retok at all", and without it
         every key below reads 0 in both cases -- the distinction RunResult.skipped exists to make,
-        and it has to survive one entry point in.
+        and it has to survive one entry point in. THE ROOT ALSO SEEDS IT, at every epoch roll and
+        before deciding whether to call (2026-09-24, the tok.due_merged precedent), so a run that
+        rolled with an unmoved match table reads present-and-0 -- armed, not delivered -- and ABSENT
+        means only that no roll happened.
       part.n_retok_domains_decayed -- per-domain histograms touched, cumulative across events.
     """
     dom = dom.owned_by("DOM")

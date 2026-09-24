@@ -109,9 +109,19 @@ check("T3 TOK's gates reach the report", "TOK(vocab.gates)" in res.report)
 # ---- D1: a roll at an UNCHANGED table does not decay, and says so -------------------------------
 sysm = build(DATA_STREAM_BYTES="40000", RUN_EPOCHS="2", DATA_RESAMPLE="1", TOK_GROW_EVERY="0")
 res = loop.run(sysm, progress=False)
-check("D1 a roll whose match table did not move leaves DOM untold (n_retok_events ABSENT)",
-      "part.n_retok_events" not in sysm.partition.counters
-      and any("DOM.on_retokenize is NOT told" in w for w in res.warnings))
+# n_retok_events IS PRESENT-AND-0 THERE SINCE 2026-09-24 (the root seeds it at every roll): the
+# delivery was armed and did not fire. It was ABSENT -- "unreachable" -- on an arm that had rolled.
+check("D1 a roll whose match table did not move leaves DOM untold (n_retok_events present, 0)",
+      sysm.partition.counters.get("part.n_retok_events", "ABSENT") == 0
+      and "part.n_retok_decays" not in sysm.partition.counters
+      and any("DOM.on_retokenize is NOT told" in w for w in res.warnings),
+      str({k: sysm.partition.counters.get(k, "ABSENT")
+           for k in ("part.n_retok_events", "part.n_retok_decays")}))
+# AND TOK_GROW_EVERY=0 IS A DISARMED MINT CADENCE (2026-09-24): its keys are ABSENT, so the gated
+# row reads UNREACHABLE and does not tell the operator to lengthen a run that cannot mint.
+check("T2 TOK_GROW_EVERY=0 seeds neither tok.due_mint nor tok.mint_bursts",
+      not any(k in sysm.vocab.counters for k in ("tok.due_mint", "tok.mint_bursts")),
+      str({k: sysm.vocab.counters.get(k, "ABSENT") for k in ("tok.due_mint", "tok.mint_bursts")}))
 
 # ---- D2: DOM.rekey follows DOM.observe, and never runs on the bigram arm ------------------------
 for mode in ("learned", "bigram"):
