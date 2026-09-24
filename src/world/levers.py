@@ -208,8 +208,15 @@ class WORLDLevers(LeverSet):
     # FAB_NMAX -> FAB_SLOTS, and the two together are the argument for a retired-names table somewhere
     # the typo net can read, not for keeping a name that describes the wrong thing.
 
-    feedback = Lever(True, "Condition the base LM on the forecast (h += world_proj(forecast)) instead "
-                           "of leaving the world model as an unused side head.", U.FLAG)
+    feedback = Lever(False, "Condition the base LM on the forecast (h += world_proj(forecast)) instead "
+                            "of leaving the world model as an unused side head.", U.FLAG)
+    # SHIPS False SINCE 2026-09-24, BY THE RULE Q-WORLD-10 SET BEFORE THE EXPERIMENT RAN. The GPU fleet
+    # (20,000 windows, seeds 0-4, paired by seed, last half of the per-flush loss): feedback on minus
+    # off = +0.0033 +- 0.0031 SE, lower in 2/5 seeds -- within noise, on a card where the same seed
+    # ran twice was bit-identical, so the noise is the seeds' and not the card's. The CPU gain
+    # (-0.099 at 300 windows) did not survive training length. The WIRING STAYS: WORLD_FEEDBACK=1
+    # turns it back on, world_proj is still born zero, and WORLD itself still trains (WORLD_ENABLED
+    # is unchanged). The forecast is kept as the route a new modality's latent can reach the LM by.
     # Census: WORLD_FEEDBACK, verdict keep; doubled name corrected to the field `feedback`. Old default
     # `bool(_i("WORLD_FEEDBACK", 1))` at :4152 -- True.
     # THIS IS THE LINK TO GOAL A. Off, nothing this package computes changes a single emitted token and

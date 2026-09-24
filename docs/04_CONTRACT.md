@@ -3436,7 +3436,7 @@ deliberately left without a caller. The reason is not the body — it is what th
 
 | what | reading |
 |---|---|
-| `WORLD_FEEDBACK` | **`True` — the lever already ships ON**, so the only thing withholding the forecast is the missing call site |
+| `WORLD_FEEDBACK` | **`True` at the time — the lever shipped ON (it ships False since 2026-09-24)**, so the only thing withholding the forecast is the missing call site |
 | `hasattr(world, "parameters")` | **`False` when this was written; `True` as of the same day.** `World` is a `__slots__` record, not an `nn.Module`, so `OPT.build` could not reach its tensors and every run printed *"WORLD.world exposes no parameters(), so it contributes NOTHING to the 'base' param group"*. `World.parameters()` closes it: 10 tensors, 31,944 elements, all ten in the `base` group, and the warning is gone |
 | `preds` after `build` | **all zeros**, `(6, 32, 32)`, 3 slots live |
 | `max abs(pop(z) - z)` | **`1.19e-07`** — float32 round-off. `_route` is residual (`outs = z + einsum(z, preds[live])`) and `preds` is identically zero, so every live predictor returns `z` and a convex blend of identical rows is `z`. **The population half of the forecast is the identity, exactly** |
@@ -3550,7 +3550,29 @@ for them "no `world.forecasts`" and "never trained" are the same statement.
 - **Every default run from this commit on differs from earlier ones**, which stay comparable only at
   `WORLD_FEEDBACK=0`. `sweep_world.sh`'s `feedback_off` arm is now the unwired control.
 
-**`WORLD_FEEDBACK` stays `True` pending the GPU experiment in `sweep_world.sh`** (5 seeds per arm,
+**THE GPU EXPERIMENT RAN (2026-09-24) AND `WORLD_FEEDBACK` NOW SHIPS `False`, by the rule below.**
+`gpu_world.sh` on one 140 GiB card, 12 runs at a time under MPS; 20,000 windows per run, seeds 0-4,
+RUN_EPOCHS=1; the same seed run twice was **bit-identical**, so every difference is the arm's.
+Last half of the per-flush loss, arm minus feedback-off, paired by seed:
+
+| arm | last half | full run | seeds lower |
+|---|---|---|---|
+| feedback on | +0.0033 ± 0.0031 | +0.0271 ± 0.0101 | 2/5 |
+| forecast trained by the LM loss alone (`WORLD_PREDICT_W=0 WORLD_COLLAPSE_W=0`) | +0.0904 ± 0.0683 | +0.3329 ± 0.1688 | 1/5 |
+| `WORLD_ENABLED=0` | −0.0027 ± 0.0016 | +0.0041 ± 0.0114 | 4/5 |
+
+The CPU gain (−0.099 at 300 windows) does not survive 20,000 windows: at this scale the forecast is
+a per-token feature the LM learns for itself, which the design judge's first dissent predicted.
+Without WORLD's own objectives the forecast path is **unstable**: latent_std fell to 0.13-0.85
+(1.01-1.05 elsewhere), `lm.encode.extra_ratio_max` reached 31.2, and one seed lost 0.358. WORLD's
+losses are what keep the forecast bounded. `WORLD_ENABLED=0` is better by 0.0027 in 4/5 seeds, under
+2 SE; **WORLD stays enabled** -- the owner keeps it as the plug-in point for video and audio -- and
+the question is re-asked once the synthetic corpus varies with the seed (DEFECT D-A13: all five
+seeds trained on the same text, so this result spans initialisations, not data). The call site, the
+zero-born `world_proj` and the gauges all stay; `WORLD_FEEDBACK=1` restores the wired arm exactly.
+Results: `results/gpu_world_2026-09-24/ANALYSIS.txt`.
+
+**`WORLD_FEEDBACK` stayed `True` pending the GPU experiment in `sweep_world.sh`** (history, as written before the run) (5 seeds per arm,
 paired by seed, mean of loss_curve differences over the last half; flip the default if the gain is
 within noise). The command is `SEEDS="0 1 2 3 4" ONLY=shipped,feedback_off bash sweep_world.sh`, and
 the number is the summary's `Q-WORLD-10: shipped - feedback_off` block: per seed, the mean over the

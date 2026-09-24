@@ -23,8 +23,9 @@
 # different claims about why the embedding should move, and `off` cannot tell them apart.
 #
 #   off             WORLD_ENABLED=0. The null world -- no term, no cost, no gradient. The control.
-#   shipped         the defaults: WORLD trained AND its forecast fed into LM.encode (world_proj
-#                   born zero, Q-WORLD-10). What the tree does today.
+#   shipped         the defaults: WORLD trained, its forecast NOT fed to the LM (WORLD_FEEDBACK
+#                   ships False since the 2026-09-24 GPU fleet, Q-WORLD-10). Same run as feedback_off.
+#   feedback_on     WORLD_FEEDBACK=1: the forecast fed into LM.encode (world_proj born zero).
 #   collapse_only   WORLD_PREDICT_W=0. Anti-collapse alone: the embedding is pushed to spread, and
 #                   nothing asks it to be predictable forward.
 #   predict_only    WORLD_COLLAPSE_W=0. Prediction alone, WITH the collapse risk that penalty
@@ -69,7 +70,7 @@ WINDOWS=${WINDOWS:-2000}
 BYTES=${BYTES:-2000000}
 SEEDS=${SEEDS:-"0 1 2"}
 TAIL=${TAIL:-5}
-ONLY=${ONLY:-off,shipped,collapse_only,predict_only,feedback_off}
+ONLY=${ONLY:-off,shipped,collapse_only,predict_only,feedback_off,feedback_on}
 
 mkdir -p "$OUT"
 S="$OUT/SUMMARY.txt"
@@ -140,6 +141,7 @@ arm shipped
 arm collapse_only WORLD_PREDICT_W=0.0
 arm predict_only  WORLD_COLLAPSE_W=0.0
 arm feedback_off  WORLD_FEEDBACK=0
+arm feedback_on   WORLD_FEEDBACK=1
 
 # ---------- the comparison, across seeds ----------
 # PAIRED BY SEED AND PRINTED AS A SPREAD, NOT AS A MEAN ALONE. compare.py exists in this repo for
@@ -180,10 +182,10 @@ def _curve(arm, seed):
             return json.load(fh)
     except (OSError, ValueError):
         return None
-seeds = sorted({s for s, _ in rows.get("shipped", [])} & {s for s, _ in rows.get("feedback_off", [])})
+seeds = sorted({s for s, _ in rows.get("feedback_on", [])} & {s for s, _ in rows.get("feedback_off", [])})
 diffs = []
 for sd in seeds:
-    a, b = _curve("shipped", sd), _curve("feedback_off", sd)
+    a, b = _curve("feedback_on", sd), _curve("feedback_off", sd)
     if not a or not b:
         continue
     n = min(len(a), len(b))
@@ -193,7 +195,7 @@ for sd in seeds:
     diffs.append((sd, sum(a[i] - b[i] for i in range(h, n)) / (n - h), n - h))
 print()
 if diffs:
-    print("=== Q-WORLD-10: shipped - feedback_off, mean over the last half of the loss curve, "
+    print("=== Q-WORLD-10: feedback_on - feedback_off, mean over the last half of the loss curve, "
           "paired by seed (negative = the forecast helps) ===")
     for sd, d, k in diffs:
         print(f"  seed {sd}: {d:+.4f}  (last {k} flushes)")
@@ -202,9 +204,9 @@ if diffs:
     se = (math.sqrt(sum((x - m) ** 2 for x in ds) / (len(ds) - 1) / len(ds))
           if len(ds) > 1 else float("nan"))
     print(f"  mean {m:+.4f} +- {se:.4f} (SE, {len(ds)} seeds), {sum(1 for x in ds if x < 0)}/{len(ds)} "
-          f"seeds negative. Q-WORLD-10: flip WORLD_FEEDBACK's default to 0 if this is within noise.")
-elif "shipped" in rows or "feedback_off" in rows:
-    print("=== Q-WORLD-10's paired shipped - feedback_off line needs BOTH arms on a common seed "
+          f"seeds negative. Q-WORLD-10: WORLD_FEEDBACK ships 0; a result outside noise is the case for turning it back on.")
+elif "feedback_on" in rows or "feedback_off" in rows:
+    print("=== Q-WORLD-10's paired feedback_on - feedback_off line needs BOTH arms on a common seed "
           "with a loss curve; it was not formed.")
 print()
 print("A '~' beside a number means fewer progress lines than TAIL asked for; a '!' means none at")

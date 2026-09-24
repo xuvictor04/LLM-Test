@@ -2,7 +2,7 @@
 # ==================================================================================================
 # THE Q-WORLD-10 GPU EXPERIMENT, RUN AS A FLEET THAT FILLS THE CARD
 # ==================================================================================================
-# WHAT IT DECIDES. Whether WORLD_FEEDBACK stays True (the forecast wired into LM.encode, world_proj
+# WHAT IT DECIDED (2026-09-24: within noise, WORLD_FEEDBACK now ships False). Whether WORLD_FEEDBACK stays True (the forecast wired into LM.encode, world_proj
 # born zero) and, if it helps, whether the help is WORLD MODELLING or just added capacity. The
 # protocol is the judge's from Q-WORLD-10 in docs/04_CONTRACT.md:
 #
@@ -160,7 +160,7 @@ for key, names in sorted(groups.items()):
         if not rows: continue
         lh, se = stat([r[1] for r in rows]); fr, fse = stat([r[2] for r in rows])
         neg = sum(1 for r in rows if r[1] < 0)
-        results[name] = (lh, se, neg, len(rows))
+        results[name] = (lh, se, neg, len(rows), {r[0]: r[1] for r in rows})
         print(f"  {name:<18} vs {ctrl:<12} last half {lh:+.4f} +- {se:.4f} SE   full run {fr:+.4f} +- {fse:.4f}"
               f"   {neg}/{len(rows)} seeds negative")
         print("      per seed (last half): " + "  ".join(f"s{r[0]} {r[1]:+.4f}" for r in rows))
@@ -173,25 +173,32 @@ print()
 print("=== DECISION (Q-WORLD-10's rule) ===")
 fo, sk, wo = results.get("fb_on"), results.get("skip"), results.get("world_off")
 if fo:
-    lh, se, neg, n = fo
+    lh, se, neg, n, fo_seeds = fo
     sig = n > 1 and lh < -2 * se
     if floor is not None and abs(lh) < floor:
         print(f"  fb_on - fb_off ({lh:+.4f}) is SMALLER than this card's run-to-run floor ({floor:.4f}): no decision possible.")
     if neg >= math.ceil(0.8 * n) and sig:
-        print(f"  KEEP WORLD_FEEDBACK=True: lower in {neg}/{n} seeds and more than 2 SE below zero ({lh:+.4f} +- {se:.4f}).")
+        print(f"  TURN WORLD_FEEDBACK ON (=1): lower in {neg}/{n} seeds and more than 2 SE below zero ({lh:+.4f} +- {se:.4f}).")
     else:
-        print(f"  WITHIN NOISE ({neg}/{n} seeds negative, {lh:+.4f} +- {se:.4f}): the rule says set WORLD_FEEDBACK's "
-              f"default to False -- the path would cost kernel launches for nothing.")
+        print(f"  WITHIN NOISE ({neg}/{n} seeds negative, {lh:+.4f} +- {se:.4f}): WORLD_FEEDBACK stays off (its "
+              f"default since 2026-09-24) -- the path would cost kernel launches for nothing.")
     if sk:
-        d = sk[0] - lh
-        if abs(d) <= max(se, sk[1]) * 2:
-            print(f"  skip ~= fb_on ({sk[0]:+.4f} vs {lh:+.4f}): the gain is CAPACITY, not world modelling -- WORLD's "
-                  f"own objectives contribute nothing measurable.")
+        # PAIRED, skip - fb_on per seed. The first version compared the two arms' means against the
+        # larger of their SEs, so a skip arm that was WORSE on average but wildly variable (+0.09 vs
+        # +0.003, one seed at +0.36) was printed as "skip ~= fb_on".
+        both = [sk[4][s] - fo_seeds[s] for s in sk[4] if s in fo_seeds]
+        d = sum(both) / len(both) if both else sk[0] - lh
+        dse = (math.sqrt(sum((x - d) ** 2 for x in both) / (len(both) - 1) / len(both))
+               if len(both) > 1 else float("inf"))
+        if abs(d) <= 2 * dse:
+            print(f"  skip - fb_on = {d:+.4f} +- {dse:.4f} (paired): not separable -- if fb_on helps at all, the help "
+                  f"is CAPACITY, not world modelling.")
         elif d < 0:
             print(f"  skip BEATS fb_on ({sk[0]:+.4f} vs {lh:+.4f}): WORLD's objectives HURT the forecast path -- revisit "
                   f"WORLD_PREDICT_W / WORLD_COLLAPSE_W or detach the population's input.")
         else:
-            print(f"  fb_on beats skip ({lh:+.4f} vs {sk[0]:+.4f}): WORLD's objectives add to the forecast beyond capacity.")
+            print(f"  fb_on beats skip by {d:+.4f} +- {dse:.4f} (paired): WORLD's own objectives keep the forecast "
+                  f"path stable (compare the arms' latent_std and extra_ratio_max).")
     if wo and wo[0] < lh:
         print(f"  world_off is better than fb_on ({wo[0]:+.4f} vs {lh:+.4f}): the subsystem does not earn its cost.")
 else:
@@ -352,8 +359,8 @@ add_job() { JOBS+=("$*"); }
 arm_env() {  # the lever settings that define each arm
   case "$1" in
     fb_off)    echo "WORLD_FEEDBACK=0" ;;
-    fb_on)     echo "" ;;
-    skip)      echo "WORLD_PREDICT_W=0.0 WORLD_COLLAPSE_W=0.0" ;;
+    fb_on)     echo "WORLD_FEEDBACK=1" ;;
+    skip)      echo "WORLD_FEEDBACK=1 WORLD_PREDICT_W=0.0 WORLD_COLLAPSE_W=0.0" ;;
     world_off) echo "WORLD_ENABLED=0" ;;
   esac
 }

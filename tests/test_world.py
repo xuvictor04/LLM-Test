@@ -45,7 +45,10 @@ from lm import api as lm_api                                       # noqa: E402
 from world import api as world_api                                 # noqa: E402
 
 FAILS = []
-BASE = {"DATA_STREAM_BYTES": "60000"}
+# WORLD_FEEDBACK=1 IN THE BASE: these checks are about the WIRED forecast path, which the lever still
+# offers although it ships False since the 2026-09-24 GPU fleet (Q-WORLD-10). The off arm is asked for
+# explicitly where it is the thing under test.
+BASE = {"DATA_STREAM_BYTES": "60000", "WORLD_FEEDBACK": "1"}
 LOOP_WINDOWS = 4
 
 
@@ -144,7 +147,7 @@ def _loop_counts(**env):
 
 
 def w2_loop_arms():
-    n, wc, lc = _loop_counts()
+    n, wc, lc = _loop_counts(WORLD_FEEDBACK=1)
     check("W2 wired: world.forecasts == lm.encode.extra_applied == flushes",
           wc.get("world.forecasts") == lc.get("lm.encode.extra_applied") == n,
           f"forecasts {wc.get('world.forecasts', 'ABSENT')} extra_applied "

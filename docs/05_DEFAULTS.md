@@ -40,8 +40,9 @@ here was never asked, and no counter in any report can say so on its own.
 | `MEM_WRONG_SWEEP` | Whether the selected wrongness detector DELETES flagged entries or only flags them. |
 | `RUN_BENCH` | Stop immediately after the training loop and print throughput instead of running the eval battery. |
 | `RUN_PROFILE` | Per-component wall-clock attribution of the training step, rendered at the end of the run and in the throughput summary. |
+| `WORLD_FEEDBACK` | Condition the base LM on the forecast (h += world_proj(forecast)) instead of leaving the world model as an unused side head. |
 
-11 levers ship False.
+12 levers ship False.
 
 **Numeric levers that ship 0.** Zero is this tree's documented OFF sentinel in most of these places
 and a legitimate value in some, so the help text is quoted rather than summarised. `spine/lever.py`
@@ -403,7 +404,7 @@ DISARMED — which the cadence audit reports as a different state from starved.
 |---|---|---|---|---|
 | `WORLD_COLLAPSE_W` | `1.0` | fraction 0..1 |  | Weight on the VICReg-style variance+covariance anti-collapse term applied to the encoder's latent. |
 | `WORLD_ENABLED` | `True` | on/off |  | Build the world encoder and the dynamics population, and add their terms to the training loss; off builds a null world that no other package can dereference. |
-| `WORLD_FEEDBACK` | `True` | on/off |  | Condition the base LM on the forecast (h += world_proj(forecast)) instead of leaving the world model as an unused side head. |
+| `WORLD_FEEDBACK` | `False` | on/off |  | Condition the base LM on the forecast (h += world_proj(forecast)) instead of leaving the world model as an unused side head. |
 | `WORLD_GROW` | `True` | on/off |  | Selection on the population: clone a predictor from the fittest on a forward-loss plateau, and soft-cull predictors whose routing mass has decayed away. |
 | `WORLD_HID` | `128` | count |  | Hidden width of the world encoder MLP and of every forward-dynamics predictor MLP. |
 | `WORLD_HORIZON` | `1` | tokens |  | Prediction horizon in stream positions: the latent at t is trained to predict the latent at t+horizon. |

@@ -1,0 +1,45 @@
+# gpu_world.sh --analyze, 2026-09-24, one 140.4 GiB card, 12 runs at a time under CUDA MPS.
+# Transcribed from the owner's terminal. The full archive (curves, logs, smi.csv) is the owner's
+# gpu_world_2026-09-24.tgz; it could not be pushed from the box (no GitHub token there).
+# NOTE: the "skip ~= fb_on" decision line below came from an unpaired comparison that was fixed
+# afterwards; the paired arm table is the result.
+
+=== RUNS ===
+  fb_off             s0    20000 win   2.13 w/s  vocab 1106  mint 594  extra_ratio         - max         -  latent_std  1.009607  peak 0.756 GiB
+  fb_off             s1    20000 win   1.96 w/s  vocab 1106  mint 594  extra_ratio         - max         -  latent_std  1.051491  peak 0.762 GiB
+  fb_off             s2    20000 win   2.20 w/s  vocab 1106  mint 594  extra_ratio         - max         -  latent_std  1.022909  peak 0.816 GiB
+  fb_off             s3    20000 win   1.93 w/s  vocab 1106  mint 594  extra_ratio         - max         -  latent_std  1.022655  peak 0.791 GiB
+  fb_off             s4    20000 win   3.10 w/s  vocab 1106  mint 594  extra_ratio         - max         -  latent_std  1.034304  peak 0.727 GiB
+  fb_off_rerun       s0    20000 win   3.19 w/s  vocab 1106  mint 594  extra_ratio         - max         -  latent_std  1.009607  peak 0.756 GiB
+  fb_on              s0    20000 win   1.97 w/s  vocab 1106  mint 594  extra_ratio  0.336398 max  3.491721  latent_std  1.011523  peak 0.729 GiB
+  fb_on              s1    20000 win   1.90 w/s  vocab 1106  mint 594  extra_ratio  0.396189 max  2.701935  latent_std   1.04668  peak 0.744 GiB
+  fb_on              s2    20000 win   1.90 w/s  vocab 1106  mint 594  extra_ratio  0.331955 max  5.349366  latent_std  1.020742  peak 0.654 GiB
+  fb_on              s3    20000 win   2.25 w/s  vocab 1106  mint 594  extra_ratio  0.297532 max  6.625085  latent_std  1.023943  peak 0.684 GiB
+  fb_on              s4    20000 win   2.81 w/s  vocab 1106  mint 594  extra_ratio  0.300402 max  4.576439  latent_std  1.031106  peak 0.826 GiB
+  skip               s0    20000 win   2.20 w/s  vocab 1106  mint 594  extra_ratio  0.338648 max  2.747813  latent_std    0.1348  peak 0.756 GiB
+  skip               s1    20000 win   4.21 w/s  vocab 1106  mint 594  extra_ratio  0.895075 max   31.2213  latent_std  0.848777  peak 0.674 GiB
+  skip               s2    20000 win   1.92 w/s  vocab 1106  mint 594  extra_ratio  0.300523 max   1.34567  latent_std  0.256083  peak 0.676 GiB
+  skip               s3    20000 win   3.82 w/s  vocab 1106  mint 594  extra_ratio  0.679076 max  8.836126  latent_std  0.518958  peak 0.600 GiB
+  skip               s4    20000 win   2.80 w/s  vocab 1106  mint 594  extra_ratio  0.555363 max 13.350013  latent_std  0.382423  peak 0.729 GiB
+  world_off          s0    20000 win   1.94 w/s  vocab 1106  mint 594  extra_ratio         - max         -  latent_std         -  peak 0.654 GiB
+  world_off          s1    20000 win   2.09 w/s  vocab 1106  mint 594  extra_ratio         - max         -  latent_std         -  peak 0.865 GiB
+  world_off          s2    20000 win   2.35 w/s  vocab 1106  mint 594  extra_ratio         - max         -  latent_std         -  peak 0.834 GiB
+  world_off          s3    20000 win   2.81 w/s  vocab 1106  mint 594  extra_ratio         - max         -  latent_std         -  peak 0.811 GiB
+  world_off          s4    20000 win   3.24 w/s  vocab 1106  mint 594  extra_ratio         - max         -  latent_std         -  peak 0.748 GiB
+
+=== RUN-TO-RUN FLOOR (fb_off seed 0 twice): max per-flush |diff| 0, last-half mean |diff| 0.0000  -> BIT-EXACT on this card
+
+=== PAIRED AGAINST fb_off (arm - fb_off, same seed; negative = the arm is better) ===
+  fb_on              vs fb_off       last half +0.0033 +- 0.0031 SE   full run +0.0271 +- 0.0101   2/5 seeds negative
+      per seed (last half): s0 -0.0001  s1 +0.0088  s2 +0.0092  s3 +0.0059  s4 -0.0072
+  skip               vs fb_off       last half +0.0904 +- 0.0683 SE   full run +0.3329 +- 0.1688   1/5 seeds negative
+      per seed (last half): s0 -0.0045  s1 +0.3580  s2 +0.0055  s3 +0.0756  s4 +0.0171
+  world_off          vs fb_off       last half -0.0027 +- 0.0016 SE   full run +0.0041 +- 0.0114   4/5 seeds negative
+      per seed (last half): s0 +0.0022  s1 -0.0010  s2 -0.0025  s3 -0.0055  s4 -0.0069
+
+=== DECISION (Q-WORLD-10's rule) ===
+  WITHIN NOISE (2/5 seeds negative, +0.0033 +- 0.0031): the rule says set WORLD_FEEDBACK's default to False -- the path would cost kernel launches for nothing.
+  skip ~= fb_on (+0.0904 vs +0.0033): the gain is CAPACITY, not world modelling -- WORLD's own objectives contribute nothing measurable.
+  world_off is better than fb_on (-0.0027 vs +0.0033): the subsystem does not earn its cost.
+
+=== GPU: utilisation mean 86.1%  median 100%  >=90% on 80% of samples  memory peak 23.7 of 140.4 GiB   (MPS on, 12 at a time)
