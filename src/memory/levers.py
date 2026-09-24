@@ -323,11 +323,13 @@ class MEMLevers(LeverSet):
     # THE INSTRUMENT IS BROKEN, NOT THE MECHANISM, which is why it is kept rather than dropped: at the
     # measured write:read ratio (11.7M writes into 200k slots against 1469 read probes) probation is 82%
     # of the store and permanently over budget, so the probation branch is the RULE rather than the
-    # exception (H33, ISSUES.md:1890-1891). ON THIS TREE THE REASON IS STRONGER AND EXACT, not a ratio:
-    # MEM.read is deferred and maintain's `probe_contexts` has no producer, so NOTHING PROMOTES AT ALL,
-    # probation is 100% of the store and the probation branch is taken every time -- for every
-    # configuration (Q-MEM-4, RESOLVED 2026-09-02 (a): keep the definition, declare the Gate, measure
-    # before retuning).
+    # exception (H33, ISSUES.md:1890-1891). WHEN Q-MEM-4 WAS RULED THE REASON ON THIS TREE WAS
+    # STRONGER AND EXACT, not a ratio: maintain's `probe_contexts` had no producer, so NOTHING PROMOTED
+    # AT ALL and the probation branch was taken every time, for every configuration (Q-MEM-4, RESOLVED
+    # 2026-09-02 (a): keep the definition, declare the Gate, measure before retuning). The loop has fed
+    # the probe the previous flush's batch since 2026-09-21, and since 2026-09-24 the probe issues
+    # probe_rows queries per fire instead of one (Q-MEM-12), so promotion is live at the defaults and
+    # this share is finally measured against a working read path.
     # IT IS A PER-BLOCK SHARE, NOT A STORE-WIDE ONE. memory/api.py's write says the owner narrows the
     # candidate slot set to its block and "probation narrowing ... run INSIDE that set", so at the
     # shipped d_owner_blocks=64 and quota=128 this 0.10 is 12.8 entries per block and not 819 across the
@@ -361,14 +363,17 @@ class MEMLevers(LeverSet):
     # whatever the store is suffering (H33). A signal that cannot reach its own threshold reads exactly
     # like a healthy one, so under G4 this becomes a declared Gate that prints its own arithmetic instead
     # of printing nothing and passing for calm.
-    # THE LEVEL DOES NOT MOVE IN THIS COMMIT AND THE REASON IS NOT CAUTION (Q-MEM-4, RESOLVED (a)): on
-    # THIS tree pressure is not ~0, it is EXACTLY 0 for every setting, because MEM.read is deferred and
-    # maintain's probe has no contexts, so n_promoted is identically 0 and there is no promoted entry an
-    # eviction could destroy. Retuning a threshold against a structural constant is unfalsifiable, and
-    # changing an instrument's definition and its setting in one step is how this project produced
-    # numbers nobody could attribute. Expect the eventual retune to raise this number rather than lower
-    # it: at probe_rows/probe_every = 64/25 and topk=8 the probe touches ~20 entries per window against
-    # ~1 gated write, so once contexts exist probation can fall under budget and pressure can pin at 1.0.
+    # THE LEVEL DID NOT MOVE WHEN THIS WAS RULED AND THE REASON WAS NOT CAUTION (Q-MEM-4, RESOLVED (a)):
+    # on the tree of that date pressure was not ~0, it was EXACTLY 0 for every setting, because
+    # maintain's probe had no contexts, so n_promoted was identically 0 and there was no promoted entry
+    # an eviction could destroy. Retuning a threshold against a structural constant is unfalsifiable,
+    # and changing an instrument's definition and its setting in one step is how this project produced
+    # numbers nobody could attribute. The probe has had contexts since 2026-09-21 and its declared rate
+    # since 2026-09-24 (Q-MEM-12: it issued ONE query per probe before that), so the measurement the
+    # ruling waits for can now be taken; no run before that date is it. Expect the eventual retune to
+    # raise this number rather than lower it: at probe_rows/probe_every = 64/25 and topk=8 the probe
+    # touches ~20 entries per window against ~1 gated write, so probation can fall under budget and
+    # pressure can pin at 1.0.
     # THE COMPARISON AGAINST THIS NUMBER HAPPENS INSIDE MEM. Its only reader is MEM.census;
     # FAB.grow_check takes a `memory_pressure` ARGUMENT and reads no threshold, so what the root hands
     # the fabric must already be MEM's verdict or fab.grow_mem_eligible fires on every flush.
@@ -462,7 +467,9 @@ class MEMLevers(LeverSet):
     # story depends on. At 64 rows every 25 windows that is ~2.5 extra key rows per step against a
     # WIN=256 x BATCH_W forward (:4881) -- cheap, and the reason the probe is affordable at all.
     # "N" NAMED NOTHING; `rows` says these are QUERY rows drawn from the current context, not store
-    # entries. ONE PROPERTY MUST BE PRESERVED VERBATIM IN THE PORT, and it is the reason the mechanism is
+    # entries -- ONE PER POSITION, each the key_win tokens ending at it, the shape the write path keys
+    # (Q-MEM-12: until 2026-09-24 the probe issued one per ROW OF THE BATCH, so this lever did nothing
+    # at the shipped OPT_BATCH_WINDOWS=1). ONE PROPERTY MUST BE PRESERVED VERBATIM IN THE PORT, and it is the reason the mechanism is
     # honest: the rows are taken by DETERMINISTIC STRIDE, not a random draw (:7556-7559), because a probe
     # that consumed RNG draws would make the probe cadence change the training trajectory. A diagnostic
     # that silently edits the run is the class frozen_rng exists for.

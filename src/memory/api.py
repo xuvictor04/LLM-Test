@@ -35,7 +35,10 @@ RECORD TYPES RETURNED (P4 defines them):
                      seven mem.* gates reach no reader at all: spine/loop.py::_gate_report is keyed
                      to the tok. and fab. books alone, and spine/loop.py::_report copies
                      store.counters straight out -- so the numbers cross the boundary and the
-                     reachability does not. The alternative considered and rejected was FAB's
+                     reachability does not. THE FIELD HAD NO READER EITHER until 2026-09-24:
+                     _report copied the census's numbers and dropped `.gates`. It now renders them
+                     as `gate:mem.*` entries in its MEM.census(reconcile=True) row, through
+                     spine/gate.py::three_state (Q-MEM-12). The alternative considered and rejected was FAB's
                      `gate:<name>` string rows inside the counters dict, which makes a mapping of
                      ints heterogeneous and breaks the absent/0/positive convention
                      spine/loop.py::_gate_report reads.
@@ -647,7 +650,8 @@ port differs in shape from nothing -- the frozen tree used the same `gate_step` 
 TURNING THEM IS A CODE EDIT, and that is the same standing REFUSE_NEGATIVE_PERIOD above has: a
 lever per number would be three more environment names for a controller the shipped configuration
 does not even select (MEM_WRITE_MODE defaults to "fixed", so at the defaults these three are read
-by nothing -- the `mem.write_target` Gate declared in write() prints exactly that).
+by nothing -- the `mem.write_target` Gate declared in write() says exactly that, and since
+2026-09-24 the R stage's MEM.census row prints it).
 """
 
 
@@ -1003,6 +1007,21 @@ def _write_gates(store, mode, fixed_gate, target, evict, decay, decay_every, pro
     committed = int(store.counters.get("store.n_writes_committed", 0))
     n_prob = int(store.counters.get("store.n_evict_probation", 0))
     written = int(store.n_written)
+    # THE PROMOTION CLAUSE IS READ OFF THE COUNTERS, NOT WRITTEN AS PROSE. Until 2026-09-24 it said
+    # "spine/loop.py::_flush passes probe_contexts=None ... store.n_reads stays ABSENT, and every
+    # eviction still takes the probation branch" -- three days after the loop began passing the
+    # previous flush's batch, in the same report that printed n_reads 3, n_promoted 24 and
+    # n_evict_main 128. The retrieval that promotes is memory/api.py::maintain's probe, and whether
+    # it has run is what store.n_reads / n_promoted say, ABSENT and 0 being different findings.
+    _promoted = store.counters.get("store.n_promoted")
+    _promo = (f"store.n_promoted {int(_promoted)} over store.n_reads "
+              f"{int(store.counters.get('store.n_reads', 0))}: the retrievals memory/api.py::"
+              f"maintain's probe issues are what moves an entry out of this region."
+              if _promoted is not None else
+              "store.n_promoted is ABSENT: memory/api.py::read has not run yet on this run -- "
+              "maintain's probe has issued no query row (it reads the PREVIOUS flush's batch, so "
+              "the first flush has none) or MEM_PROBE_EVERY=0 disarms it -- so nothing has been "
+              "promoted and every entry this store holds is still on probation.")
     _declare_gates(store, (
         # THE KEPT FRACTION AGAINST THE SETPOINT -- the number the two controller arms claim to
         # control, and the one that ran 1.00 / 0.93 / 0.80 against a requested 0.12 while the report
@@ -1040,16 +1059,7 @@ def _write_gates(store, mode, fixed_gate, target, evict, decay, decay_every, pro
                     f"which at quota={quota} is {prob_frac * quota:.1f} entries inside a block and "
                     f"not {prob_frac * int(store.capacity):.0f} across the store -- the factor is "
                     f"the block count. It cannot narrow before a block is full, and nothing leaves "
-                    f"probation until a retrieval promotes it. THAT SECOND CLAUSE SURVIVED THE "
-                    f"WRITING OF memory/api.py::read AND ITS REASON CHANGED UNDERNEATH IT: read has "
-                    f"a body now, but spine/loop.py::_flush passes probe_contexts=None, so "
-                    f"memory/api.py::maintain's job 1 never reaches the call, store.n_reads stays "
-                    f"ABSENT, and every eviction still takes the probation branch. What the body "
-                    f"did change is what memory/api.py::census can say about it: `pressure` is "
-                    f"main/(main+prob) over these branches and is now reported as UNREACHABLE with "
-                    f"no promotion path, where before it was described as an exact 0 -- and a "
-                    f"signal held at zero and a signal measured at zero are the two states that "
-                    f"whole record exists to keep apart."),
+                    f"probation until a retrieval promotes it. " + _promo),
     ))
 
 
@@ -1091,6 +1101,7 @@ def _commit_window(store, o, keys, toks, poss, ctxs, src, quota, evict, prob_fra
     m = int(keys.shape[0])
     free_used = int(min(m, int(free.numel())))
     branch, blocked, deadlock = None, 0, False
+    evicted = 0
     if m <= int(free.numel()):
         idx = free[:m]
     else:
@@ -1104,6 +1115,24 @@ def _commit_window(store, o, keys, toks, poss, ctxs, src, quota, evict, prob_fra
         vic, branch, blocked, deadlock = _victims(store, occ, need, evict, prob_frac, quota,
                                                   share, over)
         idx = torch.cat([free, vic]) if int(free.numel()) else vic
+        # AN EVICTION IS AN OCCUPIED ENTRY OVERWRITTEN, AND THAT IS vic AND NOTHING ELSE. The
+        # return below used to count all `m` rows of the commit under the branch whenever the
+        # block ran out of free slots, so a commit that filled 8 free slots and overwrote 57 entries
+        # reported 65 evictions and 8 free placements -- the free rows counted twice. Measured
+        # before the repair on an 80-window MEM_WRITE_MODE=quantile run: committed 2393 against
+        # free + probation + main = 2075 + 509 + 0 = 2584, and 318 entries actually overwritten
+        # against 509 reported. The default fixed arm balanced only because every window keeps
+        # exactly `quota` rows, so a block is either wholly free or wholly full.
+        evicted = int(vic.numel())
+    # THE IDENTITY THE THREE COUNTERS ARE READ BY: every committed row went into a free slot or
+    # displaced an occupied one, never both and never neither. Refused by name rather than asserted,
+    # so a future _victims that pads short or long cannot re-open the double count silently.
+    if free_used + evicted != m:
+        raise StoreError(
+            f"MEM.write committed {m} row(s) into owner block {o} and accounted {free_used} free "
+            f"placement(s) + {evicted} eviction(s) = {free_used + evicted}. The eviction counters "
+            f"are this store's forgetting count and MEM.census's pressure is computed from them, so "
+            f"a commit they do not add up over is refused rather than reported.")
 
     # DUPLICATES ARE REFUSED, NOT COLLAPSED. Index assignment collapses a repeat silently -- keys[idx]
     # with idx naming slot j twice writes the later row and drops the earlier -- so the store reports
@@ -1111,6 +1140,9 @@ def _commit_window(store, o, keys, toks, poss, ctxs, src, quota, evict, prob_fra
     # displaced owner ONCE PER OCCURRENCE while crediting the new source idx.numel() times, which
     # overcharges the displaced source and drives its count NEGATIVE (measured drift 9 in 200). The
     # two known producers are fixed above; this is the invariant so a third cannot be silent.
+    # SEEDED BEFORE THE TEST THAT DECIDES (G4): this tripwire must read 0, and a 0 is only a
+    # reading if the key is present -- ABSENT is this tree's word for "the check never ran".
+    _bump(store, "store.n_dup_refused", 0)
     if int(idx.numel()) != int(torch.unique(idx).numel()):
         _bump(store, "store.n_dup_refused", int(idx.numel()) - int(torch.unique(idx).numel()))
         raise StoreError(
@@ -1123,6 +1155,8 @@ def _commit_window(store, o, keys, toks, poss, ctxs, src, quota, evict, prob_fra
     # SOURCE ACCOUNTING BEFORE THE OVERWRITE: the slots being taken still hold their old owners.
     old = store.src[idx]
     oa = old[(old >= 0) & store.active[idx]]
+    # SEEDED ON EVERY COMMIT, BEFORE THE BRANCH (G4) -- the same tripwire reading as n_dup_refused.
+    _bump(store, "store.n_src_underflow", 0)
     if int(oa.numel()):
         store.nsrc.index_add_(0, oa.clamp(min=0, max=store.nsrc.numel() - 1),
                               torch.full((int(oa.numel()),), -1, dtype=store.nsrc.dtype, device=dev))
@@ -1158,8 +1192,8 @@ def _commit_window(store, o, keys, toks, poss, ctxs, src, quota, evict, prob_fra
     store.born[idx] = int(born)
     store.selfcon[idx] = -1.0                      # new entry: self-consistency not yet checked
     store.recon[idx] = -1.0                        # new entry: reconstruction not yet checked
-    return m, free_used, (m if branch == "probation" else 0), \
-        (m if branch == "main" else 0), blocked, deadlock
+    return m, free_used, (evicted if branch == "probation" else 0), \
+        (evicted if branch == "main" else 0), blocked, deadlock
 
 
 def write(mem: Config, store, *, contexts, tokens, surprise, sources, owners, positions, key_fn,
@@ -1308,8 +1342,21 @@ def write(mem: Config, store, *, contexts, tokens, surprise, sources, owners, po
     receipt = WriteReceipt(offered=offered, kept=kept, committed=0, evicted_free=0,
                            evicted_probation=0, evicted_main=0, floor_blocked=0,
                            gate_theta=float(store.gate_theta))
+    # THE TRUNCATION TRIPWIRE IS SEEDED ON ITS REACHABLE ARM ONLY, BEFORE ANY RETURN (G4). A window
+    # presents at most L positions and a block holds `quota`, so at L <= quota -- the shipped
+    # LM ctx 128 against MEM_QUOTA 128 -- no window can present more survivors than its block
+    # holds and the key stays ABSENT, which is the correct reading of an unreachable mechanism.
+    # At L > quota it is armed on every call, so it is present from the first write.
+    if L > quota:
+        _bump(store, "store.n_write_truncated", 0)
     if kept == 0:
-        _bump(store, "store.n_writes_committed", 0)
+        # THE EARLY RETURN SEEDS THE SAME BOOK THE FULL PATH BUMPS. It seeded n_writes_committed
+        # alone, so a run whose gate kept nothing printed n_writes_committed 0 beside ABSENT
+        # eviction and floor counters -- ABSENT reading as "unreachable on this arm" for a path that
+        # was armed and simply had no rows to place.
+        for _k in ("store.n_writes_committed", "store.n_evict_free", "store.n_evict_probation",
+                   "store.n_evict_main", "store.n_floor_blocked"):
+            _bump(store, _k, 0)
         _write_gates(store, mode, fixed_gate, target, evict, decay, decay_every, prob_frac, quota)
         return receipt
 
@@ -1571,8 +1618,8 @@ def read(mem: Config, store, *, queries, promote=True):
     # ==============================================================================================
     # THIS IS THE WHOLE ABSENT-VERSUS-ZERO CONTRACT FOR THIS ENTRY POINT, and it is the reason the
     # loop is here and not inside the arms below. ABSENT means read was never called on the arm this
-    # run took -- which is TODAY'S state: spine/loop.py::_flush passes probe_contexts=None, so
-    # memory/api.py::maintain's job 1 never reaches the call at all. PRESENT-AND-0 means read ran
+    # run took -- MEM_PROBE_EVERY=0, or no probe has yet found contexts (spine/loop.py::_flush
+    # passes the PREVIOUS flush's batch, so the first flush has none). PRESENT-AND-0 means read ran
     # and the mechanism did not fire. memory/api.py::census's mem.pressure Gate distinguishes
     # exactly those two states over store.n_promoted, so seeding any of these inside the `else` of
     # the gate it describes would be the defect fabric/api.py::_bump was written to stop -- SIG's
@@ -1814,16 +1861,19 @@ def maintain(mem: Config, store, *, now, key_fn, probe_contexts=None, resegment=
     once per flush", and elapsed-since-last-fire is phase-independent so it means the same thing
     however often it is evaluated.
 
-    1. READ PROBE. probe_rows real retrievals against probe_contexts, rows taken by DETERMINISTIC
-       STRIDE, never a random draw: a probe that consumed RNG draws would make the probe cadence
+    1. READ PROBE. probe_rows real retrievals against probe_contexts -- ONE QUERY PER POSITION,
+       each the key_win tokens ending at it (the write path's _key_windows), so a (B, L) batch
+       offers B*L candidate queries and probe_rows of them are issued -- taken by DETERMINISTIC
+       STRIDE with a rotating offset, never a random draw: a probe that consumed RNG draws would make the probe cadence
        change the training trajectory, and a diagnostic that silently edits the run is exactly the
        class frozen_rng exists for. WITHOUT THIS, evict=="lru"/"usage" ARE WRITE-ORDER FIFO
        WHATEVER THEY SAY, and probation can never promote -- four archive files recorded
        EVICT=usage "does not protect faded knowledge by construction" as measured fact, and it was
        measured through a constant.
        THE PROBE *IS* read(), NOT A SECOND RETRIEVAL (Q-MEM-9, RESOLVED 2026-09-02 (a)). It is
-       read(mem, store, queries=key_fn(stride(probe_contexts)[:, -key_win:], depth=key_depth),
-       promote=True), and THERE IS NO SECOND RETRIEVAL IMPLEMENTATION IN THIS PACKAGE. The
+       read(mem, store, queries=key_fn(stride(key_windows(probe_contexts, key_win)),
+       depth=key_depth), promote=True), and THERE IS NO SECOND RETRIEVAL IMPLEMENTATION IN THIS
+       PACKAGE. The
        parameter lists force it rather than merely suggesting it: read declares no key lever and
        takes no key_fn, so it cannot encode anything and its `queries` must already be key-space
        vectors -- while THIS function holds key_fn and all three key levers. Open-coding a second
@@ -1833,7 +1883,8 @@ def maintain(mem: Config, store, *, now, key_fn, probe_contexts=None, resegment=
        HERE, once; any other site that forms `queries` must use the same two levers or the store is
        queried in one key space and written in another -- the drift rekey_every exists to prevent.
        WITH probe_contexts None OR EMPTY the honest DID IT FIRE reading is n_probe_fired counting
-       the CADENCE and n_probe_rows == 0: armed-but-0, not unreachable and not silence.
+       the CADENCE and n_probe_rows == 0: armed-but-0, not unreachable and not silence. The loop
+       supplies the previous flush's batch, so that is the first flush of a run and of each epoch.
     2. AMORTIZED REKEY. If key_src == "model" and rekey_every > 0, re-encode one slice of a
        SNAPSHOT of the readable entries, sized so the whole snapshot is covered once per
        rekey_every windows. rekey_every == 0 DISARMS, behind a guard: the old tree documented 0 as
@@ -1887,6 +1938,16 @@ def maintain(mem: Config, store, *, now, key_fn, probe_contexts=None, resegment=
     #      they say, and probation can never promote.
     # ==============================================================================================
     if every_p > 0:
+        # ALL THREE PROBE COUNTERS ARE SEEDED ON THE ARMED ARM, BEFORE THE CADENCE DECIDES (G4).
+        # n_probe_fired used to appear only at the first fire and n_probe_rows / n_probe_hits only
+        # when a probe found material, so an armed probe that had not yet issued a row read ABSENT --
+        # the tree's word for UNREACHABLE -- beside a nonzero fire count. ABSENT now means one thing:
+        # MEM_PROBE_EVERY=0, or maintain was never called. _bump(..., 0) adds nothing to a value a
+        # resume restored, which is why the seed is here and not in open_store's seed dict (that
+        # dict's keys are skipped by the restore loop, so seeding one there would drop the parent's
+        # tally).
+        for _k in ("store.n_probe_fired", "store.n_probe_rows", "store.n_probe_hits"):
+            _bump(store, _k, 0)
         last_p = c.get("store.probe_last_window")
         if last_p is None or (w - int(last_p)) >= every_p:
             c["store.probe_last_window"] = w
@@ -1895,40 +1956,53 @@ def maintain(mem: Config, store, *, now, key_fn, probe_contexts=None, resegment=
             # it is a DIFFERENT fact from a probe that never fired -- which the old report could not
             # tell apart.
             _bump(store, "store.n_probe_fired")
-            n_ctx = 0 if probe_contexts is None else int(probe_contexts.shape[0])
-            if n_ctx and probe_rows > 0:
-                # DETERMINISTIC STRIDE, NEVER A RANDOM DRAW. A probe that consumed RNG draws would
-                # make the probe CADENCE change the training trajectory, and a diagnostic that
-                # silently edits the run is the class spine/rng.py exists for.
-                stride = max(1, n_ctx // probe_rows)
-                rows = probe_contexts[::stride][:probe_rows]
-                # THE NARROWING TO key_win AND THE ENCODE AT key_depth HAPPEN HERE, ONCE. `read`
-                # declares no key lever and takes no key_fn, so it cannot encode and its `queries`
-                # must already be key-space vectors; this function holds key_fn and all three key
-                # levers. Any other site that forms `queries` must use the same two levers or the
-                # store is queried in one key space and written in another.
-                queries = _encode_keys(key_fn, rows[:, -kwin:], kdepth)
+            # ONE QUERY PER POSITION, NOT ONE PER ROW OF THE BATCH (2026-09-24, F39). The write
+            # path keys EVERY POSITION through _key_windows -- the key_win tokens ending at it --
+            # and the frozen tree's probe queried the same shape (`mem_ctx(x)` is
+            # `_windows(x, KW).reshape(-1, KW)`, self_organize.py:3200-3201, strided at :7558).
+            # This line took `probe_contexts[::stride]` over the BATCH dimension and keyed only
+            # each row's last key_win tokens, so a probe issued batch_windows queries however
+            # MEM_PROBE_ROWS was set: ONE query per probe at the shipped OPT_BATCH_WINDOWS=1, where
+            # 64 are declared. Measured before the repair over 80 windows: n_probe_fired 4,
+            # n_probe_rows 3, n_promoted 24 -- and MEM_PROBE_ROWS=1 gave identical counters, which
+            # is a lever that did nothing. Every MEM arm, eviction and probation number taken
+            # before this date was taken at ~1/64 of the configured read rate (Q-MEM-12).
+            q = (None if probe_contexts is None
+                 else _key_windows(probe_contexts, kwin).reshape(-1, kwin))
+            n_q = 0 if q is None else int(q.shape[0])
+            if n_q and probe_rows > 0:
+                # DETERMINISTIC STRIDE, NEVER A RANDOM DRAW, AND A ROTATING OFFSET. A probe that
+                # consumed RNG draws would make the probe CADENCE change the training trajectory,
+                # and a diagnostic that silently edits the run is the class spine/rng.py exists for.
+                # The offset `w % stride` is the frozen tree's `step % stride` (:7558): a fixed
+                # stride from 0 would query the same positions of every window for the whole run,
+                # and it costs no draw.
+                stride = max(1, n_q // probe_rows)
+                rows = q[(w % stride)::stride][:probe_rows]
+                # THE NARROWING TO key_win AND THE ENCODE AT key_depth HAPPEN HERE, ONCE, through
+                # the same two helpers the write path uses. `read` declares no key lever and takes
+                # no key_fn, so it cannot encode and its `queries` must already be key-space
+                # vectors; this function holds key_fn and all three key levers. Any other site that
+                # forms `queries` must use the same two levers or the store is queried in one key
+                # space and written in another.
+                queries = _encode_keys(key_fn, rows, kdepth)
                 # THE PROBE *IS* read(), NOT A SECOND RETRIEVAL (Q-MEM-9, RESOLVED (a)). Open-coding
                 # a kNN here would put n_reads/n_promoted/n_wrong_* on one path while the store is
                 # moved by another, and would give wrong_read and match_floor a second
-                # implementation free to drift. memory/api.py::read HAS A BODY as of this commit,
-                # so this line RETRIEVES the moment a caller supplies probe_contexts, where it used
-                # to raise NotImplementedError -- and this comment's whole argument inverts with it.
-                # NOTHING CHANGES AT RUNTIME TODAY: spine/loop.py::_flush passes probe_contexts=None
-                # and this branch is not entered, so store.n_reads / n_promoted / n_wrong_* stay
-                # ABSENT rather than present-and-0. That absence is a reading and not a hole in the
-                # report: it is what memory/api.py::census's mem.pressure Gate prints as UNREACHABLE
-                # with no promotion path, and it is why the cadence above is counted BEFORE this
-                # line -- n_probe_fired with n_probe_rows == 0 is armed-but-0, which is a different
-                # finding from a probe that never fired.
+                # implementation free to drift. spine/loop.py::_flush supplies the PREVIOUS flush's
+                # batch as probe_contexts (since 2026-09-21), so this branch retrieves and promotes
+                # on every fire but those whose contexts are None -- the first flush of a run and
+                # the first after each epoch roll, which spine/loop.py resets the lag at. Those
+                # fires are the armed-but-0 reading: n_probe_fired counts them and n_probe_rows
+                # does not.
                 retrieval = read(mem, store, queries=queries, promote=True)
                 _bump(store, "store.n_probe_rows", int(rows.shape[0]))
                 # ONE RETRIEVAL THAT RETURNED AT LEAST ONE ENTRY, which is what this counter is
                 # declared to be -- a probe that fires and retrieves nothing is a different finding
-                # from a probe that never fires. IT READS Retrieval.hits AND ASSUMES ONE THING ABOUT
-                # IT: that a slot the retrieval did not fill is marked with a negative id. That is
-                # the only convention this file takes on faith from an unwritten body; whoever
-                # writes read() either keeps it or changes this line in the same edit.
+                # from a probe that never fires. IT READS Retrieval.hits AND DEPENDS ON ONE
+                # CONVENTION OF IT: a slot the retrieval did not fill is marked -1, which
+                # Retrieval's own docstring states and memory/api.py::read keeps. Whoever changes
+                # that convention changes this line in the same edit.
                 if int((retrieval.hits >= 0).sum()) > 0:
                     _bump(store, "store.n_probe_hits")
 
@@ -1940,6 +2014,18 @@ def maintain(mem: Config, store, *, now, key_fn, probe_contexts=None, resegment=
     # ZeroDivisionError on the first flush.
     armed = ksrc == "model" and every_r > 0 and int(store.ctx_w) > 0
     if armed:
+        # THE REKEY'S COUNTERS ARE SEEDED ON THE ARMED ARM, BEFORE ANY BRANCH BELOW DECIDES (G4).
+        # n_rekey_passes was bumped only when a pass COMPLETED, so a rekey that was armed and
+        # mid-pass read ABSENT -- which run.py and spine/loop.py::_gate_report print as "never armed
+        # on the arm this run took" -- beside 59 slices already re-encoded. Seeded here and not in
+        # open_store's seed dict: that dict's keys are skipped by the counter restore, so a key
+        # seeded there would silently drop the parent's pass count on a resume. The capped-depth
+        # tally is seeded only on its own reachable arm (a transformer at key_depth > 0); seeding it
+        # anywhere else would turn a correct UNREACHABLE into a false armed-but-0.
+        for _k in ("store.n_rekey_passes", "store.n_rekey_slices", "store.n_rekey_entries"):
+            _bump(store, _k, 0)
+        if kdepth > 0 and str(store.lm_kind) == "transformer":
+            _bump(store, "store.n_keys_at_capped_depth", 0)
         last_r = c.get("store.rekey_last_window")
         if last_r is None:
             c["store.rekey_last_window"] = w      # first sight of the clock: nothing has elapsed yet
@@ -1991,19 +2077,38 @@ def maintain(mem: Config, store, *, now, key_fn, probe_contexts=None, resegment=
     # ==============================================================================================
     # docs/04_CONTRACT.md names both: they are compared against a Windows `now` INSIDE this call and
     # `maintain` takes no `due` flag, so RUN.Cadences.ledger() cannot see either of them and these
-    # counters are their only did-it-fire surface. Declared at the END, for the reason _write_gates
+    # counters, with the two Gates below, are their did-it-fire surface -- the Gates reach the report
+    # through MEM.census's `gates`, rendered by spine/loop.py::_report at R. Declared at the END, for the reason _write_gates
     # records: a gate declared before the work reports the previous call.
     fired_p = int(c.get("store.n_probe_fired", 0))
     rows_p = int(c.get("store.n_probe_rows", 0))
     passes = int(c.get("store.n_rekey_passes", 0))
+    # THE mem.probe REASON IS COMPUTED FROM THE COUNTERS IT SITS BESIDE, NOT WRITTEN AS PROSE. It
+    # said "`probe_contexts` has no producer in spine/loop.py ... nothing to query with" on every
+    # run for three days after spine/loop.py::_flush began passing the previous flush's batch, and
+    # printed that beside "3 row(s) have actually been issued" -- a sentence that cannot be true of
+    # the line it is on. The two readings it has to tell apart are both live: rows issued, and
+    # fires that found no contexts (the first flush of a run and of each epoch).
+    _promoted = c.get("store.n_promoted")
+    _probe_why = (
+        f"{rows_p} query row(s) issued over {fired_p} fire(s), so {rows_p / fired_p:.1f} per fire "
+        f"against the {probe_rows} declared; store.n_promoted "
+        f"{'ABSENT' if _promoted is None else int(_promoted)} is what those retrievals moved out "
+        f"of probation. A fire that issues no row is one whose contexts were None -- "
+        f"spine/loop.py::_flush lags the probe one flush, so the first flush of a run and the "
+        f"first after each epoch roll have nothing to query with."
+        if rows_p > 0 else
+        f"{fired_p} fire(s) and NO query row issued yet: ARMED-BUT-0, not silence. Every fire so far "
+        f"found probe_contexts None or empty -- spine/loop.py::_flush lags the probe one flush, so "
+        f"the first flush of a run and the first after each epoch roll have nothing to query "
+        f"with. Until a row is issued nothing is retrieved, so evict='lru' and evict='usage' rank "
+        f"on write-time clocks and probation cannot promote."
+        if fired_p > 0 else
+        f"the cadence has not come due in {w} window(s).")
     _declare_gates(store, (
         Gate("mem.probe", fired_p > 0, fired_p, 0,
-             reason=f"MEM_PROBE_EVERY={every_p} windows x MEM_PROBE_ROWS={probe_rows} query rows; "
-                    f"{rows_p} row(s) have actually been issued. n_probe_rows=0 beside a nonzero "
-                    f"fire count is ARMED-BUT-0 and not silence: `probe_contexts` has no producer "
-                    f"in spine/loop.py, so the cadence is reached and there is nothing to query "
-                    f"with -- which is exactly the state that makes evict='lru' and evict='usage' "
-                    f"write-order FIFO whatever they say, and probation unable to promote.")
+             reason=f"MEM_PROBE_EVERY={every_p} windows x MEM_PROBE_ROWS={probe_rows} query rows, "
+                    f"one per POSITION of the previous flush's batch; " + _probe_why)
         if every_p > 0 else
         Gate("mem.probe", False, every_p, 0, reachable=False,
              reason="MEM_PROBE_EVERY=0 disarms every retrieval-based rule in this package: `use` and "
@@ -2451,32 +2556,35 @@ def census(mem: Config, store, *, reconcile=False):
 
     `pressure` is main/(main+prob) over eviction BRANCHES, and Q-MEM-4 is RESOLVED 2026-09-02 (a):
     KEEP THE DEFINITION, KEEP pressure_thresh AT 0.80, DECLARE THE GATE, AND MEASURE BEFORE
-    RETUNING. What changed is the REASON, and the corrected reason is stronger than H33's. H33 says
-    probation is over budget at the measured write:read ratio (82% of the store) so pressure reads
-    ~0. The operative chain today is shorter and it is exact, not approximate: only a retrieval
-    promotes out of probation (levers.py, probation_frac); the only in-loop retrieval is
-    MEM.maintain's job 1, whose `probe_contexts` HAS NO PRODUCER, and MEM.read is a DEFERRED entry
-    point for want of `queries`. So n_promoted is IDENTICALLY 0, probation is 100% of the store,
-    every eviction takes the probation branch, n_evict_main is identically 0 and pressure is exactly
-    0.0 -- for EVERY configuration, not "~0 at the measured ratio". The number is not mis-tuned; it
-    is structurally constant until P5 lands the contexts, and retuning either lever against a
-    constant is unfalsifiable.
-    THE GATE THEREFORE REPORTS A STATE, NOT A NUMBER. Whenever n_promoted == 0 over the interval it
-    prints `unreachable (no promotion path: probe_contexts has no producer, n_promoted=0)` with that
-    arithmetic, never `0.000` -- which is H33's own point read one level up, that a signal which
-    cannot reach its threshold is indistinguishable from a healthy one. It prints
+    RETUNING. The chain the ruling rested on is: only a retrieval promotes out of probation
+    (levers.py, probation_frac); the only in-loop retrieval is MEM.maintain's job 1; so with no
+    retrieval n_promoted is 0, every eviction takes the probation branch, n_evict_main is 0 and the
+    reading is pinned. WHEN THE RULING WAS WRITTEN THAT WAS EVERY CONFIGURATION, because
+    `probe_contexts` had no producer. IT HAS ONE NOW (spine/loop.py::_flush passes the previous
+    flush's batch, 2026-09-21) and the probe issues MEM_PROBE_ROWS per-position queries per fire
+    (2026-09-24, Q-MEM-12), so promotion, main-branch eviction and a reachable verdict are all live
+    at the defaults -- measured n_promoted 24, n_evict_main 128 over 80 windows even at the
+    one-query-per-probe rate that preceded Q-MEM-12.
+    THE GATE REPORTS A STATE WHEN THERE IS NO VERDICT, NOT A NUMBER, and it names WHICH state,
+    because there are four and they are different facts: MEM_PROBE_EVERY=0 (no promotion path on
+    this configuration -- read off maintain's own mem.probe Gate, since this entry point reads no
+    probe lever), the probe has issued no query row yet (its contexts lag one flush), rows issued
+    and nothing promoted yet, and promotions on the board with no eviction yet (no denominator).
+    Each prints its counters, never `0.000` -- which is H33's own point read one level up, that a
+    signal which cannot reach its threshold is indistinguishable from a healthy one. It prints
     probation_share/probation_frac and n_probe_fired/n_promoted beside pressure/pressure_thresh,
-    AND it names BOTH causes of a silent zero, because there are two: no promotion path, and the arm
-    is not selected (src_share=0.5 > 0 makes quota_arm "reservoir", and FAB.grow_on_mem_pressure
-    ships False, so the pressure_signal arm is off at both ends).
+    AND it names the second, independent cause of a silent verdict: the arm is not selected
+    (src_share=0.5 > 0 makes quota_arm "reservoir", and FAB.grow_on_mem_pressure ships False, so
+    the pressure_signal arm is off at both ends).
     probation_frac IS A PER-BLOCK PREDICATE (write's own "INSIDE that set"); `probation_share`
     reported here is a store-wide aggregate and is not the thing the eviction branch tests. At the
     shipped defaults those differ by the 64 blocks.
-    EXPECT THE RETUNE TO GO UP, NOT DOWN. Once the probe has material the rates invert: ~probe_rows/
+    EXPECT THE RETUNE TO GO UP, NOT DOWN. With the probe fed the rates invert: probe_rows/
     probe_every = 64/25 = 2.56 query rows per window at topk=8 is up to ~20 entry-touches per
     window against ~1 gated write per window, so probation can fall UNDER its budget and pressure
     can pin at 1.0 above 0.80 permanently. Both pinned-at-0 and pinned-at-1 are live outcomes and
-    only a run with the probe fed can say which.
+    only a run with the probe fed at its declared rate -- which no run before 2026-09-24 had, see
+    Q-MEM-12 -- can say which.
     THE READING IS NOT A WIRE AND MUST NOT BECOME ONE. pressure_thresh's only reader is this
     function; FAB.grow_check takes `memory_pressure` and reads no threshold, so the comparison
     against 0.80 happens HERE and what the root passes to FAB must already be MEM's VERDICT. A store
@@ -2487,8 +2595,9 @@ def census(mem: Config, store, *, reconcile=False):
     DID IT FIRE: this call IS the DID IT FIRE surface for the package; it also maintains
                  n_census_reconciles and census_drift, and a nonzero census_drift is itself a
                  defect signal rather than a repair. The `mem.pressure` Gate reads
-                 store.n_promoted, n_probe_fired, n_evict_main and n_evict_probation, and covers
-                 BOTH unreachability causes named above
+                 store.n_promoted, n_probe_fired, n_probe_rows, n_evict_main and
+                 n_evict_probation plus maintain's mem.probe Gate, and names every no-verdict
+                 state and the unselected-arm cause named above
     """
     mem = mem.owned_by("MEM")
     share, prob_frac = float(mem.src_share), float(mem.probation_frac)
@@ -2503,18 +2612,18 @@ def census(mem: Config, store, *, reconcile=False):
     # ==============================================================================================
     # Seeding them inside `if reconcile:` is precisely the recorded defect fabric/api.py::_bump
     # exists to stop, and sig/api.py::cadence_due carries the repaired form of it. With the seed at
-    # the top, ABSENT means census was never called AT ALL -- which is today's state, because
-    # spine/loop.py has no management pass and its R stage lists this row as having no producer --
-    # and PRESENT-AND-0 means census ran and never reconciled. That is also why this entry point
+    # the top, ABSENT means census was never called AT ALL -- spine/loop.py calls it on the
+    # dom.manage cadence at A and once more at R with reconcile=True, so on a driven run that is a
+    # run shorter than both -- and PRESENT-AND-0 means census ran and never reconciled. That is also why this entry point
     # needs no n_census_calls counter: the seed already carries the distinction, and minting one
     # would be a counter the frozen DID IT FIRE line does not declare.
     _bump(store, "store.n_census_reconciles", 0)
     _bump(store, "store.census_drift", 0)
     # AND CENSUS SEEDS NO OTHER ENTRY POINT'S COUNTER AND NO OTHER PACKAGE'S. n_promoted,
-    # n_probe_fired, n_evict_main and n_evict_probation are read below with `.get(k, 0)` and their
-    # ABSENCE is the signal the mem.pressure Gate exists to report; seeding them here would rewrite
-    # "MEM.read was never called" into "MEM.read ran and promoted nothing", which is a claim about
-    # another entry point's work made by the function that reports on it.
+    # n_probe_fired, n_probe_rows, n_evict_main and n_evict_probation are read below with
+    # `.get(k, 0)` and their ABSENCE is part of what the mem.pressure Gate reports; seeding them here
+    # would rewrite "MEM.read was never called" into "MEM.read ran and promoted nothing", which is a
+    # claim about another entry point's work made by the function that reports on it.
 
     # ==============================================================================================
     # THE EXACT RECOUNT, ONLY UNDER reconcile=True, AND IT IS THE REPAIR
@@ -2611,13 +2720,15 @@ def census(mem: Config, store, *, reconcile=False):
     #   (a) tot == 0: no eviction has happened, the ratio has no denominator, and a False here would
     #       claim a measurement that was never taken.
     #   (b) promoted == 0: nothing has ever left probation, so no eviction CAN destroy a promoted
-    #       entry -- n_evict_main is identically 0 and the reading is pinned at 0.0 for EVERY
-    #       configuration, which is Q-MEM-4's exact chain. Handing FAB a False there would make its
-    #       own gate print "armed, did not fire", which is the language of a measurement, about a
-    #       signal that cannot move. None makes it print UNREACHABLE, which is what this package's
-    #       Gate says one package over, and the two reports then agree.
-    # Measured on this tree after 60 windows: ev_p=3072, ev_m=0, so the denominator exists, and
-    # store.n_promoted is ABSENT -- arm (b).
+    #       entry -- n_evict_main is 0 and the reading is pinned at 0.0 until something promotes,
+    #       which is Q-MEM-4's chain. Handing FAB a False there would make its own gate print
+    #       "armed, did not fire", which is the language of a measurement, about a signal that
+    #       cannot yet move. None makes it print UNREACHABLE, which is what this package's Gate
+    #       says one package over, and the two reports then agree. Arm (b) is REACHABLE on every
+    #       configuration -- any census before the probe's first promotion lands in it -- and it
+    #       is STRUCTURAL only at MEM_PROBE_EVERY=0; the Gate below says which of the two it is.
+    # Measured at the defaults over 80 windows: ev_p=4864, ev_m=128, n_promoted 24, so neither arm
+    # holds at R and the verdict is a number.
     pressure = None if (reading is None or promoted == 0) else bool(reading > thresh)
 
     # ==============================================================================================
@@ -2654,14 +2765,39 @@ def census(mem: Config, store, *, reconcile=False):
               f"STORE-WIDE, while the PER-BLOCK distribution the eviction branch actually tests is "
               f"min/median/max {p_min}/{p_med}/{p_max} against {prob_frac * quota:.1f}; "
               f"n_probe_fired {_probe}; n_promoted {_prom}; pressure {_ratio}")
-    # THE UNREACHABLE ARM BRANCHES AGAIN, BECAUSE THERE ARE TWO WAYS TO HAVE NO VERDICT AND ONLY
-    # ONE OF THEM IS "NO PROMOTION PATH". The docstring names that one and it is tested FIRST, on
-    # n_promoted, exactly as written there. The other is tot == 0 with promotions on the board --
+    # THE UNREACHABLE ARM BRANCHES AGAIN, BECAUSE THERE ARE TWO WAYS TO HAVE NO VERDICT: nothing
+    # promoted yet (itself split four ways by `_no_promo` below) and no eviction yet. The first is
+    # tested FIRST, on n_promoted, exactly as the docstring orders them. The other is tot == 0 with promotions on the board --
     # measured on a driven store: 727 entries written, 35 promoted by one read, and NOT ONE
     # EVICTION. The first draft of this reason had only the promotion clause and printed "NO
     # PROMOTION PATH ... n_promoted 35" on that store: a reason describing the state the run is not
     # in, which is the defect this whole file argues against, and it was invisible until the line
     # was rendered on a real store.
+    # WHICH NO-PROMOTION STATE, READ OFF THE COUNTERS AND OFF maintain's OWN mem.probe GATE. This
+    # branch printed "NO PROMOTION PATH ... `probe_contexts` has no producer -- spine/loop.py::_flush
+    # passes None ... for every configuration" for three days after the loop began passing the
+    # previous flush's batch; it is still REACHED on a fed run -- any census before the first
+    # promotion lands here -- so the cause has to be named from the state and not from a sentence
+    # written about another tree. census reads no probe lever (its LEVERS READ line), so whether
+    # the probe is disarmed is taken from the Gate maintain declared with that lever in hand.
+    _pg = next((g for g in store.gates if g.name == "mem.probe"), None)
+    _rows_n = int(c.get("store.n_probe_rows", 0))
+    _rows = str(_rows_n) if "store.n_probe_rows" in c else "ABSENT"
+    _no_promo = (
+        "NO PROMOTION PATH ON THIS CONFIGURATION. Only a retrieval promotes out of probation, the "
+        "only in-loop retrieval is memory/api.py::maintain's probe, and its mem.probe Gate is "
+        "UNREACHABLE (" + _pg.reason.split(":")[0] + "), so evict='lru' and evict='usage' rank on "
+        "clocks no retrieval advances and nothing ever leaves probation."
+        if (_pg is not None and not _pg.reachable) else
+        "NO RETRIEVAL YET. maintain has not been called, so the probe has not been armed on this "
+        "store."
+        if _pg is None else
+        "NO QUERY ROW ISSUED YET. The probe is armed and has fired, but every fire so far found no "
+        "contexts: spine/loop.py::_flush lags it one flush, so the first flush of a run and the "
+        "first after each epoch roll have nothing to query with."
+        if _rows_n == 0 else
+        "NOTHING PROMOTED YET. The probe has issued query rows and memory/api.py::read ran, but no "
+        "retrieved entry was on probation -- the path is open and has not moved anything.")
     _declare_gates(store, (
         Gate("mem.pressure", bool(pressure), _value, thresh, reachable=pressure is not None,
              reason=(f"MEM_PRESSURE_THRESH={thresh} is MEM's own bar and THIS COMPARISON IS ITS "
@@ -2675,20 +2811,14 @@ def census(mem: Config, store, *, reconcile=False):
                      f"instrument by importing a constant -- so at {ev_m}/{tot} a reader can see "
                      f"for themselves how many samples this verdict rests on."
                      if pressure is not None else
-                     (f"NO PROMOTION PATH. Only a retrieval promotes out of probation, the only "
-                      f"in-loop retrieval is memory/api.py::maintain's job 1, and its "
-                      f"`probe_contexts` has no producer -- spine/loop.py::_flush passes None. "
-                      f"n_probe_fired {_probe}, n_promoted {_prom}{_prom_note}, so no eviction "
-                      f"can destroy a promoted entry: n_evict_main is identically 0 and the "
-                      f"reading is pinned -- {_ratio} -- for every configuration rather than for "
-                      f"this one. MEM_EVICT={evict!r} then ranks victims on a clock no retrieval "
-                      f"ever advances, so both retrieval arms are write-order FIFO whatever they "
-                      f"say. THE SECOND CAUSE IS SEPARATE AND ALSO HOLDS: MEM_SRC_SHARE={share} "
+                     (_no_promo + f" n_probe_fired {_probe}, n_probe_rows {_rows}, "
+                      f"n_promoted {_prom}{_prom_note}; until an entry is promoted no eviction "
+                      f"can destroy one, so n_evict_main stays 0 and the reading is pinned -- "
+                      f"{_ratio}. THE SECOND CAUSE IS SEPARATE AND ALSO HOLDS: MEM_SRC_SHARE={share} "
                       f"puts quota_arm at {_arm!r} and FAB ships its grow-on-memory-pressure flag "
                       f"False, so the pressure-signal half of D3 is off at BOTH ends. Reported as "
-                      f"a state and never as 0.000 -- a signal held at zero by construction and "
-                      f"one measured at zero print the same number, which is H33's own point read "
-                      f"one level up."
+                      f"a state and never as 0.000 -- a signal held at zero and one measured at "
+                      f"zero print the same number, which is H33's own point read one level up."
                       if promoted == 0 else
                       f"NO DENOMINATOR YET, AND THAT IS NOT A ZERO. n_promoted {_prom}, so the "
                       f"promotion path is OPEN on this run -- but not one eviction has happened, "

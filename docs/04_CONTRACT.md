@@ -2590,18 +2590,24 @@ nobody could attribute.
 Gate, measure before retuning. NO DEFAULT MOVED.** What changed is the reason, and the corrected one
 is *exact* where H33's is approximate. H33 argues from a write:read ratio; the operative chain on
 **this** tree is shorter and admits no configuration: only a retrieval promotes out of probation,
-the only in-loop retrieval is `MEM.maintain`'s job 1, its `probe_contexts` **has no producer**, and
-`MEM.read` is a **deferred** entry point for want of `queries`. Therefore `n_promoted ≡ 0`,
+the only in-loop retrieval is `MEM.maintain`'s job 1, its `probe_contexts` **had no producer** when
+this was ruled, and `MEM.read` is a **deferred** entry point for want of `queries`. Therefore `n_promoted ≡ 0`,
 probation ≡ 100% of the store, every eviction takes the probation branch, `n_evict_main ≡ 0` and
-`pressure` is **exactly 0.0 for every setting** — not "≈0 at the measured ratio". Retuning either
+`pressure` is **exactly 0.0 for every setting** — not "≈0 at the measured ratio". *(That chain is
+HISTORY as of 2026-09-21: `spine/loop.py::_flush` passes the previous flush's batch as
+`probe_contexts`, and since 2026-09-24 the probe issues `MEM_PROBE_ROWS` per-position queries per
+fire — Q-MEM-12. Promotion, main-branch eviction and a reachable verdict are live at the defaults;
+the ruling itself — keep the definition, keep 0.80, measure before retuning — stands.)* Retuning either
 lever against a structural constant is unfalsifiable, which is why (b) is refused; (c) throws away
 the one thing the definition gets right (evicting never-read junk is not scarcity); (d) is refused
 by D3 and by the owner's standing rule that a broken instrument does not convict a mechanism.
 
 **The Gate reports a STATE, not a number.** With `n_promoted == 0` over the interval it prints
-`unreachable (no promotion path: probe_contexts has no producer, n_promoted=0)` and never `0.000` —
-and it names **both** causes, because there are two: no promotion path, *and* the arm is not
-selected (`src_share=0.5 > 0` makes `quota_arm` `"reservoir"`, and `FAB.grow_on_mem_pressure` ships
+UNREACHABLE and never `0.000` — naming, from the counters and `maintain`'s own `mem.probe` Gate,
+WHICH no-promotion state holds (`MEM_PROBE_EVERY=0`; no query row issued yet; rows issued and
+nothing promoted yet — Q-MEM-12; it printed *"no promotion path: probe_contexts has no producer"*
+until then) — and it names the **second** cause as well, because there are two: no promotion, *and*
+the arm is not selected (`src_share=0.5 > 0` makes `quota_arm` `"reservoir"`, and `FAB.grow_on_mem_pressure` ships
 `False`, so the pressure-signal arm is off at both ends).
 
 **The adjacent hole, closed here because two readings are different code and they differ by 64×.**
@@ -2620,7 +2626,9 @@ against ~1 gated write, so probation can fall *under* budget and `pressure` can 
 0.80, permanently. Both pinned-at-0 and pinned-at-1 are live outcomes.
 **The measurement that settles the level:** one P4 smoke run with `probe_contexts` stubbed from the
 training batch itself, printing `probation_share` per block and the two eviction counters for 2,000
-windows. Nothing about the level should move before that run.
+windows. Nothing about the level should move before that run. *(The loop now supplies the previous
+flush's batch, which is that stub with a one-flush lag; but every run before 2026-09-24 probed at ONE
+query per probe, not 64 — Q-MEM-12 — so no run taken before that date is this measurement.)*
 **Not a wire, and never can be:** `pressure_thresh`'s only reader is `MEM.census`; `FAB.grow_check`
 takes `memory_pressure` and reads no threshold, so the root must pass **MEM's verdict** or
 `fab.grow_mem_eligible` fires on every flush. A store occupancy measured at runtime can never be a
@@ -3271,10 +3279,14 @@ computed from a `Retrieval` MEM did not build — which `blend`'s docstring exis
 untouched), and K6 requires an entry point to be named by a **row** or deferred — `MEM.read` still
 has no row, so its deferral stays valid and is **not** stale. That sentence is now written into the
 deferral itself so the next reader does not "correct" it.
-**And it is inert regardless, in the state that must be reported:** `probe_contexts` has no producer,
-so with the default `None` the honest reading is `n_probe_fired` counting the **cadence** with
-`n_probe_rows == 0` — **armed-but-0, not unreachable and not silence**, which is `maintain`'s own
-rule that a probe which fires and retrieves nothing is a different finding from one that never fires.
+**And it was inert regardless, in the state that had to be reported:** `probe_contexts` had no
+producer when this was ruled, so with the default `None` the honest reading was `n_probe_fired`
+counting the **cadence** with `n_probe_rows == 0` — **armed-but-0, not unreachable and not silence**,
+which is `maintain`'s own rule that a probe which fires and retrieves nothing is a different finding
+from one that never fires. *(Superseded 2026-09-21: the loop passes the previous flush's batch, so
+that reading now holds only on the first flush of a run and of each epoch. "Strides `probe_rows`
+rows out of `probe_contexts`" is read, since Q-MEM-12, as rows of the per-position key windows —
+one query per position, the write path's own keying — and not as rows of the batch.)*
 
 ### Q-MEM-10 — `MEM.blend` returns probabilities; every scoring hook takes `logits_fn` — **RESOLVED 2026-09-02: (a). THE RECOMMENDATION BELOW, (c), IS OVERRULED. NO EVAL SIGNATURE MOVES.**
 `blend(mem, model_probs, retrieval)` is explicit that `model_probs` are **PROBABILITIES, not
@@ -4743,6 +4755,72 @@ exists and the loop's no-material branch is a defect detector only. Every run wh
 a multiple of `ctx` gets the same number as before. **Rejected:** flushing the partial batch on the
 tail tick (leaves the clock's empty flush at `OPT_BATCH_WINDOWS=1`); un-counting the flush in the
 clock (a second place a counter moves).
+
+### Q-MEM-12 — the read probe issued one query per batch row, the eviction counters counted free placements twice, and the R stage dropped the MEM, DATA and grow_check gates — **RESOLVED 2026-09-24: ONE QUERY PER POSITION; AN EVICTION IS A VICTIM; THE ROOT RENDERS THOSE GATES THROUGH `spine/gate.py::three_state`. ⚠ EVERY MEM ARM, EVICTION AND PROBATION NUMBER TAKEN BEFORE THIS DATE WAS MEASURED AT ~1/64 OF THE DECLARED READ RATE**
+**The probe.** `maintain` took `probe_contexts[::stride][:probe_rows]` over the **batch** dimension
+and keyed each row's last `key_win` tokens, so a probe issued `batch_windows` queries whatever
+`MEM_PROBE_ROWS` said — **one** at the shipped `OPT_BATCH_WINDOWS=1`. Driven over 80 default windows:
+`n_probe_fired 4, n_probe_rows 3, n_promoted 24`, and `MEM_PROBE_ROWS=1` gave identical counters.
+The lever's help (*"how many query rows each probe read issues"*), its sizing comment, this
+contract's "64/25 query rows per window" arithmetic in Q-MEM-4 and the frozen tree
+(`mem_ctx(x) = _windows(x, KW).reshape(-1, KW)`, strided at `self_organize.py:7558`) all count
+per-position windows, and so does the write path, which keys every position through `_key_windows`.
+**Ruling:** the probe forms `_key_windows(probe_contexts, key_win).reshape(-1, key_win)` and issues
+`q[(w % stride)::stride][:probe_rows]` with `stride = max(1, n // probe_rows)` — the frozen tree's
+deterministic stride **and** its `step % stride` rotating offset, so the probe does not query the
+same positions of every window for a whole run and still draws no RNG. `n_probe_rows` counts rows
+actually issued. After: `n_probe_rows 192` (64 per fire that had contexts), `n_promoted 508`,
+`n_evict_main 256`; `MEM_PROBE_ROWS=1` now gives 3 rows. The encode cost rises from `B` to
+`probe_rows` rows of `key_win` tokens per fire. **Rejected:** keeping one query per row and
+re-documenting the lever as "rows of the batch" (it would leave the lever inert at the shipped batch
+width and the probe querying a different key shape than the write path stores); a random draw of
+positions (the probe must not consume RNG — `memory/levers.py`, probe_rows).
+**What this does to earlier numbers:** promotion out of probation and the lru/usage rankings are the
+Goal-B retention mechanism, and every run before this date ran them at ~1/64 of the declared rate —
+MEM arm comparisons (`MEM_EVICT`, `MEM_PROBATION_FRAC`, `MEM_WRITE_MODE`), `probation_share`,
+`n_evict_main` and the pressure reading must be re-taken. The training loss does not read the store
+(`MEM.blend` is deferred), so the loss curve is unaffected on the default arm.
+
+**The eviction counters.** `_commit_window` returned `m` — every committed row — as the eviction
+count whenever the block ran short of free slots, so a commit that filled 8 free slots and overwrote
+57 entries counted 65 evictions **and** 8 free placements. Driven on an 80-window
+`MEM_WRITE_MODE=quantile` run: `n_writes_committed 2393` against `free + probation + main = 2075 +
+509 + 0 = 2584`, with 318 entries actually overwritten. **Ruling:** the count is `vic.numel()`, the
+victims `_victims` chose, and `free_used + evicted == committed` is refused by name if it ever fails.
+After: `2075 + 318 + 0 = 2393`. The default fixed arm is unchanged (a block there is always wholly
+free or wholly full). **Not taken:** per-victim branch labels (`store.prob[vic]` before the
+overwrite). The branch is what `pressure` is defined over (Q-MEM-4, `_victims`' docstring), and
+changing the definition is the retune that ruling defers.
+
+**The gates at R.** `loop._report` copied MEM's census numbers and dropped `StoreCensus.gates`, never
+read `Stream.gates`, and `FAB.grow_check`'s `GrowReport` was a bare expression statement's value —
+so the seven `mem.*` gates, the four `data.*` stream gates and the five grow-check gates reached no
+report, and the LOOP_ORDER R row claimed the MEM census was where two of them *became visible*.
+**Ruling:** a shared renderer, `spine/gate.py::three_state(gates) -> {name: (state, arithmetic)}` in
+the package copies' state words, used by the root for exactly the gates no `counters()` entry point
+renders: `gate:mem.*` inside the `MEM.census(reconcile=True)` row, a `DATA(stream.gates)` row read off
+`sysm.stream` at R (stage E redraws it), and a `FAB.grow_check(last call's gates)` row from
+`System.grow_gates`, which holds the last call's **gates tuple only** — never the record. It has no
+count column: none of these gates has a ledger key of its own name, and a column would print
+`fired, 0`. **Rejected:** importing `fabric/api.py::_three_state` (O10 — a package private); holding
+the last `FabricOut` or `GrowReport` on the System (a live forward graph, and a record CKPT might try
+to serialise); refactoring LM/SIG/FAB's own copies onto the shared renderer in this commit (their
+count column is a ledger lookup this renderer deliberately lacks, and the three packages are other
+slices' work).
+
+**Two orderings and the seeds that go with them.** The R stage copied `store.counters` **before**
+`MEM.census(reconcile=True)` and `DOM(part.counters)` before `DOM.prior`, so the report printed
+`store.n_census_reconciles` and `part.n_prior_reads` ABSENT while the final checkpoint carried 1 —
+against the save row's *"the checkpointed counter vectors are the ones the report printed"*. Both
+calls now run before the copies. And per G4, counters are seeded on the arm that can bump them,
+before the branch: `n_probe_fired/rows/hits` when `MEM_PROBE_EVERY > 0`; `n_rekey_passes/slices/
+entries` when the rekey is armed (it read ABSENT mid-pass beside 79 slices), plus
+`n_keys_at_capped_depth` only on a transformer at `key_depth > 0`; `n_dup_refused` and
+`n_src_underflow` on every commit; `n_write_truncated` only when `ctx > quota` (at the shipped 128 ≤
+128 it is structurally unreachable and stays ABSENT); and the kept-nothing early return of `write`
+seeds the eviction and floor counters beside `n_writes_committed`. None of these seeds is in
+`open_store`'s seed dict, whose keys the counter restore skips.
+`tests/test_mem_probe.py` drives every part of this ruling.
 
 ---
 

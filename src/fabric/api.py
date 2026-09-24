@@ -3693,10 +3693,13 @@ def grow_check(fab: Config, pop, *, flush_loss, step_windows, soft_cap, memory_p
     fire on every flush, which is the same shape as a gate evaluated at a consumer site. It is an
     ARGUMENT and can never be a wire: a store occupancy measured at runtime is not visible to a
     Coupling.compute, which sees only frozen Configs.
-    ITS PRESENT STATE IS unreachable AND THE ARITHMETIC IS MEM'S: MEM.read is deferred and
-    MEM.maintain's probe has no contexts, so nothing promotes out of probation, no eviction destroys
-    a promoted entry, and MEM's pressure is exactly 0.0 for every configuration -- which is why
-    grow_on_mem_pressure also ships False. Two named causes, not one.
+    ITS STATE IS MEM'S VERDICT AND THE ARITHMETIC IS MEM'S. When this was written MEM.maintain's
+    probe had no contexts, nothing promoted out of probation and MEM's pressure was exactly 0.0 for
+    every configuration. The loop has fed the probe since 2026-09-21 and the probe issues its
+    declared MEM_PROBE_ROWS since 2026-09-24 (docs/04_CONTRACT.md Q-MEM-12), so the verdict is a
+    bool once MEM.census can form one and None (printed UNREACHABLE here) before the first eviction
+    or the first promotion, or for the whole run at MEM_PROBE_EVERY=0 -- the mem.pressure Gate names
+    which. grow_on_mem_pressure still ships False, so the leg is off by configuration either way.
 
     THE CLAMPS RUN INSIDE, BEFORE THE COUNTER. soft_cap (CAP's operating ceiling) and the new_frac
     newborn budget were applied at the CALL SITE after n_regr had been incremented (:7444-7470), so

@@ -64,6 +64,7 @@ import time
 import torch
 
 from spine import units as U
+from spine import gate as _gate
 from train import api as run_api
 from data import api as data_api
 from tok import api as tok_api
@@ -111,8 +112,7 @@ def _is_stub(fn):
 # `rows[stage] - _CALLS`, so a flat set credits an entry point at EVERY stage the table lists it
 # at, as soon as the driver calls it at ONE of them. MEM.census and DOM.census are stage-A rows
 # this driver calls on the dom.manage cadence AND stage-R rows -- "(reconcile=True) ... re-taken at
-# the end so the report's numbers are the settled ones, and the ONLY place the two ungated gates
-# inside MEM.maintain become visible" -- and the R calls did not exist. The run printed
+# the end so the report's numbers are the settled ones" -- and the R calls did not exist. The run printed
 # "uncalled=0" anyway, every time, because the A call had already spent their names. A per-stage
 # split is what made them visible, and it found nothing else: those two, and the ordering defect
 # beside them.
@@ -1254,6 +1254,14 @@ def _report(sysm, elapsed_s, ctx):
     out["OPT.counters"] = opt_api.counters(cfg["OPT"], sysm.optimizer)
     out["CAP.counters"] = cap_api.counters(cfg["CAP"], sysm.valve)
     out["TOK(vocab.counters)"] = dict(sysm.vocab.counters)
+    # MEM.census(reconcile=True) IS CALLED BEFORE store.counters IS COPIED, AND THE ORDER IS THE
+    # REPAIR (2026-09-24). The copy was taken first, so the census's own bump of
+    # store.n_census_reconciles reached the checkpoint and not the report: the report printed
+    # n_census_reconciles ABSENT beside a census row reading 1, while the final checkpoint's
+    # /payload/MEM/counters held 1 -- against the save row's own words, "the checkpointed counter
+    # vectors are the ones the report printed". The row it renders is still built further down,
+    # where the reasons for it are written; only the CALL moved.
+    _mc = mem_api.census(cfg["MEM"], sysm.store, reconcile=True)
     out["MEM(store.counters)"] = dict(sysm.store.counters)
     # WORLD HAD NO LINE IN THIS REPORT AT ALL, and it is the package that turned out to supply 45%
     # of the gradient on the language model's token embedding. It declares no counters() entry
@@ -1277,7 +1285,7 @@ def _report(sysm, elapsed_s, ctx):
     # NOT this: it carries the tallies, this carries the reconciliation.
     # WHY IT WAS INVISIBLE: spine/loop.py::_CALLS was one flat set, so the A-stage call spent the
     # name "MEM.census" for every stage at once and the run printed uncalled=0.
-    _mc = mem_api.census(cfg["MEM"], sysm.store, reconcile=True)
+    # (`_mc` is the call made above, before store.counters was copied.)
     out["MEM.census(reconcile=True)"] = {
         "floor_entries": int(_mc.floor_entries), "live_src": int(_mc.live_src),
         "quota_arm": str(_mc.quota_arm), "pressure": _mc.pressure,
@@ -1288,11 +1296,44 @@ def _report(sysm, elapsed_s, ctx):
         "sources_holding_entries": sum(1 for v in _mc.counts.values() if int(v) > 0),
         "census_drift": _mc.census_drift, "n_census_reconciles": int(_mc.n_census_reconciles),
     }
+    # AND THE SEVEN mem.* GATES, WHICH THIS ROW DROPPED (2026-09-24). StoreCensus.gates exists so
+    # "the numbers cross the boundary and the reachability" does too -- its own docstring -- and
+    # this row copied the numbers and left `.gates` on the record: mem.probe, mem.rekey,
+    # mem.pressure, mem.probation, mem.use_decay, mem.write_target and mem.key_depth reached no
+    # report, so an armed-but-starved rekey read the same as an unreachable one and
+    # MEM_WRITE_MODE=adaptive missing its target by 2x printed nothing. Rendered through
+    # spine/gate.py::three_state, the shared form, because MEM has no counters() entry point to
+    # render them in and the driver may not import FAB's private renderer.
+    out["MEM.census(reconcile=True)"].update(
+        {f"gate:{k}": v for k, v in _gate.three_state(_mc.gates).items()})
+    # DATA'S STREAM GATES, READ OFF sysm.stream AT R AND NOT OFF A REFERENCE TAKEN AT COMPOSE: stage
+    # E redraws the stream on every epoch roll, and a cached one would report epoch 0's draw.
+    # data/api.py::Stream declares `gates` the DID-IT-FIRE surface for data.contig_wrap and
+    # data.resample, and until this row nothing read that surface -- a DATA_SEG_CONTIG=1 or
+    # DATA_RESAMPLE=1 run printed the same report as the default.
+    out["DATA(stream.gates)"] = (
+        {f"gate:{k}": v for k, v in _gate.three_state(sysm.stream.gates).items()}
+        if sysm.stream is not None and getattr(sysm.stream, "gates", ()) else
+        "no Stream gates: the stream carries none")
+    # THE LAST FAB.grow_check CALL'S GATES. GrowReport was a bare expression statement's return
+    # value until 2026-09-24 and its per-call gates reached nothing; spine/loop.py::_flush now keeps
+    # the gates tuple -- never the record -- on System.grow_gates. Rendered as its own row because a
+    # GrowReport gate may share a name with a FAB.build gate that FAB.counters prints, and the two
+    # are verdicts about different things (per call against per run).
+    out["FAB.grow_check(last call's gates)"] = (
+        {f"gate:{k}": v for k, v in _gate.three_state(sysm.grow_gates).items()}
+        if sysm.grow_gates else
+        "no FAB.grow_check call in this process, or its record carried no gates")
     # DOM.census AT R -- "the partition's did-it-fire surface, and the domain sizes every verdict is
     # keyed by". Same history as the row above and the same repair. Until this line the partition
     # had NO report line but DOM.prior(0), so a run said nothing about how many domains it ended
     # with, how many boundaries it saw, or whether the acceptance radius had ever been measured.
+    # DOM.prior IS CALLED BEFORE part.counters IS COPIED, for the reason the MEM copy above moved:
+    # the copy was the census's snapshot, taken before prior bumped part.n_prior_reads, so the
+    # report printed that key ABSENT on a run that had just read the prior -- the key's own
+    # meaning of "never called". Both calls are made first and the rows are built after.
     _dc = dom_api.census(cfg["DOM"], sysm.partition)
+    _pr, _w = dom_api.prior(cfg["DOM"], sysm.partition, did=0)
     out["DOM.census"] = {
         "n_live": int(_dc.n_live), "live": list(_dc.live)[:32], "boundaries": int(_dc.boundaries),
         "created": _dc.created, "merged": _dc.merged, "culled": _dc.culled, "folded": _dc.folded,
@@ -1300,11 +1341,11 @@ def _report(sysm, elapsed_s, ctx):
         "pooled_radius": round(float(_dc.pooled_radius), 6),
         "partition_off": bool(_dc.partition_off), "collapsed_at": _dc.collapsed_at,
     }
-    out["DOM(part.counters)"] = dict(_dc.counters)
-    # DOM.prior FOR did=0, WHICH IS EVERY WINDOW THIS RUN HAD. Rendered as the pair the entry point
-    # returns rather than as the histogram: (None, 0.0) is the real answer at the shipped
-    # DOM_PRIOR_BLEND, and it is a different fact from a histogram of zeros.
-    _pr, _w = dom_api.prior(cfg["DOM"], sysm.partition, did=0)
+    out["DOM(part.counters)"] = dict(sysm.partition.counters)
+    # DOM.prior FOR did=0, WHICH IS EVERY WINDOW THIS RUN HAD (called above, before the copy).
+    # Rendered as the pair the entry point returns rather than as the histogram: (None, 0.0) is the
+    # real answer at the shipped DOM_PRIOR_BLEND, and it is a different fact from a histogram of
+    # zeros.
     out["DOM.prior(0)"] = {"has_histogram": _pr is not None, "weight": float(_w)}
     if sysm.retention is not None:
         out["CKPT.Retention.counters"] = sysm.retention.counters()
@@ -1674,14 +1715,22 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     # FAB_GROW_ON_MEM_PRESSURE STILL SHIPS False, so the leg is off by configuration even now that
     # it has a producer. That is a lever the owner turns, not something this driver decides.
     # shift_at RIDES THE SYSTEM AND IS None UNTIL SOMETHING STAMPS IT. Three sites are supposed to:
-    # the E draw row's resample, TOK.mint_burst's retok and OPT's LR restart. The first two are not
-    # driven yet (the retok needs TOK.on_window's Due, a stub), so fab.shift_notifications reads 0
-    # and the blackout is UNREACHABLE rather than armed -- which is precisely what that counter was
-    # declared to distinguish.
-    fab_api.grow_check(fab_cfg, pop, flush_loss=mean.detach(),
-                       step_windows=U.Windows(int(clock.step)), soft_cap=caps,
-                       memory_pressure=mem_pressure, signature=sig_vec,
-                       shift_at=sysm.shift_at_windows)
+    # the E draw row's resample, TOK.mint_burst's retok and OPT's LR restart. ONE IS DRIVEN: the
+    # epoch-roll block in `run` stamps it when it redraws the stream. The retok is not stamped on
+    # its own -- this driver defers it to that same roll, which is the act that satisfies it -- and
+    # OPT.maybe_step is called without a shift_at, so its LR restart stamps nothing here. On a run
+    # that takes no roll before it ends (every RUN_EPOCHS=1 run) fab.shift_notifications therefore
+    # reads 0 and the blackout is UNREACHABLE rather than armed -- which is precisely what that
+    # counter was declared to distinguish.
+    # THE RECORD IS BOUND AND ITS GATES KEPT (2026-09-24). This was a bare expression statement, so
+    # GrowReport's per-call gates -- the arithmetic of the call that evaluated them -- reached no
+    # report. ONLY THE GATES TUPLE is kept, on System.grow_gates, and spine/loop.py::_report renders
+    # it at R: the record itself is not held, and nothing here is on CKPT's save path.
+    _grow = fab_api.grow_check(fab_cfg, pop, flush_loss=mean.detach(),
+                               step_windows=U.Windows(int(clock.step)), soft_cap=caps,
+                               memory_pressure=mem_pressure, signature=sig_vec,
+                               shift_at=sysm.shift_at_windows)
+    sysm.grow_gates = tuple(getattr(_grow, "gates", ()) or ())
 
     # ---- MEMORY -------------------------------------------------------------------------------
     # SURPRISE IS FORMED HERE AND NOWHERE ELSE, from LM.decode's logits and `y`, because it is the
@@ -1767,18 +1816,22 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     # lose, which is the question worth asking, and it costs one carried tensor. Q-MEM-4 named "one
     # P4 smoke run with probe_contexts stubbed from the training batch itself" as the way to
     # measure this rather than guess; this is that, with the lag that makes it a measurement.
-    # IT IS None ON THE FIRST FLUSH, which maintain handles as the declared armed-but-0 reading
-    # (n_probe_fired counts the CADENCE, n_probe_rows stays 0) rather than as an error.
+    # IT IS None ON THE FIRST FLUSH, and on the first after each epoch roll, which maintain handles
+    # as the declared armed-but-0 reading (n_probe_fired counts the CADENCE, n_probe_rows does not
+    # move) rather than as an error. maintain forms ONE QUERY PER POSITION of this (B, L) batch and
+    # issues MEM_PROBE_ROWS of them (Q-MEM-12): until 2026-09-24 it issued one per ROW, which at the
+    # shipped OPT_BATCH_WINDOWS=1 was one query per probe against 64 declared.
     # THE PROBE MOVES `use`, `prob` AND `last`, AND THAT IS THE MECHANISM, NOT AN INSTRUMENT
     # EDITING ITS SUBJECT. memory/levers.py's probe_rows is emphatic that a probe must not consume
     # RNG draws, and it does not -- the stride is deterministic and MEM.read draws no randomness.
     # What it does change is which entries survive eviction, which is precisely what promotion is
     # for; an instrument that refused to promote would be the constant this repair removes.
-    # resegment=None FOR THE SAME REASON THE RETOK IS NOT DRIVEN: no Due.retok is acted on, so
-    # there is no RetokEvent to distribute.
+    # `resegment` IS THE EPOCH ROLL'S NEW Segmentation ON THE FIRST FLUSH AFTER A ROLL AND None ON
+    # EVERY OTHER (see where `run` sets and clears it). A mid-epoch Due.retok is not acted on -- the
+    # roll is what re-segments -- so the roll is the only producer of a resegment event.
     # THE TWO GATES ARE MEM'S OWN and are compared against `now` INSIDE the call -- there is no
-    # Cadences key for them, which is why store.n_probe_fired / n_rekey_passes are their only
-    # did-it-fire surface. Calling it once per flush is the shipped semantics: both periods are
+    # Cadences key for them, which is why their did-it-fire surface is store.n_probe_fired /
+    # n_rekey_passes and the mem.probe / mem.rekey Gates the R stage's MEM.census row renders. Calling it once per flush is the shipped semantics: both periods are
     # Windows and elapsed-since-last-fire is phase-independent.
     mem_api.maintain(cfg_mem, sysm.store, now=now_w, key_fn=key_fn,
                      probe_contexts=probe_prev, resegment=resegment)

@@ -77,6 +77,41 @@ class Gate:
         return f"Gate {self.name}: {verdict}{nums}{note}"
 
 
+def three_state(gates):
+    """{name: (state, arithmetic)} for every Gate given, in G4's three states. A tuple or a dict.
+
+    THE RENDERER FOR THE GATES THE ROOT PRINTS ON A PACKAGE'S BEHALF. LM, SIG and FAB each render
+    their own gates inside their counters() entry point (a private `_three_state` apiece, because
+    O10 forbids a package to import another's); MEM, DATA and FAB.grow_check's per-call GrowReport
+    have no counters() entry point that carries their gates, so spine/loop.py::_report renders them
+    from the Gate records their owners returned -- and it does so HERE, in the shared vocabulary,
+    rather than by importing a package private or writing a fourth copy in the driver. The STATE
+    WORDS are the package copies' exactly ("fired" / "armed-but-zero" / "unreachable"), so one report
+    reads in one vocabulary whichever file rendered the line.
+
+    NO COUNT COLUMN, AND THE PACKAGE COPIES HAVE ONE. Theirs is a ledger lookup by gate name, and
+    none of the gates this renders has a ledger key of its own name: a count column here would
+    print `fired, 0` beside mem.probe on every run. The count, where the gate has one, is its
+    `value`, which the arithmetic already carries -- "4 vs 0".
+
+    THE REASON RIDES ON THE TWO ARMS THAT ARE NOT A FIRING -- unreachable, where it is required, and
+    armed-but-zero, where it is what separates a threshold nearly met from one never approached --
+    which is the package copies' rule too.
+    """
+    if isinstance(gates, dict):
+        gates = tuple(gates.values())
+    out = {}
+    for g in (gates or ()):
+        arith = f"{g.value!r} vs {g.threshold!r}"
+        if not g.reachable:
+            out[g.name] = ("unreachable", f"{arith} -- {g.reason}")
+        elif g.fired:
+            out[g.name] = ("fired", arith)
+        else:
+            out[g.name] = ("armed-but-zero", arith + (f" -- {g.reason}" if g.reason else ""))
+    return out
+
+
 class NotBuilt(Exception):
     """A mechanism that is DECLARED and deliberately NOT BUILT, refused at the point of use.
 

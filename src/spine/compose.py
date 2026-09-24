@@ -1197,10 +1197,12 @@ LOOP_ORDER = (
                                       "read that moves use/last/prob, without which evict='lru' and "
                                       "evict='usage' are write-order FIFO whatever they say and "
                                       "probation can never promote; it is written without the call "
-                                      "form because MEM.read is deferred for want of `queries`, and "
-                                      "its probe_contexts argument has no producer either, which is "
-                                      "exactly the state that made those two eviction rules "
-                                      "measurable only as a constant. maintain ALSO compares "
+                                      "form because MEM.read is deferred as a row for want of "
+                                      "`queries` and maintain reaches it in-package (Q-MEM-9). Its "
+                                      "probe_contexts is the PREVIOUS flush's x, carried by the "
+                                      "loop (None on the first flush of a run and of each epoch), "
+                                      "and maintain issues probe_rows queries out of it, one per "
+                                      "POSITION (Q-MEM-12). maintain ALSO compares "
                                       "probe_every and rekey_every against `now` INTERNALLY: two "
                                       "Windows gates with no ledger key, whose only did-it-fire "
                                       "surface is store.n_probe_fired / n_rekey_passes at R. That "
@@ -1404,9 +1406,12 @@ LOOP_ORDER = (
                                       "window and never read"),
     ("R", "MEM",   "census",          "(reconcile=True) -- the store's did-it-fire surface, re-taken "
                                       "at the end so the report's numbers are the settled ones, and "
-                                      "the ONLY place the two ungated gates inside MEM.maintain "
-                                      "become visible: n_probe_fired and n_rekey_passes have no "
-                                      "ledger key"),
+                                      "called BEFORE the report copies store.counters so the copy "
+                                      "and the checkpoint carry its reconcile. Its `gates` are "
+                                      "where the two ungated gates inside MEM.maintain (mem.probe, "
+                                      "mem.rekey -- no ledger key) and the other five mem.* gates "
+                                      "reach the report, rendered in three states beside the "
+                                      "row"),
     ("R", "DOM",   "census",          "() -- the partition's did-it-fire surface, and the domain "
                                       "sizes every verdict is keyed by"),
     ("R", "LM",    "counters",        "(model)"),
@@ -1663,7 +1668,10 @@ DEFERRED_ENTRY_POINTS = {
         "a full flush of eviction pressure to lose rather than what it stored microseconds ago. "
         "Measured over 600 windows at the shipped defaults: store.n_promoted 184 where it had been "
         "ABSENT, and store.n_evict_main 6272 where it had been IDENTICALLY 0 for every "
-        "configuration this project had ever run. That number is the whole of the claim -- four "
+        "configuration this project had ever run -- and that at ONE query per probe, the rate "
+        "Q-MEM-12 corrected on 2026-09-24 to the declared MEM_PROBE_ROWS: over 300 windows at "
+        "DATA_STREAM_BYTES=200000 the corrected probe gives n_promoted 2349 against 88 and "
+        "n_evict_main 4608 against 2560. That number is the whole of the claim -- four "
         "archive files recorded evict='usage' as not protecting faded knowledge 'by construction' "
         "when it was being measured through a constant. "
         "DEFERRED AS A ROW, REACHED IN-PACKAGE: Q-MEM-9 is RESOLVED (a) as of 2026-09-02 and "
@@ -2017,6 +2025,12 @@ class System:
                  # so a reader can see what a PASSING restore did (rows widened, moments padded,
                  # a horizon changed). None on a fresh run.
                  "lm_load", "opt_load",
+                 # `grow_gates` IS THE LAST FAB.grow_check CALL'S GrowReport.gates, and ONLY that
+                 # tuple -- never the record. Same history as the three above: the call was a bare
+                 # expression statement until 2026-09-24, so its per-call gates were computed and
+                 # dropped, and spine/loop.py::_report now renders them at R. None until the first
+                 # flush. Not a value that crosses to a later row, and not on CKPT's save path.
+                 "grow_gates",
                  # THE FOUR VALUES THAT CROSS A BOUNDARY THE ORDER TABLES CANNOT EXPRESS, each
                  # named by the row that consumes it. `produces` reads FORWARDS -- an argument is
                  # supplied by an EARLIER row -- so a value produced at A and consumed at B, or
