@@ -75,6 +75,7 @@ from capacity import api as cap_api
 from spine.compose import _sample_window as _c_sample_window
 from spine.compose import _key_fn as _c_key_fn
 from spine.compose import _sig_encode_fn as _c_sig_encode_fn
+from spine.compose import _head as _c_head
 from spine.compose import _signature_stream as _c_signature_stream
 from spine.compose import _signature_cursor as _c_signature_cursor
 from ckpt import api as ckpt_api
@@ -607,6 +608,26 @@ def run(sysm, *, max_windows=None, progress=True):
     # False: fabric/api.py::grow_check prints UNREACHABLE for None and "armed, did not fire" for
     # False, and before any census has run there is no measurement to call False.
     mem_pressure = None
+    # DOM'S LIVE DOMAIN COUNT, CARRIED FROM THE dom.manage PASS'S CENSUS TO EVERY FLUSH -- FAB.forward's
+    # `live_domains`, which the flush passed as the literal 1 until 2026-09-24. The same cadenced-
+    # producer / per-flush-consumer shape as mem_pressure above, and LOOP_ORDER's DOM.census row
+    # declares the staleness ("a B row takes live_domains every flush and this one runs on a cadence
+    # that may never fire"). 1 UNTIL THAT PASS FIRST FIRES, which is the value max(1, ...) inside
+    # FAB's breadth cap already floors to; fab.breadth_cap's gate prints the count it was handed, so
+    # a run that never reached a census says so on that line (Q-FAB-9).
+    live_domains = 1
+    # THE DRIVER'S OWN DID-IT-FIRE BOOK, for the two facts no package can see because they are
+    # about how THIS FILE joined a flush: loop.flush_mixed_domain (a flush whose windows span more
+    # than one domain -- FAB.forward's breadth ban is batch-wide and is computed on dids[0], so
+    # these are the flushes where it was another window's domain for some rows) and
+    # loop.owners_from_domain (the control arms' MEM owner, see _flush). Each is SEEDED here, only
+    # on the arm that can reach it and before any flush decides: flush_mixed_domain when
+    # batch_windows > 1, owners_from_domain on FAB_ON=0 or FAB_NORM_ONLY=1. Printed at R.
+    books = {}
+    if int(opt_cfg.batch_windows) > 1:
+        books["loop.flush_mixed_domain"] = 0
+    if (not bool(fab_cfg.on)) or bool(fab_cfg.norm_only):
+        books["loop.owners_from_domain"] = 0
     # THE PENDING RESEGMENTATION EVENT, set by the epoch roll and consumed by the next flush. None
     # on every other flush, which is what makes store.n_resegment_events a count of ROLLS.
     resegment = None
@@ -745,6 +766,8 @@ def run(sysm, *, max_windows=None, progress=True):
                 # feeds mem_pressure three lines down.
                 mem_api.apply_domain_plan(cfg["MEM"], sysm.store, folds=_plan.folds,
                                           deletions=_plan.deletions, live_sources=_pc.live)
+                # AND THE OTHER HALF OF THE CENSUS ROW'S WIRE: n_live, under FAB.forward's spelling.
+                live_domains = int(_pc.n_live)
                 # AND THE PRESSURE VERDICT, CARRIED TO EVERY FLUSH UNTIL THE NEXT CENSUS. LOOP_ORDER's
                 # B row for FAB.observe/grow_check names this shape exactly -- "memory_pressure from
                 # MEM.census, which is a CADENCED producer feeding a per-flush required argument" -- so
@@ -868,9 +891,12 @@ def run(sysm, *, max_windows=None, progress=True):
                     probation=prev.probation or due.probation, frozen=due.frozen)
 
             if tick.flush_due:
+                if "loop.flush_mixed_domain" in books and len(set(dids)) > 1:
+                    books["loop.flush_mixed_domain"] += 1
                 loss, per_window, probe_prev = _flush(
                     sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, vocab, clock,
-                    sysm.novelty, did, key_fn, sigs, dids, probe_prev, mem_pressure, resegment)
+                    sysm.novelty, did, key_fn, sigs, dids, probe_prev, mem_pressure, resegment,
+                    live_domains, books)
                 # `resegment` IS CONSUMED ON THE FIRST FLUSH AFTER A ROLL AND NOT ON EVERY ONE. It is
                 # an EVENT: memory/api.py::maintain drops and retakes its rekey snapshot each time it
                 # is non-None, so leaving it set would restart that walk every flush and the amortized
@@ -1085,6 +1111,12 @@ def run(sysm, *, max_windows=None, progress=True):
     # CKPT_DIR at all.
     elapsed_s = time.time() - t0
     report = _report(sysm, elapsed_s, ctx)
+    # THE DRIVER'S OWN BOOK. An empty dict is a statement too -- neither mechanism was reachable on
+    # this arm (batch_windows=1 and a routed fabric) -- so it is printed with that sentence rather
+    # than as nothing.
+    report["LOOP(flush books)"] = dict(books) if books else (
+        "no key is reachable on this arm: loop.flush_mixed_domain needs OPT_BATCH_WINDOWS > 1 and "
+        "loop.owners_from_domain needs FAB_ON=0 or FAB_NORM_ONLY=1")
 
     final_written = _save(sysm, clock, "final")
     for _d in dict.fromkeys(_disagree):
@@ -1232,7 +1264,8 @@ def _periods_of(sysm):
 
 
 def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, vocab, clock,
-           novelty, domain_id, key_fn, sigs, dids, probe_prev, mem_pressure, resegment):
+           novelty, domain_id, key_fn, sigs, dids, probe_prev, mem_pressure, resegment,
+           live_domains, books):
     cfg_world = sysm.configs["WORLD"]
     cfg_dom = sysm.configs["DOM"]
     cfg_mem = sysm.configs["MEM"]
@@ -1360,14 +1393,32 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     # earlier rows' own text -- so rows 0..B-2 were routed on a domain read off their own targets,
     # the Q-FAB-7 leak surviving the cursor repair one level up. dids[0]'s signature precedes every
     # row. At the shipped OPT_BATCH_WINDOWS=1 the two are the same id and nothing moves. FAB.observe,
-    # DOM.note_competence and MEM.write keep their own ids: they book what already happened and
-    # reach no logit of this flush.
+    # DOM.note_competence and MEM.write take `dids`, one id PER WINDOW (the first two took the last
+    # window's id for the whole flush until 2026-09-24): they book what already happened and reach
+    # no logit of this flush. The ban itself stays batch-wide because FAB.forward's domain_id is
+    # one int; loop.flush_mixed_domain counts the flushes where that matters (Q-FAB-10).
     route_did = int(dids[0]) if dids else domain_id
+    # `head` AND `targets` ARE PASSED, AND FOR THE WHOLE LIFE OF THIS CALL UNTIL 2026-09-24 THEY WERE
+    # NOT. FAB.forward takes head=None and targets=None as "no vote, no deep supervision, no
+    # independence term, no halt-on-base spend", and this call supplied neither -- so the shipped
+    # FAB_HOP_VOTE=True and FAB_IND_W=0.5 never entered the objective, FAB_SOCIETY=1 and
+    # FAB_HOP_SUP>0 produced reports identical to the default but for timing, and the gates that
+    # said "no head was supplied" rode FabricOut.gates, which nothing printed. `head` is
+    # compose.py::_head -- LM.decode with the vocabulary boundary bound, the same boundary the
+    # decode below uses -- and `targets` is `y`, the tokens lm_loss scores.
+    # `live_domains` IS DOM.census's n_live AND IT WAS THE LITERAL 1. LOOP_ORDER's DOM.census row
+    # names the wire ("live_domains = n_live -- under FAB.forward's spelling"), and the literal
+    # made the breadth cap's limit max(FAB_DOM_MIN, int(FAB_DOM_FRAC * 1)) = FAB_DOM_MIN on every
+    # pass: FAB_DOM_FRAC=0.1 and 0.9 gave bit-identical 300-window runs (limit 4 on 300 of 300
+    # passes, 1322 bans each) while DOM held 15 live domains. The value is carried from the
+    # dom.manage pass's census -- the row's own declared staleness -- and is 1 until that pass first
+    # fires (Q-FAB-9).
     with cast():
         out = fab_api.forward(
             fab_cfg, pop, h=h, signature=sig_vec, novelty=novelty,
+            head=_c_head(sysm), targets=y,
             step_windows=U.Windows(int(clock.step)),
-            domain_id=route_did, live_domains=1, training=True)
+            domain_id=route_did, live_domains=live_domains, training=True)
         # `hidden`, NOT `h`, AND THE FIRST DRAFT GOT THIS WRONG IN THE SAME TWO LINES AS THE SWALLOWED
         # EXCEPT ABOVE. It read `h = out.h if hasattr(out, "h") else h` -- so FabricOut, whose field is
         # `hidden`, never matched, the routed output was discarded, and the run trained on the
@@ -1395,8 +1446,17 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
         # uncalled. It is the same defect the header describes, one call site over, and it would have
         # started masking the `len(retired)` HIGHEST live ids on the first retirement of the first run
         # that turned probation on.
-        logits = lm_api.decode(lm_cfg, model, h,
-                               live_vocab=int(vocab.size()), retired_ids=tuple(vocab.retired))
+        # WHEN THE POPULATION VOTED, ITS LOGITS ARE THE PREDICTION AND `hidden` IS NOT RE-DECODED.
+        # fabric/api.py::FabricOut: "the caller must not re-decode `hidden` -- that is the H11
+        # offset, a loss scored through a different function from the one the contribution
+        # counterfactual is subtracted from". out.logits is None exactly when nothing voted
+        # (FAB_HOP_VOTE=0 off the society arm, and the FAB_ON=0 / FAB_NORM_ONLY=1 control arms), and
+        # then this decode is the prediction, as it was on every run before the head was wired.
+        if out.logits is not None:
+            logits = out.logits
+        else:
+            logits = lm_api.decode(lm_cfg, model, h,
+                                   live_vocab=int(vocab.size()), retired_ids=tuple(vocab.retired))
         per_window, mean = lm_api.lm_loss(lm_cfg, logits, y)
 
         # THE APPEARANCE COUNTER IS ADVANCED BY THIS FLUSH'S TOKENS, BEFORE THE TERMS THAT READ IT.
@@ -1501,7 +1561,12 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     # THE BOOKS, AFTER THE BACKWARD AND ON THE SAME FLUSH'S NUMBERS. FAB.observe credits `use` by
     # routing MASS and `uage` by SELECTION -- the H12/H13 split -- against the experts that actually
     # produced this output, so it takes the FabricOut and the per-window loss rather than a scalar.
-    fab_api.observe(fab_cfg, pop, out, per_window_loss=per_window.detach(), domain_id=domain_id)
+    # AND ONE DOMAIN ID PER WINDOW, `dids`, WHICH WAS `domain_id` -- THE LAST WINDOW'S -- UNTIL
+    # 2026-09-24: at OPT_BATCH_WINDOWS=4 21 of 60 flushes spanned more than one domain, and every
+    # earlier window of those was affiliated (dom_of, which the breadth cap reads) with the last
+    # one's domain. Identical at the shipped OPT_BATCH_WINDOWS=1, where `dids` is [domain_id].
+    fab_api.observe(fab_cfg, pop, out, per_window_loss=per_window.detach(),
+                    domain_id=list(dids) if dids else domain_id)
 
     # GROWTH. THE ONE MECHANISM GOAL B CANNOT BE STUDIED WITHOUT, and until this line the run's
     # report read "0 experts born" for a population that was never asked to grow.
@@ -1548,15 +1613,6 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
         # FabricOut.weights, modulo MEM.d_owner_blocks. FAB.forward does NOT return it ... it needs
         # a tensor operation and nothing in src/ imports torch; P4 writes it in the loop and this
         # entry is what says so."
-        if out.weights is None:
-            raise RuntimeError(
-                "spine/loop.py::_flush: FabricOut.weights is None, and MEM.write's `owners` is an "
-                "argmax over it. fabric/api.py::FabricOut declares weights as the (B, n_live) "
-                "routing distribution 'the attribution table `observe`, the breadth cap and MEM's "
-                "owner argmax all read' -- so a None here is a fabric that did not route, and "
-                "writing every entry of the flush to block 0 instead would put a whole flush under "
-                "one owner's provenance. Refused rather than defaulted.")
-        owners = (out.weights.argmax(dim=1).long() % int(cfg_mem.d_owner_blocks))
         # PROVENANCE, PER WINDOW, FROM DOM.observe -- AND IT WAS A BROADCAST ZERO UNTIL OBSERVE
         # HAD A BODY. memory/api.py::_require_rows refuses a broadcast argument by name for exactly
         # this shape: "the six per-row arguments are six different quantities about the same rows,
@@ -1564,6 +1620,34 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
         # per WINDOW, which is what the (B,) requirement means, and it is now genuinely more than
         # one value -- measured, 7 domains over 600 windows at the shipped defaults.
         sources = torch.tensor(dids, dtype=torch.long, device=dev)
+        # THE OWNER BLOCK HAS TWO DECLARED SOURCES, ONE PER KIND OF ARM, AND THE SECOND IS NEW.
+        # On the ROUTED arm it is the argmax of the routing weights, and a None there is a fabric
+        # that did not route -- a fault, still refused. On the two CONTROL arms FabricOut.weights is
+        # None BY DECLARATION (fabric/api.py::forward's FAB_ON=0 and FAB_NORM_ONLY=1 gates: routing
+        # is "ABSENT rather than zero"), and until 2026-09-24 this line raised on both at the first
+        # flush, after a full compose and SIG warm-up, naming no lever -- so neither ablation could
+        # run. There the owner is the window's DOMAIN folded onto the blocks, `sources % blocks`:
+        # per row, like the routed owner, and never a whole flush under block 0, which is what the
+        # refusal below rightly refused to default to. IT IS A DIFFERENT QUANTITY UNDER THE SAME
+        # ARGUMENT NAME, so it is counted -- loop.owners_from_domain, seeded in `run` on those arms --
+        # and a MEM-side comparison between a routed and a control arm must read that counter first.
+        _blocks = int(cfg_mem.d_owner_blocks)
+        if out.weights is not None:
+            owners = (out.weights.argmax(dim=1).long() % _blocks)
+        elif "loop.owners_from_domain" in books:
+            # A CONTROL ARM -- the key is seeded in `run` exactly when FAB_ON=0 or FAB_NORM_ONLY=1.
+            owners = sources % _blocks
+            books["loop.owners_from_domain"] += 1
+        else:
+            raise RuntimeError(
+                "spine/loop.py::_flush: FabricOut.weights is None on the ROUTED arm (FAB_ON=1, "
+                "FAB_NORM_ONLY=0), and MEM.write's `owners` is an argmax over it. "
+                "fabric/api.py::FabricOut declares weights as the (B, n_live) routing distribution "
+                "'the attribution table `observe`, the breadth cap and MEM's owner argmax all read' "
+                "-- so a None here is a fabric that did not route, and writing every entry of the "
+                "flush to block 0 instead would put a whole flush under one owner's provenance. "
+                "Refused rather than defaulted. (The two control arms take the owner from the "
+                "window's domain instead; this is neither of them.)")
         # TRUE BYTE OFFSETS, NOT AN ARANGE. MEM.write's docstring: "a token averages ~1.85 bytes
         # and the drift reached 200+ bytes per window against a 220-byte recall span". byte_pos is
         # the Segmentation's own table and the cut is `_window_bounds`'s, so the two cannot
@@ -1685,8 +1769,18 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     # domain series is declared in bits, so the conversion happens once, here, at the one place the
     # two meet. Dividing by ln(2) at the read site instead is how one series ends up compared
     # against another in different units.
-    dom_api.note_competence(cfg_dom, sysm.partition, did=domain_id,
-                            bits=float(mean.detach()) / math.log(2.0))
+    # ONE CALL PER WINDOW, ON THAT WINDOW'S OWN id AND LOSS -- WHICH IS WHAT THE CALLEE DEMANDS AND
+    # WHAT THIS LINE DID NOT DO UNTIL 2026-09-24. It passed did=domain_id (the LAST window's) and
+    # bits=the FLUSH MEAN as a Python float, which slipped past domains/api.py::note_competence's
+    # own refusal of a batch vector ("A per-window vector is a loop over this call, one `did` at a
+    # time -- averaging it here would attribute a whole batch's windows to whichever domain the last
+    # one landed in") and folded one number into the EMA where batch_windows belong. At the shipped
+    # OPT_BATCH_WINDOWS=1 the one iteration is the old call exactly (per_window has one row and its
+    # mean is `mean`); above it the EMA now runs at its declared per-window rate.
+    _ln2 = math.log(2.0)
+    _pw = per_window.detach().float().reshape(-1).tolist()
+    for _did, _nats in zip(dids if dids else [domain_id] * len(_pw), _pw):
+        dom_api.note_competence(cfg_dom, sysm.partition, did=int(_did), bits=float(_nats) / _ln2)
     # THE PER-WINDOW MEAN SURPRISE IS RETURNED BECAUSE THE NEXT FLUSH NEEDS IT AS `novelty`, and
     # it is NOT the per-window loss this function returned until the MEM wiring landed. Both are
     # (B,) and both come off the same flush, which is exactly why the substitution survived: only

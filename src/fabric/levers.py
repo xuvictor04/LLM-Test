@@ -140,7 +140,13 @@ class FABLevers(LeverSet):
     # "479 experts buy -0.002 b/B" came to be a measurement of a forward path the run never trained.
     # ==============================================================================================
 
-    on = Lever(True, "Build the fabric and put it in the forward path; off removes it entirely.", U.FLAG)
+    on = Lever(True, "Build the fabric and put it in the forward path; off removes it from the forward "
+                     "pass, the optimizer and every fabric mechanism (the pool stays allocated and "
+                     "checkpointed, Q-FAB-11).", U.FLAG)
+    # "OFF REMOVES IT ENTIRELY" WAS THIS HELP UNTIL 2026-09-24 AND IT WAS FALSE THREE WAYS: the off arm
+    # crashed at its first flush (spine/loop.py refused FabricOut.weights=None), handed OPT all
+    # 8,929,984 fabric parameters of the shipped 10,130,057, and FAB.grow_check -- which never read
+    # this lever -- grew experts into the switched-off fabric. Q-FAB-11 is what the help now says.
     # Census: FABRIC -> FAB_ON. The most-read name in the old file (119 occurrences) and it reached
     # memory, eval and the report by direct global read -- MEM_PER_EXPERT was literally `... and
     # FABRIC` at :4866. Every one of those becomes a declared wire, which is the point: FABRIC=0 used
@@ -154,7 +160,9 @@ class FABLevers(LeverSet):
     # purpose. What the census is right about is the defect: there are two different ways to say "no
     # fabric" and they differ in ways nothing states -- off removes it from the forward pass, while
     # norm_only leaves the object built, its parameters in the optimizer and its state in the
-    # checkpoint, and is then re-tested at six separate call sites as `not fab.norm_only`.
+    # checkpoint, and is then re-tested at six separate call sites as `not fab.norm_only`. (Off also
+    # leaves the object built and checkpointed, but since Q-FAB-11 hands OPT none of its parameters
+    # and runs none of its mechanisms -- norm_only's experts stay in the optimizer and keep growing.)
     norm_only = Lever(False, "Control arm: keep the fabric's normalization, remove nodes and routing "
                              "from the forward pass.", U.FLAG)
 
@@ -199,6 +207,11 @@ class FABLevers(LeverSet):
 
     hop_vote = Lever(True, "Each hop's experts vote on the OUTPUT and the halting hop picks the "
                            "answer, instead of blending hidden states.", U.FLAG)
+    # SHIPPED ON AND NEVER FORMED UNTIL 2026-09-24 (Q-FAB-8): the loop passed no `head`, so there was
+    # no vote and every run decoded the blended hidden state -- the off arm, under the on arm's name.
+    # With the head wired the vote's logits ARE the prediction; FAB_HOP_VOTE=0 on the new tree
+    # reproduces the old default loss curve bit for bit (300 of 300 flushes), so this lever is now
+    # the whole of that change.
     # Carries the defect that produced the FAB_MIN_STEPS lie: at :1863-1868 this coerces min_steps to
     # 0 and SystemExits only on an EXPLICIT conflicting setting, so the banner printed
     # FAB_MIN_STEPS=2 for runs that used 0. Under the spine that coercion must be a declared
@@ -215,7 +228,11 @@ class FABLevers(LeverSet):
     # AND IT IS NOT INERT IN THE REBUILD: FAB.forward now states that per-hop states are collected
     # ON THE SOC LOOP, which is where the M27 inertness actually came from. At hop_vote=True the
     # per-hop logits already exist for the vote (:2675-2680), so this costs nothing there.
-    # fab.hopsup_applied reading 0 with hop_sup > 0 means that collection was not written.
+    # THAT SENTENCE WAS FALSE IN PRACTICE UNTIL 2026-09-24 (Q-FAB-8): spine/loop.py passed FAB.forward
+    # no `head` and no `targets`, so no hop produced logits and FAB_HOP_SUP=0.3 was bit-identical to
+    # 0. It is true now: FAB_HOP_SUP=0.3 FAB_DEPTH0=0 reads fab.hopsup_applied 4 over 4 windows.
+    # fab.hopsup_applied is ABSENT where the term cannot fire (society, FAB_HOPS=1, no head or
+    # targets) and 0 with hop_sup > 0 at one hop, which fab.hop_sup's gate explains.
 
     hops = Lever(4, "Maximum hop budget for one routed forward pass; effective depth is "
                     "min(depth0-stage, hops, 2 + n_live//2).", U.COUNT)

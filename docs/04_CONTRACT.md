@@ -656,6 +656,11 @@ controller can be told a loss jump was self-inflicted. `GrowReport` carries the 
 state, which is also `CAP.observe`'s missing `blackout` boolean.
 **`hop_mode` stays and `transition` is refused at startup** (**Q-FAB-1**): the arm is declared and
 unported, and `FAB.build` says so rather than silently running `soc`.
+**The loop hands `FAB.forward` its `head` and `targets`** (**Q-FAB-8**, 2026-09-24) — it passed
+neither before, so the shipped `hop_vote` never formed and **the default objective changed** when it
+did. `live_domains` is `DOM.census`'s `n_live` (**Q-FAB-9**), `observe` takes one domain id per
+window (**Q-FAB-10**), and the two control arms `FAB_ON=0` / `FAB_NORM_ONLY=1` run end to end,
+with `FAB_ON=0` handing OPT no fabric parameter (**Q-FAB-11**).
 
 ### MEM — `src/memory/api.py` (26 levers, 25 read directly, one of them a census amendment)
 
@@ -2458,9 +2463,14 @@ coverage of the compute path — on one seed pair at a run long enough for `mayb
 UNCONSUMED row is gone because the lever now has a reader; `FAB.forward` states that **per-hop states
 are collected on the soc loop**, which is the one-line repair that makes `hop_sup` reachable on the
 path that runs (M27: `s._hops.append` occurs at exactly one site, `:2819`, inside the unported
-branch); and `FAB.state_dict` **no longer claims to save `ctrl`** — `ctrl` exists only on the
+branch — and reachable in fact only since **Q-FAB-8**, when the loop began passing `head` and
+`targets`); and `FAB.state_dict` **no longer claims to save `ctrl`** — `ctrl` exists only on the
 transition arm (`:1907`, read at `:2827`), `FAB.build` allocates none, so the contract was promising
 to checkpoint a parameter nothing creates. It returns to that list with the arm and not before.
+**Since 2026-09-24 the refusal is PRINTED as one:** `FAB.build` raises `spine.gate.NotBuilt` inside
+`compose()`, before `System.refusals` is printed, so `FAB_HOP_MODE=transition` died as a traceback
+with rc=1 — a sweep reads that as a crash. `run.py` now catches `NotBuilt` around `compose()` and
+prints `REFUSED: <message>` and exits **2**, exactly like the startup refusals.
 
 ### Q-FAB-2 — does the fabric gain the merge? — **RESOLVED 2026-09-02: YES, IN ΔW SPACE, WITH NOTHING IN MEM. ⚠ THIS TURNS A MECHANISM ON AT THE SHIPPED DEFAULT**
 **The escalation's precondition is false.** This contract escalated on the ground that *"memory
@@ -4367,8 +4377,9 @@ hop, which is exactly what this term exists not to be).
 every row. The loop passed the **last** window's id, assigned from a sample over the earlier rows' own
 text at `OPT_BATCH_WINDOWS > 1`. **Ruling: the flush's first window's id (`dids[0]`)**, whose sample
 precedes every row. At the shipped `OPT_BATCH_WINDOWS=1` the two are one id. `FAB.observe`,
-`DOM.note_competence` and `MEM.write` keep theirs: they book what already happened and reach no logit
-of the flush.
+`DOM.note_competence` and `MEM.write` book what already happened and reach no logit of the flush;
+since **Q-FAB-10** all three take one id **per window** (the first two took the last window's id for
+the whole flush until then).
 
 **What the leak was worth, measured.** On a model trained 600 windows at `DATA_STREAM_BYTES=120000`,
 the CE of 32 windows from the last 100 with their training-time signature minus the CE with the
@@ -4398,6 +4409,130 @@ the first tokens' rows), 0.016 / 0.010 by flush 30. At `FAB_BALANCE=0` the flush
 0.073 / 0.009 before and 0.023 / 0.016 after. No docstring says the routing regulariser must not reach
 the language model, so nothing is changed; if the first steps' steer matters, a `detach()` on the
 route state or a balance warm-up is the lever to measure, not to assume.
+
+### Q-FAB-8 — the loop never handed `FAB.forward` a `head` or `targets` — **RESOLVED 2026-09-24: BOTH ARE PASSED, THE VOTE'S LOGITS ARE THE PREDICTION, AND THE LAST PASS'S GATES ARE PRINTED. ⚠ THE SHIPPED DEFAULT OBJECTIVE CHANGED: `FAB_HOP_VOTE=True` FORMED FOR THE FIRST TIME**
+`spine/loop.py::_flush` called `FAB.forward` with `h, signature, novelty, step_windows, domain_id,
+live_domains, training` and nothing else, although this contract's FAB section says `head` ← LM and
+`targets` ← the loop and `compose.py`'s LOOP_ORDER row says *"head=LM.decode ... bound by _head"*.
+With `head=None` and `targets=None` the per-hop vote (`FAB_HOP_VOTE`, **on** by default), the society
+arm's prediction-level blend and its halt-on-base spend, the independence loss (`FAB_IND_W`) and deep
+supervision (`FAB_HOP_SUP`) cannot run: `FAB_SOCIETY=1`, `FAB_HOP_VOTE=0` and `FAB_IND_W=0` gave the
+default's `=== loss 8.3247 -> 4.4490` over 60 windows, `FAB_HOP_SUP=0.3` was bit-identical to its
+absence, and the report printed `fab.ind_applied 0` / `fab.hopsup_applied 0` — G4's "armed, did not
+fire" — while the pass's own gates said *"no head was supplied"* on `FabricOut.gates`, which nothing
+printed. **Every society-vs-chaining comparison (D7) taken before this date measured the default
+forward.** `tests/test_fabric_forward.py` drives this ruling and Q-FAB-9 .. Q-FAB-11 through the real
+loop (W1–W6); tests/test_fabric.py could not see any of them, because it hands FAB.forward a head and
+targets of its own.
+
+**Ruling, and the four choices inside it.** (1) **`head` is `compose.py::_head`, now a one-argument
+callable that binds the vocabulary and reads it at call time** (`live_vocab=Vocabulary.size()`,
+`retired_ids=Vocabulary.retired`) — it was `lambda h, **kw: decode(...)`, which raises `TypeError` on
+FAB's `head(x)` because decode's two vocabulary arguments are keyword-only and required; `targets` is
+`y`. (2) **When `FabricOut.logits` is present it is the prediction** — `lm_loss`, the surprise and the
+next flush's novelty all read it — and `hidden` is re-decoded only when nothing voted, which is
+`FabricOut`'s own rule (the H11 offset). (3) **FAB floors the head's masked `-inf` rows at `_NEG`**
+(`fabric/api.py::_decode`): the vote and the society blend multiply logits by weights that are
+exactly zero at `FAB_HALT=0`, and `0 × -inf` is nan — measured, `LM_MASK_DEAD_ROWS=1 FAB_HALT=0` without
+the floor raises `DOM.note_competence: bits is nan` on flush 0; with it the flush reads 6.247313, the
+same as `LM_MASK_DEAD_ROWS=1` alone. `exp(-1e4 - max)` is 0.0 in fp32 and bf16, so the masked
+distribution is unchanged. (4) **FAB calls the head only when something consumes it** (the vote, the
+society arm, `hop_sup > 0`): LM.decode applies dropout, so an unconsumed decode would move the RNG and
+make `FAB_HOP_VOTE=0` a different run rather than the same run minus the vote. **The last training
+pass's gates are kept on `Population.pass_gates`** (re-earned, replaced each pass) **and
+`FAB.counters` renders them** beside the build gates; and **`fab.ind_applied`, `fab.hopsup_applied`
+and `fab.halt_spent_on_base` are seeded only on the arm that can reach them** (G4: absent is
+UNREACHABLE), still before the branch that bumps them. The same pass's `fab.depth_curriculum` gate now
+reads UNREACHABLE on the society arm, which pins the walk at one hop: it printed "armed" beside
+`fab.depth_now 4` while `fab.hops_taken` read 60 over 60 passes.
+
+**Measured.** `FAB_SOCIETY=1 FAB_HOP_SUP=0.3`, 4 windows: `fab.ind_applied 4`, `fab.halt_spent_on_base
+4`, `gate:fab.independence` in the report; `hop_sup` UNREACHABLE with the reason *"depth=1 (FAB_SOCIETY=1
+pins the walk at one hop)"*. `FAB_HOP_SUP=0.3 FAB_DEPTH0=0`: `fab.hopsup_applied 4`. The four 60-window
+arms above now give four different reports (`FAB_SOCIETY=1` ends 4.4598, `FAB_HOP_VOTE=0` 4.4635, the
+default 4.4631). **The default 300-window run (`DATA_STREAM_BYTES=200000`) is not bit-identical:**
+flush 0 agrees (every expert is born an identity, so the vote is the decode), flush 2 is the first to
+differ (8.3407917 → 8.3407936), and the mean flush loss is 7.4519 → 7.4519 over flushes 0–49,
+5.0696 → 5.0699 over 50–99, 4.9200 → 4.9270 over 100–199 and **5.0998 → 4.9704 over 200–299**; the
+final flush 7.2565 → 5.1147 (one window, noisy). **`FAB_HOP_VOTE=0` on the new tree reproduces the old
+default curve bit for bit (300 of 300 flushes)**, so the whole default change is the vote. Wall time
+76.1 s → 80.4 s on the shared 4-core CPU (ens_k=2 head calls per hop instead of one decode). One seed
+on one geometry is a direction; the owner's GPU runs re-baseline the default before any arm is
+compared with it.
+
+**Rejected:** refusing `FAB_SOCIETY=1` / `FAB_HOP_SUP>0` at compose until the wiring landed (it leaves
+the shipped `hop_vote` and `ind_w` silently inert, and removes an arm the owner asked to measure);
+forming the head in `loop.py` (the composition root is where entry points are partially applied, and
+`_head` already existed for exactly this — it only had to be made callable); masking at `-inf` and
+guarding each weighted sum inside FAB (four sites, and the next consumer would be a fifth);
+decoding `hidden` anyway and ignoring the vote (that is H11, and it keeps the shipped lever inert).
+
+### Q-FAB-9 — `live_domains` was the literal 1 — **RESOLVED 2026-09-24: IT IS `DOM.census`'s `n_live`, CARRIED FROM THE dom.manage PASS, AND 1 UNTIL THAT PASS FIRST FIRES**
+The flush passed `live_domains=1`, so the breadth cap's limit `max(FAB_DOM_MIN, int(FAB_DOM_FRAC ×
+live_domains))` was `FAB_DOM_MIN` on every pass: `FAB_DOM_FRAC=0.1` and `0.9` gave identical
+300-window runs at `DATA_STREAM_BYTES=120000` (limit 4 on 300/300 passes, 103 passes with a ban, 1322
+bans, final loss 4.016625 on both) while `DOM.census` held 15 live domains. The breadth cap is the
+fabric's own guard against one expert absorbing every domain — forgetting control for goal B.
+**Ruling:** the loop carries `DOM.census`'s `n_live` from the census the dom.manage pass already takes
+(the wire LOOP_ORDER's DOM.census row names, with the staleness it declares) and passes it every
+flush. **After:** `FAB_DOM_FRAC=0.1` limit 4 on all 300 passes (`max(4, int(0.1 × n))` is 4 for every n below
+50, so the shipped default's cap is still decided by `FAB_DOM_MIN` alone), 825 bans; `FAB_DOM_FRAC=0.9`
+limits 4 / 7 / 9 on passes 1–100 / 101–200 / 201–300 (live_domains 1 / 8 / 10) and 0 bans — the two
+arms now separate. **Before the first pass fires (windows 1–100 at the shipped `DOM_MANAGE_EVERY`) the
+value is 1**, which FAB's own `max(1, ...)` floor already treats as "no census yet", and
+`fab.breadth_cap`'s gate prints the count it was handed. **Rejected:** a census at loop entry (a
+`DOM.census` call at no LOOP_ORDER row, which bumps `part.n_censuses` on a schedule nobody declared —
+it would matter most on a resumed run, where the stale window is up to 100 windows of routing at
+`live_domains=1` against a restored partition, and that is the case to measure if it is revisited);
+a census every flush (a stage-B call to a stage-A row, and `part.n_censuses` would become a flush
+count); recomputing the count in the loop from `dids` (a second answer to a question DOM owns).
+
+### Q-FAB-10 — a flush was filed under its last window's domain — **RESOLVED 2026-09-24: `FAB.observe` AND `DOM.note_competence` TAKE ONE ID PER WINDOW; THE BREADTH BAN STAYS BATCH-WIDE AND IS COUNTED. ⚠ A FROZEN SIGNATURE WIDENED**
+At `OPT_BATCH_WINDOWS > 1` the loop handed `FAB.observe` and `DOM.note_competence` the last window's
+id for the whole flush, and `note_competence` the flush **mean** as a Python float, which slipped past
+its own refusal of a batch vector (*"averaging it here would attribute a whole batch's windows to
+whichever domain the last one landed in"*). Measured at `OPT_BATCH_WINDOWS=4`, 240 windows: 21 of 60
+flushes spanned more than one domain and `FAB.observe` affiliated some window under another window's
+domain on all 21 (flush 0: windows `[0, 0, 1, 1]`, booked `[1]`); `note_competence` was called 60 times
+for 240 windows. **Ruling:** (1) `note_competence` is called once per window with that window's `did`
+and its own per-window loss in bits — 240 calls, one per window, each on its own id; (2)
+`FAB.observe`'s `domain_id` **accepts one id per row** (a length-B sequence or (B,) tensor; an int still
+broadcasts, exact at batch 1) and `dom_of` is written per row — after: 0 of 21 mixed flushes
+mis-affiliated, flush 0 booked `[0, 0, 1, 1]`; (3) `FAB.forward`'s breadth ban **stays batch-wide on
+`dids[0]`** (Q-FAB-7's causal choice) because `domain_id` is one int in its frozen signature and the
+ban mask is built once per pass — **a per-row ban is the owner's call** (it widens a frozen signature
+and builds a (B, n) mask), and until then the loop's own book counts **`loop.flush_mixed_domain`**
+(seeded only when `OPT_BATCH_WINDOWS > 1`, printed at R under `LOOP(flush books)`): 21 of 60 above.
+Bit-identical at the shipped `OPT_BATCH_WINDOWS=1`. **Rejected:** splitting a flush by domain (it
+changes the batch and the optimizer step — a different experiment); averaging per domain before
+`note_competence` (the callee's own refusal names it).
+
+### Q-FAB-11 — the two fabric control arms crashed, and `FAB_ON=0` trained 8.9M parameters it never used — **RESOLVED 2026-09-24: BOTH ARMS RUN; AT `FAB_ON=0` THE POOL IS ALLOCATED BUT OUT OF THE OPTIMIZER AND EVERY FABRIC MECHANISM RETURNS BEFORE ACTING**
+`FAB.forward` returns `weights=None` on `FAB_ON=0` and `FAB_NORM_ONLY=1` by declaration, and
+`loop._flush` raised on `weights is None` at the first flush — after a full compose and SIG warm-up,
+naming no lever — so neither ablation could run. Behind the crash, `FAB_ON=0` still put the population
+in the optimizer (`=== 10130057 trainable parameter(s)`, 8,929,984 of them the fabric's) and
+`FAB.grow_check`, which never read `fab.on`, grew expert 2049 into the switched-off fabric
+(`fab.grown_regression 1` beside `gate:fab.growth_armed fired`), contradicting gate `fab.on`'s own
+*"every gate below this one reports UNREACHABLE"*. **Ruling:** (1) on those two arms MEM's `owners` is
+the window's **domain folded onto the owner blocks** (`sources % d_owner_blocks`), counted per flush
+as `loop.owners_from_domain` (seeded on those arms only) because it is a different quantity under the
+same argument name; a `None` on the routed arm is still refused. (2) `Population.parameters()` is
+**empty at `FAB_ON=0`**: the banner reads `1200072` and AdamW holds no fabric state. (3) `FAB.manage`,
+`FAB.grow_check` and `FAB.own_lr_scale` **return before seeding** at `FAB_ON=0`, so their families are
+ABSENT (G4: unreachable), and the build gates `fab.growth_armed` and `fab.lr_own` are UNREACHABLE with a
+`FAB_ON=0` reason. (4) **The pool is still allocated and checkpointed** at `FAB_ON=0`, so MEM's owner
+width, CAP's `n_live` and CKPT's shapes are the same on both arms; the cost is host/device memory for
+tensors nothing reads, not compute or optimizer state. `FAB.observe` is unchanged on both arms: it
+already counts `fab.observe_unrouted`. **After** (60 windows, `DATA_STREAM_BYTES=120000`): `FAB_ON=0`
+rc 0, `=== loss 8.3167 -> 4.3369`, `fab.forward_identity 60`, `fab.n_live 2048`, `loop.owners_from_domain
+60`, `fab.lr_calls` ABSENT; `FAB_NORM_ONLY=1` rc 0, `=== loss 8.3248 -> 4.6325`, 10,130,057 trainable (the
+arm keeps the experts in the optimizer by design). **Rejected:** a startup refusal naming both levers
+(safe, and leaves both ablations unrunnable); owners all in block 0 (collapses provenance, which the
+guard's own message refused); a zero-size pool at `FAB_ON=0` (every consumer of `Population` —
+`MEM` owner width, `CAP` headroom, `CKPT` restore, the report — would need an arm-conditional path,
+turning one crash into several); skipping `FAB.observe` on those arms (it would turn its
+`fab.observe_unrouted` reading into an absence).
 
 ---
 

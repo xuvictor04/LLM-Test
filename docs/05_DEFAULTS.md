@@ -248,7 +248,7 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `FAB_N0` | `2048` | experts |  | Founding population: how many experts are BUILT at construction. |
 | `FAB_NEW_FRAC` | `0.04` | fraction 0..1 | domain (0.0, 1.0) | The most of the population that may be newborn at once; growth takes whatever is left of the budget rather than being refused outright. |
 | `FAB_NORM_ONLY` | `False` | on/off |  | Control arm: keep the fabric's normalization, remove nodes and routing from the forward pass. |
-| `FAB_ON` | `True` | on/off |  | Build the fabric and put it in the forward path; off removes it entirely. |
+| `FAB_ON` | `True` | on/off |  | Build the fabric and put it in the forward path; off removes it from the forward pass, the optimizer and every fabric mechanism (the pool stays allocated and checkpointed, Q-FAB-11). |
 | `FAB_PARENT_K` | `8` | experts |  | Shortlist size: how many region-owners compete to be the parent of a new expert. |
 | `FAB_PARENT_MAX` | `0.2` | fraction 0..1 | domain (0.0, 1.0) | Maximum share of recent births any one parent may account for. |
 | `FAB_PLATEAU` | `0.002` | fraction 0..1 |  | Relative improvement of the slow EMA below which progress counts as stalled: arms the stall growth and releases RECOVER. |

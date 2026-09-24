@@ -1005,7 +1005,10 @@ LOOP_ORDER = (
                                       "feedback is off",
                                       "h -- LM.encode's (B, L, width) hidden, which is FAB.forward's "
                                       "spelling; logits -- LM.decode's return, THE ONLY PLACE "
-                                      "LOGITS ARE PRODUCED, and one of the two inputs this file "
+                                      "LOGITS ARE PRODUCED: through _head inside FAB.forward, one "
+                                      "decode per voting expert, when the population votes "
+                                      "(FabricOut.logits, Q-FAB-8), and on FabricOut.hidden here "
+                                      "when nothing voted; one of the two inputs this file "
                                       "forms MEM's write gate from (:7497-7498); "
                                       "per_window_loss = per_window -- lm_loss's first return, "
                                       "FAB.observe's spelling; "
@@ -1870,7 +1873,10 @@ ROW_ARGUMENTS_ELSEWHERE = {
         "table is for.",
     "MEM.write":
         "owners is the per-entry owner block: argmax over FabricOut.weights, modulo "
-        "MEM.d_owner_blocks. FAB.forward does NOT return it -- FabricOut carries logits, "
+        "MEM.d_owner_blocks -- and on the two fabric control arms (FAB_ON=0, FAB_NORM_ONLY=1), "
+        "where weights is None by declaration, the window's domain id (`sources`) modulo the same "
+        "count, counted per flush as loop.owners_from_domain because it is a different quantity "
+        "under the same name (Q-FAB-11). FAB.forward does NOT return it -- FabricOut carries logits, "
         "expert_ids, weights, per_expert_logits, aux_loss and gates -- and the row claimed it did "
         "until K11 refused the claim. It is the one join in this file with no named helper, because "
         "it needs a tensor operation and nothing in src/ imports torch; P4 writes it in the loop and "
@@ -1878,7 +1884,8 @@ ROW_ARGUMENTS_ELSEWHERE = {
         "key_fn is _key_fn(sysm), the same bound callable MEM.maintain takes -- see above. "
         "contexts is the flush's (B, L) TOKEN IDS -- the same `x` LM.encode takes -- tokens is that "
         "cut shifted one token, and surprise is 1 - p_model(true token) at EVERY POSITION, (B, L), "
-        "formed by spine/loop.py::_flush from LM.decode's logits and `y`. "
+        "formed by spine/loop.py::_flush from the flush's prediction and `y` -- FabricOut.logits "
+        "when the population voted (Q-FAB-8), LM.decode's logits otherwise. "
         "THIS ENTRY SAID SOMETHING ELSE UNTIL THE LOOP CALLED THE ENTRY POINT, AND ALL THREE "
         "CORRECTIONS CAME FROM THE CALL RATHER THAN FROM A READING. It read `contexts` is "
         "LM.encode's `h`; memory/api.py::write refuses a floating (B, L, width) tensor BY NAME and "
@@ -2996,14 +3003,25 @@ def _key_fn(sysm):
 
 
 def _head(sysm):
-    """LM.decode bound to (lm, model): FAB.forward's and FAB.contribution's `head`.
+    """LM.decode bound to (lm, model) AND TO THE VOCABULARY: FAB.forward's and FAB.contribution's
+    `head`, a ONE-ARGUMENT callable.
 
     NOT a logits_fn: it decodes a hidden state that the fabric already produced. The logits_fn
     every probe wants is the WHOLE path including FAB.forward, and that one is not formable today
     -- see DEFERRED_ENTRY_POINTS.
+
+    THE VOCABULARY IS BOUND HERE AND READ AT CALL TIME, AND THIS WAS `lambda h, **kw: decode(...)`
+    UNTIL 2026-09-24. FAB calls `head(x)` with nothing else, and LM.decode's `live_vocab` and
+    `retired_ids` are keyword-only and required, so the first vote would have raised TypeError --
+    which nobody saw because nothing passed this closure to FAB.forward (the vote, the society
+    blend, the independence loss and hop_sup were all inert for it). Reading sysm.vocab INSIDE the
+    lambda, not at bind time, is what keeps one closure right across mints and retirements: the
+    boundary is `Vocabulary.size()`, the positional one, for the reason spine/loop.py::_flush gives
+    at its own LM.decode call -- the two calls must mask the same rows.
     """
     lm = sysm.configs["LM"]
-    return lambda h, **kw: lm_api.decode(lm, sysm.model, h, **kw)
+    return lambda h: lm_api.decode(lm, sysm.model, h, live_vocab=int(sysm.vocab.size()),
+                                   retired_ids=tuple(sysm.vocab.retired))
 
 
 def _sig_encode_fn(sysm):

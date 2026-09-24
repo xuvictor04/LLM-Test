@@ -308,9 +308,9 @@ class Population:
     not touch 2048 of 2048 experts.
     """
 
-    # THE LAST SEVEN ARE RE-EARNED STATE, NEVER CHECKPOINTED -- fabric/api.py::state_dict names
-    # them as "the identity cache, halt_ema, the routing-mix samples", plus `learn_window` which
-    # that sentence now names too. They are slots rather than ad-hoc attributes because __slots__ is
+    # THE LAST EIGHT ARE RE-EARNED STATE, NEVER CHECKPOINTED -- fabric/api.py::state_dict names
+    # them as "the identity cache, halt_ema, the routing-mix samples", plus `learn_window` and
+    # `pass_gates` which that sentence now names too. They are slots rather than ad-hoc attributes because __slots__ is
     # closed: `pop._kc = ...` raises AttributeError, so a cache invented at the point of use would
     # be a crash on the first routed window rather than a design. ident/ident_step/ident_live are
     # the emb_every cache the old tree carried as _kc/_kstep/_kn (self_organize.py:1938-1953);
@@ -331,7 +331,7 @@ class Population:
                  "growth", "comp_glob",
                  "modules", "counters", "rng", "on", "hop_arm", "gates", "halt_b",
                  "ident", "ident_live", "ident_step", "ident_graph", "halt_ema", "marks",
-                 "learn_window")
+                 "learn_window", "pass_gates")
 
     def __init__(self, *, cap, n0, d_model, rank, signature_dim, device, rng, on, hop_arm,
                 depth_now):
@@ -420,6 +420,13 @@ class Population:
         # cache, because a resumed run's first routed pass is at a window no pass in this process
         # has seen and carrying the number across a restart could only produce a false refusal.
         self.learn_window = None
+        # THE LAST TRAINING PASS'S GATES, REPLACED (NEVER APPENDED) BY fabric/api.py::forward and
+        # rendered by fabric/api.py::counters. Until 2026-09-24 they lived only on FabricOut.gates,
+        # which the loop never read -- so the gates that said "no head was supplied" on every pass
+        # of every run were never printed, while fab.ind_applied and fab.hopsup_applied printed a
+        # present-and-0 that G4 reads as "armed, did not fire". Re-earned: the first training pass
+        # of a resumed run writes it, and an empty tuple before that says no pass has run.
+        self.pass_gates = ()
         # DISTINCT-RECIPIENT SETS, WHICH A COUNTER CANNOT HOLD. `fab.discover_targets` and
         # `fab.explore_distinct_targets` are counts of DISTINCT experts, and 1 is H14 -- discovery's
         # `min(range(N), key=use)` returns the FIRST minimum and discovery never credits use, so
@@ -439,7 +446,18 @@ class Population:
         nothing and says so in a line nobody has to read. The expert pool is preallocated, so this
         list is the same length on every step of every run and a checkpoint's param-group structure
         cannot depend on how much the population grew.
+
+        EMPTY AT FAB_ON=0 (Q-FAB-11, RESOLVED 2026-09-24). The switch's help says "off removes it
+        entirely", and until this line the off arm handed OPT all 8,929,984 fabric parameters of
+        the shipped 10,130,057 -- the banner counted them as trainable, AdamW kept moments for
+        them and OPT_WEIGHT_DECAY decayed them, for a forward that is the identity and a gradient
+        that is identically None. The pool is still ALLOCATED (and checkpointed) on that arm, so
+        every consumer of the record -- MEM's owner count, CAP's n_live, CKPT -- reads the same
+        shapes on both arms; what the arm removes is everything that trains or acts. FAB_NORM_ONLY=1
+        keeps the list: that control arm's point is that the population stays in the optimizer.
         """
+        if not self.on:
+            return []
         return [self.A, self.B, self.halt_b] + list(self.modules.parameters())
 
 
@@ -1186,16 +1204,25 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
         # NEITHER IS A SECOND EVALUATION OF ANYTHING: grow_check and own_lr_scale read the same
         # lever, and what they add is the per-call arithmetic (the MAD trigger, the envelope), which
         # is about the call and rides their own return.
-        Gate("fab.growth_armed", grow, value=f"FAB_GROW={grow}", threshold="FAB_GROW=True",
-             reason="" if grow else
+        # UNREACHABLE AT FAB_ON=0, for the cull gate's reason two entries up. It printed FIRED on
+        # that arm, and fabric/api.py::grow_check -- which never read fab.on -- then grew expert
+        # 2049 into a fabric whose forward is the identity (measured: n_live 2048 -> 2049 on a
+        # 400-loss probe with one jump). grow_check now returns before acting on that arm.
+        Gate("fab.growth_armed", grow and on, value=f"FAB_GROW={grow}", threshold="FAB_GROW=True",
+             reachable=on,
+             reason="FAB_ON=0: there is no fabric in the forward to grow into, so neither growth "
+                    "leg is evaluated and FAB.grow_check returns before its counters are seeded."
+                    if not on else "" if grow else
                     f"FAB_GROW={grow}: the population is FROZEN at FAB_N0={n0}. Both growth legs "
                     f"are off -- no regression burst and no stall birth -- while culling, routing "
                     f"and selection all still run, which is what makes this the arm that isolates "
                     f"growth from everything else the fabric does. It does not freeze "
                     f"spawn-by-specification, which is FAB_SPAWN and a different door."),
-        Gate("fab.lr_own", bool(fab.lr_own), value=f"FAB_LR_OWN={bool(fab.lr_own)}",
-             threshold="FAB_LR_OWN=True",
-             reason="" if bool(fab.lr_own) else
+        Gate("fab.lr_own", bool(fab.lr_own) and on, value=f"FAB_LR_OWN={bool(fab.lr_own)}",
+             threshold="FAB_LR_OWN=True", reachable=on,
+             reason="FAB_ON=0: no expert is in the optimizer (Population.parameters is empty on "
+                    "that arm), so there is no per-expert rate to own."
+                    if not on else "" if bool(fab.lr_own) else
                     f"FAB_LR_OWN={bool(fab.lr_own)}: every expert trains at the global rate. The "
                     f"per-expert triangular2 envelope, its lr_boost for the cull-eligible bottom "
                     f"and the lr_maxr ratio clamp are all inert, and FAB.own_lr_scale returns None "
@@ -1600,6 +1627,21 @@ def _ground_update(pop, signature, weights, n, cent_topk, cent_ema, discover):
     return discovered, slot
 
 
+def _decode(head, x):
+    """`head(x)` with LM.decode's masked rows at a FINITE floor, _NEG, instead of -inf (Q-FAB-8).
+
+    EVERY CONSUMER HERE COMBINES LOGITS LINEARLY WITH WEIGHTS THAT CAN BE EXACTLY ZERO. The vote is
+    `take * hop_lg` with take = alive * ph, and ph is identically zero at FAB_HALT=0; the society
+    blend is `(1 - held) * last + held * base` with held zero on the same arm. LM.decode masks dead
+    and retired rows with -inf at LM_MASK_DEAD_ROWS=1, and 0 * -inf is nan -- so the first vote
+    under that lever would put nan in every masked column and the loss would be nan. At _NEG the
+    same masked column is a convex combination of -1e4s, which is -1e4, and exp(-1e4 - max) is 0.0
+    in fp32 and bf16 alike: the softmax, the cross-entropy and the surprise are the masked ones.
+    """
+    lg = head(x)
+    return lg.masked_fill(torch.isneginf(lg), _NEG)
+
+
 def _breadth_ban(pop, n, domain_id, live_domains, dom_frac, dom_min):
     """The breadth cap, as a bool mask over the live population. Returns (mask, limit, reason).
 
@@ -1910,9 +1952,13 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
 
     h: (B, L, d_model) from LM. signature: (B, sig_d) from SIG.encode -- NEVER a zero placeholder
     and never None; a caller with no signature is a caller that must not route. novelty: (B,)
-    surprise from the previous step. head: LM.decode as a plain callable, needed for the per-hop
-    vote and for spending HALT mass on the base representation. targets: (B, L) token ids, needed
-    only for hop_sup and ind_w; when None those two terms are UNREACHABLE and say so.
+    surprise from the previous step. head: LM.decode as a plain ONE-ARGUMENT callable (the vocab
+    boundary already bound -- spine/compose.py::_head), needed for the per-hop vote and for
+    spending HALT mass on the base representation; it is called only when the vote, the society
+    arm or hop_sup consumes it, and its masked -inf rows are floored at _NEG (fabric/api.py::
+    _decode). targets: (B, L) token ids, needed only for hop_sup and ind_w; when None those two
+    terms are UNREACHABLE and say so. spine/loop.py::_flush passes BOTH since 2026-09-24; for the
+    whole life of this body before that it passed neither, so the vote never formed.
     live_domains: DOM's live domain count -- RUNTIME STATE, so an argument, not the frozen wire
     fabric/levers.py::FABLevers.bal_floor calls d_live_domains. `hold_out`: one expert id excluded from EVERY hop's
     routing distribution.
@@ -2002,7 +2048,9 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     2026-09-04 and found four short, which is why the last four lines exist. A key written and not
     declared is a number in the report that the contract does not admit to producing; a key declared
     and not written is the opposite and there are none (all 24 below are written, and 19 of them are
-    SEEDED to 0 before any branch decides, so absent never masquerades as zero). The count is stated
+    SEEDED to 0 before any branch decides, so absent never masquerades as zero -- 16 on every routed
+    pass and 3, fab.ind_applied, fab.hopsup_applied and fab.halt_spent_on_base, only on the arm
+    that can reach them, so that absent says UNREACHABLE for those three as G4 requires). The count is stated
     because the previous one was wrong: this body writes 24 keys, not nineteen, and it declared 14
     distinct Gates and not thirteen when that count was taken -- 15 now, fab.halt_spent_on_base
     being the one added with this reconciliation.
@@ -2074,14 +2122,18 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                                  "no routing distribution exists, and every FAB-side term of the "
                                  "objective is ABSENT rather than zero."))
         _bump(counters, "fab.forward_identity")
+        if training and hold_out is None:
+            pop.pass_gates = tuple(gates)
         return FabricOut(hidden=h, aux_loss=zero, gates=tuple(gates))
 
     hops, depth0 = int(fab.hops), int(fab.depth0)
     if norm_only:
         # THE CONTROL ARM. It keeps the normalization and removes nodes and routing, which is what
-        # separates it from FAB_ON=0: the population is still built, still in the optimizer and still
-        # in the checkpoint -- so a run on this arm answers "what did the EXPERTS buy" rather than
-        # "what did the whole package buy", and the two questions have different answers.
+        # separates it from FAB_ON=0: the population is still in the optimizer and still grows,
+        # culls and is checkpointed -- so a run on this arm answers "what did the EXPERTS buy"
+        # rather than "what did the whole package buy", and the two questions have different
+        # answers. At FAB_ON=0 the pool is still ALLOCATED and checkpointed (Q-FAB-11) but hands OPT
+        # no parameter and grow_check/manage/own_lr_scale return before acting.
         out = h
         for _ in range(max(1, min(hops, 2 + int(pop.n_live) // 2))):
             out = pop.modules["norm"](out)
@@ -2091,7 +2143,10 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                           reason="FAB_NORM_ONLY=1: the control arm keeps the fabric's normalization "
                                  "and removes nodes and routing from the forward pass. The experts "
                                  "receive no gradient from this term; they remain in the optimizer, "
-                                 "which is what makes this arm different from FAB_ON=0."))
+                                 "which is what makes this arm different from FAB_ON=0 -- where "
+                                 "fabric/api.py::Population.parameters hands OPT nothing."))
+        if training and hold_out is None:
+            pop.pass_gates = tuple(gates)
         return FabricOut(hidden=out, aux_loss=zero, gates=tuple(gates))
 
     # ---- the levers, read once ------------------------------------------------------------------
@@ -2246,10 +2301,25 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     for _key in ("fab.route_calls", "fab.hops_taken", "fab.halt_clamped", "fab.explored_rows",
                  "fab.explore_distinct_targets", "fab.discovered", "fab.discover_targets",
                  "fab.banned_experts", "fab.ec_applied", "fab.balance_nonzero", "fab.div_applied",
-                 "fab.ind_applied", "fab.hopsup_applied", "fab.ident_refreshed",
-                 "fab.ident_trained", "fab.holdout_applied", "fab.spawned", "fab.spawn_declined",
-                 "fab.halt_spent_on_base"):
+                 "fab.ident_refreshed",
+                 "fab.ident_trained", "fab.holdout_applied", "fab.spawned", "fab.spawn_declined"):
         counters.setdefault(_key, 0)
+    # THREE KEYS ARE SEEDED ONLY ON THE ARM THAT CAN REACH THEM, still before any branch decides.
+    # They were in the loop above until 2026-09-24, and spine/loop.py passed no `head` and no
+    # `targets` for the whole life of this body -- so every run printed fab.ind_applied 0,
+    # fab.hopsup_applied 0 and fab.halt_spent_on_base 0, which G4 reads as "armed, did not fire",
+    # about three mechanisms that could not run. The predicates are the ones the three gates below
+    # print as `reachable`, except that hop_sup's depth clause is taken on the CONFIGURATION (a
+    # society pin or FAB_HOPS=1 can never give it a second hop) rather than on this pass's depth,
+    # which moves with the curriculum: an armed hop_sup that is still at one hop is armed-and-0,
+    # and its gate states that with the reason.
+    if society and ind_w > 0.0 and head is not None and targets is not None:
+        counters.setdefault("fab.ind_applied", 0)
+    if (hop_sup_w > 0.0 and head is not None and targets is not None and not society
+            and hops > 1):
+        counters.setdefault("fab.hopsup_applied", 0)
+    if society and halt_on and head is not None:
+        counters.setdefault("fab.halt_spent_on_base", 0)
     if solo:
         _bump(counters, "fab.route_calls")
     # DEPTH. society PINS THE WALK AT ONE HOP and keeps per-expert logits, which is what makes
@@ -2258,10 +2328,19 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     # SUFFICIENCY called fab.society() unconditionally while the shipped default was the looped
     # path (D1, point 2).
     depth = 1 if society else max(1, min(int(pop.depth_now), hops, 2 + n // 2))
-    gates.append(Gate("fab.depth_curriculum", 0 < depth0 < hops,
+    # THE SOCIETY ARM NEVER READS depth_now, AND THIS GATE DID NOT SAY SO. At FAB_SOCIETY=1
+    # FAB_DEPTH0=0 the report printed fab.depth_now 4 and this gate "armed, did not fire" while
+    # fab.hops_taken read 60 over 60 passes -- one hop each, because the line above pins it. A
+    # curriculum over a depth nothing reads is UNREACHABLE, not armed, and the reason names the pin.
+    _curr_ok = bool(0 < depth0 < hops and not society)
+    gates.append(Gate("fab.depth_curriculum", _curr_ok,
                       value=f"depth0={depth0}", threshold=f"hops={hops}",
-                      reason="" if 0 < depth0 < hops else
-                             ("FAB_DEPTH0=0 is the no-curriculum sentinel: build resolved depth_now "
+                      reachable=not society,
+                      reason="" if _curr_ok else
+                             (f"FAB_SOCIETY=1 pins the walk at one hop, so depth_now="
+                              f"{int(pop.depth_now)} is never read and no curriculum over it can "
+                              f"move what this pass computes." if society else
+                              "FAB_DEPTH0=0 is the no-curriculum sentinel: build resolved depth_now "
                               "to the full hop budget, so FAB.manage's staged advance has nothing "
                               "to extend." if depth0 == 0 else
                               "FAB_DEPTH0 >= FAB_HOPS: the chain already starts at the budget.")))
@@ -2309,6 +2388,12 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     # the graph of the balance term ITSELF, `w.size(1) * (w.mean(0) ** 2).sum()`, taken at the one
     # place it is built. It is a bool and not a tensor, so it adds nothing to the objective.
     bal_graph = False
+    # THE HEAD IS CALLED ONLY WHEN SOMETHING CONSUMES WHAT IT RETURNS: the vote (hop_vote), the
+    # society blend and its per-expert logits, or deep supervision (hop_sup). With all three off a
+    # per-hop decode is ens_k full-vocabulary matmuls whose results nobody reads -- and LM.decode
+    # applies dropout, so the wasted calls would also move the RNG and make FAB_HOP_VOTE=0 a
+    # different run from "no vote" rather than the same run minus the vote.
+    decode_on = bool(head is not None and (hop_vote or society or hop_sup_w > 0.0))
     mass_acc, vote, last_vote, per_expert = None, None, None, None
     entry_halt, last_hop_lg = None, None
     last_idx = last_w = None
@@ -2392,13 +2477,13 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
             div_acc = dq if div_acc is None else div_acc + dq
 
         hop_lg = None
-        if head is not None:
+        if decode_on:
             # ens_k IS WHAT DECODES, chain_k IS WHAT COMPUTES, and the society arm widens the decode
             # to max(ens_k, ind_k) because the independence term charges its own experts with
             # solving the task alone -- the old tree's `k=max(ENS_K, IND_K)` (self_organize.py:6846),
             # a coupling that was invisible under the bare name.
             decode_k = max(1, min(k, max(ens_k, ind_k) if society else ens_k))
-            parts = [head(pop.modules["norm"](out[:, j])) for j in range(decode_k)]
+            parts = [_decode(head, pop.modules["norm"](out[:, j])) for j in range(decode_k)]
             vk = max(1, min(ens_k, decode_k))
             vw = cw[:, :vk] / cw[:, :vk].sum(-1, keepdim=True).clamp_min(_FLOOR)
             for j in range(vk):
@@ -2468,7 +2553,7 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     spent_on_base = 0
     if society and head is not None and last_hop_lg is not None and entry_halt is not None:
         held = entry_halt[:, None, None]
-        logits_out = (1.0 - held) * last_hop_lg + held * head(h0)
+        logits_out = (1.0 - held) * last_hop_lg + held * _decode(head, h0)
         # THE COUNTER SAYS MASS WAS SPENT, SO IT MAY NOT COUNT A BLEND THAT SPENT NONE. At
         # FAB_HALT=0 the halt column is PINNED at a constant and fabric/api.py::_halt_logit's
         # caller sets ph to zeros, so `held` is exactly 0, this line is the identity
@@ -2723,6 +2808,8 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                               "halts, so the blend is the identity on the vote.")))
     gates.append(Gate("fab.forward.routed", True, value=f"{hops_taken} hop(s) over {n} experts",
                       threshold=f"depth={depth}"))
+    if learn:
+        pop.pass_gates = tuple(gates)
 
     return FabricOut(
         # WHICH OF logits/hidden IS PRESENT IS THE STATEMENT ABOUT WHO DECODES. When the population
@@ -2731,8 +2818,9 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
         # every contribution -- which set the SIGN of contrib, the thing both spare rules test.
         # THE GATES ARE ON THE RECORD AND NOT APPENDED TO pop.gates. Appending would grow one tuple
         # by a dozen entries per window for the length of a run, and a report reading the last pass's
-        # arithmetic would have to find it among thousands; fabric/api.py::build's two gates describe
-        # the BUILD, which happens once, and these describe THIS PASS.
+        # arithmetic would have to find it among thousands; fabric/api.py::build's gates describe
+        # the BUILD, which happens once, and these describe THIS PASS. The last TRAINING pass's copy
+        # REPLACES pop.pass_gates (set just above), which is what fabric/api.py::counters renders.
         logits=logits_out, hidden=h, expert_ids=expert_ids, weights=weights,
         per_expert_logits=per_expert, aux_loss=aux, gates=tuple(gates))
 
@@ -2753,7 +2841,14 @@ def observe(fab: Config, pop, out, *, per_window_loss, domain_id):
       - `comp` per expert and the population EMA comp_glob, both at rate comp_ema;
       - `ef`/`es`, the fast/slow error pair whose DIFFERENCE separates an expert that cannot model
         its material from one whose material just changed;
-      - `dom_of[e].add(domain_id)`, the affiliation the breadth cap reads.
+      - `dom_of[e].add(domain_id)`, the affiliation the breadth cap reads -- PER ROW.
+
+    domain_id: one int for the whole batch, or ONE ID PER WINDOW (a length-B sequence or (B,)
+    tensor), which is what spine/loop.py passes since 2026-09-24 (Q-FAB-10). With the scalar the loop handed
+    over -- the LAST window's id -- every earlier window of a mixed batch was affiliated with
+    another window's domain: measured at OPT_BATCH_WINDOWS=4 over 240 windows, 21 of 60 flushes
+    spanned more than one domain and every one of them was booked under one. A scalar is still accepted and is the
+    same id for every row, which is exact at OPT_BATCH_WINDOWS=1.
 
     THE SPLIT IS A BEHAVIOUR CHANGE WITH NO MEASUREMENT BEHIND IT: grace=48 was set against a clock
     that ticked once per window, and crediting chain_k experts per hop over `hops` hops makes it
@@ -2874,6 +2969,20 @@ def observe(fab: Config, pop, out, *, per_window_loss, domain_id):
             f"disagree about how many windows there were. Attributing the overlap would report a "
             f"complete attribution over part of the batch.")
 
+    # ONE DOMAIN ID PER ROW. A sequence must be exactly as long as the batch, for the reason the
+    # per_window_loss refusal above gives: two views of one batch cannot disagree about its size.
+    if isinstance(domain_id, torch.Tensor):
+        dom_rows = [int(d) for d in domain_id.reshape(-1).tolist()]
+    elif isinstance(domain_id, (list, tuple)):
+        dom_rows = [int(d) for d in domain_id]
+    else:
+        dom_rows = [int(domain_id)] * rows
+    if len(dom_rows) != rows:
+        raise ValueError(
+            f"FAB.observe: domain_id carries {len(dom_rows)} id(s) and FabricOut.weights has "
+            f"{rows} row(s). One id per window, or one int for the whole batch -- a partial list "
+            f"would affiliate the rows past its end with nothing and report them affiliated.")
+
     # THE COMPUTED SET, AND WHY IT IS RECONSTRUCTED RATHER THAN READ. See the LEVERS READ note
     # above: the per-hop selections do not leave `forward`, `weights` is their renormalised sum, and
     # this top-k is the same set exactly at the shipped depth0=1 and their union above it.
@@ -2935,8 +3044,8 @@ def observe(fab: Config, pop, out, *, per_window_loss, domain_id):
             # SET and the breadth cap in `forward` bans an expert once len(dom_of[e]) passes
             # dom_frac x live_domains; it was one int per expert until 2026-09-04, on which this
             # line is an AttributeError -- the field the frozen docstring specified the write
-            # against could not have held it.
-            pop.dom_of[e].add(int(domain_id))
+            # against could not have held it. THIS ROW'S id, not the batch's (see domain_id above).
+            pop.dom_of[e].add(dom_rows[r])
             used.add(e)
             if pop.uage[e] >= grace:
                 past.add(e)
@@ -3094,7 +3203,7 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
 
     LEVERS READ: grace, cull_frac, pressure, slots, comp_protect, comp_ema, err_fast, err_slow,
                  shift_tol, fail_tol, rescue, mut_big, manage_every, depth0, depth_eps,
-                 depth_patience, depth_stage_max, hops, merge_dist
+                 depth_patience, depth_stage_max, hops, merge_dist, on
     WIRES READ: d_manage_period (recorded on the report beside manage_every, so the WINDOW cadence
                 this function is called on and the FLUSH cadence `contribution` is called on are
                 visible side by side and a cadence that never coincides reads as a zero rather than
@@ -3130,6 +3239,15 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
     counters, where = pop.counters, "FAB.manage"
     step = U.Windows(step_windows)
     step_n = int(step)
+
+    # FAB_ON=0 RETURNS BEFORE THE SEEDING, SO THIS WHOLE FAMILY IS ABSENT ON THAT ARM (Q-FAB-11).
+    # A selection pass over a population whose forward is the identity would cull, merge and
+    # deepen experts nothing computes -- a mechanism running on a switched-off package -- and
+    # seeding first would print its counters present-and-0, which G4 reads as "armed, did not
+    # fire". Absent is the true reading: unreachable on the arm this run took.
+    if not bool(fab.on):
+        return ManageReport(manage_every=manage_every, manage_period_flushes=period,
+                            cull_gate="FAB_ON=0: no selection pass runs on a switched-off fabric")
 
     # SEEDED BEFORE ANY BRANCH DECIDES -- the rule fabric/api.py::_bump states and that this
     # package's own sig sibling broke for a whole run. Every one of these is reachable on some arm.
@@ -3650,7 +3768,7 @@ def grow_check(fab: Config, pop, *, flush_loss, step_windows, soft_cap, memory_p
 
     LEVERS READ: grow, burst, z, plateau, warmup, cooldown, recover_min, recover_max, new_frac,
                  replicate, parent_k, parent_max, birth_win, mut, mut_big, mut_big_p, xover,
-                 birth_jitter, grow_on_mem_pressure, spawn, slots, n0
+                 birth_jitter, grow_on_mem_pressure, spawn, slots, n0, on
     WIRES READ: d_cap_lift_period (reported beside the decline counters, so "0 lifts" is
                 distinguishable from "the valve's period is longer than the run" -- round6 measured
                 0 vocabulary lifts and it was a clock-unit fault, not the plateau condition.
@@ -3732,6 +3850,17 @@ def grow_check(fab: Config, pop, *, flush_loss, step_windows, soft_cap, memory_p
     mut, mut_big, mut_big_p = float(fab.mut), float(fab.mut_big), float(fab.mut_big_p)
     xover, jitter = float(fab.xover), float(fab.birth_jitter)
     slots, n0 = int(fab.slots), int(fab.n0)
+
+    # FAB_ON=0 RETURNS BEFORE THE SEEDING (Q-FAB-11). This body never read fab.on, so on the off arm
+    # a regression grew an expert into a fabric whose forward is the identity -- measured, n_live
+    # 2048 -> 2049 and fab.grown_regression 1 beside gate fab.on's own "every gate below this one
+    # reports UNREACHABLE". The family stays ABSENT, which is G4's spelling of unreachable, and the
+    # build gate fab.growth_armed says why.
+    if not bool(fab.on):
+        return GrowReport(gates=(Gate("fab.grow_check", False, value="FAB_ON=0",
+                                      threshold="FAB_ON=1", reachable=False,
+                                      reason="FAB_ON=0: nothing is grown into a fabric that is "
+                                             "not in the forward."),))
 
     # SEEDED BEFORE ANY BRANCH DECIDES, so ABSENT never masquerades as ZERO. SIG shipped a counter
     # that was missing rather than 0 for a whole run at the one configuration the tree ships,
@@ -4081,7 +4210,7 @@ def own_lr_scale(fab: Config, pop, *, applied_lr):
     undefined global: ISSUES P1-H15 was a NameError on `_lrv` whenever LR_SCHED=none and lr_own=1, and
     the crash is now unspellable rather than merely fixed.
 
-    LEVERS READ: lr_own, lr_cycle, lr_gamma, lr_amin, lr_maxr, lr_boost, cull_frac, grace
+    LEVERS READ: on, lr_own, lr_cycle, lr_gamma, lr_amin, lr_maxr, lr_boost, cull_frac, grace
     WIRES READ: d_base_lr, d_lr_min_frac
     DID IT FIRE: fab.lr_scaled_experts, fab.lr_boosted, fab.lr_cycle_max (a max above ~12 means
                  every survivor is pinned at lr_amin and the schedule is a constant)
@@ -4109,6 +4238,12 @@ def own_lr_scale(fab: Config, pop, *, applied_lr):
     fab = fab.owned_by("FAB")
     base_lr, lr_min_frac = fab.d_base_lr, fab.d_lr_min_frac   # WIRES READ HERE -- the two endpoints
     counters = pop.counters
+    # FAB_ON=0 RETURNS FIRST, WITH THE WHOLE fab.lr_* FAMILY ABSENT (Q-FAB-11): no expert is in the
+    # optimizer on that arm (Population.parameters is empty), so there is no rate to scale and the
+    # build gate fab.lr_own reads UNREACHABLE. The seeding below is for FAB_LR_OWN=False, which is
+    # an ARMED arm that chose not to scale.
+    if not bool(fab.on):
+        return None
     _bump(counters, "fab.lr_calls")
     # SEEDED BEFORE THE OFF RETURN, for the reason fabric/api.py::observe seeds its family there:
     # at the shipped FAB_LR_OWN=False every call takes that return, and a reader asking the ledger
@@ -4264,6 +4399,13 @@ def counters(fab: Config, pop):
     out = dict(pop.counters)
     out.update({f"gate:{k}": v for k, v in
                 _three_state(getattr(pop, "gates", ()), pop.counters).items()})
+    # AND THE LAST TRAINING PASS'S GATES, which FabricOut.gates carried and nothing printed until
+    # 2026-09-24 -- including the three that said "no head was supplied" on every pass of every run.
+    # They are PER-PASS arithmetic (the build's are per-run), so the count beside each verdict is
+    # the cumulative ledger key of the same name where one exists and the verdict is the last pass's.
+    # No name collides with a build gate: fab.on / cull_gate / growth_armed / lr_own are build-only.
+    out.update({f"gate:{k}": v for k, v in
+                _three_state(getattr(pop, "pass_gates", ()), pop.counters).items()})
     # THE LIVE POPULATION AND ITS CEILING, because every fabric gate's arithmetic is a ratio
     # against one of them and a reader with the verdict but not the denominator has a claim.
     out["fab.n_live"] = int(pop.n_live)
@@ -4380,7 +4522,8 @@ def state_dict(fab: Config, pop):
     Re-earned rather than restored: the identity cache, halt_ema, the routing-mix samples, and
     `learn_window` -- the window index of the last gradient-carrying training pass, which is a
     statement about THIS PROCESS's clock and would only ever produce a false refusal if a
-    resume restored it.
+    resume restored it -- and `pass_gates`, the last training pass's gate arithmetic, which the
+    resumed run's first pass rewrites.
 
     LEVERS READ: none
     WIRES READ: none

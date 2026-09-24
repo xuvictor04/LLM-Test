@@ -63,6 +63,7 @@ if _SRC not in sys.path:
 
 from spine.compose import compose          # noqa: E402 -- after the path repair above, on purpose
 from spine import loop                     # noqa: E402
+from spine.gate import NotBuilt            # noqa: E402
 
 
 def main(argv=None):
@@ -76,7 +77,20 @@ def main(argv=None):
     # THE CALLER OWNS THE ENVIRONMENT, which is compose()'s own first line: `system =
     # compose(environ=os.environ)`. Passing it explicitly rather than letting anything reach for it
     # is what keeps the resolved Config the single source for every knob.
-    sysm = compose(environ=os.environ)
+    # A DECLARED-AND-NOT-BUILT ARM IS A REFUSAL, AND IT DIED AS A TRACEBACK WITH rc=1 UNTIL
+    # 2026-09-24. spine/gate.py::NotBuilt is raised "at the point of use" -- FAB.build for
+    # FAB_HOP_MODE=transition (Q-FAB-1) -- which is inside compose(), before System.refusals is
+    # ever printed, so the one refusal that names a lever the owner ruled on arrived as a stack
+    # trace a sweep script reads as a crash. It is printed and exited exactly like the startup
+    # refusals below: "REFUSED: <the lever and the ruling>", rc=2. NotBuilt is NOT caught anywhere
+    # else, and nothing but the message is kept -- the exception already names the lever.
+    try:
+        sysm = compose(environ=os.environ)
+    except NotBuilt as e:
+        print(f"REFUSED: {e}")
+        print("=== refusing to run: the arm above is declared and not built in this tree; "
+              "choose a built one.")
+        return 2
 
     # WHAT HARDWARE AND WHAT ARITHMETIC, PRINTED BEFORE ANYTHING ELSE. A run that does not say
     # which device it used is a run whose throughput number means nothing and whose loss curve
