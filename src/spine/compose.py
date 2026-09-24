@@ -986,12 +986,23 @@ LOOP_ORDER = (
                                       "LOWEST LAYER and the point where a second modality plugs in, "
                                       "which is the claim world/api.py makes and this row is what "
                                       "makes it true rather than asserted"),
+    ("B", "WORLD", "forecast",        "obs_emb = LM.embed's return from the row above; w is "
+                                      "System.world, built at assembly. BETWEEN embed AND encode "
+                                      "because its return IS encode's `extra` on the row below. "
+                                      "WIRED 2026-09-24 (Q-WORLD-10 RESOLVED): world_proj is born "
+                                      "ZERO, so the first call adds exactly nothing and the path "
+                                      "still learns (dL/dW = dL/dout x pop(z), and pop(z) is not "
+                                      "zero). None at WORLD_FEEDBACK=0 and on the null world, "
+                                      "which encode accepts",
+                                      "extra -- the (B, L, width) forecast world_proj(pop(z)), "
+                                      "LM.encode's additive term; None when feedback is off"),
     ("B", "LM",    "encode/decode/lm_loss", "x and y are the flush's batch and its next-token "
                                       "targets, cut from Segmentation.ids at _flush_bounds -- see "
                                       "ROW_ARGUMENTS_ELSEWHERE, because no entry point returns a "
                                       "batch. live_vocab and retired_ids come from the vocabulary "
                                       "built at assembly and are refreshed by TOK.judge_probation "
-                                      "at B; extra=WORLD.forecast(...) when feedback is on",
+                                      "at B; extra = the WORLD.forecast row's return, None when "
+                                      "feedback is off",
                                       "h -- LM.encode's (B, L, width) hidden, which is FAB.forward's "
                                       "spelling; logits -- LM.decode's return, THE ONLY PLACE "
                                       "LOGITS ARE PRODUCED, and one of the two inputs this file "
@@ -1452,8 +1463,9 @@ DEFERRED_ENTRY_POINTS = {
         "signal to the lowest layer of the language model, for every run this tree has taken, while "
         "max|delta| over 60 windows read exactly 0.0 for encoder, qproj, preds and keys. With the "
         "method in place those same 60 windows move preds by 7.955e-02 and the encoder by "
-        "8.08e-02; world_proj alone still reads 0.0, because its only consumer is WORLD.forecast "
-        "and that has no call site (Q-WORLD-10).",
+        "8.08e-02. world_proj read 0.0 there because its only consumer is WORLD.forecast, which "
+        "had no call site until Q-WORLD-10 was resolved; it is now born ZERO and moves from the "
+        "first flush (|W| 1.027 after 60 windows).",
     "FAB.Population.n":
         "P4, with the rows that read the live population size: FAB.manage's cull budget, CAP's "
         "startup refusal against CAP_FAB_START, and the banner. It is the accessor the growth "

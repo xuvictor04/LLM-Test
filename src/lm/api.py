@@ -559,7 +559,10 @@ def encode(lm: Config, model, x, *, n_layers=None, extra=None):
     WIRES READ: d_pos_max
     DID IT FIRE: lm.encode.calls, lm.encode.key_path_truncated (n_layers actually reduced the
                  stack), lm.encode.pos_overflow_refused (MUST BE 0 -- a nonzero value is the 512
-                 clamp reaching the new tree), lm.encode.extra_applied
+                 clamp reaching the new tree), lm.encode.extra_applied; and two FLOAT GAUGES
+                 written on the same arm, lm.encode.extra_ratio (the latest RMS(extra)/RMS(h),
+                 h before the add) and lm.encode.extra_ratio_max (its running max) -- all three
+                 ABSENT when no `extra` is ever passed
     """
     lm = lm.owned_by("LM")
     _bump("lm.encode.calls")
@@ -656,6 +659,22 @@ def encode(lm: Config, model, x, *, n_layers=None, extra=None):
             raise ValueError(
                 f"LM.encode: extra is on device {extra.device}, hidden is on {h.device}. Refused "
                 f"rather than silently moved.")
+        # THE OTHER HALF OF world.forecast_rms, WHICH WORLD CANNOT FORM: only this function holds
+        # both the hidden state and the term added to it, so only here is the forecast's size
+        # RELATIVE to h a reading rather than a guess. RMS(extra)/RMS(h), h taken BEFORE the add,
+        # both reduced in one stack so the pair costs ONE device sync. The latest value and the
+        # running max, as gauges: nothing bounds the forecast's magnitude (Q-WORLD-10, "Open for
+        # the owner"), and on CPU at 300 windows, seeds 0-4, the latest read 0.41-1.87 and the max
+        # 0.74-3.08, so the max is the number that says whether the forecast has started to
+        # dominate the readout. Both ABSENT
+        # when no `extra` ever arrives (WORLD_FEEDBACK=0, the null world).
+        with torch.no_grad():
+            _ms = torch.stack([extra.detach().float().pow(2).mean(),
+                               h.detach().float().pow(2).mean()]).sqrt().tolist()
+        _ratio = _ms[0] / max(_ms[1], 1e-12)
+        _set("lm.encode.extra_ratio", round(_ratio, 6))
+        _set("lm.encode.extra_ratio_max",
+             round(max(_ratio, float(_COUNTS.get("lm.encode.extra_ratio_max", 0.0))), 6))
         h = h + extra
         _bump("lm.encode.extra_applied")
 
@@ -1492,7 +1511,8 @@ def _three_state(gates, ledger):
 
 
 def counters(lm: Config, model):
-    """The DID IT FIRE ledger for this package: {name: int}. No torch, no side effects.
+    """The DID IT FIRE ledger for this package: {name: int}, plus the few float gauges a body
+    declares as such (lm.encode.extra_ratio / extra_ratio_max). No torch, no side effects.
 
     Every gated mechanism above appears here in the three-state form G4 requires -- `fired N`,
     `armed but 0`, `unreachable (<predicate with its arithmetic>)` -- so that "set but inert" and

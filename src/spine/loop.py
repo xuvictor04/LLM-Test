@@ -22,9 +22,10 @@ other width, and CKPT_EVERY sat in that block. The keys are the root's, from com
 
 WHAT THIS DRIVER SKIPS, AND WHY IT SAYS SO OUT LOUD -- IN TWO LISTS, NOT ONE
 ============================================================================
-`RunResult.skipped` names every LOOP_ORDER B row this driver has NO CALL SITE FOR. It is empty as
-of the edit that wired the last of the twenty-one, and an empty list is exactly the state that made
-the FIRST version of this report wrong: it filtered the B row through "is the body a stub" and
+`RunResult.skipped` names every LOOP_ORDER B row this driver has NO CALL SITE FOR. It has been
+empty since the edit that wired the last of the then twenty-one, and stays empty at twenty-two
+(WORLD.forecast, Q-WORLD-10, arrived WITH its call site); an empty list is exactly the state that
+made the FIRST version of this report wrong: it filtered the B row through "is the body a stub" and
 printed "0 MECHANISM(S) NOT CALLED" on a run that invoked six of twenty-one. The list is derived
 from the table and cross-checked against `_CALLS` in both directions, so a row this driver drops
 cannot vanish from the report and a `_CALLS` entry the table does not list raises.
@@ -32,7 +33,7 @@ cannot vanish from the report and a `_CALLS` entry the table does not list raise
 `RunResult.gated` IS THE SECOND LIST AND IT EXISTS BECAUSE A CALL SITE IS NOT A CALL. Three rows
 stand behind events (Due.mint, Due.probation) and one behind "the optimizer actually stepped"; at
 the shipped TOK_PROBATION_USES=0 the probation cadence is never even asked, so two of the
-twenty-one have a call site that CANNOT RUN. Reporting only the first list would say this run
+twenty-two have a call site that CANNOT RUN. Reporting only the first list would say this run
 judged probation when nothing did -- the same overstatement, one layer in. `_gate_report` reads the
 three states (fired N / armed but 0 / unreachable) off the counter each owning package keeps,
 rather than re-deriving a verdict here from levers this file does not own.
@@ -125,9 +126,9 @@ _CALLS = {
         "MEM.census", "DOM.manage", "DOM.census", "DOM.rekey",
         "SIG.cadence_due", "SIG.train_step", "FAB.manage",
         "RUN.RunClock.advance", "SIG.encode", "DOM.observe", "TOK.on_window"}),
-    # ---- stage B, per flush: all twenty-one
+    # ---- stage B, per flush: all twenty-two
     "B": frozenset({
-        "LM.embed", "LM.encode", "FAB.forward", "LM.decode", "LM.lm_loss",
+        "LM.embed", "WORLD.forecast", "LM.encode", "FAB.forward", "LM.decode", "LM.lm_loss",
         "WORLD.loss_terms", "LM.anchor_term", "OPT.scaled_backward", "RUN.RunClock.note_backward",
         "OPT.maybe_step", "FAB.own_lr_scale", "CAP.caps", "FAB.observe", "FAB.grow_check",
         "MEM.write", "MEM.maintain", "TOK.mint_burst", "LM.residual_ratios", "TOK.judge_probation",
@@ -1154,8 +1155,11 @@ def _report(sysm, elapsed_s, ctx):
     # the root took it rather than asked for it. What it makes readable: world.built (live against
     # null, the D4 distinction the class docstring calls its whole point), world.loss_terms.calls,
     # world.latent_std -- the COLLAPSE reading, and the one number that says whether an arm that
-    # improved the loss did so by flattening the latent -- and world.forecast.*, which is ABSENT
-    # today and correctly so (Q-WORLD-10: that entry point has no call site).
+    # improved the loss did so by flattening the latent -- and world.forecast.*, which since the
+    # call site landed (Q-WORLD-10) reads world.forecasts == lm.encode.extra_applied == flushes at
+    # the defaults, and world.forecast.inert == calls with world.forecasts ABSENT at
+    # WORLD_FEEDBACK=0. The forecast's size RELATIVE to h is LM's lm.encode.extra_ratio, in the
+    # LM.counters line above.
     out["WORLD(w.counters)"] = dict(sysm.world.counters)
     # MEM.census AT R, WITH reconcile=True, WHICH IS THE ROW AND WHICH NOTHING CALLED. The A-stage
     # census runs on the dom.manage cadence with reconcile=False -- the exact recount is an
@@ -1275,8 +1279,8 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     # carries 8 mantissa bits against fp32's 24; two runs agreeing to four decimals after 400
     # optimizer steps did not differ in arithmetic at all.
     # WHAT IS INSIDE: the LM step, which is the lever's own scope -- "Autocast precision for the LM
-    # step". Embed and encode here; the fabric, the decode, the loss, the world terms and the
-    # anchor in the second block below.
+    # step". Embed, the world forecast and encode here; the fabric, the decode, the loss, the world
+    # terms and the anchor in the second block below.
     # WHAT IS OUTSIDE, AND EVERY EXCLUSION IS THE CONTRACT'S RATHER THAN CAUTION:
     #   SIG.encode, which is why this is TWO blocks and not one. train/levers.py's carve-out is
     #   about "the one place in the step where reduced precision changes BEHAVIOUR rather than
@@ -1295,7 +1299,13 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     cast = sysm.process.autocast
     with cast():
         obs_emb = lm_api.embed(lm_cfg, model, x)
-        h = lm_api.encode(lm_cfg, model, x)
+        # THE FORECAST IS LM.encode's `extra` (Q-WORLD-10, RESOLVED 2026-09-24). None at
+        # WORLD_FEEDBACK=0 and on the null world, which encode already accepts, so the off arm is
+        # this tree before the call site existed, bit for bit. world_proj is born ZERO, so the
+        # first call adds exactly nothing (flush-0 loss 8.354218 wired and unwired, seed 0) while
+        # world_proj's own gradient is nonzero from that first backward.
+        h = lm_api.encode(lm_cfg, model, x,
+                          extra=world_api.forecast(cfg_world, sysm.world, obs_emb))
     # THE SIGNATURE IS REAL OR THE CALL RAISES, AND THE FIRST DRAFT OF THIS BLOCK SWALLOWED IT.
     # It read `try: sig_vec = sig_api.encode(...) except Exception: sig_vec = None`, and then
     # skipped FAB.forward when the result was None -- so the fabric silently left the forward path

@@ -23,16 +23,21 @@
 # different claims about why the embedding should move, and `off` cannot tell them apart.
 #
 #   off             WORLD_ENABLED=0. The null world -- no term, no cost, no gradient. The control.
-#   shipped         the defaults, with WORLD now trained. What the tree does today.
+#   shipped         the defaults: WORLD trained AND its forecast fed into LM.encode (world_proj
+#                   born zero, Q-WORLD-10). What the tree does today.
 #   collapse_only   WORLD_PREDICT_W=0. Anti-collapse alone: the embedding is pushed to spread, and
 #                   nothing asks it to be predictable forward.
 #   predict_only    WORLD_COLLAPSE_W=0. Prediction alone, WITH the collapse risk that penalty
 #                   exists to prevent -- a latent that goes constant predicts itself perfectly.
 #                   Watch world.latent_std: if it falls toward 0 this arm is winning by collapsing.
-#   feedback_off    WORLD_FEEDBACK=0 at the shipped weights. Today this changes NOTHING in the
-#                   step -- WORLD.forecast has no call site (Q-WORLD-10) -- so this arm is a
-#                   TRIPWIRE, not a treatment: it must land on top of `shipped`, and any separation
-#                   means something is reading that lever that this comment does not know about.
+#   feedback_off    WORLD_FEEDBACK=0 at the shipped weights: the UNWIRED CONTROL. Since the
+#                   forecast got its call site (Q-WORLD-10, RESOLVED 2026-09-24) `shipped` feeds
+#                   world_proj(pop(z)) into LM.encode as `extra`, and this arm withholds it --
+#                   BIT-IDENTICAL to the tree before the call site existed (driven: the same loss
+#                   curve, max|diff| 0.0). `shipped` minus this arm prices the forecast itself;
+#                   this arm minus `off` prices the world loss alone. Tripwires: here
+#                   world.forecast.inert == calls and world.forecasts / lm.encode.extra_ratio are
+#                   ABSENT; on `shipped`, world.forecasts == lm.encode.extra_applied == flushes.
 #
 # WHAT IT MEASURES AND WHAT IT CANNOT. There is no held-out number in the loop: run.py prints a
 # TRAINING loss and the EVAL battery is not wired, so every column below is training loss and must

@@ -166,7 +166,7 @@ def main(argv=None):
     for s in result.skipped:
         print(f"      - {s}")
     # AND THE GATED ONES, SEPARATELY, BECAUSE "IT HAS A CALL SITE" IS NOT "IT RAN". Three of the
-    # twenty-one B rows stand behind events that are UNREACHABLE at the shipped defaults --
+    # twenty-two B rows stand behind events that are UNREACHABLE at the shipped defaults --
     # TOK_PROBATION_USES=0 turns the whole probation family off -- so a report that printed "0 not
     # called" and stopped would say this run judged probation when nothing did. That is the same
     # overstatement the skipped list itself was written to repair, one layer in.

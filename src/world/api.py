@@ -114,7 +114,7 @@ class World:
 
     __slots__ = ("built", "encoder", "preds", "keys", "qproj", "world_proj", "fit", "mass",
                  "alive", "grown", "nmax", "n_live", "horizon", "feedback", "lat",
-                 "_wl_ema", "_wl_lastgrow", "counters", "rng")
+                 "_wl_ema", "_wl_lastgrow", "_proj_trained", "counters", "rng")
 
     def __init__(self, *, built, nmax=0, n_live=0, horizon=1, feedback=False, lat=0, rng=None):
         self.built = built
@@ -124,6 +124,10 @@ class World:
         self.nmax, self.n_live = nmax, n_live
         self.horizon, self.feedback, self.lat = horizon, feedback, lat
         self._wl_ema, self._wl_lastgrow = None, 0
+        # WHETHER forecast() HAS EVER RETURNED A TENSOR IN THIS LINEAGE -- the only way world_proj
+        # can ever have received a gradient. Saved by state_dict as `proj_trained` and read by
+        # load_into to decide whether a restored world_proj is trained or a never-stepped draw.
+        self._proj_trained = False
         self.counters = {"world.built": built, "world.live": n_live, "world.nmax": nmax}
         self.rng = rng
 
@@ -155,9 +159,10 @@ class World:
         LM's own gradient falls; the direction it moves is up.
         RE-TAKEN WITH THIS METHOD IN PLACE, over the same 60 windows: preds 7.955e-02, encoder's
         two weight matrices 8.078e-02 and 8.075e-02, keys 1.737e-03, qproj 1.156e-03. world_proj
-        is the ONE that still reads exactly 0.0, and it is not this method's to move: world_proj
-        appears in no expression but the forecast's, which has no caller (Q-WORLD-10), so the only
-        gradient it can ever receive arrives the moment that call site exists.
+        was the ONE that still read exactly 0.0, and it was not this method's to move: world_proj
+        appears in no expression but the forecast's, so its only gradient arrives through that
+        call site -- which exists since Q-WORLD-10 was resolved, with world_proj born zero so the
+        first call adds nothing.
         THE DESIGN IS NOT THE DEFECT. Shaping the embedding by predictability plus an anti-collapse
         penalty is what world/api.py::loss_terms is FOR (`predict_w * pop_loss + collapse_w *
         (var_loss + W_COV * cov_loss)`), and leaving obs_emb attached is what makes the language
@@ -261,6 +266,16 @@ def build(world: Config, *, d_model, device, ctx_tokens, rng):
         # RUN_DEVICE=cuda. w.keys was already allocated with device=device at construction, so
         # writing into it directly needs no intermediate tensor and no .to(device) copy at all.
         w.keys.uniform_(-0.1, 0.1, generator=gen)
+        # world_proj IS BORN ZERO (Q-WORLD-10), the rule the fabric's A/B and `preds` above follow:
+        # "every expert is born an identity, so adding one never disrupts what already works". The
+        # forecast is h's ADDITIVE term, so a zero output map makes the first call an exact no-op
+        # (flush-0 loss 8.354218 wired and unwired, seed 0) while dL/dW = dL/dout x pop(z) is
+        # nonzero -- pop(z) is not zero -- so the path learns from the first backward.
+        # ZEROED AFTER THE DRAW, NOT TAKEN OUT OF IT: the generator stream is unchanged, so encoder,
+        # qproj and keys hold exactly the values they held before this line existed. The bias was
+        # already zero (the loop above zeroes every 1-dim tensor); zeroing it here states the rule.
+        w.world_proj.weight.zero_()
+        w.world_proj.bias.zero_()
 
     w.counters.update({
         "world.built": "live", "world.live": n0, "world.nmax": nmax,
@@ -552,9 +567,9 @@ def forecast(world: Config, w, obs_emb):
     its three states a run was in.
       world.forecast.calls -- how many times this function was CALLED. Without it `world.forecasts`
         is ABSENT both when a lever refused the forecast and when nothing invoked this function at
-        all, and ON 2026-09-22 THE SECOND IS THE TRUE ONE: no row of spine/loop.py's LOOP_ORDER
-        names `forecast`, so the pair (calls present, forecasts absent) is the only shape that can
-        separate "called and declined" from "never reached".
+        all -- which until Q-WORLD-10 was resolved was the true one, because no LOOP_ORDER row
+        named `forecast` -- so the pair (calls present, forecasts absent) is the only shape that
+        can separate "called and declined" from "never reached".
       world.forecast.inert -- calls that returned None, which is the denominator `world.forecasts`
         has no other way to state.
       world.forecast.unreachable -- WHY None, in a sentence, and it is the SAME key
@@ -568,28 +583,16 @@ def forecast(world: Config, w, obs_emb):
         1e-6 beside a hidden state of order 1 changes none of them while the fire counter reads
         one per flush. IT IS HALF A READING AND SAYS SO -- the hidden state is not an argument
         here, so nothing in this package can form the ratio; the other half is LM's own
+        lm.encode.extra_ratio / extra_ratio_max (RMS(extra)/RMS(h), formed where both exist) and
         lm.encode.extra_applied, which counts the flushes on which the term was actually added.
     """
     world = world.owned_by("WORLD")
-    # THIS ENTRY POINT HAS NO CALLER AND HAS NOT BEEN GIVEN ONE (Q-WORLD-10, HELD 2026-09-22).
-    # THE FIRST OF THE HOLD'S TWO REASONS IS CLOSED AND THE SECOND IS NOT, which is why this
-    # paragraph is still here. Closed: World.parameters() now exists, WORLD's tensors are in
-    # OPT's `base` group, and over 60 windows preds moves 7.955e-02 and the encoder 8.08e-02 where
-    # both read EXACTLY 0.0 before. So the population is no longer the identity map it is
-    # zero-initialised as, and `z` is no longer build()'s uniform draw.
-    # STILL OPEN: world_proj. It appears in NO expression in this package but the one below, so the
-    # forecast's own call site is the only gradient path it can ever have -- re-measured over those
-    # same 60 windows it is the one tensor still reading exactly 0.0, while every other moved. A
-    # first call therefore adds world_proj's RANDOM uniform(-0.1, 0.1) projection to the hidden
-    # state: one measured call returned world.forecast_rms 0.11047, and WORLD_FEEDBACK ALREADY
-    # SHIPS True, so a call site is the only thing withholding it.
-    # THAT IS A BOOTSTRAP AND NOT A PERMANENT DEFECT -- it is what adding any head looks like -- but
-    # this tree has a rule about it and world_proj does not follow it: fabric/api.py::build
-    # zero-inits A and B so "every expert is born an identity, so adding one never disrupts what
-    # already works", and build() above zero-inits `preds` citing the same sentence. world_proj is
-    # the third tensor of that kind and is drawn uniform. SETTLE THAT BEFORE WIRING, not after: the
-    # question is whether the forecast should be born a no-op and grow, like everything else this
-    # tree adds mid-run, and it costs nothing to answer while there is still no caller.
+    # WIRED 2026-09-24 (Q-WORLD-10 RESOLVED): spine/loop.py::_flush passes this return to LM.encode
+    # as `extra`. It was HELD until world_proj followed the born-an-identity rule; build() now
+    # zeroes it and load_into re-zeroes a never-trained one, so a first call adds exactly nothing.
+    # Before that, at the real call site a first call added world_proj's uniform(-0.1, 0.1) draw:
+    # world.forecast_rms 0.002974, 7.6% of h's RMS 0.039029 (the 0.11047 once quoted here was
+    # measured on a unit-variance synthetic input, not on LM.embed's output, whose RMS is 0.0219).
     # THE CALL COUNT IS SEEDED BEFORE EITHER GATE BELOW DECIDES ANYTHING, which is this tree's rule
     # about absence: ABSENT must mean the mechanism was UNREACHABLE on the arm this run took, so a
     # counter seeded inside the else of the gate it describes is a defect rather than a detail.
@@ -703,26 +706,30 @@ def forecast(world: Config, w, obs_emb):
 
     # NOT DETACHED, AND THE DETACH WOULD HAVE BEEN THE DEFECT. world_proj appears in no other
     # expression in this file, so the LM loss reaching back through this return is the ONLY
-    # gradient it can ever receive: detaching here would leave it at build()'s uniform(-0.1, 0.1)
-    # draw for the whole run while state_dict faithfully saved it, which is an untrained random
-    # projection added to every hidden state -- noise conditioning wearing a world model's name,
-    # and precisely the failure the archive records when world_proj had to be added to the
-    # checkpoint or generation ran a different network than training.
+    # gradient it can ever receive: detaching here would leave it at build()'s zero for the whole
+    # run while state_dict faithfully saved it -- a forecast that never conditions anything while
+    # every fire counter reads one per flush. (Before build() zeroed it, the same detach would
+    # have frozen an untrained uniform(-0.1, 0.1) projection onto every hidden state: noise
+    # conditioning wearing a world model's name, and precisely the failure the archive records
+    # when world_proj had to be added to the checkpoint or generation ran a different network
+    # than training.)
     # MEASURED, NOT ARGUED, AND THE MEASUREMENT FOUND A SECOND THING: on a 60-window run at the
-    # shipped defaults, w.world_proj.weight.grad is None on the way out -- loss_terms ran 60 times
-    # and never touched it, so before this body existed world_proj had never received a gradient
-    # from anything at all. THE SAME RUN SHOWED THE LARGER HOLE AND IT IS NOW CLOSED, ONE
-    # LINE OF THIS FILE AWAY:
+    # shipped defaults before the call site existed, w.world_proj.weight.grad was None on the way
+    # out -- loss_terms ran 60 times and never touched it, so until this function had a caller
+    # world_proj had never received a gradient from anything at all. THE SAME RUN SHOWED THE
+    # LARGER HOLE AND IT IS NOW CLOSED, ONE LINE OF THIS FILE AWAY:
     # max|delta| over 60 windows was exactly 0.0 for encoder, qproj, preds AND keys while their
     # .grad was nonzero (the encoder's first weight accumulated a gradient sum of 19.5) -- WORLD's
     # tensors took gradient and were never STEPPED, because spine/compose.py::_base_parameters
     # harvests each object by `getattr(obj, "parameters", None)` and this package's World class had
     # no such method. World.parameters() supplies it, the startup warning that said so is gone, and
     # the same 60 windows now move preds by 7.955e-02 and the encoder by 8.08e-02.
-    # WHAT THAT MEANS FOR THE PARAGRAPH ABOVE: the gradient this return carries is now the ONLY one
-    # world_proj receives AND the only one it is missing, since every other tensor here is fed by
-    # loss_terms. It is the one tensor that still measures exactly 0.0 over those 60 windows, for
-    # the plain reason that nothing calls this function.
+    # WHAT THAT MEANT FOR THE PARAGRAPH ABOVE: the gradient this return carries is the ONLY one
+    # world_proj receives, since every other tensor here is fed by loss_terms. It was the one
+    # tensor that still measured exactly 0.0 over those 60 windows, for the plain reason that
+    # nothing called this function; with the call site in place, and world_proj born zero, its
+    # gradient at the very first flush is nonzero (|dL/dW| 0.4197, seed 0) and |W| reads 1.027
+    # after 60 windows.
     # THE ENCODER AND THE POPULATION TAKE GRADIENT FROM THE LM LOSS THROUGH THIS PATH TOO, which is
     # a real coupling and not a side effect: `feedback` on means the latent is shaped by what makes
     # the language model better as well as by what predicts the latent forward, and that is the
@@ -734,8 +741,9 @@ def forecast(world: Config, w, obs_emb):
         # forecast that conditions the LM from one that is numerically absent, and the collapsed
         # latent is the state this subsystem has been in for every reading ever taken of it
         # (world/levers.py carries them) -- which is exactly the state in which world_proj's output
-        # goes small. Measured on a fresh build the term is 7.5% of the hidden state's own RMS and
-        # after 60 windows 0.4%, so the number moves and is worth printing. Read off the tensor
+        # goes small. On a fresh build the term is EXACTLY 0 (world_proj is born zero), and it
+        # grows as world_proj learns, so the number moves and is worth printing; its size relative
+        # to h is lm.encode.extra_ratio, the other half, formed where h exists. Read off the tensor
         # that leaves this function, detached, so the reading cannot hold the graph open past the
         # return.
         w.counters["world.forecast_rms"] = round(float(out.detach().pow(2).mean().sqrt()), 6)
@@ -744,9 +752,11 @@ def forecast(world: Config, w, obs_emb):
     # package away: lm.encode.extra_applied is the other half and the two must agree flush for
     # flush. A gap between them is a composition root that computed a forecast and dropped it, and
     # no counter inside WORLD can see that -- which is why the pair is named here rather than left
-    # to whoever reads the report. TODAY BOTH READ ABSENT: nothing calls this function, so the
-    # honest statement is "never reached", not "reached and worth 0".
+    # to whoever reads the report.
     w.counters["world.forecasts"] = w.counters.get("world.forecasts", 0) + 1
+    # THE LINEAGE FLAG load_into READS: a forecast was returned, so from here on world_proj is on
+    # a gradient path and a checkpoint of it holds a trained tensor, not a never-stepped draw.
+    w._proj_trained = True
     return out
 
 
@@ -943,6 +953,14 @@ def state_dict(world: Config, w):
     the first loss on the NEW material cannot detect the arrival of a new area, which is the one
     moment continual learning has a signal.
 
+    AND `proj_trained`, a bool: whether forecast() has ever returned a tensor in this lineage,
+    which is the only way world_proj can have received a gradient. load_into reads it to tell a
+    trained world_proj from a never-stepped one and re-zeroes the latter (Q-WORLD-10). It is a
+    DEDICATED FIELD rather than an inference from `counters` (`world.forecasts` present or not) so
+    that pruning or resetting WORLD's counters before a save can never re-zero a trained
+    world_proj on the next resume; load_into falls back to the counter inference only for blobs
+    written before the field existed, and says which it used.
+
     LEVERS READ: none
     WIRES READ: none
     DID IT FIRE: world.state_written
@@ -968,6 +986,7 @@ def state_dict(world: Config, w):
         # learning has a signal. Seeding it fresh on every resume is the same as not having it.
         "_wl_ema": None if w._wl_ema is None else float(w._wl_ema),
         "_wl_lastgrow": int(w._wl_lastgrow),
+        "proj_trained": bool(w._proj_trained),
         "counters": dict(w.counters),
         "rng": (w.rng._r.getstate(), int(w.rng._draws)) if getattr(w, "rng", None) else None,
     }
@@ -989,9 +1008,16 @@ def load_into(world: Config, w, sd):
     rebuilt `alive` from anything else would silently resurrect culled predictors, which is exactly
     what (b) refuses to do on purpose.
 
+    A world_proj NO FORECAST EVER REACHED IS REBORN ZERO (Q-WORLD-10): see the body.
+
     LEVERS READ: n0, nmax
     WIRES READ: none
-    DID IT FIRE: world.state_restored, world.state_refused
+    DID IT FIRE: world.state_restored, world.state_refused, world.proj_zeroed_on_load (loads,
+                 across the lineage like world.state_restored, that re-zeroed world_proj -- present
+                 and 0 when every load restored a trained one; ABSENT on a fresh run and on the
+                 null world), world.proj_trained_basis (a string gauge for THIS load: which
+                 evidence decided -- the saved `proj_trained` field, or the `world.forecasts`
+                 counter fallback for a blob that predates the field)
     """
     world = world.owned_by("WORLD")
 
@@ -1058,6 +1084,32 @@ def load_into(world: Config, w, sd):
         w.qproj.load_state_dict(sd["qproj"])
     if sd.get("world_proj") is not None and hasattr(w.world_proj, "load_state_dict"):
         w.world_proj.load_state_dict(sd["world_proj"])
+    # A world_proj NO FORECAST EVER REACHED IS REBORN ZERO. forecast() is its only gradient path,
+    # so a lineage in which forecast never returned a tensor never stepped it, and the saved tensor
+    # is some build()'s never-trained draw -- uniform(-0.1, 0.1) in every checkpoint written before
+    # the call site existed. Restoring it adds a random projection to a TRAINED hidden state on the
+    # first resumed flush, which is what build()'s zero exists to prevent and cannot prevent here,
+    # because the load overwrites it. MEASURED on a 150-window pre-wiring checkpoint: restored |W|
+    # 3.70398, the forecast 4.0% of h on the first resumed flush, which read 5.584440 -- against
+    # 5.591557 with the re-zero, exactly the unwired tree's own resume. So the re-zero buys
+    # EXACTNESS across the resume boundary, not loss: a resume is the experiment (ckpt/levers.py),
+    # and a boundary that silently changes the network is not one.
+    # THE SAVED FIELD DECIDES WHEN IT EXISTS; the counter inference is the fallback for blobs that
+    # predate it, because a counter can be pruned before a save and a pruned `world.forecasts`
+    # would silently re-zero a trained world_proj. Decided off `sd`, not off w.counters, so the
+    # merge below cannot change the answer.
+    if "proj_trained" in sd:
+        proj_trained = bool(sd["proj_trained"])
+        proj_basis = "saved proj_trained field"
+    else:
+        proj_trained = "world.forecasts" in (sd.get("counters") or {})
+        proj_basis = ("no proj_trained field (blob predates it): inferred from 'world.forecasts' "
+                      "in the saved counters")
+    w._proj_trained = proj_trained
+    if not proj_trained:
+        with torch.no_grad():
+            w.world_proj.weight.zero_()
+            w.world_proj.bias.zero_()
     with torch.no_grad():
         for field in ("preds", "keys"):
             if sd.get(field) is not None:
@@ -1070,6 +1122,14 @@ def load_into(world: Config, w, sd):
     w._wl_lastgrow = int(sd.get("_wl_lastgrow", 0))
     if sd.get("counters"):
         w.counters.update(sd["counters"])
+    # WRITTEN AFTER THE MERGE, ON BOTH ARMS. The parent's saved counters carry the parent's own
+    # values of these keys, so a value written before the update would be overwritten by them and
+    # this load would report the PARENT's re-zero (driven in the Q-WORLD-10 design round: a lineage
+    # resume that restored a trained world_proj read proj_zeroed_on_load 1 with the write placed
+    # before the merge; tests/test_world.py W3 now pins the after-merge reading).
+    w.counters["world.proj_zeroed_on_load"] = (
+        w.counters.get("world.proj_zeroed_on_load", 0) + (0 if proj_trained else 1))
+    w.counters["world.proj_trained_basis"] = proj_basis
     if sd.get("rng") and getattr(w, "rng", None) is not None:
         state, draws = sd["rng"]
         w.rng._r.setstate(state)

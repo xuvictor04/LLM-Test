@@ -956,6 +956,9 @@ returns the inert answer — D4's requirement, and the half the old tree failed:
 would have priced this package was the one ablation that could not run.
 **`forecast` reaches LM through `encode(extra=...)`, a parameter** — the monkey-patch at
 `:4158-4169` does not port, and it cost a run where a *timing probe* decided the outcome.
+**`world_proj` is born ZERO**, like FAB's `A`/`B` and WORLD's own `preds`, and `load_into` re-zeroes
+it when the checkpoint says no forecast ever reached it — by the saved `proj_trained` field, or for a
+blob that predates the field by `world.forecasts` being absent from its counters (**Q-WORLD-10**).
 Five undeclared constants (`w_cov=0.04`, `w_bal=0.01`, `min_mass=1e-3`, `tau=1.0`, the plateau pair)
 become **named module constants with a written reason** — not levers; the census never voted on them.
 **`nmax` caps LIVE predictors and a mint at the cap takes the lowest DEAD SLOT** (**Q-WORLD-8**,
@@ -3378,7 +3381,7 @@ field with it. The root additionally **cross-checks the five fields the live man
 `WORLD.geometry` both carry**, because the root is the only thing that sees both producers, and a
 field with two producers and no comparison is the shape this whole document is organised against.
 
-### Q-WORLD-10 — `WORLD.forecast` has a body and must NOT be wired yet — **HELD 2026-09-22: the body is correct and the network behind it has never been stepped. Do not give it a call site.**
+### Q-WORLD-10 — `WORLD.forecast` was held back from its call site — **RESOLVED 2026-09-24: `world_proj` is born ZERO, re-zeroed on load when no forecast ever reached it, and the call site exists (`spine/loop.py::_flush`, a `WORLD.forecast` LOOP_ORDER row). No signature moves.** (HELD 2026-09-22; the text down to the ruling is that hold, kept as history.)
 
 `forecast` was written on 2026-09-22 and is the one finished entry point in this tree that is
 deliberately left without a caller. The reason is not the body — it is what the body computes with.
@@ -3391,7 +3394,7 @@ deliberately left without a caller. The reason is not the body — it is what th
 | `hasattr(world, "parameters")` | **`False` when this was written; `True` as of the same day.** `World` is a `__slots__` record, not an `nn.Module`, so `OPT.build` could not reach its tensors and every run printed *"WORLD.world exposes no parameters(), so it contributes NOTHING to the 'base' param group"*. `World.parameters()` closes it: 10 tensors, 31,944 elements, all ten in the `base` group, and the warning is gone |
 | `preds` after `build` | **all zeros**, `(6, 32, 32)`, 3 slots live |
 | `max abs(pop(z) - z)` | **`1.19e-07`** — float32 round-off. `_route` is residual (`outs = z + einsum(z, preds[live])`) and `preds` is identically zero, so every live predictor returns `z` and a convex blend of identical rows is `z`. **The population half of the forecast is the identity, exactly** |
-| `world.forecast_rms` on one call | **`0.11047`** |
+| `world.forecast_rms` on one call | ~~`0.11047`~~ — **WRONG, corrected 2026-09-24: `0.002974` at the real call site, 7.6% of h's RMS `0.039029`.** `0.11047` was taken on a unit-variance synthetic input (`randn(4, 64, 128)` gives `0.1051`); `LM.embed`'s RMS at init is `0.0219` |
 
 When this was written, `world_proj(pop(z))` was `world_proj(encoder(obs_emb))` with **both maps at
 their random initialisation and no gradient path to move them**, and `forecast`'s own body recorded
@@ -3406,7 +3409,8 @@ the only gradient path it will ever have*.
 
 **So the hold now rests on one thing instead of two.** The population is no longer the identity and
 the latent is no longer a random draw, but a first call still adds `world_proj`'s
-`uniform(-0.1, 0.1)` projection — one measured call returns `world.forecast_rms` **0.11047** — and
+`uniform(-0.1, 0.1)` projection — one measured call returns `world.forecast_rms` **0.002974, 7.6%
+of h** (the `0.11047` first written here was a synthetic-input reading; see the table) — and
 `WORLD_FEEDBACK` already ships `True`, so a call site is the only thing withholding it. That is a
 **bootstrap**, which is what adding any head looks like, except that this tree has a rule for it and
 `world_proj` does not follow it: `fabric/api.py::build` zero-inits `A`/`B` so *"every expert is born
@@ -3421,6 +3425,87 @@ is expensive to answer after; (3) only then a call site, at which point `world.f
 `lm.encode.extra_applied` prices what it contributes. Until (2), this is **BUILT BUT NOT WIRED, ON
 PURPOSE**, and that is a third state beside `notes/07_WIP.md`'s three — worth naming, because the
 other two ways to leave it (no body, or a body and a call site) are both worse than this one.
+
+**THE RULING, 2026-09-24.** Step (2) is settled as **born-an-identity** and step (3) is done:
+
+- `world/api.py::build` zeroes `world_proj`'s weight and bias **after** the uniform draw, so the
+  generator stream is unchanged and `encoder`, `qproj` and `keys` hold exactly the values they held
+  before (`tests/test_world.py` W1 replays the draw and compares).
+- `spine/loop.py::_flush` passes `WORLD.forecast(...)` to `LM.encode` as `extra`, inside the same
+  autocast block; LOOP_ORDER gains a `("B", "WORLD", "forecast", ...)` row between `LM.embed` and
+  `encode/decode/lm_loss`, and `_CALLS["B"]` names it.
+- `WORLD.load_into` re-zeroes a `world_proj` no forecast ever reached. **Decided by a saved field,
+  not by a counter:** `WORLD.state_dict` now writes `proj_trained` (whether `forecast` has ever
+  returned a tensor in this lineage — the only way `world_proj` can have had a gradient), and
+  `load_into` uses it when present. Only a blob that predates the field falls back to "`world.forecasts`
+  absent from the saved counters". The report says which: `world.proj_trained_basis` (a string gauge
+  for this load) and `world.proj_zeroed_on_load` (re-zeroing loads, counted across the lineage like
+  `world.state_restored`, written **after** the counter merge so a parent's value cannot mask this
+  load's).
+- `LM.encode` writes two float gauges on its `extra` arm, `lm.encode.extra_ratio` (the latest
+  RMS(extra)/RMS(h), h taken before the add) and `lm.encode.extra_ratio_max`. `world.forecast_rms`
+  is half a reading, and only `encode` holds both halves. Both are ABSENT when no `extra` arrives.
+
+**Measured on this tree** (`DATA_STREAM_BYTES=200000`, one thread, CPU, 128-wide GRU; the
+"unwired" arm is the parent commit, and `WORLD_FEEDBACK=0` on this commit reproduces it exactly):
+
+| what | reading |
+|---|---|
+| flush-0 LM loss, wired against unwired | **equal to the bit**: 8.354218 / 8.277447 / 8.332117 on seeds 0 / 1 / 2, and 8.313601 at `LM_ARCH=transformer` |
+| the forecast at flush 0 | **exactly 0**; ‖dL/dW‖ on `world_proj.weight` **0.4197** (seed 0) — the path learns from the first backward |
+| ‖W‖ of `world_proj` | 0.00122 after one step, 1.027 after 60 windows, 2.195 after 300 (seed 0) |
+| `WORLD_FEEDBACK=0` against the parent commit | **bit-identical** loss curve over 300 flushes (max\|diff\| 0.0) |
+| wired minus unwired, paired by seed, 300 windows, seeds 0-4 (mean ± SE, seeds lower) | full run **-0.028 ± 0.020** (4/5); last 150 flushes **-0.058 ± 0.029** (4/5); last 100 **-0.099 ± 0.033** (5/5). Per seed, last 100: -0.183 / -0.023 / -0.170 / -0.076 / -0.042. SMALLER than the design round's -0.195 ± 0.022 (5 seeds, 400 windows), which was measured on the tree before the causality fix (Q-FAB-7) and is not comparable with it |
+| `lm.encode.extra_ratio` at 300 windows | latest 0.41-1.87, `extra_ratio_max` 0.74-3.08 over seeds 0-4 — the forecast is already the size of h |
+| resume of a 150-window **pre-wiring** checkpoint | restored ‖W‖ **3.70398**; without the re-zero the first flush reads **5.584440** with the forecast at 4.0% of h; with it **5.591557**, exactly the parent tree's own resume. `world.proj_zeroed_on_load` 1, basis the counter fallback |
+| resume of a 150-window **wired** checkpoint | `world_proj` restored trained (‖W‖ 1.6209), `world.proj_zeroed_on_load` 0, basis the saved field |
+
+**The contract's `0.11047` was wrong** (see the corrected row in the hold's table): at the real call
+site a first call of the old uniform `world_proj` added `world.forecast_rms` **0.002974, 7.6% of h's
+0.039029**.
+
+**Why the saved field and not the counter alone.** A counter-keyed guard re-zeroes a TRAINED
+`world_proj` the day anyone prunes or resets WORLD's counters before a save, silently, on the next
+resume. The field costs one payload key and no signature. The counter inference is kept only as the
+fallback for blobs written before the field existed — every such blob predates the call site too, so
+for them "no `world.forecasts`" and "never trained" are the same statement.
+
+**Rejected, with the numbers the design round measured (on the parent of the causality fix,
+3 to 5 seeds, 400 windows):**
+- *A learned gate `alpha = 0` over the uniform draw.* `dL/dW = alpha·(…)` is exactly 0 at birth
+  (`alpha` was 0.036 at step 100); pooled paired gain -0.017, i.e. nothing. It also adds a tensor to
+  OPT's `base` group (38 → 39), and every existing checkpoint's AdamW restore is then refused as
+  `param_group_shape` — which `spine/compose.py` discards (the `LoadReport` returned by
+  `opt_api.load_state` is not read; the only trace is `opt.ckpt.refused 1`). That discard is a
+  separate defect and is filed on its own, not here.
+- *A scheduled ramp `alpha = min(1, k/R)`.* Needs a new lever, a frozen-signature change and a clock
+  that survives a resume: `clock.opt_steps` restarts at 0 on resume while `clock.step` carries on, so
+  a ramp on the first restarts and a ramp on the second is already at 1 over an untrained draw.
+- *Wiring the uniform draw as it is.* Not exact at step 0 or across a resume, and the tree's own
+  rule ("every expert is born an identity") says no.
+- **The double-zero trap:** a zero gate ON TOP OF the zero `world_proj` left every gradient at
+  exactly 0.0 for 60 steps. Never add a multiplicative zero to this path.
+- *normal(std 1e-3) instead of zero.* Indistinguishable at step 0 (within 0.13% of h) and not
+  rankable on loss at this scale (two near-identical inits differ by up to 0.48 nats per 100-flush
+  block); zero is chosen for exactness and for the rule. It is the fallback if the GPU runs show the
+  zero start costs anything.
+
+**Open for the owner:**
+- The LM loss becomes the WORLD encoder's main teacher (0.196 of encoder[0]'s 0.204 gradient norm at
+  flush 300, design round), and WORLD's own loss rises (last-100 mean 0.443 → 0.530, seed 0).
+  Feeding `world_proj` `pop(z).detach()` would keep WORLD's loss at baseline for about half the LM
+  gain; not chosen, because performance decides and `forecast`'s docstring calls the coupling
+  deliberate.
+- **Nothing bounds the forecast's magnitude.** `lm.encode.extra_ratio_max` makes growth visible; it
+  does not prevent it.
+- MEM's keys come from `LM.encode` WITHOUT `extra` (`_key_fn`), while FAB and the readout see
+  h + forecast. Invisible until MEM.blend lands.
+- **Every default run from this commit on differs from earlier ones**, which stay comparable only at
+  `WORLD_FEEDBACK=0`. `sweep_world.sh`'s `feedback_off` arm is now the unwired control.
+
+**`WORLD_FEEDBACK` stays `True` pending the GPU experiment in `sweep_world.sh`** (5 seeds per arm,
+paired by seed, mean of loss_curve differences over the last half; flip the default if the gain is
+within noise).
 
 ### Q-TOK-10 — `TOK.save_vocabulary` takes no suffix, so M46 is not closed — **RESOLVED 2026-09-02: (b), OVERRULING THIS DOCUMENT'S OWN RECOMMENDATION (a). ⚠ A FROZEN SIGNATURE MOVED: `save_vocabulary(tok, vocab, *, suffix="")`**
 `CKPT.save` has a `suffix` and says *"THE SUFFIX APPLIES TO THE WHOLE SNAPSHOT"*;
