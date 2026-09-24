@@ -291,12 +291,20 @@ def _widened_rows(was, live):
 def _pad_moments(saved_opt, widened, group):
     """A COPY of one AdamW state_dict with every widened tensor's moments zero-padded along dim 0.
 
-    ZERO IS NOT A GUESS, IT IS WHAT AN UNINTERRUPTED RUN HOLDS THERE. The rows above the saved
-    count are slots no expert or token has occupied: in a run that had been built at the wider
-    size from the start, those rows receive an exactly-zero gradient on every step (the dense
-    tensor is stepped whole, and nothing reads an unoccupied row), so their exp_avg and exp_avg_sq
-    decay from zero to zero -- and this tree has no other moment handling at all (no birth or mint
-    resets a slot's moments). The per-parameter `step` is kept: AdamW's bias correction is per
+    ZERO IS EXACT FOR FAB SLOT ROWS AND FOR LM ROWS UNDER LM_MASK_DEAD_ROWS=1, AND AN APPROXIMATION
+    FOR LM HEAD ROWS AT THE SHIPPED LM_MASK_DEAD_ROWS=0. An unoccupied FAB slot is read by nothing,
+    so in a run built wide from the start it gets an exactly-zero gradient and its moments stay
+    zero (FAB_SLOTS=640 on a 512-slot parent resumes bit-identical to the unwidened control). A
+    never-minted LM HEAD row is different on the unmasked arm: it sits in the softmax denominator,
+    so every step pushes its logit down and its moments are small but NOT zero (measured 2026-09-24
+    after 2 default windows: head.weight exp_avg_sq nonzero on 3584 of 3584 never-minted rows, mean
+    4.0e-12, head.bias on all 3584; 0 of 3584 at LM_MASK_DEAD_ROWS=1; emb.weight 0 either way). Zero
+    there is below what an uninterrupted run holds, so the first steps on those rows are close to
+    sign-SGD at the full rate -- a larger push-down of logits no target uses, not a corruption of
+    any row that is. Padding them with the saved never-minted rows' mean moments would be closer,
+    but OPT does not know which rows are minted, and it was not measured to matter. This tree has
+    no other moment handling at all (no birth or mint resets a slot's moments). The per-parameter
+    `step` is kept: AdamW's bias correction is per
     tensor, and the saved rows' moments were accumulated under it. The checkpoint's own tensors are
     never modified in place.
     """

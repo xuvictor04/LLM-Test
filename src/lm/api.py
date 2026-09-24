@@ -1398,7 +1398,9 @@ def load_state(lm: Config, model, geom, saved):
     language got ZERO tokens of its own and was segmented entirely with the previous one's merges.
 
     REFUSES, by name and with both numbers: any NARROWING of vocab_slots; any change to width,
-    arch, resolved layers, heads, ctx/pos_max or compose; a missing key the live model has. The old
+    arch, resolved layers, heads, ctx/pos_max or compose; a change to max_token_bytes when compose
+    is on at either end (it sizes only the composer's byte tables, so with compose off at both it
+    is counted and named instead); a missing key the live model has. The old
     tree used strict=True on the model while the fabric loaded strict=False for exactly this
     reason, so adding one parameter to the LM made every existing checkpoint unresumable with a raw
     torch error (ISSUES P1-M49). A COMPOSE FLIP IS REFUSED IN BOTH DIRECTIONS and named: under compose
@@ -1412,7 +1414,8 @@ def load_state(lm: Config, model, geom, saved):
     LEVERS READ: vocab_slots (via geom)
     WIRES READ: none
     DID IT FIRE: lm.ckpt.loaded, lm.ckpt.rows_widened (the count, per tensor), lm.ckpt.refused
-                 (with the reason string, so a refusal is a Reading and not a traceback). On a
+                 (with the reason string, so a refusal is a Reading and not a traceback),
+                 lm.ckpt.max_token_bytes_moved (absent unless it moved with compose off). On a
                  load that is not refused, the parent's whole ledger (state_dict's "counters")
                  comes back first, except lm.resolve.* and lm.build.*, which are this process's
                  own.
@@ -1438,14 +1441,31 @@ def load_state(lm: Config, model, geom, saved):
     # at 16 was refused as LM_MAX_TOKEN_BYTES, the first time this refusal ever reached a reader).
     knob = {"max_token_bytes": "TOK_MAX_BYTES (LM.d_max_token_bytes)",
             "pos_max": "LM_CTX (LM.d_pos_max)"}
+    # max_token_bytes SIZES A TENSOR ONLY UNDER COMPOSE (2026-09-24). It is the width of the
+    # composer's byte tables (LM.composed_table) and nothing else in the model, so with compose off
+    # at both ends a move of it leaves every tensor the shape it was -- and refusing it stopped a
+    # resume whose restore is exact. Driven: a TOK_MAX_BYTES=12 child of a parent written at 16,
+    # with only the saved field edited to 12, restored 8 of 8 LM tensors and trained the same first
+    # three losses as the unchanged control resume. It is still refused whenever either end
+    # composes; with compose off it is counted (lm.ckpt.max_token_bytes_moved) and named in the
+    # report's reason, which the root turns into a startup warning.
+    _composes = bool(saved_geom.get("compose", False)) or bool(geom.compose)
+    mtb_moved = None
     for field in ("arch", "width", "layers", "heads", "ctx", "pos_max", "compose",
                   "max_token_bytes"):
         if field in saved_geom and saved_geom[field] != getattr(geom, field):
+            if field == "max_token_bytes" and not _composes:
+                mtb_moved = (saved_geom[field], getattr(geom, field))
+                continue
             return _refuse(
                 f"{knob.get(field, 'LM_' + field.upper())}: the checkpoint was written at "
                 f"{saved_geom[field]!r} and this "
-                f"run resolves {getattr(geom, field)!r}. The tensors do not fit and no prefix of "
-                f"them means anything. Resume with the saved value, or start a new run.")
+                f"run resolves {getattr(geom, field)!r}. "
+                + ("The composer's byte tables are sized by it (compose is on at "
+                   f"{'the checkpoint' if saved_geom.get('compose') else 'this run'}), so they do "
+                   f"not fit. " if field == "max_token_bytes" else
+                   "The tensors do not fit and no prefix of them means anything. ")
+                + "Resume with the saved value, or start a new run.")
     saved_slots = int(saved_geom.get("vocab_slots", geom.vocab_slots))
     live_slots = int(geom.vocab_slots)
     if saved_slots > live_slots:
@@ -1521,9 +1541,15 @@ def load_state(lm: Config, model, geom, saved):
 
     _bump("lm.ckpt.loaded")
     _bump("lm.ckpt.rows_widened", widened)
+    note = ""
+    if mtb_moved is not None:
+        _bump("lm.ckpt.max_token_bytes_moved")
+        note = (f"; TOK_MAX_BYTES (LM.d_max_token_bytes) moved {mtb_moved[0]!r} -> "
+                f"{mtb_moved[1]!r}, which sizes no LM tensor with compose off at both ends")
     return LoadReport(widened=widened, refused=False,
                       reason=(f"{widened} tensor(s) widened by prefix, {saved_slots} -> "
-                              f"{live_slots} rows" if widened else "fitted exactly, nothing widened"))
+                              f"{live_slots} rows" if widened else "fitted exactly, nothing widened")
+                             + note)
 
 
 

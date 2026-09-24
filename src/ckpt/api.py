@@ -844,6 +844,12 @@ def resume_source(ckpt: Config):
     # raw lever, and both non-bare forms were refused for a missing parent vocabulary that was on
     # disk (driven 2026-09-24). The two now share ONE string rule, spine/derive.py::checkpoint_base,
     # which is the run base both the file below and '<base>.dyntok.json' are built from.
+    # A DIRECTORY IS TESTED FIRST, BECAUSE A RUN DIRECTORY MAY ITSELF END IN '.pt' (2026-09-24).
+    # CKPT_DIR='runs/q.pt' saves 'runs/q.pt/ckpt.pt', and the '.pt' shortcut below returned the
+    # directory as though it were the file, so its resume was refused as a path that "does not
+    # exist". The shortcut stays for a file of any name.
+    if os.path.isdir(raw):
+        return os.path.join(raw, "ckpt.pt")
     if raw.endswith(".pt"):
         return raw
     base = derive.checkpoint_base(raw, file_form=True)

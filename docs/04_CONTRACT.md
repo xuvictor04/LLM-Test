@@ -4647,7 +4647,14 @@ ln 4096 = 8.32). **Ruling:** both reports are bound (`System.lm_load`,
 — run.py already stops on any refusal before a tensor is trained — and `loop.run` now raises on a
 System that carries one, so a driver that skips run.py's check cannot train through it either. The
 LM refusal now names `TOK_MAX_BYTES (LM.d_max_token_bytes)` and `LM_CTX (LM.d_pos_max)` instead of
-upper-casing a wire's field name (`LM_MAX_TOKEN_BYTES` is not a lever). **Rejected:** raising at the
+upper-casing a wire's field name (`LM_MAX_TOKEN_BYTES` is not a lever). **And the driving case was
+itself a false refusal, corrected later on 2026-09-24:** `max_token_bytes` sizes only the composer's
+byte tables, and the composer cannot be built (`LM_COMPOSE=1` raises `NotBuilt`), so on the only arm
+that runs a `TOK_MAX_BYTES` move leaves every LM tensor its shape — a copy of the parent with only the
+saved field edited to 12 restored 8 of 8 tensors and trained the control resume's first three losses
+bit-for-bit. `LM.load_state` now refuses it only when compose is on at either end; otherwise it counts
+`lm.ckpt.max_token_bytes_moved`, names the move in its reason, and the root warns
+(`tests/test_resume.py` R1b; R1 now drives the refusal with a `pos_max` the live model lacks). **Rejected:** raising at the
 `restore.lm` stage (run.py reads `sysm.base_params` and `sysm.process` before it prints refusals, so
 an early exit turns a named refusal into a traceback — **superseded by Q-RUN-13**, where the exception
 carries the System and run.py prints from it); adding `lm.max_token_bytes` to the geometry
@@ -4684,9 +4691,18 @@ stood at `opt_step 3` and a rate of 7.6e-5 — the warmup re-run — against 1.9
 counts and order equal, rank and every trailing dimension equal, live dim 0 ≥ saved — and pads
 `exp_avg`/`exp_avg_sq` of the widened tensors with **zeros** for the new rows, keeping each tensor's
 `step`; counted as `opt.ckpt.moments_widened` (seeded 0 on every restore that reaches the test).
-**Zero is exact, not a guess:** in a run built wide from the start, an unoccupied row gets an exactly
-zero gradient every step and its moments stay zero, and nothing in the tree resets a slot's moments on
-birth or mint. After: `FAB_SLOTS=640` on a 512-slot parent restored 2 widened tensors, `opt_step 160`,
+**Zero is exact for FAB slot rows, and for LM rows only under `LM_MASK_DEAD_ROWS=1`:** in a run built
+wide from the start, an unoccupied FAB slot gets an exactly zero gradient every step and its moments
+stay zero, and nothing in the tree resets a slot's moments on birth or mint. **At the shipped
+`LM_MASK_DEAD_ROWS=0` a never-minted head row is in the softmax denominator**, so its true moments are
+small but nonzero (2026-09-24, 2 default windows: `head.weight` `exp_avg_sq` nonzero on 3584 of 3584
+never-minted rows, mean 4.0e-12, `head.bias` likewise; 0 of 3584 under the mask; `emb.weight` 0
+either way). For an `LM_VOCAB_SLOTS` widening zero padding is therefore an approximation: the new
+head rows' first updates are close to sign-SGD at the full rate, pushing down logits no target uses.
+It is kept (OPT does not know which rows are minted, so the saved never-minted rows' mean is not
+available to it without a new argument, and the difference was not measured to matter). An
+`LM_VOCAB_SLOTS` child is not loss-identical to its control for a separate reason as well: the new
+head rows keep their init and join the unmasked softmax. After: `FAB_SLOTS=640` on a 512-slot parent restored 2 widened tensors, `opt_step 160`,
 and its first three resumed losses were **bit-identical** to the unwidened control's. Anything else
 still refuses (ISSUES P1-L50), and the refusal now names the first differing tensor, since the
 per-group summary is identical on both sides of a pure shape change. `counters()`'s
@@ -4706,7 +4722,9 @@ rebuilt from the checkpointed curve and `sig.warmup_*` counters, takes no draw o
 counts `sig.warmup_skipped_resume` (seeded 0 on the learned arm) and prints Gate `sig.adaptive_stop`
 UNREACHABLE with a `RESUMED` reason. The root's collapsing-verdict warning reads the parent's verdict,
 so a collapsed parent still marks its child. After: encoder identical to the checkpoint, cosine 1.0,
-0 of 160 centroid changes. **Rejected:** a `SIG_REWARM_ON_RESUME` lever (the lever's own note says
+0 of 160 centroid changes. **`SIG_WARMUP` is therefore inert on a resume**, and an operator who
+sets it explicitly there gets a startup warning saying so (added later on 2026-09-24; before it a
+resume at `SIG_WARMUP=1500` skipped the warm-up with no word naming the lever). **Rejected:** a `SIG_REWARM_ON_RESUME` lever (the lever's own note says
 more steps degrade the encoder past 1000–4000, and re-warming stacks per resume; it can be added the
 day someone asks for the behaviour by name); warming then restoring the saved encoder (pays the
 budget to discard it).
@@ -4721,7 +4739,10 @@ headroom 0). **Ruling:** `CAP.state` records each arm's provenance (`armed_*`, `
 takes a saved cap only on an arm armed now **and** at save, follows the live ceiling when the saved cap
 was at its saved ceiling (the sentinel's state), clamps to the live hard ceiling, and says which in
 `origin`; `CAP.restore` restores the pin clocks and high-water marks and still counts
-`cap.state_refused` when an operator's value beat a saved cap. A checkpoint without provenance keys is
+`cap.state_refused` when an operator's value beat a saved cap **that `new_valve` would have taken**
+(armed now, not saved unarmed, not at its saved ceiling — until a later 2026-09-24 fix it also counted
+caps never on offer, e.g. a parent saved with `armed_experts` False resumed at `CAP_TARGETS=experts
+CAP_FAB_START=400` read `state_refused 1`). A checkpoint without provenance keys is
 taken as the old restore took it, on an armed arm only, and `origin` says it carries none.
 **Rejected:** reading the saved hard ceiling from the snapshot's geometry manifest at the root (a
 second producer for a CAP fact); keeping the cap writes in `restore` behind a `targets` test (two

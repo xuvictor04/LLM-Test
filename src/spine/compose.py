@@ -2371,6 +2371,9 @@ def compose(environ=None, *, restored=None):
         # manifest carries no max_token_bytes), restored 0 of 8 LM tensors, restored OPT at
         # opt_step 160, and printed 0 refusals; its first three resumed losses were 8.14 / 8.07 /
         # 7.92 (ln 4096 = 8.32, a random model) against 7.35 / 7.40 / 7.43 on the control resume.
+        # THAT DRIVING CASE IS NO LONGER A REFUSAL: max_token_bytes sizes only the composer's
+        # tables, so with compose off LM.load_state restores all 8 tensors and names the move, and
+        # the elif below warns (Q-CKPT-4). Every other geometry refusal takes this path.
         # The refusal is APPENDED here and RAISED at the next stop point, after
         # CAP.startup_refusals (_stop_if_refused), so the operator hears every refusal the
         # configuration earns in one run rather than one per attempt; RefusedRun carries the
@@ -2384,6 +2387,10 @@ def compose(environ=None, *, restored=None):
                 f"LM.load_state refused the checkpoint {sysm.resume_src!r}: "
                 f"{sysm.lm_load.reason} Continuing would train a randomly initialised language "
                 f"model under the parent's optimizer state, fabric, memory and domains.")
+        elif "TOK_MAX_BYTES" in sysm.lm_load.reason:
+            # A MOVED TOK_MAX_BYTES WITH COMPOSE OFF IS RESTORED EXACTLY AND SAID (2026-09-24): it
+            # sizes no LM tensor on that arm, so LM.load_state names it instead of refusing.
+            sysm.warnings.append(f"LM.load_state: {sysm.lm_load.reason}.")
 
     sysm.stage = "signature"
     sysm.sig = sig_api.build(
@@ -2651,6 +2658,19 @@ def compose(environ=None, *, restored=None):
     sysm.warmup = sig_api.warm_up(sig, sysm.sig, stream=_signature_stream(sysm, sig),
                                   seen_units=_signature_units(sysm, sig),
                                   opt=sysm.optimizer.encoder)
+    # AN OPERATOR WHO SETS SIG_WARMUP ON A RESUME IS TOLD IT IS INERT (2026-09-24). The restored
+    # encoder is not re-warmed at any budget (Q-SIG-2), so a resume launched to warm longer -- off a
+    # SIG_WARMUP=0 parent, say -- got nothing and heard nothing: driven, CKPT_RESUME=<160-window
+    # parent> SIG_WARMUP=1500 skipped the warm-up with no warning naming the lever.
+    # SIG decides whether the lever was set (sig.warmup_budget_ignored, the budget asked for); the
+    # root only says it, because the root does not read a package's Config.given().
+    _ignored = int(getattr(sysm.sig, "counters", {}).get("sig.warmup_budget_ignored", 0) or 0)
+    if _ignored:
+        sysm.warnings.append(
+            f"SIG_WARMUP={_ignored} is INERT on this resume: the checkpoint restored a trained "
+            f"encoder, and SIG.warm_up does not re-warm a restored encoder at any budget (Q-SIG-2) "
+            f"-- the warm-up report is the parent's. Start a new run to warm with a different "
+            f"budget.")
     # WHAT THE ROOT DOES WITH IT, AND WHAT IT DELIBERATELY DOES NOT DO. Neither
     # sig/api.py::warm_up nor docs/04_CONTRACT.md's SIG section says what "act on it" MEANS:
     # both say the verdict is a run-level failure and stop there. So the report is CARRIED to

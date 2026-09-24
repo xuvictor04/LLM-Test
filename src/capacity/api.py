@@ -1738,7 +1738,8 @@ def restore(cap: Config, valve, state):
 
     An EXPLICIT operator request still wins over the checkpoint -- see new_valve -- and is still
     COUNTED here as cap.state_refused, because this is the entry point that knows a checkpoint's cap
-    was on offer.
+    was on offer -- and ONLY when it was: armed now, not saved on an unarmed arm, not saved at its
+    own ceiling, which is new_valve's test for taking it.
 
     LEVERS READ: targets, fab_start, vocab_start
     WIRES READ: none
@@ -1760,8 +1761,21 @@ def restore(cap: Config, valve, state):
     # `restored`, applied the operator / off / unarmed / checkpoint precedence and recorded the
     # answer in Valve.origin -- so this loop only COUNTS the arms where an operator's request beat a
     # saved cap. It used to write the saved cap onto every other arm, gated on nothing.
-    for field, lever_name in (("cap_experts", "fab_start"), ("cap_vocab", "vocab_start")):
-        if lever_name in asked and state.get(field) is not None:
+    # ONLY A CAP THAT WAS ON OFFER CAN BE REFUSED (2026-09-24). This counted every arm with a saved
+    # cap and an operator lever, so a cap saved on an UNARMED arm, or any cap under CAP_TARGETS=off
+    # or on an arm `targets` does not name -- none of which new_valve would have taken -- read as
+    # "an operator's request beat a saved cap". Driven: a parent saved with armed_experts False,
+    # resumed at CAP_TARGETS=experts CAP_FAB_START=400, printed state_refused 1, while the same
+    # checkpoint without the lever resolves to the sentinel and never offers its cap. The test is
+    # new_valve's checkpoint branch's: armed now, not saved unarmed, not saved at its own ceiling.
+    targets = str(cap.targets)
+    for field, lever_name, arm in (("cap_experts", "fab_start", "experts"),
+                                   ("cap_vocab", "vocab_start", "vocab")):
+        saved_hard = state.get("hard_" + arm)
+        on_offer = (state.get(field) is not None and targets in (arm, "both")
+                    and state.get("armed_" + arm) is not False
+                    and not (saved_hard is not None and int(state[field]) >= int(saved_hard)))
+        if lever_name in asked and on_offer:
             # COUNTED, BECAUSE A REFUSAL THAT CANNOT BE COUNTED IS THE STATE THIS PACKAGE EXISTS TO
             # MAKE READABLE. This is the THIRD state and not an error: a checkpoint whose lifted cap
             # loses to an explicit request is refused ON PURPOSE, and that has to be separable from

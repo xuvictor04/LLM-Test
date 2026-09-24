@@ -1471,11 +1471,17 @@ def checkpoint_base(path, *, file_form, suffix=""):
     '<dir>/.dyntok.json', and build_vocabulary refused a parent whose vocabulary was on disk at
     '<dir>.dyntok.json' (driven 2026-09-24). This function is both readers' rule now.
 
-    `file_form` SAYS WHICH LEVER IS ASKING. A RESUME may name the checkpoint FILE, so a trailing
-    component ending in '.pt' is dropped back to its directory ('runs/x.best3/ckpt.pt' ->
-    'runs/x.best3', which is exactly the base the best-snapshot save spliced its suffix into). A
-    SAVE DIR is always a directory, so only its trailing separators go ('runs/x/' -> 'runs/x',
-    which the save side turned into 'runs/x/.dyntok.json' -- a file no bare-form resume looks for).
+    `file_form` SAYS WHICH LEVER IS ASKING. A RESUME may name the checkpoint FILE, and CKPT.save
+    writes exactly one file name, '<dir>/ckpt.pt' plus the snapshot's suffix (ckpt/api.py::save), so
+    a trailing component named 'ckpt.pt<suffix>' is mapped to '<dir><suffix>': 'runs/x/ckpt.pt' ->
+    'runs/x', and a best snapshot 'runs/x/ckpt.pt.best3' -> 'runs/x.best3', which is the base
+    TOK.save_vocabulary spliced the same suffix into ('runs/x.best3.dyntok.json'). ONLY THAT NAME IS
+    STRIPPED (2026-09-24). The rule was "any trailing component ending in '.pt'", which also cut a
+    run DIRECTORY named 'q.pt' back to its parent -- CKPT_DIR accepts that name and saves under it,
+    and its resume then read the wrong vocabulary -- and it described the best-snapshot layout as
+    'runs/x.best3/ckpt.pt', which CKPT.save never writes. A SAVE DIR is always a directory, so only
+    its trailing separators go ('runs/x/' -> 'runs/x', which the save side turned into
+    'runs/x/.dyntok.json' -- a file no bare-form resume looks for).
 
     `suffix` IS SPLICED ONTO THE BASE, AND AN UNSET PATH STAYS '' WHATEVER THE SUFFIX. That is the
     couplings' "empty in, empty out" rule -- CKPT_DIR='' is saving off and CKPT_RESUME='' is no
@@ -1489,8 +1495,10 @@ def checkpoint_base(path, *, file_form, suffix=""):
     if not raw:
         return ""
     base = raw.rstrip("/\\") or raw[:1]
-    if file_form and base.endswith(".pt"):
-        # A BARE 'ckpt.pt' IS IN THE CURRENT DIRECTORY, whose base is '.', the same answer a save
-        # dir of '.' gives -- not '', which would read as "no parent".
-        base = base.replace("\\", "/").rpartition("/")[0] or "."
+    if file_form:
+        head, _, leaf = base.replace("\\", "/").rpartition("/")
+        if leaf == "ckpt.pt" or leaf.startswith("ckpt.pt."):
+            # A BARE 'ckpt.pt' IS IN THE CURRENT DIRECTORY, whose base is '.', the same answer a
+            # save dir of '.' gives -- not '', which would read as "no parent".
+            base = (head or ".") + leaf[len("ckpt.pt"):]
     return base + suffix

@@ -1274,9 +1274,10 @@ def warm_up(sig: Config, st, *, stream, seen_units, opt):
     load_state_dict has put a trained encoder back (st.encoder_restored) the warm-up already
     happened -- in the run that wrote the checkpoint -- and running it again is SIG_WARMUP more
     optimizer steps on a trained encoder that an uninterrupted run never takes. Until this ruling
-    it ran on every resume: driven on a 160-window parent, the encoder AdamW went from step 957 to
-    1757, mean cosine between the parent's and the resumed encoder's signatures over the same 160
-    windows was 0.38, and 101 of 160 windows changed nearest DOM centroid -- centroids the restore
+    it ran on every resume: driven on a 160-window parent, the encoder AdamW went from step 956 to
+    1756, mean cosine between the parent's and the resumed encoder's signatures over the same 160
+    windows was 0.53 (Q-SIG-2's numbers; this docstring said 957 -> 1757 and 0.38 until a re-drive
+    corrected it), and 101 of 160 windows changed nearest DOM centroid -- centroids the restore
     had just put back, measured in the space the re-warm moved away from. It also replaced the
     checkpointed curve and verdict (docs/04_CONTRACT.md's SIG section lists "warmup curve and its
     verdict" as checkpointed) with a pass the parent never made, and took a draw off the restored
@@ -1302,6 +1303,9 @@ def warm_up(sig: Config, st, *, stream, seen_units, opt):
                  decides it, 1 when a restored encoder made this call return the parent's report;
                  ABSENT on the bigram arm, which has no encoder to restore. Gate sig.adaptive_stop
                  is then UNREACHABLE with that reason, since no stop could fire on steps not taken.
+                 sig.warmup_budget_ignored -- present on that resume arm only: the SIG_WARMUP an
+                 operator set explicitly and did not get (0 when it was left at its default); the
+                 root turns a nonzero into a startup warning.
     """
     sig = sig.owned_by("SIG")
     mode = str(sig.mode)
@@ -1313,6 +1317,12 @@ def warm_up(sig: Config, st, *, stream, seen_units, opt):
         # THE RESUME. See this docstring's RESUME paragraph: the encoder was warmed by the run that
         # wrote it, and the record of that warm-up came back with it.
         st.counters["sig.warmup_skipped_resume"] = 1
+        # AN EXPLICIT SIG_WARMUP IS INERT HERE, AND THAT IS COUNTED FOR THE ROOT TO SAY (2026-09-24).
+        # The value is the budget the operator asked for and did not get; 0 means the lever was left
+        # at its default. Seeded on this arm before the branch that decides it (G4).
+        st.counters["sig.warmup_budget_ignored"] = 0
+        if "warmup" in sig.given():
+            st.counters["sig.warmup_budget_ignored"] = int(budget)
         curve = list(getattr(st, "warmup_curve", None) or [])
         c = st.counters
         verdict = c.get("sig.warmup_verdict") or "budget"

@@ -547,13 +547,20 @@ def check_c4_table_resolves():
 # normalised all of them before loading, and the TOK.d_vocab_read_path compute appended its tail to the
 # RAW lever -- so 'runs/parent/ckpt.pt' read 'runs/parent/ckpt.pt.dyntok.json' and 'runs/parent/' read
 # 'runs/parent/.dyntok.json', and build_vocabulary refused both for a missing parent vocabulary that was
-# on disk (driven 2026-09-24). C4's fixture is the bare form, the one spelling that worked. The last row
-# is a rotation snapshot: its suffix is on the DIRECTORY, so the base keeps it and nothing adds it again.
+# on disk (driven 2026-09-24). C4's fixture is the bare form, the one spelling that worked. A best
+# snapshot is the file CKPT.save writes, '<dir>/ckpt.pt.best3', with its vocabulary at
+# '<dir>.best3.dyntok.json'; a directory that happens to carry the suffix keeps it. A run directory
+# NAMED '*.pt' is a directory, not a checkpoint file: the rule stripped any '.pt' leaf until
+# 2026-09-24, so CKPT_DIR='runs/q.pt' saved a run its own resume could not read.
 RESUME_SPELLINGS = {
     ("runs/parent", True):          "runs/parent.dyntok.json",
     ("runs/parent/", True):         "runs/parent.dyntok.json",
     ("runs/parent/ckpt.pt", True):  "runs/parent.dyntok.json",
+    ("runs/x/ckpt.pt.best3", True): "runs/x.best3.dyntok.json",
     ("runs/x.best3/ckpt.pt", True): "runs/x.best3.dyntok.json",
+    ("runs/q.pt", True):            "runs/q.pt.dyntok.json",
+    ("runs/q.pt/ckpt.pt", True):    "runs/q.pt.dyntok.json",
+    ("runs/q.pt", False):           "runs/q.pt.dyntok.json",
     # AND THE SAVE SIDE, WHICH HAD THE SAME HOLE FROM THE OTHER END: CKPT_DIR='runs/a/' wrote its
     # vocabulary to 'runs/a/.dyntok.json', which no bare-form resume of that run looks for.
     ("runs/a/", False):             "runs/a.dyntok.json",

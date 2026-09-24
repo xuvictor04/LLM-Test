@@ -11,7 +11,8 @@ refusal, or a piece of state that did not cross the boundary, and none of them f
       root discarded it, so a TOK_MAX_BYTES change trained a random model under the parent's
       optimizer, fabric and memory. The refusal must reach System.refusals, compose() must raise
       RefusedRun before the optimizer and the SIG warm-up, and loop.run must not train a System
-      that carries one.
+      that carries one. R1b: TOK_MAX_BYTES itself sizes no LM tensor with compose off, so that
+      move now restores all of them and is warned; it still refuses under compose.
   R2  A WIDENED RESUME KEEPS ITS OPTIMIZER. FAB_SLOTS / LM_VOCAB_SLOTS widening made OPT.load_state
       refuse on param_group_shape, which the root also discarded: empty moments, opt_step 0, a
       re-run warmup. A dim-0 widening must restore with padded moments; any other shape change
@@ -82,11 +83,26 @@ def parent():
     return p, snapshot_of(p, PARENT_WINDOWS)
 
 
+def _doctored(snap, **lm_geometry):
+    """`snap` with fields of the LM's saved geometry replaced: a checkpoint written at another
+    LM geometry, without a second parent run."""
+    payload = dict(snap.payload)
+    lm = dict(payload["LM"])
+    lm["geometry"] = dict(lm["geometry"], **lm_geometry)
+    payload["LM"] = lm
+    return snap._replace(payload=payload) if hasattr(snap, "_replace") else \
+        __import__("dataclasses").replace(snap, payload=payload)
+
+
 def r1(snap):
     # compose() RAISES RefusedRun ON A REFUSED RESTORE (2026-09-24) and the partial System rides on
     # the exception; it used to return the System with the refusal on it and keep building.
+    # THE TRIGGER IS A pos_max THE LIVE MODEL DOES NOT HAVE, not TOK_MAX_BYTES=12: since 2026-09-24
+    # max_token_bytes is refused only when compose is on at either end (R1b), and no other lever
+    # moves an LM geometry field past the root's geometry gate on the shipped arm.
+    bad = _doctored(snap, pos_max=int(snap.payload["LM"]["geometry"]["pos_max"]) + 1)
     try:
-        build(restored=snap, TOK_MAX_BYTES=12)
+        build(restored=bad)
         check("R1 compose raises RefusedRun on a refused LM restore", False, "compose returned")
         return build(restored=snap)
     except RefusedRun as e:
@@ -97,8 +113,8 @@ def r1(snap):
     named = [r for r in c.refusals if r.startswith("LM.load_state refused")]
     check("R1 a refused LM restore is carried onto System.refusals",
           bool(named) and c.lm_load is not None and c.lm_load.refused, named[:1])
-    check("R1 the refusal names the lever an operator moves (TOK_MAX_BYTES), not a wire",
-          bool(named) and "TOK_MAX_BYTES" in named[0] and "LM_MAX_TOKEN_BYTES" not in named[0])
+    check("R1 the refusal names the lever an operator moves (LM_CTX), not a wire",
+          bool(named) and "LM_CTX (LM.d_pos_max)" in named[0] and "LM_POS_MAX" not in named[0])
     try:
         loop.run(c, max_windows=PARENT_WINDOWS + 1, progress=False)
         check("R1 loop.run refuses a System carrying refusals", False, "it trained")
@@ -107,7 +123,31 @@ def r1(snap):
     ok = build(restored=snap)
     check("R1 control: an unchanged resume restores LM and carries no refusal",
           not ok.refusals and ok.lm_load is not None and not ok.lm_load.refused, ok.refusals[:1])
-    return ok
+    # R1b. TOK_MAX_BYTES SIZES ONLY THE COMPOSER'S BYTE TABLES, so with compose off at both ends a
+    # move of it restores every LM tensor exactly and is SAID, not refused (2026-09-24).
+    mv = build(restored=snap, TOK_MAX_BYTES=12)
+    saved_mod = snap.payload["LM"]["module"]
+    live_mod = mv.model.state_dict()
+    same = sum(1 for k in live_mod if k in saved_mod and torch.equal(live_mod[k].cpu(),
+                                                                     saved_mod[k].cpu()))
+    check("R1b TOK_MAX_BYTES moved with compose off: no refusal, every LM tensor restored",
+          not mv.refusals and not mv.lm_load.refused and same == len(live_mod),
+          f"refusals {mv.refusals[:1]}; {same} of {len(live_mod)} tensors equal to the saved ones")
+    check("R1b ... and it is counted and warned, naming TOK_MAX_BYTES",
+          lm_api._COUNTS.get("lm.ckpt.max_token_bytes_moved") == 1
+          and any("TOK_MAX_BYTES" in w and "16 -> 12" in w for w in mv.warnings),
+          f"lm.ckpt.max_token_bytes_moved={lm_api._COUNTS.get('lm.ckpt.max_token_bytes_moved')}")
+    check("R1b ... and a checkpoint written under compose still refuses",
+          _raises_lm_refusal(_doctored(snap, compose=True), TOK_MAX_BYTES=12))
+    return build(restored=snap)
+
+
+def _raises_lm_refusal(snap, **env):
+    try:
+        build(restored=snap, **env)
+    except RefusedRun as e:
+        return any(r.startswith("LM.load_state refused") for r in e.system.refusals)
+    return False
 
 
 def r2(snap):
@@ -216,6 +256,16 @@ def r5():
     cap_api.restore(pinned, nv, earned)
     check("R5 an operator's request still wins, and the refused checkpoint cap is counted",
           nv.cap_experts == 400 and nv.counters.get("cap.state_refused") == 1)
+    # A CAP NEVER ON OFFER IS NOT "REFUSED" (2026-09-24): saved on an unarmed arm, or under a
+    # targets value that does not arm it now, new_valve would not have taken it either.
+    for restored, env, label in ((off, {"CAP_TARGETS": "experts"}, "saved UNARMED"),
+                                 (earned, {"CAP_TARGETS": "off"}, "CAP_TARGETS=off now")):
+        cfg = valve(CAP_FAB_START=400, **env)
+        nv = cap_api.new_valve(cfg, restored=restored)
+        cap_api.restore(cfg, nv, restored)
+        check(f"R5 an operator's request over a cap never on offer ({label}) counts no refusal",
+              nv.counters.get("cap.state_refused", 0) == 0,
+              f"cap.state_refused={nv.counters.get('cap.state_refused')}")
 
 
 def r6(snap):
