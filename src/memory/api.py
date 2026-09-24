@@ -459,6 +459,11 @@ def open_store(mem: Config, *, key_dim, vocab_slots, device, rng, lm_kind, resto
         # the capacity opened, the rows this restore placed and refused, the block count and the
         # census width -- so the blob may not overwrite them; everything else is the previous
         # segment's tally and carries forward.
+        # THE GENERATOR COMES BACK WITH THE ROWS, so the next eviction continues the parent's
+        # stream instead of replaying its first draws. A blob written before the key existed has
+        # none, and the store keeps the freshly seeded stream -- the pre-2026-09-24 behaviour.
+        if restored.get("gen") is not None:
+            store.gen.set_state(torch.as_tensor(restored["gen"], dtype=torch.uint8).cpu())
         _seeded = set(store.counters)
         for _k, _v in dict(restored.get("counters") or {}).items():
             if _k in _seeded:
@@ -2727,7 +2732,8 @@ def state_dict(mem: Config, store):
     """The checkpoint blob. Everything mutable that the store cannot re-derive: keys, tok, src,
     pos, ctx, own, active, use, last, born, prob, selfcon, recon, nsrc_max, gate_theta,
     gate_seeded, ctx_w, live_src, the rekey cursor, the write counter behind use_decay_every, the
-    tick clocks, and every store.n_* counter.
+    tick clocks, every store.n_* counter, and (since 2026-09-24) the victim sampler's generator
+    state, `gen`.
 
     TWO OF THOSE NAMES ARE NEW AND ONE OF THE TWO WAS ALREADY HERE. `live_src` is DOM's last
     verdict on which sources are alive, and it is the only scalar in this blob that is not a
@@ -2824,6 +2830,12 @@ def state_dict(mem: Config, store):
         # each live domain got shrank by that ratio at the resume boundary, silently.
         "live_src": int(store.live_src),
         "counters": dict(store.counters),
+        # THE VICTIM SAMPLER'S GENERATOR, WHICH DID NOT CROSS UNTIL 2026-09-24. Every eviction draws
+        # its candidate pool off store.gen, and SIG, FAB and WORLD each save their own stream while
+        # this one was re-seeded from the subsystem name on every resume -- so a resumed run
+        # REPLAYED the parent's first eviction choices (driven: the child's generator state was
+        # byte-identical to a freshly seeded memory.torch stream). A CPU ByteTensor on every device.
+        "gen": store.gen.get_state().clone(),
     }
     store.counters["store.n_state_dicts"] = store.counters.get("store.n_state_dicts", 0) + 1
     return out

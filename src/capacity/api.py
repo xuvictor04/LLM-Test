@@ -586,14 +586,26 @@ def new_valve(cap: Config, *, restored=None):
     indexing nothing -- 6144 of them at 8192 reserved against 2048 minted -- so the run measures
     the reservation and not the mechanism. LM owns the output layer, so it arrives as a wire.
 
-    `restored` IS KEYED BY THE START LEVERS' OWN NAMES -- restored["fab_start"] and
-    restored["vocab_start"] carry the LIFTED caps -- and that convention is written here because the
-    only other end of it, CAP.state, is still a stub. Keying the payload on the Valve's field names
-    instead (cap_experts / cap_vocab) would make restored.get("fab_start") return None on every
-    resume, silently: the valve would fall through to the sentinel and a run that spent hours
-    lifting would resume at its hard ceiling with `origin` truthfully reporting "sentinel". That is
-    the M38 family again, and an unwritten key convention between a live body and a stub is exactly
-    where it comes back.
+    `restored` IS KEYED BY THE VALVE'S FIELD NAMES -- restored["cap_experts"] and
+    restored["cap_vocab"] carry the caps, because that is what CAP.state writes. THIS PARAGRAPH
+    SAID THE OPPOSITE UNTIL 2026-09-24 ("keyed by the start levers' own names ... fab_start /
+    vocab_start"), written while CAP.state was a stub, and it predicted the failure exactly: the
+    body read restored["fab_start"], CAP.state wrote "cap_experts", so the checkpoint branch below
+    never ran on any checkpoint this tree writes and `origin` said "sentinel" or "off" for every
+    resume. CAP.restore then wrote the caps back ungated -- onto an OFF valve, and onto a widened
+    one at the old ceiling (driven: a clean FAB_SLOTS=1024 resume of a 512-slot parent came back
+    with cap_experts 512 against a hard ceiling of 1024, origin "off"). The unwritten key
+    convention between a live body and a stub is where M38 came back, as this paragraph said it
+    would.
+    THE CHECKPOINT'S CAP IS TAKEN ONLY FOR AN ARM THE VALVE GOVERNS NOW AND GOVERNED WHEN IT WAS
+    SAVED. CAP.state records each arm's `armed_*` flag and `hard_*` ceiling beside its cap, because
+    a cap saved under "off" -- or on an arm `targets` does not name -- is the hard ceiling at that
+    time and not an earned number; installing it as a soft cap after a slot widening freezes the
+    new capacity behind the old ceiling. A saved cap AT its saved ceiling is the sentinel ("start at
+    the hard ceiling"), so it follows the ceiling to the live one. Every cap taken is clamped to the
+    live hard ceiling: FAB_SLOTS / LM_VOCAB_SLOTS narrowing is refused by the geometry gate, so the
+    clamp only bites a checkpoint written before the provenance keys, which carry no `armed_*` and
+    are taken as the pre-2026-09-24 restore took them, and say so in `origin`.
 
     REFUSES AT STARTUP, BY LEVER NAME, WITH BOTH NUMBERS IN THE MESSAGE. Two values are refused and
     EITHER ONE ALONE is enough: CAP_LIFT < 0, and CAP_LIFT_MIN < 0. EITHER NEGATIVE CAN LOWER A CAP,
@@ -636,9 +648,12 @@ def new_valve(cap: Config, *, restored=None):
                      own cap_experts / cap_vocab, and the counters below pair them. The sources are
                      a closed set of four: "off (valve disabled; ...)" when targets is off,
                      "operator (<lever>=<n>)" and its sentinel form "operator (<lever>=0, the
-                     sentinel) -> hard ceiling <n>", "checkpoint (lifted to <n>)", and
-                     "sentinel 0 -> hard ceiling <n>". A cap that came from the wrong place is
-                     visible because the four are spelled differently.
+                     sentinel) -> hard ceiling <n>", "checkpoint (lifted to <n>...)" and its
+                     at-ceiling form "checkpoint (at its hard ceiling <m>) -> hard ceiling <n>",
+                     and "sentinel 0 -> hard ceiling <n>" (with a parenthesis when a checkpoint's
+                     cap was on offer and was saved on an unarmed arm). A cap that came from the
+                     wrong place is visible because the four are spelled differently -- which is
+                     how the checkpoint source was found never to appear (Q-CAP-3).
                  (2) Valve.counters -- cap.targets, the two caps, the two hard ceilings, the two
                      origins (which is the pairing (1) leaves to the reader), cap.mask_dead_rows,
                      the honesty precondition, added 2026-09-04 because observe's new
@@ -808,7 +823,7 @@ def new_valve(cap: Config, *, restored=None):
             f"reason both are refused rather than the exception to the first. CAP_LIFT above 1 is "
             f"NOT refused: it is a large lift, not a lowering one. {yours}")
 
-    def _resolve(given, asked, hard, what):
+    def _resolve(given, asked, hard, what, arm):
         """Where a starting cap comes from, in the order the four branches below decide it.
 
         `targets == "off"` FIRST -- the valve disabled means the starting caps are not applied
@@ -851,10 +866,32 @@ def new_valve(cap: Config, *, restored=None):
             if int(asked) == 0:
                 return hard, f"operator ({what}=0, the sentinel) -> hard ceiling {hard}"
             return int(asked), f"operator ({what}={asked})"
-        if restored is not None and restored.get(what) is not None:
+        field = "cap_" + arm
+        if (restored is not None and restored.get(field) is not None
+                and targets in (arm, "both")):
             # THE LIFTED CAP IS EARNED STATE, NOT A KNOB. Rebuilding it from the environment on
             # every resume handed a run that had spent hours lifting its starting cap back.
-            return int(restored[what]), f"checkpoint (lifted to {int(restored[what])})"
+            # READ UNDER THE KEY CAP.state WRITES -- `restored[what]` (the lever's name) matched
+            # nothing any checkpoint carries, so this branch was unreachable until 2026-09-24.
+            # AND ONLY ON AN ARM `targets` ARMS: `off` is handled above, and an arm `targets` does
+            # not name is not governed by the valve either, so a saved number is not applied to it.
+            saved_cap = int(restored[field])
+            was_armed = restored.get("armed_" + arm)
+            saved_hard = restored.get("hard_" + arm)
+            if was_armed is False:
+                # SAVED UNDER A VALVE THAT DID NOT GOVERN THIS ARM: the number is the ceiling at
+                # save time, not an earned cap, so the sentinel resolves instead -- and says why.
+                return hard, (f"sentinel 0 -> hard ceiling {hard} (the checkpoint's {field}="
+                              f"{saved_cap} was saved on an UNARMED arm and is not earned state)")
+            if saved_hard is not None and saved_cap >= int(saved_hard):
+                # AT ITS SAVED CEILING IS THE SENTINEL'S STATE, so it follows the ceiling: a slot
+                # widening on resume must not come back capped at the old hard ceiling.
+                return hard, (f"checkpoint (at its hard ceiling {int(saved_hard)}) -> hard "
+                              f"ceiling {hard}")
+            taken = min(saved_cap, hard)
+            tail = "" if was_armed is not None else "; checkpoint carries no arm provenance"
+            clamp = "" if taken == saved_cap else f", clamped from {saved_cap}"
+            return taken, f"checkpoint (lifted to {taken}{clamp}{tail})"
         # THE SENTINEL. 0 means START AT THE HARD CEILING -- no room to earn -- and it must be a
         # sentinel rather than a literal because lever.py refuses a default computed from another
         # lever, so the number it stands for can only arrive as the wire.
@@ -864,8 +901,8 @@ def new_valve(cap: Config, *, restored=None):
     # it is the answer to "did the operator ask", and it is the only correct source -- reading
     # os.environ here would be the L2 violation the whole spine removes.
     asked = cap.given()
-    ce, oe = _resolve("fab_start" in asked, cap.fab_start, hard_experts, "fab_start")
-    cv, ov = _resolve("vocab_start" in asked, cap.vocab_start, hard_vocab, "vocab_start")
+    ce, oe = _resolve("fab_start" in asked, cap.fab_start, hard_experts, "fab_start", "experts")
+    cv, ov = _resolve("vocab_start" in asked, cap.vocab_start, hard_vocab, "vocab_start", "vocab")
 
     valve = Valve(cap_experts=ce, cap_vocab=cv, origin=(oe, ov))
     valve.counters = {
@@ -1602,7 +1639,10 @@ def startup_refusals(cap: Config, valve, *, live_experts):
 
 
 def state(valve):
-    """The lifted caps AND the two pin clocks AND the high-water marks, for the checkpoint.
+    """The lifted caps AND the two pin clocks AND the high-water marks, for the checkpoint -- and,
+    since 2026-09-24, each cap's PROVENANCE (armed_experts / armed_vocab, hard_experts /
+    hard_vocab), which new_valve needs to tell an earned cap from a hard ceiling saved on an arm
+    the valve did not govern.
 
     Adding the PIN CLOCKS is a change from the old tree and it is half of the M38 fix; the lifted
     caps were already saved at :5423 and the clocks were not, so the valve resumed with an earned
@@ -1641,6 +1681,16 @@ def state(valve):
         "best_improving": float(valve.best_improving), "stall_checks": int(valve.stall_checks),
         "last_window": int(valve.last_window),
     }
+    # THE CAPS' PROVENANCE TRAVELS WITH THEM (2026-09-24). A cap saved on an arm the valve did not
+    # govern -- every arm under the shipped CAP_TARGETS=off -- is that moment's HARD CEILING, not an
+    # earned number, and a resume that widened FAB_SLOTS installed it as a soft cap below the new
+    # ceiling. new_valve reads these to take a saved cap only where it was earned. Read off the
+    # ledger new_valve seeded, because that is where the valve keeps what it was built under.
+    targets = str(valve.counters.get("cap.targets", ""))
+    for arm in ("experts", "vocab"):
+        payload["armed_" + arm] = targets in (arm, "both")
+        hard = valve.counters.get("cap.hard_" + arm)
+        payload["hard_" + arm] = None if hard is None else int(hard)
     # THE LEDGER KEY, NOT AN ATTRIBUTE. This line used to be declared as `valve.state_written`,
     # which is neither a field of Valve nor produced anywhere, so the one signal saying the
     # checkpoint carried the valve's earned state had no home a reader could find.
@@ -1649,9 +1699,24 @@ def state(valve):
 
 
 def restore(cap: Config, valve, state):
-    """Put the lifted caps, the pin clocks and the high-water marks back; symmetric with state().
+    """Put the pin clocks and the high-water marks back. THE CAPS ARE new_valve'S, NOT THIS
+    FUNCTION'S.
 
-    An EXPLICIT operator request still wins over the checkpoint -- see new_valve.
+    IT WROTE THE CAPS TOO UNTIL 2026-09-24, and that was the half of the resume that was wrong.
+    new_valve takes the lifted cap so Valve.origin records where the starting cap came from
+    (spine/compose.py's `valve` row and docs/04_CONTRACT.md say restore puts back "the two pin clocks
+    and the high-water marks"); this function then overwrote whatever new_valve resolved with the
+    saved number, on every arm the operator had not pinned -- under CAP_TARGETS=off, which "MUST
+    ALSO MEAN THE STARTING CAPS ARE NOT APPLIED", and after a slot widening at the old ceiling --
+    without touching Valve.origin or the cap.cap_* / cap.origin_* ledger, so the report named an
+    origin for a number that came from somewhere else. Driven: a checkpoint doctored to
+    cap_experts == n_live resumed at the shipped off valve with Caps(experts=n_live) and "off
+    (valve disabled; the cap is the hard ceiling)" beside it, and a regression-triggered birth was
+    declined at headroom 0.
+
+    An EXPLICIT operator request still wins over the checkpoint -- see new_valve -- and is still
+    COUNTED here as cap.state_refused, because this is the entry point that knows a checkpoint's cap
+    was on offer.
 
     LEVERS READ: targets, fab_start, vocab_start
     WIRES READ: none
@@ -1668,20 +1733,18 @@ def restore(cap: Config, valve, state):
     asked = cap.given()
     # AN EXPLICIT OPERATOR REQUEST STILL WINS OVER THE CHECKPOINT, and this is the branch new_valve
     # points at. Taking the max instead made CAP_FAB_START=8 lose to a checkpoint that had reached
-    # 48, which left the startup refusal unreachable on every checkpoint written from then on. The
-    # cap is left exactly as new_valve resolved it -- new_valve has already seen `restored` and has
-    # already recorded the operator's number in Valve.origin -- so this loop restores only the arms
-    # the operator did NOT pin.
+    # 48, which left the startup refusal unreachable on every checkpoint written from then on. THE
+    # CAP IS LEFT EXACTLY AS new_valve RESOLVED IT ON EVERY ARM -- new_valve has already seen
+    # `restored`, applied the operator / off / unarmed / checkpoint precedence and recorded the
+    # answer in Valve.origin -- so this loop only COUNTS the arms where an operator's request beat a
+    # saved cap. It used to write the saved cap onto every other arm, gated on nothing.
     for field, lever_name in (("cap_experts", "fab_start"), ("cap_vocab", "vocab_start")):
-        if lever_name in asked:
+        if lever_name in asked and state.get(field) is not None:
             # COUNTED, BECAUSE A REFUSAL THAT CANNOT BE COUNTED IS THE STATE THIS PACKAGE EXISTS TO
             # MAKE READABLE. This is the THIRD state and not an error: a checkpoint whose lifted cap
             # loses to an explicit request is refused ON PURPOSE, and that has to be separable from
             # "no checkpoint at all", which reaches the early return above and counts nothing.
             valve.counters["cap.state_refused"] = valve.counters.get("cap.state_refused", 0) + 1
-            continue
-        if state.get(field) is not None:
-            setattr(valve, field, int(state[field]))
     # THE KINDS GO BACK ON HERE, because state() took them off to travel. Windows, because the pin
     # clocks accumulate WINDOWS -- units.py reserves Steps for the LR horizon, and applying the
     # other repair as well would fire the valve 16x too early at BATCH_W=16.

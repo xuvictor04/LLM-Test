@@ -381,6 +381,16 @@ def _payload(sysm):
         "OPT": opt_api.state_dict(cfg["OPT"], sysm.optimizer),
         "DATA": data_api.stream_state(cfg["DATA"], sysm.areas),
         "TOK": tok_api.vocab_state(cfg["TOK"], sysm.vocab),
+        # THE ROOT'S OWN STATE, UNDER A KEY NO PACKAGE OWNS, AND THE ONE EXCEPTION TO THE PARAGRAPH
+        # ABOVE. System.token_seen is the per-token appearance counter the loop allocates and
+        # advances (LM.anchor_term's `token_seen`, TOK.judge_probation's `appearances`); no package
+        # owns it, so no package's state_dict can carry it, and until 2026-09-24 nothing did: every
+        # resumed process started it at None, so LM.anchor_term held every minted row at full
+        # weight again and judge_probation counted only post-resume appearances. The root is the
+        # only thing that knows it exists, which is why the root writes it here and
+        # spine/compose.py::compose puts it back.
+        "LOOP": {"token_seen": (None if sysm.token_seen is None
+                                else sysm.token_seen.detach().cpu().clone())},
     }
 
 
@@ -492,7 +502,18 @@ def run(sysm, *, max_windows=None, progress=True):
     through epochs and DATA owns its length through the corpus, and a knob here that could cut a
     run short would be a second answer to "how long is this run" that no report reads. It exists so
     a smoke test can be a smoke test, and a run that stops because of it SAYS SO in warnings.
+
+    A System CARRYING REFUSALS IS NOT RUN. run.py stops on System.refusals before it gets here
+    ("REFUSALS STOP THE RUN BEFORE A TENSOR IS TRAINED"), and that was the only stop: a driver
+    that called compose() and then this function trained through every refusal. Since 2026-09-24
+    the refusals include a refused LM or OPT restore, where training means a randomly initialised
+    model or cold moments under the parent's name, so the stop is enforced here as well.
     """
+    if getattr(sysm, "refusals", None):
+        raise RuntimeError(
+            f"loop.run: this System carries {len(sysm.refusals)} refusal(s) and is not run -- "
+            f"compose() appends a refusal instead of raising so a report can be printed, and "
+            f"training past one is the state it exists to prevent. First: {sysm.refusals[0]}")
     cfg = sysm.configs
     run_cfg, lm_cfg, tok_cfg = cfg["RUN"], cfg["LM"], cfg["TOK"]
     fab_cfg, sig_cfg, dat_cfg, opt_cfg = cfg["FAB"], cfg["SIG"], cfg["DATA"], cfg["OPT"]

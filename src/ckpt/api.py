@@ -38,6 +38,7 @@ import torch
 from spine.lever import Config, LeverError
 from spine.gate import Gate
 from spine import units as U
+from spine import derive
 
 
 # ==================================================================================================
@@ -804,9 +805,17 @@ def resume_source(ckpt: Config):
         return None
     # BOTH SUPPORTED FORMS NORMALISE TO THE FILE. `RESUME=runs/x/` and `RESUME=runs/x/ckpt.pt` are
     # both documented, and the sibling-vocabulary guess broke on the second because it appended
-    # `.dyntok.json` to a path that already ended in `.pt` (ISSUES P1-M19). Normalising here means
-    # every later consumer -- the vocabulary read path among them -- sees one shape.
-    return os.path.join(raw, "ckpt.pt") if raw.endswith(("/", os.sep)) or os.path.isdir(raw) else raw
+    # `.dyntok.json` to a path that already ended in `.pt` (ISSUES P1-M19). THIS COMMENT CLAIMED
+    # "every later consumer -- the vocabulary read path among them -- sees one shape" and the
+    # vocabulary read path never saw this function's result: spine/assemble.py computed it from the
+    # raw lever, and both non-bare forms were refused for a missing parent vocabulary that was on
+    # disk (driven 2026-09-24). The two now share ONE string rule, spine/derive.py::checkpoint_base,
+    # which is the run base both the file below and '<base>.dyntok.json' are built from.
+    if raw.endswith(".pt"):
+        return raw
+    base = derive.checkpoint_base(raw, file_form=True)
+    return os.path.join(base, "ckpt.pt") if raw.endswith(("/", os.sep)) or os.path.isdir(base) \
+        else raw
 
 
 def load(ckpt: Config):

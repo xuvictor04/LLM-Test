@@ -437,6 +437,12 @@ def open_partition(dom: Config, *, sig_dim, vocab_slots, device, rng, restored=N
         # run to whatever the parent was in the middle of.
         part.cur = -1
         part.run, part.run_sig, part.pend = 0, None, None
+        # THE STREAM CONTINUES WHERE THE PARENT LEFT IT; see state_dict. A blob older than the key
+        # keeps the freshly seeded stream.
+        if restored.get("rng") and getattr(part, "rng", None) is not None:
+            _state, _draws = restored["rng"]
+            part.rng._r.setstate(_state)
+            part.rng._draws = int(_draws)
 
     part.counters = {
         "part.n_opened": len(part.cent),
@@ -1834,7 +1840,8 @@ def state_dict(dom: Config, part):
     boundary clock and per-domain birth-boundary, merge chains, radii and the pooled radius, the
     TOKEN HISTOGRAMS, the COMPETENCE EMAs and the population baseline, and the ADJACENT-DISTANCE
     HISTORY the relative shift test calibrates on. The four capitalised ones are the omissions that
-    each disarmed a live mechanism at the run boundary (M51).
+    each disarmed a live mechanism at the run boundary (M51). And this package's RNG stream, `rng`,
+    since 2026-09-24.
 
     LEVERS READ: none (a pure read of `part`)
     WIRES READ: none
@@ -1890,6 +1897,11 @@ def state_dict(dom: Config, part):
         # value AFTER restoring it, so grace re-arms against the real clock rather than expiring
         # against a zero.
         "nb": int(part.nb),
+        # THIS PACKAGE'S RNG STREAM, which did not cross until 2026-09-24 while SIG's, FAB's and
+        # WORLD's did, in the same (state, draws) shape. part.rng decides reservoir replacement and
+        # _absorb's pooled resample; re-seeded on every resume, the child REPLAYED the parent's
+        # first choices (driven: 79 draws in a 160-window parent, 0 in its resumed child).
+        "rng": (part.rng._r.getstate(), int(part.rng._draws)) if getattr(part, "rng", None) else None,
     }
     # `cur`, `run`, `run_sig` and `pend` ARE NOT SAVED, and open_partition resets them. The current
     # domain is a property of the STREAM POSITION and the resume starts a new stream; carrying it

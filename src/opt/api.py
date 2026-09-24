@@ -255,6 +255,71 @@ def _normalised_shape(shape):
     return tuple(out)
 
 
+def _widened_rows(was, live):
+    """Which tensors a resume WIDENED along dim 0, or None when the difference is anything else.
+
+    THE L50 GUARD'S OWN TERMS, WITH ONE DIRECTION ADMITTED. Group names, tensor counts and group
+    order must match EXACTLY, and every tensor must keep its rank and every trailing dimension; only
+    dim 0 may differ, and only upward. That is the geometry gate's MAY_WIDEN rule
+    (spine/compose.py::_geometry_manifest: fab.slots, fab.cap, lm.vocab_slots) seen from the
+    optimizer's side -- LM.load_state and FAB.load_state_dict widen exactly those tensors by prefix,
+    so slot i is still slot i and its moments still belong to it. Any other difference returns
+    None and load_state refuses, because a positional moment restore across it attaches one
+    tensor's moments to another.
+
+    Returns a tuple of (group index, tensor index, saved shape, live shape) -- EMPTY when the two
+    shapes are equal.
+    """
+    was, live = _normalised_shape(was), _normalised_shape(live)
+    if len(was) != len(live):
+        return None
+    out = []
+    for g, (a, b) in enumerate(zip(was, live)):
+        if a[0] != b[0] or a[1] != b[1] or len(a[2]) != len(b[2]):
+            return None
+        for i, (sa, sb) in enumerate(zip(a[2], b[2])):
+            if sa == sb:
+                continue
+            if len(sa) != len(sb) or not sa or sa[1:] != sb[1:] or sa[0] > sb[0]:
+                return None
+            out.append((g, i, sa, sb))
+    return tuple(out)
+
+
+def _pad_moments(saved_opt, widened, group):
+    """A COPY of one AdamW state_dict with every widened tensor's moments zero-padded along dim 0.
+
+    ZERO IS NOT A GUESS, IT IS WHAT AN UNINTERRUPTED RUN HOLDS THERE. The rows above the saved
+    count are slots no expert or token has occupied: in a run that had been built at the wider
+    size from the start, those rows receive an exactly-zero gradient on every step (the dense
+    tensor is stepped whole, and nothing reads an unoccupied row), so their exp_avg and exp_avg_sq
+    decay from zero to zero -- and this tree has no other moment handling at all (no birth or mint
+    resets a slot's moments). The per-parameter `step` is kept: AdamW's bias correction is per
+    tensor, and the saved rows' moments were accumulated under it. The checkpoint's own tensors are
+    never modified in place.
+    """
+    idx = {i: (sa, sb) for g, i, sa, sb in widened if g == group}
+    if not idx:
+        return saved_opt
+    state = {}
+    for key, entry in dict(saved_opt.get("state", {})).items():
+        k = int(key)
+        if k not in idx:
+            state[key] = entry
+            continue
+        sa, sb = idx[k]
+        grown = {}
+        for name, value in dict(entry).items():
+            if torch.is_tensor(value) and tuple(value.shape) == tuple(sa):
+                pad = torch.zeros(sb, dtype=value.dtype, device=value.device)
+                pad[:sa[0]] = value
+                grown[name] = pad
+            else:
+                grown[name] = value
+        state[key] = grown
+    return {**saved_opt, "state": state}
+
+
 def _shape_summary(shape):
     """The one-line form of a param_group_shape, for a refusal message."""
     return ", ".join(f"{row[0]}:{row[1]} tensor(s)" for row in shape) or "(no groups)"
@@ -2217,7 +2282,22 @@ def counters(opt: Config, st):
     # opt.ckpt.horizon_changed HAD NO GATE AND NO REPORT LINE, so the one counter that says a
     # resume changed the schedule's horizon was an unannounced integer in a dict -- while
     # load_state's own docstring singles that resume out as the case it REPORTS rather than refuses.
-    if not ckpt_loaded:
+    # A REFUSED RESTORE IS NOT "NO CHECKPOINT", and the unreachable sentence below said it was:
+    # opt.ckpt.loaded == 0 is true of a fresh run AND of a resume whose restore load_state refused,
+    # and the second printed "no checkpoint has been loaded in this process" over a process that was
+    # handed one. The refusal itself stops the run at the root (spine/compose.py appends the
+    # LoadReport's reason to System.refusals), so this arm is read only by a driver that builds a
+    # ledger anyway -- which is exactly the reader that must not be told nothing was offered.
+    ckpt_refused = int(st.counters.get("opt.ckpt.refused", 0))
+    if not ckpt_loaded and ckpt_refused:
+        gates.append(Gate("opt.ckpt.horizon_changed", False, horizon_changed, "a checkpoint loaded",
+                          reachable=False,
+                          reason=f"a checkpoint WAS offered and its restore was REFUSED "
+                                 f"(opt.ckpt.refused == {ckpt_refused}, opt.ckpt.loaded == 0), so "
+                                 f"no boundary was crossed for a horizon to change across. The "
+                                 f"refusal's reason is on the LoadReport OPT.load_state returned, "
+                                 f"which the composition root carries onto System.refusals."))
+    elif not ckpt_loaded:
         gates.append(Gate("opt.ckpt.horizon_changed", False, horizon_changed, "a checkpoint loaded",
                           reachable=False,
                           reason="no checkpoint has been loaded in this process (opt.ckpt.loaded "
@@ -2350,10 +2430,16 @@ def state_dict(opt: Config, st):
 def load_state(opt: Config, st, saved):
     """Restore, or refuse by name. Returns a LoadReport.
 
-    REFUSES when saved.param_group_shape differs from the live one: the optimizer moment restore in
-    the old tree did not verify that the module composition matched the checkpoint (ISSUES P1-L50),
-    and AdamW state is POSITIONAL over param groups, so a changed group order silently attaches one
-    tensor's moments to another. REPORTS rather than refuses when the horizon changed (a legitimate
+    REFUSES when saved.param_group_shape differs from the live one in anything but a dim-0
+    WIDENING: the optimizer moment restore in the old tree did not verify that the module
+    composition matched the checkpoint (ISSUES P1-L50), and AdamW state is POSITIONAL over param
+    groups, so a changed group order silently attaches one tensor's moments to another. A WIDENING
+    -- same groups, same counts, same order, same trailing dimensions, dim 0 grown -- IS RESTORED,
+    with the new rows' moments zero-padded (_pad_moments says why zero is exact), because it is
+    the add-an-area resume the geometry gate's MAY_WIDEN rule admits and LM.load_state and
+    FAB.load_state_dict already widen by prefix. Until 2026-09-24 it was refused like any other
+    difference, and the root discarded the refusal, so every such child trained from empty moments
+    with the LR warmup re-run. REPORTS rather than refuses when the horizon changed (a legitimate
     resume at a different run length), and prints both horizons.
 
     A BLESSED RESUME USED TO MAKE counters() RAISE, AND IT BLAMED THE WRONG DEFECT. OPT_ACCUM is a
@@ -2373,6 +2459,9 @@ def load_state(opt: Config, st, saved):
     LEVERS READ: none
     WIRES READ: none
     DID IT FIRE: opt.ckpt.loaded, opt.ckpt.refused (with the reason),
+                 opt.ckpt.moments_widened (how many tensors' moments were zero-padded for a dim-0
+                 widening; seeded at 0 on every restore that reaches the shape test, ABSENT on a
+                 process that restored nothing),
                  opt.ckpt.horizon_changed (the resume this docstring singles out as REPORTED rather
                  than refused. It was written here, named in no DID IT FIRE line and given no Gate
                  and no report line by counters(), so the one counter that says a resume changed
@@ -2398,18 +2487,39 @@ def load_state(opt: Config, st, saved):
                    "the L50 guard to compare against -- and a positional moment restore taken "
                    "without that comparison is exactly what the guard exists to stop.")
     was = tuple(tuple(r) if isinstance(r, (list, tuple)) else r for r in was)
-    if _normalised_shape(was) != _normalised_shape(live):
+    # THE WIDENING IS SEEDED BEFORE THE TEST THAT DECIDES IT (G4): present-and-0 on every restore
+    # that got this far, so "no tensor widened" reads as a measurement, not as an arm never reached.
+    st.counters["opt.ckpt.moments_widened"] = 0
+    widened = _widened_rows(was, live)
+    if widened is None:
+        # THE SENTENCE NAMES WHAT DIFFERS, not just that something does. The summary alone prints
+        # "base:38 tensor(s), encoder:3 tensor(s)" on BOTH sides for a pure shape change -- a
+        # refusal that reads as self-contradictory -- so the first differing tensor is named.
+        first = next(((str(a[0]), i, sa, sb)
+                      for a, b in zip(_normalised_shape(was), _normalised_shape(live))
+                      for i, (sa, sb) in enumerate(zip(a[2], b[2])) if sa != sb), None)
         st.counters["opt.ckpt.refused"] += 1
         return LoadReport(
             restored=False, refused=True,
             reason=f"param_group_shape disagrees (ISSUES P1-L50). Checkpoint: "
-                   f"{_shape_summary(was)}; live: {_shape_summary(live)}. AdamW state is POSITIONAL "
-                   f"over param groups, so restoring across this difference attaches one tensor's "
-                   f"moments to another and the run trains on scrambled second moments with every "
-                   f"loss curve looking plausible.")
+                   f"{_shape_summary(was)}; live: {_shape_summary(live)}"
+                   + (f"; first differing tensor: group {first[0]!r} #{first[1]}, "
+                      f"{first[2]} saved against {first[3]} live" if first else "")
+                   + ". Only a dim-0 WIDENING with every trailing dimension equal is restored "
+                   f"(opt.ckpt.moments_widened); anything else is refused, because AdamW state is "
+                   f"POSITIONAL over param groups and restoring across this difference attaches "
+                   f"one tensor's moments to another -- the run would train on scrambled second "
+                   f"moments with every loss curve looking plausible.")
 
-    st.base.load_state_dict(saved["base"])
-    st.encoder.load_state_dict(saved["encoder"])
+    # A DIM-0 WIDENING IS RESTORED, NOT REFUSED. Until 2026-09-24 the exact comparison above was the
+    # whole test, so every add-an-area resume -- FAB_SLOTS or LM_VOCAB_SLOTS widened, the resume the
+    # geometry gate's MAY_WIDEN rule exists to allow and LM/FAB already widen by prefix -- was
+    # refused here, and the root discarded the refusal: the child trained from EMPTY moments with
+    # opt_step 0 and a re-run LR warmup. The moments are padded with zeros for the new rows (see
+    # _pad_moments for why zero is exact) and everything else restores as usual.
+    st.counters["opt.ckpt.moments_widened"] = len(widened)
+    st.base.load_state_dict(_pad_moments(saved["base"], widened, 0))
+    st.encoder.load_state_dict(_pad_moments(saved["encoder"], widened, 1))
     st.opt_step = U.Steps(int(saved["opt_step"]))
     st.n_backward = U.Backwards(int(saved["n_backward"]))
     st.lr_prev = float(saved["lr_prev"])
@@ -2428,6 +2538,10 @@ def load_state(opt: Config, st, saved):
             continue
         st.counters[key] = value
     st.counters["opt.ckpt.loaded"] += 1
+    # RE-STAMPED AFTER THE COUNTER RESTORE ABOVE, which would otherwise overwrite this process's
+    # widening count with a parent's (a resume of a resume that widened) -- the same reason the
+    # accumulation boundary below is stamped after it.
+    st.counters["opt.ckpt.moments_widened"] = len(widened)
 
     # THE ACCUMULATION BOUNDARY, STAMPED AFTER THE RESTORE SO THE RESTORE CANNOT OVERWRITE IT.
     # counters() measures `backward // accum == step` from these two numbers, because OPT_ACCUM is a

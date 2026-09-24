@@ -4573,20 +4573,40 @@ def state_dict(fab: Config, pop):
         # THE SIDECAR load_state_dict REFUSES AGAINST. Three widths produced one error message in
         # the old tree (:4678-4684) -- "it can be failing on FAB_EMB_HID, SIG_D or D_MODEL and no
         # prefix of it means anything" -- so each is carried separately and refused by name.
-        "sidecar": {
-            "slots": int(pop.cap), "rank": int(pop.A.shape[2]), "dk": int(pop.A.shape[1]),
-            "signature_dim": int(pop.cent.shape[1]),
-        },
+        # `dk` WAS pop.A.shape[1] UNTIL 2026-09-24, WHICH IS d_model AND NOT FAB_DK: A is
+        # (cap, d_model, rank), so a checkpoint at the shipped FAB_DK=32 recorded dk=128, this
+        # package's own dk refusal compared d_model against d_model and could never fire for the
+        # lever it names, and FAB_EMB_HID -- in load_state_dict's LEVERS READ -- was not recorded at
+        # all. Each width is now read off the module it sizes; the geometry gate
+        # (spine/compose.py::_geometry_manifest's fab.dk and fab.emb_hid) was the only check of
+        # either until then.
+        "sidecar": _sidecar_of(pop),
     }
     pop.counters["fab.state_written"] = pop.counters.get("fab.state_written", 0) + 1
     return out
 
 
+def _sidecar_of(pop):
+    """The five widths load_state_dict refuses on, plus the slot count, READ OFF WHAT THEY SIZE.
+
+    ONE FUNCTION FOR BOTH SIDES, so the save's record and the load's comparison cannot name one
+    field after two different quantities again -- which is how `dk` came to mean d_model on both
+    sides at once and compare equal on every FAB_DK change.
+    """
+    return {
+        "slots": int(pop.cap), "rank": int(pop.A.shape[2]), "d_model": int(pop.A.shape[1]),
+        "dk": int(pop.modules["q_route"].out_features),
+        "emb_hid": int(pop.modules["eemb"][0].out_features),
+        "signature_dim": int(pop.cent.shape[1]),
+    }
+
+
 def load_state_dict(fab: Config, pop, sd, *, sidecar):
     """Restore the population, REFUSING A GEOMETRY CHANGE BY NAME.
 
-    rank and dk are INNER dimensions and cannot be prefix-widened; slots may widen but never
-    narrow; signature_dim must match. Each refusal NAMES the field. The old tree recorded tensors
+    rank, dk, emb_hid and d_model are INNER dimensions and cannot be prefix-widened; slots may widen
+    but never narrow; signature_dim must match. Each refusal NAMES the field. (dk and emb_hid are
+    compared since 2026-09-24; the sidecar's `dk` was d_model before, see state_dict.) The old tree recorded tensors
     failing shape checks with no way to tell whether FAB_EMB_HID, SIG_D or D_MODEL was to blame --
     three widths, one error message (:4678-4684).
 
@@ -4602,14 +4622,19 @@ def load_state_dict(fab: Config, pop, sd, *, sidecar):
 
     if not sd:
         return pop
-    live = {"slots": int(pop.cap), "rank": int(pop.A.shape[2]), "dk": int(pop.A.shape[1]),
-            "signature_dim": int(pop.cent.shape[1])}
+    live = _sidecar_of(pop)
     was = dict(sidecar or {})
+    if "d_model" not in was and "dk" in was:
+        # A SIDECAR WRITTEN BEFORE 2026-09-24 RECORDED d_model UNDER THE NAME `dk` (see state_dict),
+        # and it carries neither the real dk nor emb_hid. Read it as what it measured, so an older
+        # checkpoint is compared on d_model rather than refused for a FAB_DK it never recorded.
+        was["d_model"] = was.pop("dk")
     # rank AND dk ARE INNER DIMENSIONS AND CANNOT BE PREFIX-WIDENED. A prefix widen adds ROWS; these
     # two change what each row MEANS, so an expert restored across a change of either is a tensor of
-    # the right shape holding a different decomposition. signature_dim is the same argument one
-    # package over: the centroids were measured in a space of that width.
-    for field in ("rank", "dk", "signature_dim"):
+    # the right shape holding a different decomposition. emb_hid and d_model are the same argument
+    # for the identity embedder and the adapters themselves, and signature_dim is the same argument
+    # one package over: the centroids were measured in a space of that width.
+    for field in ("rank", "dk", "emb_hid", "d_model", "signature_dim"):
         if field in was and int(was[field]) != live[field]:
             _refuse(f"FAB resume refused on {field}: the checkpoint was written at {was[field]} "
                     f"and this run resolves {live[field]}. This is an INNER dimension -- it changes "

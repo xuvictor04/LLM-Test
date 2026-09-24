@@ -845,8 +845,14 @@ def manage(world: Config, w, *, latent, plateau, add_param_group):
 
 
 def geometry(world: Config, w):
-    """Every field a resume must match, with its rule: lat/hid/route_d EXACT, nmax MAY_WIDEN, n
+    """Every field a resume must match, with its rule: lat/hid/route_d EXACT, nmax EXACT, n
     (the grown population) MAY_WIDEN AND MAY_NARROW, feedback EXACT.
+
+    nmax IS EXACT AND SAID MAY_WIDEN UNTIL 2026-09-24. Under Q-WORLD-8 (b) preds and keys are
+    allocated at nmax, so nmax IS the tensor extent and load_into refuses any difference between
+    the saved and live allocation; the MAY_WIDEN rule dated from before (b), and the live manifest
+    in spine/compose.py::_geometry_manifest carried it too, so the gate passed a widening that
+    load_into then refused after three packages had been built.
 
     `n` IS THE ALLOCATED PREDICTOR COUNT -- len(preds), the number of ForwardModels that EXIST -- AND
     NEVER THE LIVE COUNT. Stated because Q-WORLD-8 (b) makes the two diverge and M70 is the record of
@@ -937,8 +943,9 @@ def geometry(world: Config, w):
                       "an inner dimension with no valid prefix"),
         "world.n": (int(w.preds.shape[0]), "MAY_WIDEN_AND_MAY_NARROW", "WORLD_N0",
                     "the ALLOCATED predictor count, len(preds) -- never the live count (M70)"),
-        "world.nmax": (int(w.nmax), "MAY_WIDEN", "WORLD_NMAX",
-                       "the ceiling n may grow to; n <= nmax is an invariant under Q-WORLD-8 (b)"),
+        "world.nmax": (int(w.nmax), "EXACT", "WORLD_NMAX",
+                       "the allocation extent of preds/keys under Q-WORLD-8 (b); load_into "
+                       "refuses any difference in either direction"),
         "world.feedback": (bool(w.feedback), "EXACT", "WORLD_FEEDBACK",
                            "whether the forecast is fed back into the LM's hidden state"),
     }
@@ -1065,9 +1072,10 @@ def load_into(world: Config, w, sd):
         # appending at capacity, so `while world_fwd.n() < _want2` never terminated. Named against
         # the lever an operator can actually move.
         _refuse(f"WORLD_NMAX: the checkpoint holds {saved_alloc} predictors and this run allocates "
-                f"at most {int(w.nmax)}. Raise WORLD_NMAX to {saved_alloc} or more, or start a new "
-                f"run -- a replay loop cannot grow past its own ceiling and the old tree spun "
-                f"forever trying.")
+                f"at most {int(w.nmax)}. Set WORLD_NMAX to {saved_alloc} (the allocation must match "
+                f"exactly: the next refusal is the other direction), or start a new run -- a "
+                f"replay loop cannot grow past its own ceiling and the old tree spun forever "
+                f"trying.")
     if saved_alloc != live_alloc:
         # REFUSED IN BOTH DIRECTIONS (M43). The replay `while world_fwd.n() < _want2` (:4591)
         # handles only GROWTH, so a checkpoint with FEWER predictors than this run builds fell

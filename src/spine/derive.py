@@ -1424,3 +1424,43 @@ def phase_schedule(n_areas, n_phases=None, width=None):
         lo = round(i * (n_areas - w) / max(1, p - 1))      # window slides from the first area to the last
         out.append(list(range(lo, lo + w)))
     return out
+
+
+# === the checkpoint's base path ==================================================================
+
+def checkpoint_base(path, *, file_form, suffix=""):
+    """The RUN BASE a checkpoint path names -- the prefix a run's `.dyntok.json` is spliced onto.
+
+    UNIT IN: path = a CKPT_DIR or CKPT_RESUME string. UNIT OUT: path ('' for an unset one).
+
+    ONE STRING RULE, TWO READERS, AND THEY HAD DRIFTED. The vocabulary's read path was the raw lever
+    plus '.dyntok.json' (spine/assemble.py's CKPT.resume -> TOK.d_vocab_read_path coupling) while
+    ckpt/api.py::resume_source normalised the same lever before loading from it, so of the three
+    spellings CKPT_RESUME's help text documents -- 'a run directory or a .pt file' -- only the bare
+    directory resumed: '<dir>/ckpt.pt' looked for '<dir>/ckpt.pt.dyntok.json' and '<dir>/' for
+    '<dir>/.dyntok.json', and build_vocabulary refused a parent whose vocabulary was on disk at
+    '<dir>.dyntok.json' (driven 2026-09-24). This function is both readers' rule now.
+
+    `file_form` SAYS WHICH LEVER IS ASKING. A RESUME may name the checkpoint FILE, so a trailing
+    component ending in '.pt' is dropped back to its directory ('runs/x.best3/ckpt.pt' ->
+    'runs/x.best3', which is exactly the base the best-snapshot save spliced its suffix into). A
+    SAVE DIR is always a directory, so only its trailing separators go ('runs/x/' -> 'runs/x',
+    which the save side turned into 'runs/x/.dyntok.json' -- a file no bare-form resume looks for).
+
+    `suffix` IS SPLICED ONTO THE BASE, AND AN UNSET PATH STAYS '' WHATEVER THE SUFFIX. That is the
+    couplings' "empty in, empty out" rule -- CKPT_DIR='' is saving off and CKPT_RESUME='' is no
+    parent -- carried here so the compute needs no truthiness test of its own.
+
+    PURE STRING WORK, NO FILESYSTEM TEST, deliberately: the value lands in a wire computed at
+    assembly, and a wire that depended on what happened to be on disk when the run started would
+    differ between two machines given the same environment.
+    """
+    raw = str(path or "").strip()
+    if not raw:
+        return ""
+    base = raw.rstrip("/\\") or raw[:1]
+    if file_form and base.endswith(".pt"):
+        # A BARE 'ckpt.pt' IS IN THE CURRENT DIRECTORY, whose base is '.', the same answer a save
+        # dir of '.' gives -- not '', which would read as "no parent".
+        base = base.replace("\\", "/").rpartition("/")[0] or "."
+    return base + suffix

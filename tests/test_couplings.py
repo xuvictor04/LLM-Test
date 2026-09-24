@@ -539,6 +539,51 @@ def check_c4_table_resolves():
 
 
 # ==================================================================================================
+# C5 -- every documented CKPT_RESUME spelling reads the vocabulary its parent wrote
+# ==================================================================================================
+
+# THE KNOWN-ANSWER TABLE ABOVE PINS ONE SPELLING, AND THAT IS HOW THE OTHER TWO BROKE UNSEEN.
+# ckpt/levers.py documents CKPT_RESUME as "a run directory or a .pt file", ckpt/api.py::resume_source
+# normalised all of them before loading, and the TOK.d_vocab_read_path compute appended its tail to the
+# RAW lever -- so 'runs/parent/ckpt.pt' read 'runs/parent/ckpt.pt.dyntok.json' and 'runs/parent/' read
+# 'runs/parent/.dyntok.json', and build_vocabulary refused both for a missing parent vocabulary that was
+# on disk (driven 2026-09-24). C4's fixture is the bare form, the one spelling that worked. The last row
+# is a rotation snapshot: its suffix is on the DIRECTORY, so the base keeps it and nothing adds it again.
+RESUME_SPELLINGS = {
+    ("runs/parent", True):          "runs/parent.dyntok.json",
+    ("runs/parent/", True):         "runs/parent.dyntok.json",
+    ("runs/parent/ckpt.pt", True):  "runs/parent.dyntok.json",
+    ("runs/x.best3/ckpt.pt", True): "runs/x.best3.dyntok.json",
+    # AND THE SAVE SIDE, WHICH HAD THE SAME HOLE FROM THE OTHER END: CKPT_DIR='runs/a/' wrote its
+    # vocabulary to 'runs/a/.dyntok.json', which no bare-form resume of that run looks for.
+    ("runs/a/", False):             "runs/a.dyntok.json",
+    ("runs/a", False):              "runs/a.dyntok.json",
+}
+
+
+def check_c5_resume_spellings():
+    findings = []
+    for (path, is_resume), want in RESUME_SPELLINGS.items():
+        levers = {p: dict(v) for p, v in LEVERS.items()}
+        levers["CKPT"] = {"dir": "runs/a/ckpt" if is_resume else path,
+                          "resume": path if is_resume else "runs/parent/ckpt"}
+        sets = {p: _package(p, v) for p, v in levers.items()}
+        try:
+            configs, _, _ = assemble.build(environ={}, sets=sets)
+        except Exception as e:                                # noqa: BLE001 -- reported, never swallowed
+            findings.append(f"{path!r}: build() raised {type(e).__name__}: {e}")
+            continue
+        field = "d_vocab_read_path" if is_resume else "d_vocab_save_path"
+        got = configs["TOK"].wired().get(field)
+        if got != want:
+            findings.append(f"CKPT_{'RESUME' if is_resume else 'DIR'}={path!r}: TOK.{field} is "
+                            f"{got!r}, expected {want!r} -- the file the parent run's save wrote.")
+    detail = f"{len(RESUME_SPELLINGS)} spelling(s) of CKPT_RESUME / CKPT_DIR built against stand-ins"
+    return _report("C5", "every documented checkpoint spelling reaches the parent's vocabulary file",
+                   not findings, detail, findings, vacuous=not RESUME_SPELLINGS)
+
+
+# ==================================================================================================
 # The runner
 # ==================================================================================================
 
@@ -547,6 +592,7 @@ CHECKS = (
     check_c2_escapes_refused,
     check_c3_allowlist_is_a_declaration,
     check_c4_table_resolves,
+    check_c5_resume_spellings,
 )
 
 

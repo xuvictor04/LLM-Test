@@ -880,7 +880,8 @@ COUPLINGS = [
     Coupling(
         src="CKPT.dir",
         dst="TOK.d_vocab_save_path",
-        compute=lambda r: (r["CKPT"].dir + ".dyntok.json") if r["CKPT"].dir else "",
+        compute=lambda r: derive.checkpoint_base(r["CKPT"].dir, file_form=False,
+                                                 suffix=".dyntok.json"),
         unit=U.PATH,
         irreducible=False,
         why="Where this run SAVES its own vocabulary is a property of its checkpoint, not a knob. The "
@@ -896,7 +897,8 @@ COUPLINGS = [
     Coupling(
         src="CKPT.resume",
         dst="TOK.d_vocab_read_path",
-        compute=lambda r: (r["CKPT"].resume + ".dyntok.json") if r["CKPT"].resume else "",
+        compute=lambda r: derive.checkpoint_base(r["CKPT"].resume, file_form=True,
+                                                 suffix=".dyntok.json"),
         unit=U.PATH,
         irreducible=False,
         why="TWO FIELDS, NOT ONE, AND THE SPLIT IS THE POINT OF THE PROMOTE. TOKENIZER_PATH had two jobs "
@@ -908,7 +910,13 @@ COUPLINGS = [
             "RESUME=runs/x/ckpt.pt form it guessed runs/x/ckpt.dyntok.json, that file did not exist, and "
             "it fell through to the shared data/dyntok.json (ISSUES.md P1-M19). A resume must reuse the "
             "saved vocabulary or 'the restored embedding table would be indexed by a DIFFERENT "
-            "vocabulary' (:1226-1227). Empty resume, empty path: there is no parent to read."),
+            "vocabulary' (:1226-1227). Empty resume, empty path: there is no parent to read. THE "
+            "REPAIR THIS ROW CLAIMED WAS NOT MADE UNTIL 2026-09-24: the compute appended the suffix "
+            "to the RAW lever, so RESUME=runs/x/ckpt.pt read runs/x/ckpt.pt.dyntok.json and "
+            "RESUME=runs/x/ read runs/x/.dyntok.json -- P1-M19 again, now a refusal because "
+            "build_vocabulary refuses a missing parent file. Both sides go through "
+            "derive.checkpoint_base, which ckpt/api.py::resume_source shares, so every documented "
+            "spelling lands on <run base>.dyntok.json."),
 
     # --- the tokenizer's longest token -> the composer's byte tables --------------------------------
     Coupling(

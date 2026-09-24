@@ -440,7 +440,9 @@ has been **seen** enough (`:1531` says so in as many words). One counter, one in
 batch, which is the loop's object, and it is sized from `LM.vocab_slots`, which LM already
 publishes. Neither alternative is legal: a per-step-mutated tensor cannot be carried by a wire,
 which is a value frozen at build. It is the one shared mutable tensor in this contract and it is
-named as such.
+named as such. **Because the loop owns it, the root checkpoints it** — under the payload key
+`"LOOP"`, which no package owns — and `compose` puts it back on a resume (Q-CKPT-4); until 2026-09-24
+nothing saved it and every resumed process started it at `None`.
 
 ### C6 — `RUN` vs `TRAIN`
 
@@ -566,6 +568,8 @@ probation test wanted. **Both LM additions landed the same day from two independ
 set is 123, not 122 — §7 holds the count.**
 **Checkpointed:** the module, the composer's `born` tensor, the counters, the resolved
 `LMGeometry`. **Not:** the derived byte-index tensors (rebuilt on load) or the dead-row mask cache.
+The counters were written and never read back until 2026-09-24; `load_state` now restores them
+(except `lm.resolve.*`), and its `LoadReport` is bound by the root — a refusal stops the run (Q-CKPT-4).
 
 A resume across a `compose` flip is **refused in both directions** and named — under compose,
 `emb`/`head` are not constructed at all. That is a real operational restriction and P7's add-area
@@ -595,7 +599,8 @@ longer takes `resume`** — `load_state` is the whole restore path (Q-OPT-4, a f
 `cycle_best`, `cycle_index`, the resolved `Horizon`, **`param_group_shape`**, the counters. The old
 checkpoint saved `opt_m`/`opt_e` and *nothing else from this package*. `param_group_shape` was
 missing from `state_dict`'s enumeration while `load_state` refused on it — an untrippable L50 guard,
-repaired 2026-09-02 with Q-OPT-4.
+repaired 2026-09-02 with Q-OPT-4. A **dim-0 widening** (FAB_SLOTS, LM_VOCAB_SLOTS) is restored with
+zero-padded moments rather than refused (Q-OPT-8), and a remaining refusal stops the run (Q-CKPT-4).
 **The invariant `counters()` asserts:** `backward // accum == step`.
 **What `counters()` renders and does not compute:** `opt.grad_norm.p50/p99` (base group). The norm is
 **read in `maybe_step`**, between the gradient's last use and the `zero_grad`; taken in `counters` it
@@ -623,6 +628,7 @@ InfoNCE floor gate and `train_every` / `train_every_idle` / `dense_window` load-
 sidecar carrying `width_units`, `alphabet_size`, `space`, `d`, `mode` — a resume that disagrees
 about any of them fails **here**, naming the field.
 **`warm_up` returns one of three verdicts, never a binary**; `collapsing` is a run-level failure.
+**On a restored encoder `warm_up` trains nothing** and returns the parent's report (Q-SIG-2).
 **Where they are called (§3):** `warm_up` is an `ASSEMBLY_ORDER` row after both stream rows and the
 optimizer row; `cadence_due` → `train_step` are stage-`A` rows **before** `encode`; `counters` is a
 stage-`R` row and is the encoder cadence's **only** did-it-fire surface, because its two-arm gate
@@ -683,7 +689,7 @@ writes are partitioned: knowledge is owned but not walled off.
 **`born` (write tick) is a new field beside `last` (retrieval tick)** — one field carrying both
 meanings is what made "LRU" evict the domain that had *stopped being written*.
 **Checkpointed additions:** `prob`, `recon`, `nsrc_max`, `gate_theta` — four omissions that each
-disarmed a live mechanism at the run boundary.
+disarmed a live mechanism at the run boundary — and the victim generator `gen` (Q-CKPT-4).
 **Record types are DECLARED, not prose** — `census` returns **`StoreCensus`**, added to the RECORD
 TYPES block 2026-09-02 under **Q-MEM-11**, under MEM's own field spellings; the renames into DOM and
 FAB stay in `compose.py`'s `produces` column.
@@ -716,7 +722,7 @@ one record feeding two vocabularies is why "spell it as the consumer does" is no
 **`rekey` is an EVENT the spine delivers** — the cadence is MEM's and the arm test is SIG's, and both
 were read directly from inside the domain block at `:6688-6689`.
 **Checkpointed additions:** the reservoirs (the uncensored sample the measured radius needs),
-`tokc`, `comp`/`comp_glob`, the adjacent-distance history. The boundary clock **must not restart** on
+`tokc`, `comp`/`comp_glob`, the adjacent-distance history, and the RNG stream `rng` (Q-CKPT-4). The boundary clock **must not restart** on
 resume; `grace` **does**, and the asymmetry is deliberate.
 **Where they are called (§3):** `rekey` is a stage-`A` row on `Cadences.due('dom.rekey',
 MEM.rekey_every, clock)` **after** `observe` — without it `accept_rule="radius"` silently degenerates
@@ -3485,9 +3491,10 @@ for them "no `world.forecasts`" and "never trained" are the same statement.
 - *A learned gate `alpha = 0` over the uniform draw.* `dL/dW = alpha·(…)` is exactly 0 at birth
   (`alpha` was 0.036 at step 100); pooled paired gain -0.017, i.e. nothing. It also adds a tensor to
   OPT's `base` group (38 → 39), and every existing checkpoint's AdamW restore is then refused as
-  `param_group_shape` — which `spine/compose.py` discards (the `LoadReport` returned by
-  `opt_api.load_state` is not read; the only trace is `opt.ckpt.refused 1`). That discard is a
-  separate defect and is filed on its own, not here.
+  `param_group_shape` — which `spine/compose.py` discarded when this was written (the `LoadReport`
+  returned by `opt_api.load_state` was not read; the only trace was `opt.ckpt.refused 1`). That
+  discard was a separate defect, filed on its own and closed by Q-CKPT-4: the refusal now stops the
+  run by name.
 - *A scheduled ramp `alpha = min(1, k/R)`.* Needs a new lever, a frozen-signature change and a clock
   that survives a resume: `clock.opt_steps` restarts at 0 on resume while `clock.step` carries on, so
   a ramp on the first restarts and a ramp on the second is already at 1 over an untrained draw.
@@ -4533,6 +4540,108 @@ guard's own message refused); a zero-size pool at `FAB_ON=0` (every consumer of 
 `MEM` owner width, `CAP` headroom, `CKPT` restore, the report — would need an arm-conditional path,
 turning one crash into several); skipping `FAB.observe` on those arms (it would turn its
 `fab.observe_unrouted` reading into an absence).
+
+### Q-CKPT-4 — the root discarded both restore verdicts, and three pieces of state did not cross a resume — **RESOLVED 2026-09-24: A REFUSED LM OR OPT RESTORE IS A NAMED REFUSAL THAT STOPS THE RUN; `loop.run` REFUSES A SYSTEM CARRYING ONE; THE LM COUNTERS, MEM's GENERATOR, DOM's STREAM AND `token_seen` NOW CROSS. NO SIGNATURE MOVES**
+`LM.load_state` and `OPT.load_state` refuse by **returning** a `LoadReport(refused=True, reason=…)`,
+and `compose` called both as bare statements. Driven on a 160-window parent: a child at
+`TOK_MAX_BYTES=12` passed the geometry gate, restored **0 of 8** LM tensors, restored OPT at
+`opt_step 160`, printed **0 refusals**, and trained a random model under the parent's optimizer (its
+first three resumed losses 8.14 / 8.07 / 7.92 against 7.35 / 7.40 / 7.43 on the unchanged control;
+ln 4096 = 8.32). **Ruling:** both reports are bound (`System.lm_load`,
+`System.opt_load`) and a refusal is **appended to `System.refusals`** with the package's own sentence
+— run.py already stops on any refusal before a tensor is trained — and `loop.run` now raises on a
+System that carries one, so a driver that skips run.py's check cannot train through it either. The
+LM refusal now names `TOK_MAX_BYTES (LM.d_max_token_bytes)` and `LM_CTX (LM.d_pos_max)` instead of
+upper-casing a wire's field name (`LM_MAX_TOKEN_BYTES` is not a lever). **Rejected:** raising at the
+`restore.lm` stage (run.py reads `sysm.base_params` and `sysm.process` before it prints refusals, so
+an early exit turns a named refusal into a traceback); adding `lm.max_token_bytes` to the geometry
+manifest as `EXACT` (every checkpoint written before it lacks the field, and `check_geometry` refuses a
+missing field — every existing checkpoint would become unresumable at unchanged levers).
+**State that did not cross, each driven:** (1) `LM.state_dict` wrote `"counters"` and `load_state`
+never read them — the child reported `lm.embed.calls` 1 against the parent's 160; they are restored
+except `lm.resolve.*`, this process's own. (2) MEM's victim generator `store.gen` and DOM's `part.rng`
+were re-seeded on every resume while SIG, FAB and WORLD save theirs (child: generator byte-identical
+to a fresh `memory.torch` stream; DOM draws 0 against the parent's 79); both now travel, MEM as
+`gen` and DOM as `rng`, in the shapes the other three use. (3) `System.token_seen` — the loop-owned
+counter of C5 — was never saved, so `LM.anchor_term` re-held every minted row and
+`TOK.judge_probation` counted only post-resume appearances; the root writes it under a payload key
+**no package owns, `"LOOP"`**, and puts it back as a prefix of the live `LM.vocab_slots`. Older
+checkpoints carry none of the new keys and restore as before. **FAB's sidecar recorded `d_model`
+under the name `dk`** (`pop.A.shape[1]`), so FAB's own dk refusal could never fire on `FAB_DK` and
+`FAB_EMB_HID` was not recorded; it now records `d_model`, `dk` and `emb_hid` off the modules they
+size, and reads an old sidecar's `dk` as the `d_model` it was. A checkpoint written by this tree is
+refused by an OLDER tree's FAB on `dk` — the one forward incompatibility here, stated. **The geometry
+manifest compares `lm.arch`, `lm.compose` and `sig.mode` first**, because `LM_LAYERS=0` resolves per
+arch and an `LM_ARCH` change was refused as `LM_LAYERS`. `world.nmax` is **`EXACT`**, not
+`MAY_WIDEN`: under Q-WORLD-8 (b) it is the allocation extent of `preds`/`keys`, and `WORLD.load_into`
+refuses any difference — the gate let a wider `WORLD_NMAX` through to die after LM, SIG and FAB were
+built. `CKPT_RESUME`'s three documented spellings (`runs/x`, `runs/x/`, `runs/x/ckpt.pt`) and a
+trailing-slash `CKPT_DIR` share one string rule, `derive.checkpoint_base`, with `resume_source`; only
+the bare form resumed before (tests/test_couplings.py C5 pins all of them).
+
+### Q-OPT-8 — a MAY_WIDEN resume dropped every AdamW moment — **RESOLVED 2026-09-24: A DIM-0 WIDENING IS RESTORED WITH ZERO-PADDED MOMENTS; EVERY OTHER SHAPE CHANGE IS STILL REFUSED**
+The geometry gate admits `fab.slots`, `fab.cap` and `lm.vocab_slots` widening, `LM.load_state` and
+`FAB.load_state_dict` widen by prefix, and `OPT.load_state` compared `param_group_shape` exactly and
+refused — which the root discarded (Q-CKPT-4): driven at `FAB_SLOTS=640` on a 512-slot, 160-window
+parent, the child had 0 of 38 moment entries, `opt_step 0`, `lr_prev 0.0`, and after three windows it
+stood at `opt_step 3` and a rate of 7.6e-5 — the warmup re-run — against 1.94e-3 once restored. **Ruling:** the shape test admits exactly a dim-0 widening — group names, tensor
+counts and order equal, rank and every trailing dimension equal, live dim 0 ≥ saved — and pads
+`exp_avg`/`exp_avg_sq` of the widened tensors with **zeros** for the new rows, keeping each tensor's
+`step`; counted as `opt.ckpt.moments_widened` (seeded 0 on every restore that reaches the test).
+**Zero is exact, not a guess:** in a run built wide from the start, an unoccupied row gets an exactly
+zero gradient every step and its moments stay zero, and nothing in the tree resets a slot's moments on
+birth or mint. After: `FAB_SLOTS=640` on a 512-slot parent restored 2 widened tensors, `opt_step 160`,
+and its first three resumed losses were **bit-identical** to the unwidened control's. Anything else
+still refuses (ISSUES P1-L50), and the refusal now names the first differing tensor, since the
+per-group summary is identical on both sides of a pure shape change. `counters()`'s
+`opt.ckpt.horizon_changed` gate no longer says "no checkpoint has been loaded" for a restore that was
+offered and refused. **Rejected:** a cold-optimizer opt-in lever (nothing asks for it once widening
+restores); copying a neighbouring row's moments into new rows (no row is a neighbour of an
+unoccupied slot).
+
+### Q-SIG-2 — `SIG.warm_up` re-trained the restored encoder at every resume — **RESOLVED 2026-09-24: ON A RESTORED ENCODER `warm_up` TRAINS NOTHING AND RETURNS THE PARENT'S REPORT**
+No ruling chose re-warming: `WarmupReport`'s "`warm_up` REPLACES `SigState.warmup_curve`" rules on how
+a curve is kept, while this contract lists the "warmup curve **and its verdict**" as checkpointed and
+the legacy tree skipped the warm-up on resume. Driven on a 160-window parent: the encoder AdamW went
+from step 956 to 1756, mean cosine between parent and resumed signatures over the same 160 windows
+was 0.53, and **101 of 160** windows changed nearest restored DOM centroid. **Ruling:**
+`SIG.load_state_dict` marks `SigState.encoder_restored`, and `warm_up` then returns a `WarmupReport`
+rebuilt from the checkpointed curve and `sig.warmup_*` counters, takes no draw off the restored stream,
+counts `sig.warmup_skipped_resume` (seeded 0 on the learned arm) and prints Gate `sig.adaptive_stop`
+UNREACHABLE with a `RESUMED` reason. The root's collapsing-verdict warning reads the parent's verdict,
+so a collapsed parent still marks its child. After: encoder identical to the checkpoint, cosine 1.0,
+0 of 160 centroid changes. **Rejected:** a `SIG_REWARM_ON_RESUME` lever (the lever's own note says
+more steps degrade the encoder past 1000–4000, and re-warming stacks per resume; it can be added the
+day someone asks for the behaviour by name); warming then restoring the saved encoder (pays the
+budget to discard it).
+
+### Q-CAP-3 — a resumed valve took its caps from the wrong place, under the wrong key — **RESOLVED 2026-09-24: `new_valve` READS THE KEY `CAP.state` WRITES, ONLY ON AN ARM ARMED NOW AND AT SAVE; `CAP.restore` NO LONGER WRITES CAPS**
+`new_valve` looked up `restored["fab_start"]` while `CAP.state` writes `cap_experts`, so its checkpoint
+branch never ran; `CAP.restore` then wrote the saved caps onto every unpinned arm, including under the
+shipped `CAP_TARGETS=off` and after a slot widening, without touching `Valve.origin` (driven: a clean
+`FAB_SLOTS=1024` resume of a 512-slot parent came back at `cap_experts 512` against a hard ceiling of
+1024, origin "off"; a checkpoint doctored to `cap_experts = n_live` declined a regression birth at
+headroom 0). **Ruling:** `CAP.state` records each arm's provenance (`armed_*`, `hard_*`); `new_valve`
+takes a saved cap only on an arm armed now **and** at save, follows the live ceiling when the saved cap
+was at its saved ceiling (the sentinel's state), clamps to the live hard ceiling, and says which in
+`origin`; `CAP.restore` restores the pin clocks and high-water marks and still counts
+`cap.state_refused` when an operator's value beat a saved cap. A checkpoint without provenance keys is
+taken as the old restore took it, on an armed arm only, and `origin` says it carries none.
+**Rejected:** reading the saved hard ceiling from the snapshot's geometry manifest at the root (a
+second producer for a CAP fact); keeping the cap writes in `restore` behind a `targets` test (two
+places deciding the starting cap is how the two disagreed).
+
+### Q-DOM-1 — `DOM_ENABLED=0` restored a trained partition in silence while `WORLD_ENABLED=0` refuses — **RESOLVED 2026-09-24: STATED BEFORE THE FIRST WINDOW, NOT REFUSED**
+Driven: a `DOM_ENABLED=0` child of a 160-window parent restored 8 domains with 0 refusals and 0
+warnings, then sent `did=0` for every window — and 0 is a real id, so the parent's surviving domain 0
+received every window's memory source and token prior. **Ruling:** a startup warning naming the count
+and what `did=0` does to the restored partition. **Why not WORLD's refusal:** `WORLD_ENABLED=0` builds
+a NULL world with nowhere to load into; DOM builds the identical `Partition` on both arms, so the
+restore is sound, and `DOM.census` already prints `partition_off` for exactly this configuration
+("A run with DOM_ENABLED=0 that restored domains from a checkpoint still has a live-looking partition
+and is still off") — the tree already treats it as a run to report, not to refuse. Refusing would
+remove an ablation-from-checkpoint that runs. **Rejected:** skipping the DOM restore when disabled
+(discards trained state a later `DOM_ENABLED=1` resume of the same child would want).
 
 ---
 

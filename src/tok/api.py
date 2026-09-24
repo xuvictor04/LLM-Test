@@ -2621,9 +2621,11 @@ def save_vocabulary(tok: Config, vocab, *, suffix=""):
     WHAT IS WRITTEN: d_vocab_save_path with `suffix` spliced in immediately BEFORE the
     ".dyntok.json" tail, so a snapshot at <base><suffix> is accompanied by
     <base><suffix>.dyntok.json. suffix="" is the ordinary periodic/final save and writes the wire's
-    own value unchanged. THE READ SIDE THEN NEEDS NO EDIT AT ALL: d_vocab_read_path is
-    CKPT.resume + ".dyntok.json" and CKPT.resume names the snapshot the operator is resuming FROM,
-    suffix included -- so the two sides meet exactly.
+    own value unchanged. THE READ SIDE THEN NEEDS NO EDIT AT ALL: d_vocab_read_path is the RUN
+    BASE CKPT.resume names plus ".dyntok.json" (spine/derive.py::checkpoint_base, which drops a
+    trailing separator or a trailing '.pt' file -- until 2026-09-24 it was the RAW lever plus the
+    tail, and only the bare-directory spelling of CKPT_RESUME resumed), and that base names the
+    snapshot the operator is resuming FROM, suffix included -- so the two sides meet exactly.
     THE ".dyntok.json" TAIL IS NOW NAMED IN THREE PLACES AND THEY MOVE TOGETHER: the two couplings
     in spine/assemble.py (which already state it twice, once per direction) and this splice. The
     considered alternative -- have the couplings carry CKPT.dir/CKPT.resume as bare bases and let

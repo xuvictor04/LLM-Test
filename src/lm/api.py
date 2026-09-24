@@ -1382,7 +1382,9 @@ def load_state(lm: Config, model, geom, saved):
     LEVERS READ: vocab_slots (via geom)
     WIRES READ: none
     DID IT FIRE: lm.ckpt.loaded, lm.ckpt.rows_widened (the count, per tensor), lm.ckpt.refused
-                 (with the reason string, so a refusal is a Reading and not a traceback)
+                 (with the reason string, so a refusal is a Reading and not a traceback). On a
+                 load that is not refused, the parent's whole ledger (state_dict's "counters")
+                 comes back first, except lm.resolve.*, which is this process's own.
     """
     lm = lm.owned_by("LM")
 
@@ -1398,11 +1400,19 @@ def load_state(lm: Config, model, geom, saved):
     # `compose` is in this list and is refused IN BOTH DIRECTIONS: under compose emb/head are not
     # constructed at all, so the two arms are not resume-compatible either way, and a resume across
     # the flip would index a trained head by a vocabulary that means something different.
+    # THE NAME IS THE KNOB AN OPERATOR CAN MOVE, not the field's name upper-cased. Two of these are
+    # WIRES and not levers: max_token_bytes is LM.d_max_token_bytes, wired from TOK_MAX_BYTES, and
+    # pos_max is LM.d_pos_max, wired from LM_CTX -- so "LM_MAX_TOKEN_BYTES" named an environment
+    # variable that does not exist (driven 2026-09-24: a TOK_MAX_BYTES=12 child of a parent written
+    # at 16 was refused as LM_MAX_TOKEN_BYTES, the first time this refusal ever reached a reader).
+    knob = {"max_token_bytes": "TOK_MAX_BYTES (LM.d_max_token_bytes)",
+            "pos_max": "LM_CTX (LM.d_pos_max)"}
     for field in ("arch", "width", "layers", "heads", "ctx", "pos_max", "compose",
                   "max_token_bytes"):
         if field in saved_geom and saved_geom[field] != getattr(geom, field):
             return _refuse(
-                f"LM_{field.upper()}: the checkpoint was written at {saved_geom[field]!r} and this "
+                f"{knob.get(field, 'LM_' + field.upper())}: the checkpoint was written at "
+                f"{saved_geom[field]!r} and this "
                 f"run resolves {getattr(geom, field)!r}. The tensors do not fit and no prefix of "
                 f"them means anything. Resume with the saved value, or start a new run.")
     saved_slots = int(saved_geom.get("vocab_slots", geom.vocab_slots))
@@ -1462,6 +1472,19 @@ def load_state(lm: Config, model, geom, saved):
     # not save: a resume with a re-segmented vocabulary must not come back with a stale byte-index
     # table or a stale dead-row mask.
     model._dead_mask_cache = None
+
+    # THE COUNTERS COME BACK, WHICH state_dict ALWAYS WROTE AND NOTHING READ. `"counters":
+    # dict(_COUNTS)` has been in the payload since state_dict was written, and until 2026-09-24 this
+    # function never looked at it, so every LM tally restarted at the resume boundary -- driven on a
+    # 160-window parent: lm.embed.calls 160, lm.encode.calls 485, lm.anchor.unreachable 160 and
+    # lm.ckpt.saved 3 in the blob, and none of them in the child. The same repair MEM's open_store
+    # and OPT.load_state carry, and with the same exception: lm.resolve.* describes THIS process's
+    # geometry resolution, which has already run and must not be overwritten by the parent's.
+    # Restored BEFORE the two bumps below so this process's load is counted on top of any the
+    # parent's ledger carried, the way opt.ckpt.loaded accumulates.
+    for key, value in dict(saved.get("counters") or {}).items():
+        if not str(key).startswith("lm.resolve."):
+            _COUNTS[key] = value
 
     _bump("lm.ckpt.loaded")
     _bump("lm.ckpt.rows_widened", widened)

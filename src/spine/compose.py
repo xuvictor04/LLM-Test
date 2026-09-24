@@ -483,7 +483,11 @@ ASSEMBLY_ORDER = (
                                               "callable class of argument has no other producer, "
                                               "and the four rows that take one name the join"),
     ("restore",   "LM",    "load_state",      "(model, geom, saved=Snapshot.payload['LM']) -> "
-                                              "LoadReport, which nothing takes as an argument"),
+                                              "LoadReport, which nothing takes as an argument: it "
+                                              "is BOUND on System.lm_load and a refused one is "
+                                              "appended to System.refusals, which stops the run. "
+                                              "Until 2026-09-24 it was discarded and a refused "
+                                              "restore trained the random model"),
     ("signature", "SIG",   "build",           "(width_units=derive.signature_width_bytes(LM.ctx, "
                                               "bytes_per_token), alphabet_size, device, generator) "
                                               "-- the ONE width, resolved once, here",
@@ -516,12 +520,17 @@ ASSEMBLY_ORDER = (
                                               "skipping in silence"),
     ("restore",   "FAB",   "load_state_dict", "(pop, sd=Snapshot.payload['FAB'], "
                                               "sidecar=_sidecar(sysm, restored, 'FAB') -- slots "
-                                              "MAY_WIDEN, rank and dk "
-                                              "EXACT. SAME DISARMED REFUSAL AS SIG'S, and worse by "
-                                              "one step: FAB.state_dict does not even CLAIM to emit "
-                                              "a sidecar the way sig/api.py::state_dict does, so this "
-                                              "row refuses on a value with no declared origin at "
-                                              "either end. Q-CKPT-2)"),
+                                              "MAY_WIDEN; rank, dk, emb_hid, d_model and "
+                                              "signature_dim EXACT. ARMED, like SIG's: "
+                                              "fabric/api.py::state_dict writes the sidecar into "
+                                              "Snapshot.payload['FAB']['sidecar'] and _sidecar "
+                                              "reads it there (Q-CKPT-2). This row said the "
+                                              "refusal was DISARMED and that FAB.state_dict did "
+                                              "not claim to emit a sidecar, both false since "
+                                              "2026-09-22; and until 2026-09-24 the sidecar's `dk` "
+                                              "was d_model, so FAB's own refusal could not fire on "
+                                              "FAB_DK and never saw FAB_EMB_HID -- the geometry "
+                                              "gate was the only check of either)"),
     ("world",     "WORLD", "build",           "(d_model=LM.width, device, ctx_tokens=LM.ctx, rng)"),
     ("restore",   "WORLD", "load_into",       "(w, sd=Snapshot.payload['WORLD']) -- STRICTLY BEFORE "
                                               "OPT.build. WORLD.manage mints parameters mid-run "
@@ -568,7 +577,11 @@ ASSEMBLY_ORDER = (
                                               "one argument cannot carry -- the two pin clocks and "
                                               "the high-water marks, which is the other half of M38 "
                                               "-- and it precedes the refusal below so the refusal "
-                                              "is taken against the restored ceiling"),
+                                              "is taken against the restored valve. IT DOES NOT "
+                                              "TOUCH THE CAPS: until 2026-09-24 it wrote the saved "
+                                              "caps over new_valve's answer on every unpinned arm, "
+                                              "including under CAP_TARGETS=off, while new_valve's "
+                                              "own checkpoint branch read a key nothing writes"),
     ("refuse",    "CAP",   "startup_refusals","(live_experts=Population.n_live)"),
     ("optimizer", "OPT",   "build",           "(param_groups={'base': _base_parameters(sysm), which "
                                               "walks LM's model, FAB's population and WORLD's world "
@@ -606,7 +619,11 @@ ASSEMBLY_ORDER = (
                                               "(Q-OPT-4). OPT.state_dict now declares it writes "
                                               "param_group_shape, which it did not, so the refusal "
                                               "compares against a value something produces instead "
-                                              "of being untrippable"),
+                                              "of being untrippable. Its LoadReport is BOUND on "
+                                              "System.opt_load and a refusal is appended to "
+                                              "System.refusals; a dim-0 widening of a MAY_WIDEN "
+                                              "tensor is restored with padded moments, not "
+                                              "refused"),
     ("clock",     "RUN",   "new_clock",       "(batch_windows=OPT.batch_windows, accum=OPT.accum, "
                                               "resume_step, resume_epoch)",
                                               "clock -- the RunClock every Cadences.due gate is "
@@ -653,7 +670,11 @@ ASSEMBLY_ORDER = (
                                               "param_groups['encoder'], NOT the whole OptState, "
                                               "which is what crossed until 2026-09-02 because "
                                               "OptState was declared as 'both AdamW instances' and "
-                                              "named neither (Q-OPT-7 RESOLVED (a))"),
+                                              "named neither (Q-OPT-7 RESOLVED (a)). ON A RESUME "
+                                              "IT TRAINS NOTHING (Q-SIG-2): an encoder SIG's restore "
+                                              "row put back is not warmed a second time, and the "
+                                              "report returned is the parent's, rebuilt from the "
+                                              "checkpointed curve and counters"),
     ("cadence",   "RUN",   "new_cadences",    "(periods={'curve': EVAL.curve_period(ev), "
                                               "'dom.manage': DOM.manage_period(dom), 'fab.manage': "
                                               "FAB.manage_period(fab), 'dom.rekey': "
@@ -1951,6 +1972,14 @@ class System:
                  # OWNS, and before it had a name here the call was a bare expression statement
                  # and the verdict was computed and dropped on the floor.
                  "warmup",
+                 # `lm_load` and `opt_load` ARE THE TWO RESTORE VERDICTS, bound for the same
+                 # reason and with the same history: LM.load_state and OPT.load_state refuse BY
+                 # RETURNING a LoadReport, and both calls were bare expression statements until
+                 # 2026-09-24, so a refused restore trained a random model or cold moments with
+                 # nothing printed. A refusal is carried onto `refusals`; the records stay here
+                 # so a reader can see what a PASSING restore did (rows widened, moments padded,
+                 # a horizon changed). None on a fresh run.
+                 "lm_load", "opt_load",
                  # THE FOUR VALUES THAT CROSS A BOUNDARY THE ORDER TABLES CANNOT EXPRESS, each
                  # named by the row that consumes it. `produces` reads FORWARDS -- an argument is
                  # supplied by an EARLIER row -- so a value produced at A and consumed at B, or
@@ -2159,8 +2188,25 @@ def compose(environ=None, *, restored=None):
     sysm.model = lm_api.build_model(
         lm, sysm.geometry, device=sysm.process.device, seed=int(run.seed))
     if "LM" in saved:
+        # THE REPORT IS BOUND AND A REFUSAL STOPS THE RUN. LM.load_state REFUSES BY RETURNING
+        # LoadReport(refused=True, reason=...) rather than by raising, and until the resume-restore
+        # repair (2026-09-24) this line was a bare expression statement: the refusal went on the
+        # floor and the run trained the RANDOM model build_model had just made, under the parent's
+        # AdamW moments, fabric, memory and domains, with nothing printed. Driven: a child at
+        # TOK_MAX_BYTES=12 of a 160-window parent written at 16 passed the geometry gate (the
+        # manifest carries no max_token_bytes), restored 0 of 8 LM tensors, restored OPT at
+        # opt_step 160, and printed 0 refusals; its first three resumed losses were 8.14 / 8.07 /
+        # 7.92 (ln 4096 = 8.32, a random model) against 7.35 / 7.40 / 7.43 on the control resume. The refusal is APPENDED rather than raised so
+        # the rows below still build the objects run.py reads before it prints refusals and stops
+        # (run.py: "REFUSALS STOP THE RUN BEFORE A TENSOR IS TRAINED"); loop.run refuses a System
+        # that carries any, so no driver reaches training past this line either.
         sysm.stage = "restore.lm"
-        lm_api.load_state(lm, sysm.model, sysm.geometry, saved["LM"])
+        sysm.lm_load = lm_api.load_state(lm, sysm.model, sysm.geometry, saved["LM"])
+        if sysm.lm_load.refused:
+            sysm.refusals.append(
+                f"LM.load_state refused the checkpoint {sysm.resume_src!r}: "
+                f"{sysm.lm_load.reason} Continuing would train a randomly initialised language "
+                f"model under the parent's optimizer state, fabric, memory and domains.")
 
     sysm.stage = "signature"
     sysm.sig = sig_api.build(
@@ -2201,6 +2247,33 @@ def compose(environ=None, *, restored=None):
     sysm.partition = dom_api.open_partition(
         dom, sig_dim=int(sig.d), vocab_slots=int(lm.vocab_slots), device=sysm.process.device,
         rng=sysm.streams["domains"], restored=saved.get("DOM"))
+    # A TRAINED PARTITION RESTORED INTO A RUN THAT TURNED DOMAINS OFF IS SAID, NOT REFUSED (Q-DOM-1,
+    # 2026-09-24). DOM_ENABLED=0 builds the same Partition the on-arm does, so the restore is sound
+    # and the ablation the operator asked for is kept -- unlike WORLD_ENABLED=0, which builds a
+    # NULL world with nowhere to load into and is refused. But the resume was SILENT: driven, a
+    # DOM_ENABLED=0 child of a 160-window parent restored 8 domains, printed 0 refusals and 0
+    # warnings, and then sent did=0 for every window -- and 0 is a REAL id: when the parent's
+    # domain 0 survived, every window of the child is attributed to it (MEM's source, DOM.prior's
+    # histogram), which is neither the parent's partition nor an ablation of it. DOM.census already
+    # prints partition_off for this configuration ("A run with DOM_ENABLED=0 that restored domains
+    # from a checkpoint still has a live-looking partition and is still off"), which is why this is
+    # a sentence and not a refusal; that line is printed at the END of a run, and this one is
+    # printed before the first window.
+    if (not bool(dom.enabled)
+            and int(sysm.partition.counters.get("part.n_restored_domains", 0)) > 0):
+        _zero = 0 in sysm.partition.cent
+        sysm.warnings.append(
+            f"DOM_ENABLED=0 on a resume whose checkpoint carries "
+            f"{int(sysm.partition.counters['part.n_restored_domains'])} trained domain(s): they "
+            f"are restored, and every window of this run is did=0, so "
+            + ("the parent's domain 0 -- which survived -- receives EVERY window's attribution "
+               "(its memory source and its token prior), a state neither the parent's partition "
+               "nor an ablation of it"
+               if _zero else
+               "no restored domain is ever assigned a window again and new memory is filed under "
+               "source 0, an id the parent's partition no longer holds")
+            + ". This continues a different optimisation from the checkpoint's under its name; to "
+            "ablate domains cleanly, start a fresh run at DOM_ENABLED=0.")
 
     # -- 9. the capacity valve, and the refusal that needs the population -------------------------
     # new_valve's `restored` is the LIFTED CAP alone, because Valve.origin has to record where the
@@ -2241,8 +2314,41 @@ def compose(environ=None, *, restored=None):
         # groups, which do not exist until build returns; OPT.state_dict now DECLARES it writes
         # that shape, which it did not until the same edit, so the refusal has something to
         # compare against instead of being armed against nothing.
+        # AND THE REPORT IS BOUND, for the reason the LM restore's is. OPT.load_state refuses by
+        # RETURNING LoadReport(refused=True), and this line discarded it: every resume that widened
+        # FAB_SLOTS or LM_VOCAB_SLOTS -- the add-an-area resume the MAY_WIDEN rules exist for --
+        # came back with EMPTY AdamW moments, opt_step 0 and a re-run LR warmup while the clock
+        # resumed at the parent's step, and printed nothing (driven: a FAB_SLOTS=640 child of a
+        # 512-slot, 160-window parent -- opt.ckpt.refused 1, 38 saved moment entries and 0 live,
+        # and after 3 windows opt_step 3 at LR 7.6e-5 against 1.94e-3 once restored).
+        # OPT.load_state now restores a dim-0 widening by padding the moments
+        # (opt.ckpt.moments_widened), so what still refuses is a group structure the L50 guard
+        # exists to stop, and that stops the run by name here.
         sysm.stage = "restore.opt"
-        opt_api.load_state(opt, sysm.optimizer, saved["OPT"])
+        sysm.opt_load = opt_api.load_state(opt, sysm.optimizer, saved["OPT"])
+        if sysm.opt_load.refused:
+            sysm.refusals.append(
+                f"OPT.load_state refused the checkpoint {sysm.resume_src!r}: "
+                f"{sysm.opt_load.reason} Continuing would train the restored weights from EMPTY "
+                f"AdamW moments with the LR warmup re-run from step 0 while the clock resumes at "
+                f"the parent's step. Resume at the parent's geometry, or start a new run.")
+
+    # THE ROOT'S OWN RESUME: the appearance counter spine/loop.py::_payload writes under "LOOP".
+    # No package owns System.token_seen, so no package restore row can put it back; before
+    # 2026-09-24 nothing saved it and every resumed process started it at None (LM.anchor_term then
+    # re-held every minted row at full weight, and TOK.judge_probation counted only post-resume
+    # appearances). LM_VOCAB_SLOTS may widen across a resume, so the saved counter is a PREFIX of
+    # the live one; a narrowing is refused by the geometry gate before this line.
+    _loop = saved.get("LOOP") or {}
+    if _loop.get("token_seen") is not None:
+        sysm.stage = "restore.loop"
+        # TENSOR METHODS ON THE SAVED COUNTER, NOT A torch IMPORT: this file imports no torch, and
+        # the buffer takes the saved counter's dtype and is moved to the run's device.
+        _seen = _loop["token_seen"]
+        _live = _seen.new_zeros(int(lm.vocab_slots))
+        _n = min(int(_seen.shape[0]), int(_live.shape[0]))
+        _live[:_n] = _seen[:_n]
+        sysm.token_seen = _live.to(sysm.process.device)
 
     # -- 11. the clocks, epoch 0's length, and the encoder warm-up --------------------------------
     sysm.stage = "clock"
@@ -2277,6 +2383,12 @@ def compose(environ=None, *, restored=None):
     # `len(curve) < 2`, and at the shipped SIG_WARMUP / SIG_WARMUP_PROBE_EVERY a fully
     # collapsed encoder returned "budget". That arm now takes a one-point curve, so the
     # run-level failure is reachable and the root was the only reader that could see it.
+    # ON A RESUME THIS CALL TRAINS NOTHING (Q-SIG-2, 2026-09-24). It ran SIG_WARMUP more steps on
+    # the restored encoder at every resume -- moving the signature space away from the DOM and FAB
+    # centroids restored beside it (101 of 160 windows changed nearest domain centroid on a
+    # 160-window parent) -- and replaced the checkpointed verdict with a pass the parent never
+    # made. warm_up now returns the parent's report when SIG.load_state_dict restored the encoder,
+    # so the collapsing check below reads the verdict the encoder actually has.
     sysm.stage = "warmup"
     sysm.warmup = sig_api.warm_up(sig, sysm.sig, stream=_signature_stream(sysm, sig),
                                   seen_units=_signature_units(sysm, sig),
@@ -2680,9 +2792,9 @@ def _geometry_manifest(sysm):
                          "different object, and the signature is the router's only input"),
         "fab.emb_hid":  (int(fab.emb_hid), "EXACT", "FAB_EMB_HID",
                          "the shared identity embedder's hidden width -- a real tensor dimension "
-                         "that FAB.load_state_dict names in its LEVERS READ and compares ONLY "
-                         "against the sidecar, which is None on every resume, so nothing checked it "
-                         "at either end"),
+                         "that FAB.load_state_dict names in its LEVERS READ. Its sidecar did not "
+                         "record it until 2026-09-24 (and recorded d_model under the name dk), so "
+                         "this field was the only check at either end"),
         "fab.slots":    (int(fab.slots), "MAY_WIDEN", "FAB_SLOTS",
                          "preallocated; growth only advances n_live, so a smaller cap IS a prefix"),
         "fab.rank":     (int(fab.rank), "EXACT", "FAB_RANK", "an inner dimension; no prefix valid"),
@@ -2702,7 +2814,17 @@ def _geometry_manifest(sysm):
         "world.lat":    (int(world.lat), "EXACT", "WORLD_LAT", "H22: recorded and never read"),
         "world.hid":    (int(world.hid), "EXACT", "WORLD_HID", "H22"),
         "world.route_d": (int(world.route_d), "EXACT", "WORLD_ROUTE_D", "H22"),
-        "world.nmax":   (int(world.nmax), "MAY_WIDEN", "WORLD_NMAX", "H22"),
+        # EXACT, NOT MAY_WIDEN, SINCE Q-WORLD-8 (b) MADE nmax THE TENSOR EXTENT. preds and keys are
+        # allocated at nmax (world/api.py::build), and WORLD.load_into refuses ANY difference
+        # between the saved and live allocation, "Both directions are refused". The MAY_WIDEN rule
+        # here predates (b), when nmax sized only the fit/mass/alive buffers, and it let a larger
+        # WORLD_NMAX through this gate -- listed as a legal widening -- to die at load_into after
+        # LM, SIG and FAB were already built (driven 2026-09-24: WORLD_NMAX=8 against a checkpoint
+        # at 6). A real prefix widen needs OPT's moments for preds/keys widened with it, which is
+        # the same padding OPT.load_state now does for FAB and LM, and is not done here.
+        "world.nmax":   (int(world.nmax), "EXACT", "WORLD_NMAX",
+                         "preds/keys are allocated at nmax under Q-WORLD-8 (b); WORLD.load_into "
+                         "refuses any difference in either direction"),
         "world.feedback": (bool(world.feedback), "EXACT", "WORLD_FEEDBACK", "H22"),
     }
     # LM.resolve is the authority on LM's shapes -- it is the row that refuses width % heads and
@@ -2718,7 +2840,16 @@ def _geometry_manifest(sysm):
         rule = prior[1] if prior else "EXACT"
         env = prior[2] if prior else ("LM_" + name.upper())
         man[key] = (value, rule, env, "LM.resolve's resolved value, not the raw lever")
-    return man
+    # THE FIELDS THAT DECIDE WHICH TENSORS EXIST ARE COMPARED FIRST, because check_geometry refuses
+    # on the FIRST mismatch it meets and a shape field can move BECAUSE one of these did. LM_LAYERS=0
+    # is a sentinel LM.resolve turns into a per-arch depth, so an LM_ARCH change alone (gru ->
+    # transformer) also moves the resolved lm.layers, and with lm.layers ahead of lm.arch in this
+    # dict the refusal named LM_LAYERS -- "written at lm.layers=1 and this run resolves 4" -- for a
+    # lever the operator never touched (driven 2026-09-24). The order changes nothing a passing
+    # resume sees: the gate compares every field either way.
+    first = ("lm.arch", "lm.compose", "sig.mode")
+    return {**{k: man[k] for k in first if k in man},
+            **{k: v for k, v in man.items() if k not in first}}
 
 
 def _sidecar(sysm, restored, prefix):

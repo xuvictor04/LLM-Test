@@ -191,6 +191,11 @@ class SigState:
     counters: dict
     warmup_curve: list
     rng: object
+    # TRUE ONCE load_state_dict HAS PUT A TRAINED ENCODER BACK, and warm_up reads it. Declared with a
+    # default for the reason `gates` below is: build() does not pass it, and a fresh encoder is
+    # False by construction. It is NOT a counter, because the counters travel in the checkpoint and
+    # a flag that came back from a parent's blob would describe the parent's process, not this one.
+    encoder_restored: bool = False
     # DECLARED WITH A DEFAULT SO build() DOES NOT HAVE TO PASS IT, and keyed by name for the reason
     # in this module's RECORD TYPES block: four entry points declare gates here, two of them once
     # per window, and a tuple appended to on the loop path holds one entry per window.
@@ -238,6 +243,9 @@ class WarmupReport:
     that restored a previous run's curve and appended to it would make one curve out of two
     measurements, which is C4's shape one level up -- so warm_up REPLACES SigState.warmup_curve
     rather than extending it, and `separation_peak` / `separation_final` are taken over this call.
+    ON A RESUME THERE IS NO SECOND CALL'S CURVE TO REPLACE IT WITH (Q-SIG-2, 2026-09-24): warm_up
+    does not re-train a restored encoder, and returns THIS record rebuilt from the curve and
+    counters the checkpoint carried -- the one warm-up that encoder had, unextended.
     """
     verdict: str
     curve: list
@@ -1259,6 +1267,21 @@ def warm_up(sig: Config, st, *, stream, seen_units, opt):
     a name it passed the whole OptState, so this pre-loop routine was handed an object through which
     it could have stepped the language model.
 
+    ON A RESUME IT DOES NOT TRAIN, AND IT RETURNS THE PARENT'S REPORT (Q-SIG-2, 2026-09-24). When
+    load_state_dict has put a trained encoder back (st.encoder_restored) the warm-up already
+    happened -- in the run that wrote the checkpoint -- and running it again is SIG_WARMUP more
+    optimizer steps on a trained encoder that an uninterrupted run never takes. Until this ruling
+    it ran on every resume: driven on a 160-window parent, the encoder AdamW went from step 957 to
+    1757, mean cosine between the parent's and the resumed encoder's signatures over the same 160
+    windows was 0.38, and 101 of 160 windows changed nearest DOM centroid -- centroids the restore
+    had just put back, measured in the space the re-warm moved away from. It also replaced the
+    checkpointed curve and verdict (docs/04_CONTRACT.md's SIG section lists "warmup curve and its
+    verdict" as checkpointed) with a pass the parent never made, and took a draw off the restored
+    stream. The report is rebuilt from what the checkpoint carried -- st.warmup_curve and the
+    sig.warmup_* counters -- so a 'collapsing' parent still puts its RUN-LEVEL FAILURE line on the
+    child's warnings, and WarmupReport's "this call's curve" rule is kept rather than broken: the
+    curve IS the one warm-up this encoder had, and nothing is appended to it.
+
     LEVERS READ: mode, warmup, warmup_min_frac, warmup_plateau_eps, warmup_probe_every,
                  contrastive_batch, d
     WIRES READ: none
@@ -1272,10 +1295,35 @@ def warm_up(sig: Config, st, *, stream, seen_units, opt):
                  read off sig.warmup_verdict; the number behind it is
                  sig.warmup_separation_final, which is the surface that carries the truth on any
                  setting where no probe reaches the floor.
+                 sig.warmup_skipped_resume -- seeded at 0 on the learned arm before the test that
+                 decides it, 1 when a restored encoder made this call return the parent's report;
+                 ABSENT on the bigram arm, which has no encoder to restore. Gate sig.adaptive_stop
+                 is then UNREACHABLE with that reason, since no stop could fire on steps not taken.
     """
     sig = sig.owned_by("SIG")
     mode = str(sig.mode)
     budget = int(sig.warmup)
+    if mode == "learned":
+        # SEEDED BEFORE THE BRANCH THAT DECIDES IT (G4): 0 is "a fresh encoder, warmed here".
+        st.counters["sig.warmup_skipped_resume"] = 0
+    if mode == "learned" and getattr(st, "encoder_restored", False):
+        # THE RESUME. See this docstring's RESUME paragraph: the encoder was warmed by the run that
+        # wrote it, and the record of that warm-up came back with it.
+        st.counters["sig.warmup_skipped_resume"] = 1
+        curve = list(getattr(st, "warmup_curve", None) or [])
+        c = st.counters
+        verdict = c.get("sig.warmup_verdict") or "budget"
+        peak = c.get("sig.warmup_separation_peak", max(curve) if curve else None)
+        final = c.get("sig.warmup_separation_final", curve[-1] if curve else None)
+        steps, probes = int(c.get("sig.warmup_steps", 0) or 0), int(c.get("sig.warmup_probes", 0) or 0)
+        st.gates["sig.adaptive_stop"] = Gate(
+            "sig.adaptive_stop", False, steps, budget, reachable=False,
+            reason=f"RESUMED: the encoder was restored from the checkpoint and the warm-up was NOT "
+                   f"re-run (sig.warmup_skipped_resume=1). The verdict {verdict!r}, the curve and "
+                   f"the {steps} step(s) / {probes} probe(s) are the PARENT's warm-up, carried by "
+                   f"the checkpoint; no stop can fire on steps this process did not take.")
+        return WarmupReport(verdict=verdict, curve=curve, separation_peak=peak,
+                            separation_final=final, steps=steps, probes=probes)
     probe_every = int(sig.warmup_probe_every)
     eps = float(sig.warmup_plateau_eps)
     pairs = int(sig.contrastive_batch)
@@ -1626,6 +1674,8 @@ def load_state_dict(sig: Config, st, sd, *, sidecar):
     saved_enc = sd.get("encoder")
     if saved_enc is not None and hasattr(enc, "load_state_dict"):
         enc.load_state_dict(saved_enc)
+        # WHAT warm_up READS TO KNOW THE ENCODER IS ALREADY TRAINED. See warm_up's RESUME paragraph.
+        st.encoder_restored = True
     if sd.get("counters"):
         st.counters.update(sd["counters"])
     if sd.get("warmup_curve") is not None:
