@@ -33,7 +33,7 @@ refused by the type system rather than by discipline.
     reviewer found it by reading the two surfaces against each other.
     THAT IS NO LONGER WHERE IT STOPS, AND THIS SENTENCE SAID IT WAS UNTIL 2026-09-04. Re-measured
     by running it: RUN.process_setup has a body, and `compose(environ={})` now halts on the 29th of
-    the 39 rows in spine/compose.py::ASSEMBLY_ORDER, at CAP.startup_refusals -- which is PAST the
+    the 40 rows in spine/compose.py::ASSEMBLY_ORDER, at CAP.startup_refusals -- which is PAST the
     valve's own row, so new_valve IS built on every compose() today and all THREE of its Gates are
     readable without writing a line -- THREE, corrected 2026-09-05: this said "both its Gates" from
     the edit that added cap.clamp, a count-in-prose falsified in the file that respells "EIGHT keys

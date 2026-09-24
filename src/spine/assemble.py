@@ -1241,7 +1241,7 @@ NOT_WIRES = (
      "The most-proposed rejected candidate in this tree, and it is rejected on the SECOND ground, not "
      "the first. `RUN.epochs -> OPT.d_lr_horizon` above is refused because it IS the defect; this one is "
      "refused because the value does not EXIST yet: the run length in windows is "
-     "len(Segmentation.ids) // LM.ctx times RUN.epochs, and Segmentation does not exist until "
+     "(len(Segmentation.ids) - 1) // LM.ctx times RUN.epochs, and Segmentation does not exist until "
      "TOK.tokenize has run, which is many assembly rows after every build() has frozen. A Config that "
      "can still be written after startup is a Config the report cannot claim the run used, so there is "
      "no late wire and there must not be one. The named computation is spine/compose.py's _run_windows, "

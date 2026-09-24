@@ -431,8 +431,12 @@ ASSEMBLY_ORDER = (
                                               "their second positional. Plan carries NO length: "
                                               "the run's extent is MEASURED off the segmentation "
                                               "two rows down, never read off this record"),
-    ("stream",    "DATA",  "draw_stream",     "(areas, plan, epoch=0, seed=RUN.seed) -- EPOCH 0's "
-                                              "draw, and it is here rather than only at stage E "
+    ("stream",    "DATA",  "draw_stream",     "(areas, plan, epoch=Snapshot.epoch on a resume and 0 "
+                                              "otherwise, seed=RUN.seed) -- THE RUN'S FIRST EPOCH's "
+                                              "draw (it was epoch=0 unconditionally until "
+                                              "2026-09-24, so a child resumed at epoch 1 under "
+                                              "DATA_RESAMPLE=1 trained on epoch 0's stream; "
+                                              "Q-RUN-11), and it is here rather than only at stage E "
                                               "because two rows below need the material: OPT.build "
                                               "needs run_windows MEASURED from the segmentation "
                                               "(opt/api.py::build) and SIG.warm_up takes the stream. The "
@@ -451,7 +455,7 @@ ASSEMBLY_ORDER = (
     ("segment",   "TOK",   "tokenize",        "(vocab, data=Stream.bytes, labels=Stream.labels, "
                                               "regularize=True, seed) -- the epoch-0 segmentation. "
                                               "It is the ONLY producer of a window count: "
-                                              "len(Segmentation.ids) // LM.ctx, never "
+                                              "(len(Segmentation.ids) - 1) // LM.ctx, never "
                                               "stream_bytes // ctx, which divides a BYTE budget by a "
                                               "TOKEN window and overstates it by the compression "
                                               "ratio. THE ROOT PRINTS ONE LINE AFTER THIS ROW, ON "
@@ -625,7 +629,15 @@ ASSEMBLY_ORDER = (
                                               "tensor is restored with padded moments, not "
                                               "refused"),
     ("clock",     "RUN",   "new_clock",       "(batch_windows=OPT.batch_windows, accum=OPT.accum, "
-                                              "resume_step, resume_epoch)",
+                                              "resume_step, resume_epoch, "
+                                              "resume_backwards=OptState.n_backward, "
+                                              "resume_opt_steps=OptState.opt_step) -- the last two "
+                                              "off the OPT restore row above, so the clock's step "
+                                              "gate and OPT's evaluate one backward count (Q-RUN-9). "
+                                              "A resume whose clock is already at epoch >= "
+                                              "RUN_EPOCHS is REFUSED right after the epoch0 row "
+                                              "(Q-RUN-10), and a mid-epoch one is WARNED with the "
+                                              "windows it replays and the horizon it overruns",
                                               "clock -- the RunClock every Cadences.due gate is "
                                               "handed; step -- RunClock.step (units.Windows) under "
                                               "the spelling TOK.on_window, TOK.mint_burst, "
@@ -638,12 +650,15 @@ ASSEMBLY_ORDER = (
                                               "RunClock.epoch, taken by DATA.draw_stream at E and "
                                               "by CKPT.save at C. ONE CLOCK, FOUR SPELLINGS, and "
                                               "the renames are this file's"),
-    ("epoch0",    "RUN",   "RunClock.begin_epoch", "(windows_in_epoch=len(Segmentation.ids)//LM.ctx "
+    ("epoch0",    "RUN",   "RunClock.begin_epoch", "(windows_in_epoch=(len(Segmentation.ids)-1)//LM.ctx "
                                               "through _windows_in_epoch) -- epoch 0's length, "
                                               "MEASURED on the stream that actually exists. It is "
                                               "here and not only at stage E because the first epoch "
                                               "is never rolled into, and it needs the clock the row "
-                                              "above builds"),
+                                              "above builds. On a resume it is the RESUMED epoch's "
+                                              "length, measured on the stream the `stream` row drew "
+                                              "for that epoch (Q-RUN-11). The count is (len - 1) // "
+                                              "ctx because a window needs ctx+1 ids (Q-RUN-12)"),
     ("warmup",    "SIG",   "warm_up",         "(stream=the epoch-0 unit stream in SIG's alphabet, "
                                               "seen_units=the WHOLE stream through "
                                               "_signature_units, opt=OPT's ENCODER optimizer) -- "
@@ -712,8 +727,18 @@ ASSEMBLY_ORDER = (
                                               "checks == 0: DECLARED AND NEVER ASKED, which is a "
                                               "different statement from armed-and-inert and G4 "
                                               "requires both"),
+    ("restore",   "RUN",   "Cadences.restore", "(state=Snapshot.payload['RUN']['cadences']) -- "
+                                              "AFTER new_cadences because it restores INTO the "
+                                              "ledger that row builds: every gate's seed, checks, "
+                                              "fires and last fire, for the keys still declared. "
+                                              "Until 2026-09-24 nothing of RUN's crossed the "
+                                              "boundary and every gate re-seeded at the resumed "
+                                              "step, so dom.manage fired at 261 instead of 201 on a "
+                                              "160-window parent and the ledger restarted at 0 "
+                                              "(Q-RUN-9). A checkpoint written before then has no "
+                                              "'RUN' key and restores nothing"),
     ("audit",     "RUN",   "cadence_audit",   "(run_windows=_run_windows(sysm), which measures "
-                                              "len(Segmentation.ids)//LM.ctx times RUN.epochs -- NOT "
+                                              "(len(Segmentation.ids)-1)//LM.ctx times RUN.epochs -- NOT "
                                               "'Plan's measured length', a field Plan does not have "
                                               "(data/api.py::<module>) and the same wrong fact "
                                               "_run_windows' own docstring already caught once; "
@@ -805,7 +830,7 @@ LOOP_ORDER = (
     ("E", "TOK",   "tokenize",        "(vocab, data=Stream.bytes, labels=Stream.labels, "
                                       "regularize=True) -- between the draw and begin_epoch, because "
                                       "the window count the next row needs is "
-                                      "len(Segmentation.ids)//LM.ctx and that cannot be known until "
+                                      "(len(Segmentation.ids)-1)//LM.ctx and that cannot be known until "
                                       "this call returns",
                                       "ids; positions -- Segmentation.byte_pos under MEM.write's "
                                       "spelling; windows_in_epoch and run_windows through "
@@ -814,7 +839,7 @@ LOOP_ORDER = (
                                       "the call the B row invokes on a retok, and the RetokEvent it "
                                       "is said to return is DECLARED (tok/api.py::<module>) BY NO ENTRY "
                                       "POINT'S DOCSTRING -- tokenize's says Segmentation"),
-    ("E", "RUN",   "RunClock.begin_epoch", "(windows_in_epoch=len(Segmentation.ids)//LM.ctx) -- a "
+    ("E", "RUN",   "RunClock.begin_epoch", "(windows_in_epoch=(len(Segmentation.ids)-1)//LM.ctx) -- a "
                                       "MEASUREMENT, re-taken every epoch because a resampling stream "
                                       "is a different length each time and minting shortens every "
                                       "later one. THE LENGTH ARRIVES AS A COUNT OF WINDOWS. The "
@@ -1091,7 +1116,10 @@ LOOP_ORDER = (
                                       "four rows above this one. lm/api.py::lm_loss forbids LM "
                                       "composing it, so the sum is THIS FILE'S and the row names "
                                       "the summands rather than a producer that must not exist"),
-    ("B", "RUN",   "RunClock.note_backward", "derive.accum_due on a Backwards clock"),
+    ("B", "RUN",   "RunClock.note_backward", "derive.accum_due on a Backwards clock -- seeded from "
+                                      "OPT's restored n_backward (Q-RUN-9) and compared with "
+                                      "OPT.scaled_backward's count every flush, because "
+                                      "OPT.maybe_step re-decides the step on that one"),
     ("B", "OPT",   "maybe_step",      "shift_at from the root, stamped at the E draw row; returns "
                                       "StepOutcome.lr as a RETURN VALUE. Its step 2 IS "
                                       "OPT.lr_at(st, st.opt_step) -- the schedule is PURE and is "
@@ -1330,6 +1358,15 @@ LOOP_ORDER = (
                                       "on and which OptState does not declare -- a refusal armed "
                                       "against a value nothing produces",
                                       "payload['OPT']"),
+    ("C", "RUN",   "Cadences.state",  "() -- every gate's seed, checks, fires and last fire, so a "
+                                      "resumed run keeps the parent's schedule instead of "
+                                      "re-seeding each gate a period late (Q-RUN-9)",
+                                      "payload['RUN']['cadences']"),
+    ("C", "RUN",   "RunClock.counters", "() -- in_epoch and windows_in_epoch, the clock's position "
+                                      "in its epoch, which a Snapshot's step and epoch cannot say at "
+                                      "epoch > 0; the child reads it to WARN about a mid-epoch "
+                                      "replay (Q-RUN-10)",
+                                      "payload['RUN']['clock']"),
     ("C", "CKPT",  "Retention.state", "() -> Snapshot.best_state, which is a FIELD OF ITS OWN and "
                                       "not part of payload: new_retention(restored=) takes it back. "
                                       "Without it the first post-resume probe satisfies 'no best "
@@ -1881,7 +1918,7 @@ ROW_ARGUMENTS_ELSEWHERE = {
         "terms plus LM.anchor_term. The sum is the loop's because the terms come from four packages "
         "and no package may see another's.",
     "RUN.RunClock.begin_epoch":
-        "windows_in_epoch is _windows_in_epoch(sysm) -- len(Segmentation.ids) // LM.ctx, this file's "
+        "windows_in_epoch is _windows_in_epoch(sysm) -- (len(Segmentation.ids) - 1) // LM.ctx, this file's "
         "arithmetic over TOK.tokenize's return and LM's frozen Config. TOK.tokenize does NOT return "
         "it: tok/api.py::<module> declares Segmentation as ids, byte_pos, labels and bytes_per_token, and "
         "the row claimed the count until K11 refused the claim. begin_epoch's own docstring is why "
@@ -2174,9 +2211,19 @@ def compose(environ=None, *, restored=None):
     # OPT.build needs run_windows measured from a segmentation that exists (opt/api.py::build), and
     # SIG.warm_up takes the stream. The epoch level draws every LATER epoch's; the duplication is
     # the honest shape and the old tree has it too (:4104 and :6513 both call _resample()).
+    # THE EPOCH THE RUN IS IN, WHICH IS 0 ONLY ON A FRESH RUN (2026-09-24, Q-RUN-11). This read
+    # `epoch=0` unconditionally, so a child resumed at epoch E redrew EPOCH 0's stream under
+    # DATA_RESAMPLE=1: driven at RUN_EPOCHS=2, a parent's epoch-1 draw hashed 65cd298845 and its
+    # child, resumed at 'epoch 1', drew cfacafbe13 -- epoch 0's -- and trained its first window on
+    # epoch 0's first window. data/api.py::draw_stream owns whether the epoch changes the draw, so
+    # the root passes the number and never the decision, exactly as stage E's row does. (The
+    # DATA_RESAMPLE=0 arm at epoch >= 1 is refused before a window trains: RUN.startup_refusals
+    # refuses RUN_EPOCHS > 1 without resampling, and epoch 1 of RUN_EPOCHS=1 is a finished resume.) It is also what the declared mid-epoch
+    # replay (train/api.py::new_clock) means by "replays the epoch it was interrupted in".
     sysm.stage = "stream"
     sysm.stream = data_api.draw_stream(
-        data, sysm.areas, sysm.plan, epoch=0, seed=int(run.seed))
+        data, sysm.areas, sysm.plan, epoch=0 if restored is None else int(restored.epoch),
+        seed=int(run.seed))
 
     sysm.stage = "segment"
     sysm.segmentation = tok_api.tokenize(
@@ -2351,16 +2398,87 @@ def compose(environ=None, *, restored=None):
         sysm.token_seen = _live.to(sysm.process.device)
 
     # -- 11. the clocks, epoch 0's length, and the encoder warm-up --------------------------------
+    # resume_backwards / resume_opt_steps ARE OPT'S RESTORED COUNTS, read off the two declared
+    # OptState fields after the restore row above (0 and 0 on a fresh run or a refused restore).
+    # Without them the clock restarted at backwards=0 while OPT resumed at n_backward, and a parent
+    # saved partway through an accumulation left the two gates out of phase for the whole child:
+    # zero optimizer steps, then a raise at R before the final save (Q-RUN-9).
     sysm.stage = "clock"
     sysm.clock = run_api.new_clock(
         run, batch_windows=int(opt.batch_windows), accum=int(opt.accum),
         resume_step=0 if restored is None else restored.step,
-        resume_epoch=0 if restored is None else restored.epoch)
+        resume_epoch=0 if restored is None else restored.epoch,
+        resume_backwards=int(sysm.optimizer.n_backward),
+        resume_opt_steps=int(sysm.optimizer.opt_step))
 
     # Epoch 0 is never rolled into, so its length is declared here rather than at stage E. It is a
-    # COUNT OF WINDOWS measured on the segmentation that exists, never stream_bytes // ctx.
+    # COUNT OF WINDOWS measured on the segmentation that exists, never stream_bytes // ctx. ON A
+    # RESUME it is the RESUMED epoch's length, measured on the stream the `stream` row drew for it.
     sysm.stage = "epoch0"
     sysm.clock.begin_epoch(_windows_in_epoch(sysm))
+
+    # A RESUME OF A FINISHED RUN IS REFUSED, THE WAY RUN_EPOCHS=0 IS (2026-09-24, Q-RUN-10). The
+    # loop's first act is clock.advance(), so a clock already at epoch >= RUN_EPOCHS trained one
+    # window nobody asked for -- a full flush, an optimizer step, a MEM write -- and overwrote the
+    # final checkpoint at step+1: driven, a 157-window finished parent resumed as '158 windows, 1
+    # flushes, 1 optimizer steps' and 'CKPT.save: 1 checkpoint(s) written'. RunClock.counters
+    # publishes epochs_target for exactly this question and nothing asked it. A REFUSAL rather than
+    # a zero-window report, because the add-an-area continuation that forgot to raise RUN_EPOCHS
+    # is the goal-B case where a silently empty child is most damaging.
+    _c0 = sysm.clock.counters()
+    if restored is not None and int(_c0["epoch"]) >= int(_c0["epochs_target"]):
+        sysm.refusals.append(
+            f"CKPT_RESUME={sysm.resume_src!r} has already completed epoch {int(_c0['epoch'])} of "
+            f"RUN_EPOCHS={int(_c0['epochs_target'])} (step {int(_c0['step'])}), so the loop would "
+            f"make no passes -- and before this refusal it trained one unrequested window and "
+            f"overwrote the final checkpoint. Raise RUN_EPOCHS above {int(_c0['epoch'])} to "
+            f"continue training from it.")
+
+    # A MID-EPOCH RESUME REPLAYS ITS EPOCH, AND THE RUN NOW SAYS SO (2026-09-24, Q-RUN-10). The
+    # replay is DECLARED (train/api.py::new_clock, "A MID-EPOCH RESUME REPLAYS THE EPOCH IT WAS
+    # INTERRUPTED IN") and is kept; what was missing is the operator hearing about it. Driven: a
+    # 120-window parent of a 211-window epoch resumed to 331 windows, trained windows 0..119 a
+    # second time and ran 120 optimizer steps past a 211-step horizon, and printed nothing. The
+    # position comes from payload['RUN'] (RunClock.counters' in_epoch, written by
+    # spine/loop.py::_payload); a checkpoint written before 2026-09-24 has none, and then epoch 0's
+    # position is still exact (it began at step 0) while a later epoch's is unknown and said so.
+    if restored is not None and not sysm.refusals:
+        _run_saved = saved.get("RUN") or {}
+        _pos = _run_saved.get("clock") or {}
+        if "in_epoch" in _pos:
+            _in = int(_pos["in_epoch"])
+        elif int(restored.epoch) == 0:
+            _in = int(restored.step)
+        else:
+            _in = None
+        _wie = int(_c0["windows_in_epoch"])
+        if _in is None:
+            sysm.warnings.append(
+                f"RESUME POSITION UNKNOWN: the checkpoint predates payload['RUN'], so whether step "
+                f"{int(restored.step)} of epoch {int(restored.epoch)} was an epoch boundary cannot "
+                f"be told. If it was not, the {_wie}-window epoch restarts at window 0 and the "
+                f"windows already trained in it are trained again (train/api.py::new_clock).")
+        elif _in > 0:
+            from spine import derive as _derive, units as _U
+            # THE WINDOWS LEFT, THROUGH THE NAMED CONVERSIONS: this epoch replayed whole plus every
+            # later one at this epoch's length (later epochs shrink as mints land, so this is an
+            # upper estimate), then windows to optimizer steps at the effective batch.
+            _left = _derive.run_windows_from_epochs(
+                _U.Epochs(int(_c0["epochs_target"]) - int(restored.epoch)), _wie)
+            _steps_end = int(sysm.optimizer.opt_step) + int(_derive.opt_steps_from_windows(
+                _left, int(opt.d_effective_batch_windows)))
+            _run_steps = int(sysm.optimizer.horizon.run_steps)
+            sysm.warnings.append(
+                f"MID-EPOCH RESUME REPLAYS ITS EPOCH: the checkpoint was saved {_in} window(s) into "
+                f"epoch {int(restored.epoch)}, and a resume restarts that epoch at window 0 (the "
+                f"declared semantics, train/api.py::new_clock), so those {_in} window(s) are "
+                f"trained again and this {_wie}-window epoch rolls {_wie} windows from now rather "
+                f"than {max(0, _wie - _in)}. The optimizer resumes at step "
+                f"{int(sysm.optimizer.opt_step)} and would end near step {_steps_end} against an OPT "
+                f"horizon of {_run_steps}"
+                + (f" -- {_steps_end - _run_steps} step(s) past it, at the LR floor."
+                   if _steps_end > _run_steps else ", inside it.")
+                + " Resume from an epoch-boundary checkpoint to avoid both (Q-RUN-10).")
 
     # The encoder is trained BEFORE the loop, which is why this needs the stream and the optimizer
     # to be in place already. Without it every window of the run is routed through a randomly
@@ -2421,7 +2539,7 @@ def compose(environ=None, *, restored=None):
     # THE PERIODS ARE ARGUMENTS AND THE CALL WAS NOT PASSING ANY. new_cadences(run: Config, *,
     # periods) is keyword-only with no default (train/api.py::new_cadences), so this line was a TypeError on
     # every compose() -- unreachable behind THREE stubs and not one. This is row 35 of
-    # ASSEMBLY_ORDER's 39, and rows 29, 32 and 33 each raise NotImplementedError before it:
+    # ASSEMBLY_ORDER's 40, and rows 29, 32 and 33 each raise NotImplementedError before it:
     # capacity/api.py::startup_refusals, train/api.py::new_clock and
     # train/api.py::RunClock.begin_epoch. Row 29 is the FIRST of the three and not the reason, so
     # repairing CAP alone does not bring this line into reach -- the run then stops earlier, at
@@ -2452,6 +2570,15 @@ def compose(environ=None, *, restored=None):
     sysm.stage = "cadence"
     periods = _periods(sysm)
     sysm.cadences = run_api.new_cadences(run, periods=periods)
+    # THE GATES' SCHEDULE CROSSES THE BOUNDARY (2026-09-24, Q-RUN-9). spine/loop.py::_payload
+    # writes Cadences.state() under payload['RUN']; without this row every gate re-seeded at the
+    # resumed step and first fired a whole period late -- dom.manage at 261 instead of 201 on a
+    # 160-window parent, dom.rekey at 361 instead of 201 -- and the ledger restarted at 0 fires. A
+    # checkpoint written before then has no 'RUN' key and restores nothing, which is the old
+    # behaviour and not a refusal.
+    if restored is not None:
+        sysm.stage = "restore.run"
+        sysm.cadences.restore((saved.get("RUN") or {}).get("cadences"))
 
     # AND THE AUDIT WAS A ROW NOBODY CALLED. `grep cadence_audit` found it only inside its own row
     # prose: the one statement that makes ISSUES P1-C11 visible -- ten cadence defaults longer than a
@@ -2583,7 +2710,7 @@ def _run_windows(sysm):
     and derive.opt_steps_from_windows does the same (derive.py::opt_steps_from_windows), so RUN.cadence_audit would
     have raised on its first call and OPT.build on its first horizon. THE TWO CONSUMERS ARE
     UNREACHABLE FOR DIFFERENT REASONS, AND SAYING SO IS THE WHOLE VALUE OF THE SENTENCE. OPT.build
-    is row 30 of ASSEMBLY_ORDER's 39 and capacity/api.py::startup_refusals at row 29 is its ONLY
+    is row 30 of ASSEMBLY_ORDER's 40 and capacity/api.py::startup_refusals at row 29 is its ONLY
     blocker: make startup_refusals return an empty list and compose() runs straight through
     OPT.build and OPT.load_state -- this function is CALLED there, at the `optimizer` stage -- and
     stops at row 32. RUN.cadence_audit is row 36 and has FOUR blockers above it, not one: row 29,
@@ -2606,7 +2733,7 @@ def _run_windows(sysm):
     mechanism that no longer holds is a false equation, which this file rates worse than printing
     nothing. Measured, not inferred: `compose.compose(environ={})` raises NotImplementedError from
     compose.py's `refuse` stage into capacity/api.py::startup_refusals, and docs/04_CONTRACT.md
-    says the same in as many words ("halts on the 29th of the 39 rows in ASSEMBLY_ORDER, at
+    says the same in as many words ("halts on the 29th of the 40 rows in ASSEMBLY_ORDER, at
     CAP.startup_refusals"). ISSUES P1-H51 is the general case: all 35 Clock-unit levers resolve to bare
     ints and the typing is real only where derive or assemble puts it back, which for this quantity
     is here, at the one place it is computed.
@@ -2664,7 +2791,18 @@ def _run_windows(sysm):
 
 
 def _windows_in_epoch(sysm):
-    """This epoch's length in WINDOWS: len(Segmentation.ids) // LM.ctx.
+    """This epoch's length in WINDOWS: (len(Segmentation.ids) - 1) // LM.ctx.
+
+    THE -1 IS THE TARGET SHIFT, AND IT WAS MISSING UNTIL 2026-09-24 (Q-RUN-12). A window needs
+    ctx + 1 ids, because `y` is `x` shifted one token (spine/loop.py::_window_bounds), so window i
+    exists only while (i + 1) * ctx + 1 <= len(ids): that is (len - 1) // ctx windows, not
+    len // ctx. The two differ exactly when len(ids) is a multiple of ctx -- about one epoch in
+    ctx -- and there the old count declared a last window with no final target. The loop skipped
+    it, but the clock had already counted it, and when it fell on a flush the clock closed a flush
+    with no backward: driven on a 768-id segmentation at ctx=128, 6 flushes against 5 backward
+    passes at OPT_BATCH_WINDOWS=1, and at OPT_BATCH_WINDOWS=2 the fifth window was accumulated,
+    never flushed, never trained, and not counted in dropped_windows. Everywhere len is not a
+    multiple of ctx the two spellings are the same number, so no run that avoided that case moves.
 
     The ONE arithmetic that turns a token stream into a window count, named so both readers -- the
     LR horizon above and RunClock.begin_epoch -- take it from the same place. `stream_bytes // ctx`
@@ -2697,7 +2835,7 @@ def _windows_in_epoch(sysm):
     ownership rule that stops RUN from assembling them. P4 prints it once, after the `segment`
     stage, on EVERY run.
     """
-    return max(1, len(sysm.segmentation.ids) // int(sysm.configs["LM"].ctx))
+    return max(1, (len(sysm.segmentation.ids) - 1) // int(sysm.configs["LM"].ctx))
 
 
 def _geometry_manifest(sysm):
@@ -2761,7 +2899,7 @@ def _geometry_manifest(sysm):
         # body since P4 wrote one, so NOTHING SHIELDS THIS LINE ANY MORE. _geometry_manifest is
         # reached on every compose() today -- measured by running compose.compose(environ={}), which
         # builds all 21 manifest entries and only then stops at CAP.startup_refusals, row 29 of
-        # ASSEMBLY_ORDER's 39. An `lm.depth` written here now would kill the root at once.
+        # ASSEMBLY_ORDER's 40. An `lm.depth` written here now would kill the root at once.
         # A defect hidden behind an earlier stub is this project's oldest shape. K7 below is the
         # general form of the check that would have caught it at author time.
         "lm.layers":    (int(lm.layers), "EXACT", "LM_LAYERS", "the layer stack"),

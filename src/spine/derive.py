@@ -551,7 +551,7 @@ def run_windows_from_epochs(n_epochs, windows_in_epoch):
     EPOCHS -> WINDOWS AND NOT EPOCHS -> STEPS, though the horizon eventually wants Steps. Two
     boundaries separate an epoch from an optimizer step and they are crossed by two different
     rates: this one is windows per epoch, MEASURED on the segmentation that exists
-    (len(Segmentation.ids) // LM.ctx, spine/compose.py::_windows_in_epoch), and the next is
+    ((len(Segmentation.ids) - 1) // LM.ctx, spine/compose.py::_windows_in_epoch), and the next is
     windows per optimizer step, which is opt_steps_from_windows' divisor. Folding them into one
     call would put a measured quantity and a configured one under one rate, which is how
     `STREAM_LEN // WIN` came to divide a BYTE budget by a TOKEN window and overstate the step count
@@ -670,8 +670,10 @@ def cadences_that_cannot_fire(run_windows, periods):
     states it; it does not raise. The owner decides whether to change the numbers.
 
     STRICT: a period EQUAL to the run length is reported. A gate fires when `period` windows have
-    ELAPSED since it last fired, and `_fired[key]` seeds at the resumed step -- so a period exactly
-    equal to the run has one chance, at the final window, and only if nothing rounds against it.
+    ELAPSED since it last fired, and a gate with no seed seeds at the clock's current step (a resume
+    from a checkpoint carrying payload['RUN'] restores the parent's seed instead, Q-RUN-9) -- so a
+    period exactly equal to the run has one chance, at the final window, and only if nothing rounds
+    against it.
     Reporting it is the honest side of a boundary nobody should have to reason about twice.
     """
     if type(run_windows) is not Windows:
@@ -1111,6 +1113,37 @@ def accum_due(n_backward, accum):
     n = int(n_backward)
     k = max(1, int(accum))
     return n > 0 and n % k == 0
+
+
+def accum_partial(n_backward, accum):
+    """How many backward passes have accumulated since the last optimizer-step boundary?
+
+    UNIT IN: n_backward = Backwards, accum = backward passes per optimizer step (count).
+    UNIT OUT: Backwards.
+
+    THE COMPANION OF accum_due, AND IT EXISTS FOR ONE READER (2026-09-24, Q-RUN-9).
+    opt/api.py::load_state counts opt.ckpt.partial_accum_dropped -- the passes of a parent's
+    unfinished accumulation whose gradients no checkpoint carries -- and that is `n % accum`, a
+    remainder of a backward count by the accumulation rate. Written inline at the call site it is a
+    cross-kind operation on a Clock-unit lever that O11 refuses and nobody can audit; here it is
+    named once, with accum_due's refusals and accum_due's clamp, so the two answers cannot disagree:
+    accum_due(n, k) is exactly `n > 0 and accum_partial(n, k) == Backwards(0)`.
+
+    A NEGATIVE COUNT IS REFUSED: a remainder is a NUMBER of passes, and like the five conversions
+    above there is no honest number for minus four backward passes.
+    """
+    if type(n_backward) is not Backwards:
+        raise UnitError(f"accum_partial: n_backward must be Backwards, got "
+                        f"{type(n_backward).__name__}. Accumulation counts backward passes.")
+    if isinstance(accum, Clock) or type(accum) is not int:
+        raise UnitError(f"accum_partial: accum={accum!r} is a {type(accum).__name__}. It is a "
+                        f"RATE -- backward passes per optimizer step -- and an int, exactly as "
+                        f"accum_due requires.")
+    n = int(n_backward)
+    if n < 0:
+        raise UnitError(f"accum_partial: n_backward={n} is negative; there is no number of passes "
+                        f"accumulated since a step boundary for a count below zero.")
+    return Backwards(n % max(1, int(accum)))
 
 
 def pin_tick(held, pinned, dstep):

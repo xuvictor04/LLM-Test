@@ -138,7 +138,8 @@ _CALLS = {
     "C": frozenset({
         "DATA.stream_state", "TOK.vocab_state", "LM.state_dict", "SIG.state_dict", "FAB.state_dict",
         "WORLD.state_dict", "WORLD.geometry", "MEM.state_dict", "DOM.state_dict", "CAP.state",
-        "OPT.state_dict", "CKPT.Retention.state", "TOK.save_vocabulary", "CKPT.save"}),
+        "OPT.state_dict", "RUN.Cadences.state", "RUN.RunClock.counters", "CKPT.Retention.state",
+        "TOK.save_vocabulary", "CKPT.save"}),
     # ---- stage R, the report, through _report and run's own tail
     "R": frozenset({
         "DOM.prior", "MEM.census", "DOM.census",
@@ -340,8 +341,15 @@ class RunResult:
     `skipped` IS NOT DECORATION AND IT IS THE FIRST FIELD A READER SHOULD LOOK AT. It names every
     mechanism LOOP_ORDER lists that this driver could not call, so "0 experts born" is readable as
     "growth was never invoked" rather than as "growth was invoked and declined".
+
+    RUN TOTALS AND THIS PROCESS'S, NAMED APART (2026-09-24, Q-RUN-10). `windows` and `opt_steps`
+    are the RUN's totals -- the clock resumes both from the checkpoint -- while `flushes` and
+    `windows_here` count THIS process only; on a fresh run windows == windows_here. run.py prints
+    the two apart on a resumed run, because a throughput or a window count quoted from the total
+    on a resume is a number about a process that did not run here.
     """
     windows: int
+    windows_here: int
     opt_steps: int
     flushes: int
     epochs: int
@@ -370,6 +378,7 @@ def _payload(sysm):
     declares it as such, and the package that writes the file has no business knowing what is in it.
     """
     cfg = sysm.configs
+    _pos = sysm.clock.counters()
     return {
         "LM": lm_api.state_dict(cfg["LM"], sysm.model, sysm.geometry),
         "SIG": sig_api.state_dict(cfg["SIG"], sysm.sig),
@@ -391,6 +400,15 @@ def _payload(sysm):
         # spine/compose.py::compose puts it back.
         "LOOP": {"token_seen": (None if sysm.token_seen is None
                                 else sysm.token_seen.detach().cpu().clone())},
+        # RUN'S STATE, THROUGH RUN'S OWN ENTRY POINTS (2026-09-24, Q-RUN-9 and Q-RUN-10). Nothing of
+        # RUN crossed the boundary except the two numbers CKPT.save records itself (step, epoch), so
+        # every cadenced gate re-seeded at the resumed step and fired a period late, and a resume
+        # could not tell a boundary save from a mid-epoch one. `cadences` is Cadences.state() and
+        # spine/compose.py puts it back through Cadences.restore; `clock` is the epoch position off
+        # RunClock.counters(), which compose reads to warn about a mid-epoch replay.
+        "RUN": {"cadences": sysm.cadences.state(),
+                "clock": {"in_epoch": _pos["in_epoch"],
+                          "windows_in_epoch": _pos["windows_in_epoch"]}},
     }
 
 
@@ -502,6 +520,17 @@ def run(sysm, *, max_windows=None, progress=True):
     through epochs and DATA owns its length through the corpus, and a knob here that could cut a
     run short would be a second answer to "how long is this run" that no report reads. It exists so
     a smoke test can be a smoke test, and a run that stops because of it SAYS SO in warnings.
+    IT COUNTS THE WINDOWS THIS CALL TRAINS, NOT THE CLOCK'S RUN TOTAL (2026-09-24, Q-RUN-10). It was
+    compared against the absolute `tick.step`, which a resume restores, so every resumed run given
+    --max-windows N <= its restored step trained exactly ONE window and stopped (driven: a 60-window
+    parent resumed with --max-windows 40 printed '61 windows, 1 flushes'). A driver argument is
+    about the process it is handed to. It is tested BEFORE the epoch roll, so a stop that lands on
+    an epoch boundary stops there instead of drawing the next epoch and training one window of it.
+
+    A CLOCK THAT HAS ALREADY FINISHED IS REFUSED BEFORE THE FIRST advance(). The first advance is a
+    window of training; spine/compose.py refuses a resume of a finished run for that reason, and
+    this is the same predicate (RunClock.counters' epoch against epochs_target) for a caller that
+    hands this function a System by another route.
 
     A System CARRYING REFUSALS IS NOT RUN. run.py stops on System.refusals before it gets here
     ("REFUSALS STOP THE RUN BEFORE A TENSOR IS TRAINED"), and that was the only stop: a driver
@@ -575,6 +604,16 @@ def run(sysm, *, max_windows=None, progress=True):
 
     warnings = list(sysm.warnings)
     clock, cadences = sysm.clock, sysm.cadences
+    _c_start = clock.counters()
+    if int(_c_start["epoch"]) >= int(_c_start["epochs_target"]):
+        raise RuntimeError(
+            f"loop.run: the clock has already completed epoch {int(_c_start['epoch'])} of "
+            f"epochs_target={int(_c_start['epochs_target'])} (step {int(_c_start['step'])}). The "
+            f"first act of this loop is clock.advance(), which is a window of training the run was "
+            f"not asked for; spine/compose.py refuses a resume of a finished run for the same "
+            f"reason. Raise RUN_EPOCHS to continue from it.")
+    # WHERE THIS CALL STARTED, so max_windows counts this call's windows (see the docstring).
+    start_step = int(_c_start["step"])
     periods = {k: v for k, v in _periods_of(sysm).items()}
     model, pop, st = sysm.model, sysm.fabric, sysm.sig
     ctx = int(lm_cfg.ctx)
@@ -605,13 +644,14 @@ def run(sysm, *, max_windows=None, progress=True):
     # and the signature slice index the segmentation that is currently loaded rather than the run's
     # cumulative window count. See the paragraph at the cut.
     win_in_epoch = 0
-    # ONE TAIL WARNING PER RUN, not one per epoch: the one-token tail is a property of the
-    # geometry, so a resampling run would otherwise repeat the same sentence every time a
-    # draw happened to land on a multiple of ctx.
-    _tail_warned = False
-    # HOW MANY TOKENS WERE MINTED BY THE TIME OF THE LAST EPOCH ROLL. 0 until a roll happens, which
-    # at RUN_EPOCHS=1 is for ever -- and that is exactly the case the end-of-run warning reports.
-    _mint_at_last_roll = 0
+    # HOW MANY TOKENS WERE MINTED BY THE TIME OF THE LAST RE-SEGMENTATION. The segmentation this
+    # loop starts on was cut by compose at the vocabulary as it stood then, so the mark starts at
+    # the MINT COUNT THE RUN ENTERED WITH, not at 0 (2026-09-24). On a fresh run those are the same
+    # number; on a resume tok.mint is the parent's count, carried by TOK's restore, and every one of
+    # those tokens is in this stream -- driven: 6 parent mints, 1707 occurrences of their ids in the
+    # resumed segmentation, and the end-of-run warning said all 6 "cannot appear". The roll below
+    # moves the mark forward.
+    _mint_at_last_roll = int(vocab.counters.get("tok.mint", 0))
     # `did` IS SEEDED AT 0 AND IS NO LONGER A CONSTANT. It is overwritten by DOM.observe on every
     # window; the seed only covers the impossible case of a flush with no window in it.
     did = 0
@@ -689,37 +729,24 @@ def run(sysm, *, max_windows=None, progress=True):
         win_in_epoch += 1
         bounds = _window_bounds(ids, i, ctx)
         if bounds is None:
-            # THE WINDOW HAS NO MATERIAL. TWO CAUSES, AND THEY ARE DIFFERENT FACTS ABOUT DIFFERENT
-            # RUNS, so this branch names which before it does anything.
-            # (1) THE ONE-TOKEN TAIL, WHICH IS ARITHMETIC AND NOT A DEFECT. `_windows_in_epoch` is
-            #     `len(ids) // ctx` and a window needs ctx + 1 ids -- `y` is `x` shifted one token
-            #     -- so whenever len(ids) is an exact multiple of ctx the LAST window of the epoch
-            #     is one target short. The clock is right, the division is right, and the epoch
-            #     simply ends one window earlier than the floor suggests. It happens on about one
-            #     epoch in `ctx`, so a single-epoch run almost never sees it and a long resampling
-            #     run eventually does.
-            # (2) A REAL DISAGREEMENT between the epoch length and the stream it was measured on,
-            #     which is a defect somebody needs to see.
-            # THIS BRANCH USED TO `break` FOR BOTH, and in case (1) that STOPPED THE RUN one window
-            # before a roll it should have taken -- so a multi-epoch run would silently become a
-            # one-epoch run, with a warning that called the arithmetic a defect. The window is
-            # skipped either way; what changed is that the loop now falls through to the
-            # finished/rolled tail below instead of leaving, so the epoch can roll.
+            # THE WINDOW HAS NO MATERIAL, AND SINCE 2026-09-24 THAT IS ALWAYS A DEFECT (Q-RUN-12).
+            # This branch used to name TWO causes and call the first arithmetic: the ONE-TOKEN TAIL,
+            # when len(ids) was an exact multiple of ctx and `_windows_in_epoch` (then len // ctx)
+            # declared a last window one target short. The window was skipped here, but the clock
+            # had already counted it -- and on a flush tick it closed a flush with no backward
+            # (6 flushes against 5 backward passes at OPT_BATCH_WINDOWS=1; at 2, a window that was
+            # accumulated, never trained and never counted as dropped). `_windows_in_epoch` is now
+            # (len(ids) - 1) // ctx, the number of windows that HAVE ctx + 1 ids, so that tail no
+            # longer exists and what reaches here is a real disagreement between the epoch length
+            # and the stream it was measured on. The window is skipped and the loop falls through
+            # to the finished/rolled tail below, so the epoch can still roll.
             _short_by = (i * ctx + ctx + 1) - len(ids)
-            if _short_by == 1 and not _tail_warned:
-                _tail_warned = True
-                warnings.append(
-                    f"loop: epoch {int(tick.epoch)}'s last window has inputs and no final target "
-                    f"-- len(ids)={len(ids)} is an exact multiple of LM_CTX={ctx}, and a window "
-                    f"needs ctx+1 ids because `y` is `x` shifted one token. The window is skipped "
-                    f"and the epoch rolls normally. This is the floor in "
-                    f"spine/compose.py::_windows_in_epoch, not a defect.")
-            elif _short_by != 1:
-                warnings.append(
-                    f"loop: the segmentation ran out at window {i} of epoch {int(tick.epoch)} and "
-                    f"it is NOT the one-token tail -- it is short by {_short_by} "
-                    f"(len(ids)={len(ids)}, ctx={ctx}). The epoch length and the stream it was "
-                    f"measured on disagree, which is a defect rather than arithmetic.")
+            warnings.append(
+                f"loop: the segmentation ran out at window {i} of epoch "
+                f"{int(tick.epoch) - (1 if tick.rolled else 0)} -- it is short by {_short_by} "
+                f"(len(ids)={len(ids)}, ctx={ctx}). spine/compose.py::_windows_in_epoch counts "
+                f"only windows with ctx+1 ids, so the epoch length and the stream it was measured "
+                f"on disagree, which is a defect rather than arithmetic.")
         else:
             batch.append(bounds)
             # DOM.observe IS CALLED ONCE PER WINDOW, ABOVE THE BATCH EARLY-OUT, and that placement is
@@ -968,6 +995,22 @@ def run(sysm, *, max_windows=None, progress=True):
 
         if tick.finished:
             break
+        # THE DRIVER'S STOP, TESTED BEFORE THE ROLL AND COUNTED IN THIS CALL'S WINDOWS (2026-09-24,
+        # Q-RUN-10). It sat after the roll's `continue` and compared the absolute clock step, so a
+        # stop landing exactly on an epoch boundary drew the next epoch and trained one window of it
+        # (driven: max_windows=157 on a 157-window epoch ran 158 and saved at epoch 1, one window
+        # in), and every resume given N <= its restored step trained one window. Stopping here, at
+        # a boundary, leaves the clock at the new epoch with in_epoch 0, so the final checkpoint IS
+        # a boundary checkpoint and its child draws that epoch's stream from window 0.
+        if max_windows is not None and int(tick.step) - start_step >= int(max_windows):
+            stopped_early = True
+            warnings.append(f"loop: stopped at max_windows={int(max_windows)} window(s) trained by "
+                            f"THIS process (the clock reads step {int(tick.step)}"
+                            + (f", resumed at {start_step}" if start_step else "")
+                            + "), which is a DRIVER argument and not a lever -- this run is "
+                              "shorter than RUN.epochs and DATA asked for, and no report line "
+                              "should be read as a full run.")
+            break
         if tick.rolled:
             # ---- STAGE E: THE EPOCH ROLL. DATA.draw_stream -> TOK.tokenize -> begin_epoch -------
             # THIS DRIVER RAN A SINGLE PASS AND STOPPED HERE UNTIL 2026-09-22, and stage E's three
@@ -1053,12 +1096,6 @@ def run(sysm, *, max_windows=None, progress=True):
                 f"PREVIOUS segmentation and is NOT rewritten; MEM.maintain is told, drops its "
                 f"rekey snapshot and counts the event.")
             continue
-        if max_windows is not None and int(tick.step) >= int(max_windows):
-            stopped_early = True
-            warnings.append(f"loop: stopped at max_windows={int(max_windows)}, which is a DRIVER "
-                            f"argument and not a lever -- this run is shorter than RUN.epochs and "
-                            f"DATA asked for, and no report line should be read as a full run.")
-            break
 
     # THE FINAL SAVE, UNCONDITIONALLY, WHATEVER ENDED THE RUN. A run that stops because the epoch
     # finished, because max_windows was reached, or because the stream ran out has all done the
@@ -1098,23 +1135,29 @@ def run(sysm, *, max_windows=None, progress=True):
     # re-segmented at vocabulary 518 and the id count went 13,429 -> 13,202 for the same bytes,
     # which is the minted tokens being spent.
     # WHAT IS STILL TRUE IS NARROWER AND IS THE ONLY THING NOW CLAIMED: a token minted AFTER THE
-    # LAST ROLL has had no re-segmentation since it was born, so it is stranded exactly as before.
-    # At RUN_EPOCHS=1 that is every mint the run makes, because the one roll a single-epoch run
-    # takes is the one that also finishes it.
+    # LAST RE-SEGMENTATION has had none since it was born, so it is stranded exactly as before. The
+    # re-segmentations are the epoch rolls AND the one compose cut this process's first stream
+    # with, which on a resume already holds every token the parent minted -- the mark this counts
+    # from starts there (see where _mint_at_last_roll is seeded). On a fresh RUN_EPOCHS=1 run that
+    # is every mint the run makes, because the one roll a single-epoch run takes is the one that
+    # also finishes it.
     _minted = int(vocab.counters.get("tok.mint", 0))
     _stranded = _minted - _mint_at_last_roll
     if _minted and _mint_at_last_roll:
         warnings.append(
-            f"loop: {_minted} token(s) were minted; {_mint_at_last_roll} of them were in the "
-            f"vocabulary at the last epoch roll and ARE in this run's training stream, because the "
-            f"roll re-segments at the vocabulary as it then stands.")
+            f"loop: {_minted} token(s) were minted (the run's total, a resumed parent's included); "
+            f"{_mint_at_last_roll} of them were in the vocabulary at the last re-segmentation -- an "
+            f"epoch roll, or the segmentation this process started on -- and ARE in this run's "
+            f"training stream, because both segment at the vocabulary as it then stands.")
     if _stranded:
         warnings.append(
-            f"loop: {_stranded} token(s) were minted AFTER THE LAST EPOCH ROLL and cannot appear "
-            f"in this run's training stream -- their rows are initialised and a resume carries "
-            f"them, but no re-segmentation has happened since they were born. At RUN_EPOCHS=1 that "
-            f"is every mint the run makes: the single roll a one-epoch run takes is the one that "
-            f"also finishes it, and Tick requires `finished` to be tested first.")
+            f"loop: {_stranded} token(s) were minted AFTER THE LAST RE-SEGMENTATION and cannot "
+            f"appear in this run's training stream -- their rows are initialised and a resume "
+            f"carries them (a resumed run segments at the restored vocabulary, so they reach the "
+            f"data there), but nothing has re-segmented since they were born. On a fresh "
+            f"RUN_EPOCHS=1 run that is every mint the run makes: the single roll a one-epoch run "
+            f"takes is the one that also finishes it, and Tick requires `finished` to be tested "
+            f"first.")
 
     # THE R STAGE RUNS BEFORE THE FINAL SAVE, WHICH IS WHAT ITS OWN ROW ASKS FOR AND WHAT THIS
     # DRIVER DID BACKWARDS. LOOP_ORDER's ("R", "CKPT", "save") row reads: "the third route into the
@@ -1131,7 +1174,17 @@ def run(sysm, *, max_windows=None, progress=True):
     # includes the checkpoint is measuring the disk, which is the reason sweep_gpu.sh sets no
     # CKPT_DIR at all.
     elapsed_s = time.time() - t0
-    report = _report(sysm, elapsed_s, ctx)
+    # A RAISING R STAGE STILL SAVES FIRST (2026-09-24, Q-RUN-9). The order above is the row's and
+    # is kept, but several R entry points ASSERT -- OPT.counters raises on a broken accumulation
+    # invariant -- and with the save after them a failed assertion threw the trained weights away
+    # with the report: the mid-accumulation resume that raised there wrote no checkpoint at all.
+    # An invariant failure is a reason to distrust the run, not to lose it; the save is taken with
+    # the counters as they stand and the exception is re-raised unchanged.
+    try:
+        report = _report(sysm, elapsed_s, ctx)
+    except Exception:
+        _save(sysm, clock, "final")
+        raise
     # THE DRIVER'S OWN BOOK. An empty dict is a statement too -- neither mechanism was reachable on
     # this arm (batch_windows=1 and a routed fabric) -- so it is printed with that sentence rather
     # than as nothing.
@@ -1151,7 +1204,8 @@ def run(sysm, *, max_windows=None, progress=True):
 
     c = clock.counters()
     return RunResult(
-        windows=int(c["step"]), opt_steps=int(c["opt_steps"]), flushes=int(c["flushes"]),
+        windows=int(c["step"]), windows_here=int(c["step"]) - start_step,
+        opt_steps=int(c["opt_steps"]), flushes=int(c["flushes"]),
         epochs=int(c["epoch"]), loss_first=first_loss, loss_last=last_loss,
         loss_curve=tuple(curve), elapsed_s=elapsed_s, skipped=skipped,
         gated=_gate_report(sysm) + (
@@ -1269,7 +1323,7 @@ def _report(sysm, elapsed_s, ctx):
 def _windows_in_epoch_of(sysm):
     """compose.py::_windows_in_epoch, reached without importing compose at this module's top level.
 
-    THE DIVISION IS NAMED ONCE, THERE. `len(Segmentation.ids) // LM.ctx` and `stream_bytes // ctx`
+    THE DIVISION IS NAMED ONCE, THERE. `(len(Segmentation.ids) - 1) // LM.ctx` and `stream_bytes // ctx`
     are both ints and both would wrap as units.Windows; what separates them is WHICH STREAM was
     divided, and no type states that -- which is why RunClock.begin_epoch takes a bare count and
     refuses a Clock, and why this driver must not write the division itself.
@@ -1510,9 +1564,9 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     # false for the whole life of this driver. This is read off the tensor the step produced, and
     # run.py prints it beside amp_state so a reader compares two numbers instead of trusting one.
     sysm.process_dtype = str(logits.dtype)
-    opt_api.scaled_backward(opt_cfg, sysm.optimizer, total)
+    n_bwd_opt = opt_api.scaled_backward(opt_cfg, sysm.optimizer, total)
 
-    # THE BACKWARD IS COUNTED BY THE CLOCK AND NOWHERE ELSE, and the optimizer steps only when the
+    # THE BACKWARD IS COUNTED BY THE CLOCK, and the optimizer steps only when the
     # clock says a step is due -- derive.accum_due on a Backwards clock, never a modulo on the
     # window counter. Two real runs one line apart measured 55 optimizer steps where 13 were due.
     # THESE TWO LINES MOVED HERE FROM `run` and the move is LOOP_ORDER's, not a preference. The B
@@ -1523,6 +1577,22 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     # downstream of it: its `applied_lr` is THIS flush's StepOutcome.lr, and there is no way to
     # supply that from a caller that has not stepped yet.
     stepped = clock.note_backward()
+    # THE TWO BACKWARD COUNTS ARE COMPARED EVERY FLUSH, because two gates decide one step: the
+    # clock's accum_due on RunClock.backwards lets maybe_step be called, and maybe_step re-decides
+    # on OPT's own st.n_backward (scaled_backward's return). When they disagree the optimizer
+    # silently never steps -- which is what every resume from a checkpoint saved partway through an
+    # accumulation did until 2026-09-24 (Q-RUN-9): the clock restarted at 0 while OPT resumed at the
+    # parent's count, and a 30-window OPT_ACCUM=4 child took 0 steps in 30 backward passes. The
+    # clock is now seeded from OPT's restored count, so this cannot fire in a sound process; it is
+    # here so the next route to that state stops the run on the first flush instead of at R.
+    _clock_bwd = int(clock.counters()["backwards"])
+    if _clock_bwd != int(n_bwd_opt):
+        raise RuntimeError(
+            f"loop: the clock counts {_clock_bwd} backward pass(es) and OPT counts "
+            f"{int(n_bwd_opt)}. RunClock.note_backward decides whether a step is due on the first "
+            f"and OPT.maybe_step on the second, so with them apart the optimizer steps on neither "
+            f"schedule. spine/compose.py seeds the clock from OPT's restored n_backward for exactly "
+            f"this reason (Q-RUN-9).")
     outcome = opt_api.maybe_step(opt_cfg, sysm.optimizer) if stepped else None
 
     # THE PER-EXPERT RATES, ON THE RATE THE OPTIMIZER JUST APPLIED. LOOP_ORDER's own row says this

@@ -526,6 +526,19 @@ def smoke():
     # noticed. The third row is the count end: `n > 0` is False at -4, so a negative is not due --
     # answered rather than refused, which is the other half of the same asymmetry.
     assert derive.accum_due(Backwards(52), 0) is True
+    # accum_partial IS accum_due'S REMAINDER, WITH THE SAME CLAMP: 27 passes at accum=4 leave 3
+    # un-stepped, a boundary leaves none, and a negative count or a non-int rate is refused.
+    assert derive.accum_partial(Backwards(27), 4) == Backwards(3)
+    assert derive.accum_partial(Backwards(28), 4) == Backwards(0)
+    assert derive.accum_partial(Backwards(5), 0) == Backwards(0)
+    assert all(derive.accum_due(Backwards(n), 4) == (n > 0 and derive.accum_partial(
+        Backwards(n), 4) == Backwards(0)) for n in range(0, 40))
+    for _bad in ((Windows(27), 4), (27, 4), (Backwards(27), 4.0), (Backwards(-1), 4)):
+        try:
+            derive.accum_partial(*_bad)
+            raise AssertionError(f"accum_partial accepted {_bad!r}")
+        except UnitError:
+            pass
     assert derive.accum_due(Backwards(52), -4) is True
     assert derive.accum_due(Backwards(-4), 4) is False
 

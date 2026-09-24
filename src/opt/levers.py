@@ -199,7 +199,7 @@ off a document.
   place. That coupling does not exist yet either." IT NEVER WILL. NOT_WIRES gained a row on 2026-09-02
   (Q-OPT-1) refusing "the run length in windows -> OPT.d_run_steps / OPT.d_total_steps", on a ground
   DIFFERENT from the epochs one: the value does not EXIST at freeze, because it is
-  len(Segmentation.ids) // LM.ctx times RUN.epochs and Segmentation does not exist until TOK.tokenize
+  (len(Segmentation.ids) - 1) // LM.ctx times RUN.epochs and Segmentation does not exist until TOK.tokenize
   has run -- many assembly rows after every build() has returned, and a Config that can still be written
   after startup is a Config the report cannot claim the run used. The run length reaches this package as
   the `run_windows` ARGUMENT to OPT.build, and the named computation is spine/compose.py's

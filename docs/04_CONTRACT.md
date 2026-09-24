@@ -40,7 +40,7 @@ the count is checkable from the suite rather than from here.)*
 **Executable today.** `python3 -c "import sys;sys.path.insert(0,'src');from spine.compose import
 compose; compose(environ={})"` runs the composition root against the stubs and stops at the first
 unimplemented one with `NotImplementedError: CAP.startup_refusals: P4 (capacity) fills this in` —
-the **29th** of the 39 rows in `ASSEMBLY_ORDER`. *(This sentence named `RUN.process_setup` until
+the **29th** of the 40 rows in `ASSEMBLY_ORDER`. *(This sentence named `RUN.process_setup` until
 2026-09-04, and had been wrong since that entry point got a body: the root now reaches past the
 resume, the corpus, the vocabulary, the model, the fabric, the store, the partition and
 `CAP.new_valve` before it halts. Three further copies of the same stale claim — §3.8, §5's
@@ -737,7 +737,8 @@ Owns the shape of the run. **Declares no cadence and no threshold** — a claim 
 grepping the package for `%` and for a threshold literal.
 
 `process_setup` · `mode` · `streams` · `new_clock` + `RunClock.{begin_epoch,advance,note_backward,
-counters}` · `new_cadences` + `Cadences.{due,ledger}` · `bench_summary` · `startup_refusals`.
+counters}` · `new_cadences` + `Cadences.{due,ledger,state,restore}` · `bench_summary` ·
+`startup_refusals`.
 
 **`Cadences.due` is elapsed-since-last-fire, not modulo** — this is the load-bearing repair. Over
 200,000 simulated windows the mint fired 999 times at BATCH_W=1 and **zero** times at BATCH_W in
@@ -749,6 +750,12 @@ thing — which is what lets CKPT's and MEM's Windows cadences need **no** Windo
 row for every roll — it had **no caller at all** before, together with the epoch level itself;
 `RunClock.counters`, `Cadences.ledger` and `bench_summary` are stage-`R` rows, and the ledger is
 half of the NEVER-ASKED / ASKED-AND-REFUSED distinction G4 requires.
+**What crosses a resume (Q-RUN-9, Q-RUN-10):** `payload['RUN']` carries `Cadences.state()` (a C row;
+put back by the `Cadences.restore` row after `new_cadences`) and the clock's epoch position off
+`RunClock.counters` (a C row as well). `new_clock` seeds `backwards` and `opt_steps` from OPT's
+restored counts, so four of the six counters resume and `flushes` / `dropped_windows` are this
+process's. A resume of a finished run is refused; a mid-epoch one keeps the declared replay and is
+warned.
 
 ### CKPT — `src/ckpt/api.py` (5 levers)
 
@@ -1202,7 +1209,7 @@ is drawn at stage `E`. The old tree has the identical duplication — `:4104` an
 `plan.run_windows`, and `run_windows` **is not a field of `Plan`** (`data/api.py:22` declares
 `Plan` as `protocol, schedule, phase_bounds, per_area_draw, exposure, gates`) — a latent `AttributeError`
 sitting under a docstring that described the correct computation and could not perform it, because
-nothing drew a stream. It now measures `len(Segmentation.ids) // LM.ctx` through the named join
+nothing drew a stream. It now measures `(len(Segmentation.ids) - 1) // LM.ctx` through the named join
 `_windows_in_epoch`, which is the same arithmetic `RunClock.begin_epoch` is handed. That the two
 then **diverge** across a minting run is Q-OPT-5.
 
@@ -1402,7 +1409,7 @@ tables claiming one, and it names the producer each is waiting on.
 
 Six defects in `spine/compose.py` that the column exposed and that are repaired here. None of them
 is a signature change, and none is reached by the stub-only `compose(environ={})` above: it halts on
-the **29th** of the 39 rows in `ASSEMBLY_ORDER`, at `CAP.startup_refusals`, and the rows carrying
+the **29th** of the 40 rows in `ASSEMBLY_ORDER`, at `CAP.startup_refusals`, and the rows carrying
 these six either sit past that point or are on the resume path an empty environment never takes.
 That is the shape this file's own header calls *"a defect hidden behind an earlier stub, this
 project's oldest"*. *(This paragraph said `RUN.process_setup` "raises several rows earlier" until
@@ -1779,7 +1786,7 @@ with `int(held) >= cap.pin_windows` as the only form that runs — which `capaci
 as *"the original defect again"*. A reviewer found it by reading both surfaces; nothing executed,
 because `compose()` **then** stopped at `RUN.process_setup`, long before the valve. *(That is no
 longer where it stops, and this sentence said it was until 2026-09-04: `compose(environ={})` now
-halts on the 29th of the 39 rows in `ASSEMBLY_ORDER`, at `CAP.startup_refusals`, which is **past**
+halts on the 29th of the 40 rows in `ASSEMBLY_ORDER`, at `CAP.startup_refusals`, which is **past**
 `CAP.new_valve` — so the valve is built on every `compose()` today and both its Gates are readable
 without writing a line. The reading that found this one still had to be done by hand; what has
 changed is that the next one of its kind need not be.)*
@@ -3100,7 +3107,7 @@ read with them.
 
 ### Q-OPT-5 — the horizon is a projection and the epoch length is a measurement — **RESOLVED 2026-09-02: (a), PRINT THE RESIDUAL AND NAME ITS SIGN (UNDER-ANNEAL). NO SIGNATURE, NO LEVER. THE MAGNITUDE IS UNMEASURED AND THE PRINTED LINE IS WHAT MEASURES IT**
 `OPT.build` resolves the LR horizon **once**, from `run_windows`; `RunClock.begin_epoch` re-measures
-`len(Segmentation.ids) // ctx` **every epoch**, and online minting lengthens tokens and shortens
+`(len(Segmentation.ids) - 1) // ctx` **every epoch**, and online minting lengthens tokens and shortens
 every later epoch. Both are `units.Windows`, so nothing raises and nothing reconciles them. The
 once-resolved horizon is deliberate — the re-projecting machinery it replaces (`_project`/`_lr_total`
 /`_proj_lr`, `:6335-6376`) produced the E8 p=0.760 under-annealing — but it is resolved from epoch 0,
@@ -4284,9 +4291,10 @@ row and one deleted exemption. After P4 it is a coordinated edit across ten inde
 **THE COUNT WAS RE-VERIFIED BY SCRIPT ON 2026-09-03, NOT COPIED FROM THIS DOCUMENT**, because
 `Q-TOK-11` and this question collided on it once already and a fifth stale count would be the sixth
 time. Running `test_contract.api_signatures()` — K1's own AST walk, the same oracle the check uses —
-over `src/` returns **134 entry points**, against **134 declared** in §7's ```contract block, all
+over `src/` returns **136 entry points**, against **136 declared** in §7's ```contract block, all
 distinct. Per package: CAP 7, CKPT 11, DATA 5, DOM 10, EVAL 9, FAB 11, **LM 12**, MEM 10, OPT 7,
-RUN 14, SIG 10, TOK 9, **WORLD 9**. LM's twelve are `anchor_term`, `build_model`, `counters`, `decode`,
+RUN 16, SIG 10, TOK 9, **WORLD 9** (RUN's two since 2026-09-24 are `Cadences.state` and
+`Cadences.restore`, Q-RUN-9). LM's twelve are `anchor_term`, `build_model`, `counters`, `decode`,
 **`embed`**, `encode`, `lm_loss`, `load_state`, `on_mint`, **`residual_ratios`**, `resolve`,
 `state_dict` — the two additions are both present and both in §7, so 121 + 2 = 123 is the arithmetic
 and the tree agrees with it in both directions.
@@ -4643,6 +4651,99 @@ and is still off") — the tree already treats it as a run to report, not to ref
 remove an ablation-from-checkpoint that runs. **Rejected:** skipping the DOM restore when disabled
 (discards trained state a later `DOM_ENABLED=1` resume of the same child would want).
 
+### Q-RUN-9 — a resumed clock restarted `backwards`, `opt_steps` and every cadence seed at zero — **RESOLVED 2026-09-24: THE CLOCK IS SEEDED FROM OPT'S RESTORED COUNTS, THE GATE SCHEDULE IS CHECKPOINTED, AND THE ACCUMULATION INVARIANT COUNTS MULTIPLES CROSSED**
+Three defects, one boundary. **(1) Accumulation phase.** `RunClock.note_backward` decided a step with
+`accum_due(clock.backwards)` and `OPT.maybe_step` re-decided it with `accum_due(st.n_backward)`; the
+clock restarted at 0 while OPT restored the parent's count, so a parent saved partway through an
+accumulation put the two gates out of phase for the whole child. Driven at `OPT_ACCUM=4`: a 30-window
+parent (backward=30, step=7) resumed to 60 took **0** optimizer steps in 30 backward passes, then
+`OPT.counters` raised at R — which ran before the final save, so no checkpoint was written. Any
+epoch whose backward count is not a multiple of accum ends misaligned. **Ruling:** `new_clock` gains
+two DEFAULTED keywords, `resume_backwards` and `resume_opt_steps`, which the root fills from the
+restored `OptState.n_backward` / `opt_step`; the loop compares the clock's backward count with
+`OPT.scaled_backward`'s every flush and raises if they ever differ; `OPT.counters` measures the steps
+due since the resume as `floor(n/k) − floor(base/k)` (the multiples of accum crossed), not
+`floor((n − base)/k)`, which differs exactly on a misaligned base and raised on a correct schedule;
+the parent's lost partial accumulation is counted as `opt.ckpt.partial_accum_dropped`
+(`n_backward % accum` at load — no checkpoint carries `.grad`); and the loop takes the final save
+before re-raising a failed R stage. After: the same child took 8 steps (7 → 15), printed
+`opt.accum.invariant: FIRED (60 // 4 - 30 // 4 vs 8)` and `partial_accum_dropped 2`, and wrote its
+checkpoint. `opt_steps` in the report is now a run total, like `step`, which is what
+`RunClock.counters`' horizon comparison always assumed. **(2) Cadence schedule.** `Cadences.due`
+seeds lazily at the resumed step, so every gate first fired a full period late on the child
+(`dom.manage` at 261 instead of 201 on a 160-window parent, `dom.rekey` at 361 instead of 201) and a
+run resumed in chunks shorter than a period never managed at all. **Ruling:** RUN entry points
+`Cadences.state()` (a C row, written as `payload['RUN']['cadences']`) and
+`Cadences.restore(state)` (an ASSEMBLY_ORDER restore row after `new_cadences`), which restores the
+keys still declared and treats a missing `'RUN'` key — every pre-fix checkpoint — as "seed lazily, as
+before". The ledger's checks and fires become run totals, as MEM's and TOK's restored counters
+already are. **Rejected:** letting `OPT.maybe_step` alone decide and changing `note_backward` to
+record its answer (the same fix with a moved signature and a reordered B row, and the per-flush
+cross-check gives the single-decision guarantee without it); refusing a misaligned resume at compose
+(refuses the natural end-of-epoch checkpoint at any `OPT_ACCUM > 1`); flushing the partial
+accumulation at save time (takes a step the parent's own invariant does not allow); reading
+`Cadences`' private slots from `spine/loop.py` (the root builds the payload through declared entry
+points only).
+
+### Q-RUN-10 — `max_windows`, a finished resume and a mid-epoch resume each trained unrequested or repeated windows — **RESOLVED 2026-09-24: `max_windows` COUNTS THIS PROCESS'S WINDOWS AND STOPS BEFORE A ROLL; A FINISHED RESUME IS REFUSED; A MID-EPOCH RESUME KEEPS THE DECLARED REPLAY AND WARNS**
+**`max_windows`.** It was compared with the absolute `tick.step`, which a resume restores, so any
+resume given `--max-windows N` ≤ its restored step trained exactly one window (driven: a 60-window
+parent resumed with `--max-windows 40` printed `61 windows, 1 flushes`), and the test sat after the
+epoch roll's `continue`, so a stop landing exactly on a boundary drew the next epoch and trained one
+window of it (driven: `max_windows=157` on a 157-window epoch ran 158 and saved one window into epoch
+1). **Ruling:** it is a DRIVER argument about the process it is handed to, so it counts the windows
+THIS call trains, and it is tested before the roll — a stop on a boundary leaves the clock at the new
+epoch with `in_epoch` 0, so the final checkpoint is a true boundary checkpoint. `RunResult` gains
+`windows_here`, and `run.py`'s banner prints run totals (windows, optimizer steps, epochs) apart from
+this process's (windows trained, flushes, the rate) on a resume. **Rejected:** keeping the absolute
+reading and documenting it (every chained resume would need arithmetic on the parent's step to
+express "N more").
+**A finished resume.** The loop's first act is `clock.advance()`, so a resume from a completed run
+trained one unrequested window and overwrote the final checkpoint at step+1 (driven: a finished
+157-window parent resumed as `158 windows, 1 flushes, 1 optimizer steps`, `1 checkpoint(s) written`),
+while `RunClock.counters` published `epochs_target` for exactly this question. **Ruling:** refused at
+compose, after the `epoch0` row, the way `RUN_EPOCHS=0` is — the refusal names the epoch reached and
+says to raise `RUN_EPOCHS` — and `loop.run` raises on the same predicate for a System built another
+way. **Rejected:** skipping straight to the report with zero windows (every R surface would be asked
+about a run that made no passes, and the add-an-area continuation that forgot `RUN_EPOCHS` would exit
+0 with a warning — the goal-B case where a silently empty child costs most).
+**A mid-epoch resume.** `train/api.py::new_clock` DECLARES that a mid-epoch resume replays its epoch
+from window 0, and that stays: restoring the cursor needs the child's segmentation to cut the epoch
+where the parent's did, and it need not — the child tokenises the redrawn stream with the SAVED
+vocabulary, which can hold merges minted after the epoch began, so a saved window index can name
+different bytes. The byte-cursor remap Q-RUN-8's option (a) describes is the route when it is built.
+What was undeclared is that the operator heard nothing: a 120-window parent of a 211-window epoch
+resumed to 331 windows, trained windows 0..119 twice and ran 120 optimizer steps past a 211-step
+horizon, silently. **Ruling:** the loop checkpoints the clock's position (`RunClock.counters`' new
+`in_epoch` / `windows_in_epoch`, under `payload['RUN']['clock']`), and compose WARNS on a mid-epoch
+resume with the windows it replays and the optimizer step it will end near against the OPT horizon; a
+pre-fix checkpoint at epoch 0 is still exact (`in_epoch = step`), and at a later epoch it is warned as
+unknown. **Rejected:** seeding `in_epoch` from the saved index now (see above); refusing mid-epoch
+resumes (every `CKPT_EVERY` checkpoint is one, and the replay is a declared, working behaviour).
+
+### Q-RUN-11 — a resume drew epoch 0's stream whatever epoch it resumed in — **RESOLVED 2026-09-24: THE `stream` ROW DRAWS `Snapshot.epoch`**
+The `stream` row passed `epoch=0` unconditionally. Driven at `RUN_EPOCHS=2 DATA_RESAMPLE=1`: the
+parent's epoch-1 draw hashed `65cd298845`; its child, resumed at epoch 1, drew `cfacafbe13` (epoch
+0's) and trained its first window on epoch 0's first window. **Ruling:** the row draws the resumed
+epoch; `DATA.draw_stream` still owns whether the epoch changes the draw. The `DATA_RESAMPLE=0` arm
+at epoch ≥ 1 cannot train at all — `RUN.startup_refusals` refuses `RUN_EPOCHS > 1` without
+resampling, and at `RUN_EPOCHS=1` epoch 1 is the finished resume Q-RUN-10 refuses — so what
+`draw_stream` does there (it replays epoch 0 only from its in-process cache) is never trained on. It is also what Q-RUN-10's declared replay means by "the epoch it was
+interrupted in". **Rejected:** drawing epoch 0 and fast-forwarding the DATA rng (the draw is a
+function of `(seed, epoch)` already; there is nothing to fast-forward).
+
+### Q-RUN-12 — `_windows_in_epoch` counted a window that lacks its final target — **RESOLVED 2026-09-24: `(len(ids) − 1) // ctx`**
+A window needs `ctx + 1` ids, so an epoch holds `(len(ids) − 1) // ctx` windows; `len(ids) // ctx`
+overcounted by one exactly when `len(ids)` is a multiple of `ctx`. The loop skipped that window and
+called it arithmetic, but the clock had counted it, and on a flush tick it closed a flush with no
+backward: driven on a 768-id segmentation at `ctx=128`, 6 flushes against 5 backward passes at
+`OPT_BATCH_WINDOWS=1`, and at 2 the fifth window was accumulated, never trained and not counted in
+`dropped_windows`. **Ruling:** the named division is `(len(ids) − 1) // ctx`, so the empty tail never
+exists and the loop's no-material branch is a defect detector only. Every run whose `len(ids)` is not
+a multiple of `ctx` gets the same number as before. **Rejected:** flushing the partial batch on the
+tail tick (leaves the clock's empty flush at `OPT_BATCH_WINDOWS=1`); un-counting the flush in the
+clock (a second place a counter moves).
+
 ---
 
 ## 6. What `tests/test_contract.py` checks
@@ -4708,14 +4809,16 @@ nobody has watched fail is indistinguishable from a check that cannot fail.
 
 ## 7. THE FROZEN SIGNATURE SET
 
-Everything above is prose about these 134 entry points — 121 until 2026-09-02, when Q-TOK-11 added
+Everything above is prose about these 136 entry points — 121 until 2026-09-02, when Q-TOK-11 added
 `LM.residual_ratios` (122) and Q-LM-12 added `LM.embed` (123); 133 from 2026-09-15, when P4 wrote
 `CAP.caps` and the `Caps` record it returns brought `Caps.headroom(n)` with it; **134 since
 2026-09-22, when `World.parameters(self)` closed the hole `spine/compose.py::_base_parameters` had
 been warning about on every run** — WORLD's tensors took gradient from a loss that was in the
 objective and were never STEPPED, because that helper harvests by
 `getattr(obj, "parameters", None)` and `World` had no such method. It is the same shape as
-`FAB: Population.parameters(self)`, which is in this block for the same reason. Neither of the two
+`FAB: Population.parameters(self)`, which is in this block for the same reason. **136 since
+2026-09-24**, when RUN's `Cadences.state(self)` and `Cadences.restore(self, state)` carried every
+cadenced gate's schedule across a resume (Q-RUN-9). Neither of the two before them
 is a new ruling: this document has said since the record was specified that "`Caps.headroom(n)`
 exists so the negative clamp (C30) **cannot be written** at a call site", and it became an ENTRY
 POINT the moment a body existed to carry it. A record's public method is public surface, which K1
@@ -4828,7 +4931,7 @@ RUN: mode(run: Config)
 RUN: Timing.span(self, name)
 RUN: Timing.spans(self)
 RUN: streams(run: Config, subsystems)
-RUN: new_clock(run: Config, *, batch_windows, accum, resume_step=0, resume_epoch=0)
+RUN: new_clock(run: Config, *, batch_windows, accum, resume_step=0, resume_epoch=0, resume_backwards=0, resume_opt_steps=0)
 RUN: RunClock.begin_epoch(self, windows_in_epoch)
 RUN: RunClock.advance(self)
 RUN: RunClock.note_backward(self)
@@ -4836,6 +4939,8 @@ RUN: RunClock.counters(self)
 RUN: new_cadences(run: Config, *, periods)
 RUN: Cadences.due(self, key, period, clock)
 RUN: Cadences.ledger(self)
+RUN: Cadences.state(self)
+RUN: Cadences.restore(self, state)
 RUN: bench_summary(run: Config, clock, *, elapsed_s, bytes_per_window, n_params, timing=None)
 RUN: startup_refusals(run: Config, *, disk_stream)
 RUN: cadence_audit(run: Config, *, run_windows, periods)

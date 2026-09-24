@@ -6,8 +6,9 @@ not this script's convenience: spine/lever.py generates every environment name a
 only spine/lever.py names os.environ, so a flag here would be a second source for a value the
 frozen Config already holds -- and whichever of the two a report quoted would be a coin flip.
 `--max-windows` is the one exception and it is NOT a lever: it is the driver argument
-spine/loop.py::run documents, it cannot lengthen a run, and a run that stops because of it says so
-in its own warnings.
+spine/loop.py::run documents, it counts the windows THIS process trains (a resume given
+--max-windows 40 trains 40 more), it cannot lengthen a run, and a run that stops because of it says
+so in its own warnings.
 
     PYTHONPATH=src python run.py                      # the shipped defaults
     PYTHONPATH=src RUN_DEVICE=cuda python run.py      # on a GPU
@@ -69,8 +70,9 @@ from spine.gate import NotBuilt            # noqa: E402
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--max-windows", type=int, default=None,
-                    help="stop after N windows. A DRIVER argument, not a lever: it cannot make a "
-                         "run longer, and a run stopped by it says so in its warnings.")
+                    help="stop after N windows trained by THIS process (on a resume, N more "
+                         "than the checkpoint's step). A DRIVER argument, not a lever: it cannot "
+                         "make a run longer, and a run stopped by it says so in its warnings.")
     ap.add_argument("--quiet", action="store_true", help="suppress the progress line")
     args = ap.parse_args(argv)
 
@@ -156,9 +158,21 @@ def main(argv=None):
     result = loop.run(sysm, max_windows=args.max_windows, progress=not args.quiet)
 
     print()
-    print(f"=== {result.windows} windows, {result.flushes} flushes, "
-          f"{result.opt_steps} optimizer steps, {result.epochs} epoch(s) "
-          f"in {result.elapsed_s:.1f}s ({result.windows / max(result.elapsed_s, 1e-9):.1f} w/s)")
+    # RUN TOTALS AND THIS PROCESS'S ARE PRINTED APART ON A RESUME (2026-09-24, Q-RUN-10). windows,
+    # optimizer steps and epochs are the RUN's -- the clock resumes them -- while flushes and the
+    # rate are this process's; the old line divided the run total by this process's seconds and
+    # printed 480 w/s for a resume that trained one window. A fresh run prints the old line.
+    _here = result.windows_here
+    _rate = _here / max(result.elapsed_s, 1e-9)
+    if _here == result.windows:
+        print(f"=== {result.windows} windows, {result.flushes} flushes, "
+              f"{result.opt_steps} optimizer steps, {result.epochs} epoch(s) "
+              f"in {result.elapsed_s:.1f}s ({_rate:.1f} w/s)")
+    else:
+        print(f"=== {result.windows} windows run total ({_here} trained by this process, resumed "
+              f"at {result.windows - _here}), {result.flushes} flushes this process, "
+              f"{result.opt_steps} optimizer steps run total, {result.epochs} epoch(s) "
+              f"in {result.elapsed_s:.1f}s ({_rate:.1f} w/s this process)")
     print(f"=== loss {result.loss_first:.4f} -> {result.loss_last:.4f}")
     # THE PRECISION ASKED FOR AND THE PRECISION OBSERVED, ON ONE LINE, BECAUSE THEY DISAGREED FOR
     # THE LIFE OF THIS DRIVER. amp_state above is what RUN.process_setup decided; this is the dtype

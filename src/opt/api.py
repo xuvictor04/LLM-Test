@@ -1612,7 +1612,10 @@ def counters(opt: Config, st):
     so many words -- and the unshifted form then raised on exactly that resume and took the whole
     DID IT FIRE surface of the package down with it, blaming a defect (P3-H29) that had not
     happened. What it gives up: a parent that miscounted is not re-caught here. The parent's own
-    counters() call is where that reading belongs.
+    counters() call is where that reading belongs. THE STEPS DUE SINCE THE RESUME ARE
+    floor(backward/accum) - floor(base/accum), NOT (backward - base) // accum (2026-09-24): the two
+    differ whenever the parent was saved partway through an accumulation, and the second raised on
+    a correct schedule (see the `due` line).
 
     THE COMPARISON IS NOW Steps AGAINST Steps, THROUGH A NAMED CONVERSION, AND IT WAS AN UNNAMED
     ONE UNTIL 2026-09-04. It was written `due_steps = (n_bwd - base_bwd) // divisor` against
@@ -1825,7 +1828,17 @@ def counters(opt: Config, st):
             f"Steps(0) for every deficit smaller than accum and removed even that. It is checked on "
             f"the count itself now, here and in spine/derive.py::opt_steps_from_backwards, and this "
             f"is the one of the two that has the numbers.")
-    due = derive.opt_steps_from_backwards(st.n_backward - U.Backwards(base_bwd), divisor)
+    # FLOOR OF EACH END, NOT FLOOR OF THE DIFFERENCE (2026-09-24, Q-RUN-9). maybe_step steps when
+    # n_backward itself reaches a multiple of accum, so the steps due in this process are the
+    # multiples crossed between the two counts: floor(n/k) - floor(base/k). The old spelling,
+    # floor((n - base)/k), is the same number only when the base is itself a multiple of k -- a
+    # parent saved PARTWAY THROUGH an accumulation (backward=27 at OPT_ACCUM=4, which is what any
+    # epoch whose backward count is not a multiple of accum ends at) stepped at 28, 32, ..., 60 in
+    # the child: 9 steps against a claimed 33 // 4 = 8, and the run raised this function's P3-H29
+    # message for a correct schedule. At a base that IS a multiple (every fresh run, every
+    # accum=1 run) the two spellings agree exactly.
+    due = (derive.opt_steps_from_backwards(st.n_backward, divisor)
+           - derive.opt_steps_from_backwards(U.Backwards(base_bwd), divisor))
     taken = st.opt_step - U.Steps(base_step)
     due_steps = int(due)
     if due != taken:
@@ -1922,17 +1935,21 @@ def counters(opt: Config, st):
         # accumulation defect on a resumed run has nothing else to go on. `due` and `taken` ARE the
         # two sides of the `!=` three lines up, so the gate now renders those; the unbased pair is
         # still printed, correctly, on the opt.backward=/opt.step= report line above.
+        # AND ON A RESUME IT PRINTS BOTH FLOORS, because the comparison is floor(n/k) - floor(base/k)
+        # (see `due` above) and `(n - base) // k` is a different number whenever the parent was
+        # saved partway through an accumulation.
         Gate("opt.accum.invariant", True,
-             f"{n_bwd - base_bwd} backward // {divisor}", int(taken),
+             (f"{n_bwd - base_bwd} backward // {divisor}" if not (base_bwd or base_step) else
+              f"{n_bwd} // {divisor} - {base_bwd} // {divisor}"), int(taken),
              reason=("backward // accum == step -- the one statement that proves ISSUES P3-H29 dead"
                      if not (base_bwd or base_step) else
                      f"backward // accum == step -- the one statement that proves ISSUES P3-H29 "
                      f"dead, MEASURED SINCE THE LAST RESUME, which restored backward={base_bwd} and "
-                     f"step={base_step}. The numbers above are this process's own "
-                     f"({n_bwd - base_bwd} backward pass(es) against {int(taken)} step(s)); the "
-                     f"run totals are opt.backward={n_bwd} and opt.step={n_step} on the report line "
-                     f"above, and OPT_ACCUM may legitimately have changed at the boundary, so those "
-                     f"two are NOT the pair this equation holds between.")),
+                     f"step={base_step}: the steps due in THIS process are the multiples of accum "
+                     f"crossed between the two counts, against {int(taken)} step(s) taken here. "
+                     f"The run totals are opt.backward={n_bwd} and opt.step={n_step} on the report "
+                     f"line above, and OPT_ACCUM may legitimately have changed at the boundary, so "
+                     f"those two are NOT the pair this equation holds between.")),
         # reachable=sched_live AND NOT reachable=True. It was hard-coded True, so the ablation
         # printed "armed, did not fire (none vs cosine)" -- the measurement words -- followed by its
         # own reason asserting unreachability. One line making both statements. The two gates
@@ -2456,7 +2473,7 @@ def load_state(opt: Config, st, saved):
     (opt.ckpt.backward_at_load, opt.ckpt.step_at_load) so the invariant is a statement about this
     process's passes against this process's steps.
 
-    LEVERS READ: none
+    LEVERS READ: accum (only to stamp opt.ckpt.partial_accum_dropped at the live phase)
     WIRES READ: none
     DID IT FIRE: opt.ckpt.loaded, opt.ckpt.refused (with the reason),
                  opt.ckpt.moments_widened (how many tensors' moments were zero-padded for a dim-0
@@ -2472,7 +2489,10 @@ def load_state(opt: Config, st, saved):
                  restart on the first resumed step),
                  opt.ckpt.backward_at_load and opt.ckpt.step_at_load (the pair counters() measures
                  the accumulation invariant from, because OPT_ACCUM may legitimately change at
-                 exactly this boundary)
+                 exactly this boundary),
+                 opt.ckpt.partial_accum_dropped (backward passes of the parent's unfinished
+                 accumulation whose gradients no checkpoint carries -- n_backward % accum at load;
+                 0 on an aligned boundary, ABSENT on a process that restored nothing)
     """
     opt = opt.owned_by("OPT")
 
@@ -2551,6 +2571,16 @@ def load_state(opt: Config, st, saved):
     # surface while naming a defect (P3-H29) that had not occurred.
     st.counters["opt.ckpt.backward_at_load"] = int(st.n_backward)
     st.counters["opt.ckpt.step_at_load"] = int(st.opt_step)
+    # THE PARENT'S UN-STEPPED ACCUMULATION, WHICH NO CHECKPOINT CARRIES, COUNTED (2026-09-24). A
+    # parent saved partway through an accumulation had n_backward % accum backward passes whose
+    # gradients sat in .grad waiting for a step; the checkpoint holds weights and moments, not
+    # .grad, so those passes are gone and the child's first step averages only the passes it runs
+    # itself (still scaled by 1/accum, so that step is proportionally smaller). Stamped with the
+    # LIVE accum, which is the one that decides when the child's first step lands; 0 on every
+    # boundary a multiple of accum, including every accum=1 run. ABSENT on a process that restored
+    # nothing, which is this tree's word for UNREACHABLE.
+    st.counters["opt.ckpt.partial_accum_dropped"] = int(
+        derive.accum_partial(st.n_backward, int(opt.accum)))
 
     saved_h = dict(saved.get("horizon", {}))
     live_h = {"run_steps": int(st.horizon.run_steps), "warmup": int(st.horizon.warmup),

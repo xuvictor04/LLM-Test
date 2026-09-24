@@ -451,11 +451,13 @@ def streams(run: Config, subsystems):
     return {name: _rng.rng_for(name, seed) for name in subsystems}
 
 
-def new_clock(run: Config, *, batch_windows, accum, resume_step=0, resume_epoch=0):
+def new_clock(run: Config, *, batch_windows, accum, resume_step=0, resume_epoch=0,
+              resume_backwards=0, resume_opt_steps=0):
     """The run's counters, TYPED, and the ONLY object in the tree that increments any of them.
 
     batch_windows and accum are OPT's and arrive as plain ints. resume_step/resume_epoch come from
-    a CKPT Snapshot. Returns RunClock with:
+    a CKPT Snapshot; resume_backwards/resume_opt_steps come from OPT's RESTORED OptState
+    (n_backward, opt_step), which is 0/0 on a fresh run. Returns RunClock with:
         .step        units.Windows    -- what `step` counted at :6796 and :7708
         .flushes     units.Flushes    -- what `_nbwd` counted; the loop body's own clock
         .backwards   units.Backwards  -- what accumulation must count (derive.accum_due)
@@ -482,19 +484,33 @@ def new_clock(run: Config, *, batch_windows, accum, resume_step=0, resume_epoch=
     signature cannot carry the number, and because a resume taken at an epoch boundary has none of
     this problem -- which is the configuration every result in this project has been taken under so
     far, and the reason it has not yet been paid for.
+    TWO THINGS CHANGED ON 2026-09-24 AND THE REPLAY ITSELF DID NOT. The replay is now ANNOUNCED:
+    spine/loop.py::_payload checkpoints counters()' in_epoch, and spine/compose.py warns on a
+    mid-epoch resume with the windows replayed and the optimizer step it will end near against the
+    OPT horizon (Q-RUN-10, which also says why the cursor is not restored). And the boundary resume
+    this paragraph calls safe WAS NOT until then: compose drew epoch 0's stream whatever epoch the
+    clock resumed in, so under DATA_RESAMPLE=1 an epoch-1 child trained on epoch 0's draw (Q-RUN-11).
 
-    ONLY TWO COUNTERS RESUME, AND THE OTHER FOUR START AT ZERO. `resume_step` and `resume_epoch`
-    are the whole of what a Snapshot hands back, so a resumed clock has `step` at the checkpoint's
-    window count while `flushes`, `backwards`, `opt_steps` and `dropped_windows` all begin at 0.
-    THAT IS A PROPERTY OF THIS FROZEN SIGNATURE AND NOT AN OVERSIGHT IN THE BODY -- there is no
-    parameter to carry the other four through, and inventing one is a contract change rather than a
-    P4 decision. What it costs is stated here rather than discovered downstream: counters() is
-    declared as "the OBSERVED SIDE OF THE HORIZON COMPARISON", and on a resumed run the observed
-    opt_steps is the count SINCE THE RESUME while `step` is the count since the run began, so
-    derive.opt_steps_from_windows(Windows(step), ...) and `opt_steps` measure different intervals.
-    The residual an owner reads off that pair is the under-anneal PLUS the resume, and nothing in
-    either number separates them. A reader comparing the two across a resume needs the checkpoint's
-    own opt_step count, which lives on the Snapshot and not here.
+    FOUR COUNTERS RESUME AND TWO START AT ZERO (2026-09-24; Q-RUN-9). `step` and `epoch` come off
+    the Snapshot; `backwards` and `opt_steps` come off OPT's restored OptState, through the two
+    DEFAULTED keywords, so `flushes` and `dropped_windows` are the only counters that begin at 0 and
+    both are THIS PROCESS's. THE PARAGRAPH THAT STOOD HERE SAID ONLY TWO RESUMED AND CALLED THE COST
+    A REPORTING ONE; IT WAS A TRAINING OUTAGE. note_backward decides a step with
+    derive.accum_due(self.backwards, accum) and OPT.maybe_step re-decides it with
+    accum_due(st.n_backward, accum); with this clock restarting at 0 and OPT's count restored, a
+    parent saved partway through an accumulation put the two out of phase for the rest of the run.
+    Driven at OPT_ACCUM=4: a 30-window parent (backward=30, step=7) resumed to 60 took ZERO
+    optimizer steps in 30 backward passes -- every call the clock let through was one OPT found
+    not due -- and then raised at OPT.counters, before the final save, so the child's weights were
+    lost. Seeded from OPT's own count the two gates evaluate the same number and cannot disagree;
+    spine/loop.py::_flush also compares them every flush and raises if they ever do. The earlier
+    claim that the other counters could not resume without a contract change was true, and the
+    contract change is the two keywords.
+    WHAT THE SEEDING ALSO MENDS: counters() is "the OBSERVED SIDE OF THE HORIZON COMPARISON", and
+    with opt_steps counted since the resume while `step` counted since the run began, the residual
+    an owner read off that pair was the under-anneal PLUS the resume. Both are run totals now.
+    `flushes` stays per-process, so a resumed run's report prints windows and optimizer steps as run
+    totals beside a flush count that is this process's; run.py's banner says which is which.
 
     LEVERS READ: epochs (via RunClock._finished, published on every Tick as Tick.finished)
     WIRES READ: none
@@ -512,7 +528,9 @@ def new_clock(run: Config, *, batch_windows, accum, resume_step=0, resume_epoch=
     # would seed a WINDOW counter from a FLUSH count and every later comparison would be off by the
     # batch width with nothing raising. The kinds are put on INSIDE the clock; what arrives here is
     # a plain count, and this refusal is what keeps "plain" from meaning "anything int() accepts".
-    for _label, _v in (("resume_step", resume_step), ("resume_epoch", resume_epoch)):
+    for _label, _v in (("resume_step", resume_step), ("resume_epoch", resume_epoch),
+                       ("resume_backwards", resume_backwards),
+                       ("resume_opt_steps", resume_opt_steps)):
         if isinstance(_v, U.Clock):
             raise U.UnitError(
                 f"RUN.new_clock: {_label}={_v!r} is a Clock. It arrives from a CKPT Snapshot as a "
@@ -520,7 +538,9 @@ def new_clock(run: Config, *, batch_windows, accum, resume_step=0, resume_epoch=
                 f"a wrong-kind clock would seed the counter and raise nothing.")
     return RunClock(epochs=int(run.epochs),
                     batch_windows=int(batch_windows), accum=int(accum),
-                    resume_step=int(resume_step), resume_epoch=int(resume_epoch))
+                    resume_step=int(resume_step), resume_epoch=int(resume_epoch),
+                    resume_backwards=int(resume_backwards),
+                    resume_opt_steps=int(resume_opt_steps))
 
 
 class RunClock:
@@ -535,17 +555,22 @@ class RunClock:
 
     __slots__ = ("step", "flushes", "backwards", "opt_steps", "epoch", "batch_len",
                  "epochs", "batch_windows", "accum", "windows_in_epoch", "_in_epoch",
-                 "dropped_windows")
+                 "dropped_windows", "_resumed_at")
 
-    def __init__(self, *, epochs, batch_windows, accum, resume_step=0, resume_epoch=0):
+    def __init__(self, *, epochs, batch_windows, accum, resume_step=0, resume_epoch=0,
+                 resume_backwards=0, resume_opt_steps=0):
         # THE RESUMED STEP IS THE STEP, not an offset held beside one. Cadences seeds _fired[key]
         # at whatever this reads on the first evaluation, so a clock that started at 0 and added
         # the resume afterwards would bank the entire resume step count into the first gate.
         self.step = U.Windows(int(resume_step))
         self.epoch = U.Epochs(int(resume_epoch))
+        # WHERE THIS PROCESS STARTED, so a per-process rate can be told from a run total.
+        self._resumed_at = int(resume_step)
         self.flushes = U.Flushes(0)
-        self.backwards = U.Backwards(0)
-        self.opt_steps = U.Steps(0)
+        # SEEDED FROM OPT'S RESTORED COUNT, NOT FROM 0, or note_backward's accum_due and
+        # OPT.maybe_step's evaluate two different numbers -- see new_clock's FOUR COUNTERS RESUME.
+        self.backwards = U.Backwards(int(resume_backwards))
+        self.opt_steps = U.Steps(int(resume_opt_steps))
         self.batch_len = 0
         self.epochs = int(epochs)
         self.batch_windows = int(batch_windows)
@@ -602,7 +627,7 @@ class RunClock:
         # is the opposite of what this guard said when it was first written. The first draft here
         # demanded units.Windows and cited spine/compose.py::_run_windows' "IT RETURNS
         # units.Windows"; that sentence is about a DIFFERENT helper. The value handed here comes
-        # from _windows_in_epoch, which is `len(Segmentation.ids) // LM.ctx` -- a bare int by
+        # from _windows_in_epoch, which is `(len(Segmentation.ids) - 1) // LM.ctx` -- a bare int by
         # design, because its other consumer is derive.run_windows_from_epochs, whose rate end
         # REFUSES a Clock in as many words: "a rate is a ratio of two kinds, not a count of one".
         # Demanding Windows here would have made one quantity need two spellings, one per call
@@ -717,7 +742,9 @@ class RunClock:
         return due
 
     def counters(self):
-        """The five typed counters plus the batch flush count, as the DID IT FIRE surface.
+        """The five typed counters plus the batch flush count, as the DID IT FIRE surface -- and,
+        since 2026-09-24, the clock's position in its epoch (in_epoch, windows_in_epoch), which the
+        checkpoint carries so a resume can tell a boundary save from a mid-epoch one (Q-RUN-10).
 
         `step` -- the WINDOW total -- IS THE OBSERVED SIDE OF THE HORIZON COMPARISON (Q-OPT-5).
         OPT's schedule horizon is resolved ONCE at build() from epoch 0's length times RUN.epochs,
@@ -759,7 +786,21 @@ class RunClock:
             # driver had to advance once to find out, and that one window is a window of training
             # the run was not asked for. `epoch` and this are the same comparison the property
             # makes, on the public surface, and it is a lever-derived count rather than a counter.
+            # NOTHING ASKED IT UNTIL 2026-09-24, so a resume of a finished run spent exactly that
+            # window and overwrote the final checkpoint; spine/compose.py now refuses such a resume
+            # on this comparison and spine/loop.py::run refuses a finished clock (Q-RUN-10).
             "epochs_target": self.epochs,
+            # WHERE IN THE CURRENT EPOCH THE CLOCK STANDS, published so a checkpoint can say it.
+            # spine/loop.py::_payload writes both under payload['RUN'] and spine/compose.py reads
+            # them back to WARN when a resume replays part of an epoch (Q-RUN-10): a Snapshot
+            # carries only `step` and `epoch`, and at epoch > 0 those two cannot say whether the
+            # save was on a boundary. Plain ints; windows_in_epoch is None between a roll and the
+            # begin_epoch that follows it, which is exactly the moment a boundary save is taken.
+            "in_epoch": self._in_epoch,
+            "windows_in_epoch": self.windows_in_epoch,
+            # THE STEP THIS PROCESS RESUMED AT (0 on a fresh run), so `step` minus this is the
+            # windows THIS process advanced -- what a throughput is a rate of (bench_summary).
+            "resumed_at": self._resumed_at,
         }
 
 
@@ -849,10 +890,12 @@ class Cadences:
         self._fires = {k: 0 for k in self._periods}
         self._last = {k: None for k in self._periods}
         # WHEN THIS KEY LAST FIRED, IN WINDOWS, seeded LAZILY at the first evaluation rather than
-        # at 0 here. On a resume the clock starts at the checkpoint's step, and a baseline of 0
-        # would make `elapsed = step - 0` exceed every period on the first window -- every gate in
-        # the run firing at once because the run was resumed. :5281-5282 already seeded at the
-        # resumed step; new_cadences has no clock to read, so the seed happens where one arrives.
+        # at 0 here. A baseline of 0 on a resume would make `elapsed = step - 0` exceed every period
+        # on the first window -- every gate in the run firing at once because the run was resumed.
+        # ON A RESUME restore() PUTS THE PARENT'S SEED HERE BEFORE THE FIRST EVALUATION (Q-RUN-9),
+        # so the lazy seed is now what a fresh run, a key the parent did not have, and a checkpoint
+        # written before 2026-09-24 get; new_cadences has no clock to read, so it happens where one
+        # arrives.
         self._seeded = {}
 
     def due(self, key, period, clock):
@@ -885,9 +928,10 @@ class Cadences:
         thing -- which is what lets CKPT.every stay Windows while its gate runs at the flush tail,
         and what makes MEM's Windows cadences need no Windows->Flushes conversion.
 
-        `period` MUST be units.Windows. An int raises; a Flushes raises. _fired[key] seeds at the
-        RESUMED step, not 0 (:5281-5282 already did this), so the first post-resume evaluation does
-        not bank the whole resume step count.
+        `period` MUST be units.Windows. An int raises; a Flushes raises. A key with no seed seeds at
+        the clock's CURRENT step, not 0, so a first evaluation never banks a resume's whole step
+        count; on a resume from a checkpoint that carries payload['RUN'], restore() has already put
+        the parent's seed back and the gate continues the parent's schedule (Q-RUN-9).
         """
         if key not in self._periods:
             # THE KEYS ARE THE ROOT'S, NOT A CALL SITE'S. A key invented here would have no ledger
@@ -943,10 +987,10 @@ class Cadences:
         if int(period) <= 0:
             return False
         if key not in self._seeded:
-            # SEEDED AT WHATEVER THE CLOCK READS NOW, which on a resume is the checkpoint's step.
-            # The first evaluation therefore banks nothing and answers False; the first fire comes
-            # one full period later, which is what "at most once per period elapsed" means from a
-            # cold start as much as from a warm one.
+            # SEEDED AT WHATEVER THE CLOCK READS NOW -- on a fresh run 1, and on a resume only when
+            # restore() had nothing to put back (a pre-2026-09-24 checkpoint, or a key the parent
+            # did not declare). The first evaluation therefore banks nothing and answers False; the
+            # first fire comes one full period later.
             self._seeded[key] = now
             return False
         # ELAPSED-SINCE-LAST-FIRE, NOT MODULO. `step % N == 0` below the batch early-out asks for a
@@ -984,9 +1028,59 @@ class Cadences:
 
     def ledger(self):
         """{key: (checks, fires, last_fired_step, period)} -- the DID IT FIRE surface for every
-        periodic gate in the run, in one place, whoever owns the threshold."""
+        periodic gate in the run, in one place, whoever owns the threshold.
+
+        RUN TOTALS ON A RESUMED RUN (2026-09-24, Q-RUN-9): Cadences.restore puts the parent's
+        checks, fires and last-fired step back, so a gate that fired before the boundary does not
+        read "0 fires" after it -- the same reason MEM's and TOK's restored counters are totals.
+        cadence_audit is a different statement and is not affected: it is a startup sentence about
+        which periods exceed the run length compose measured, not a count of fires."""
         return {k: (self._checks[k], self._fires[k], self._last[k], self._periods[k])
                 for k in self._periods}
+
+    def state(self):
+        """What a checkpoint must carry for every gate to keep its SCHEDULE across a resume:
+        {'seeded': {key: int}, 'checks': {key: int}, 'fires': {key: int}, 'last': {key: int|None}}.
+
+        WITHOUT IT EVERY GATE RE-SEEDED AT THE RESUMED STEP (2026-09-24, Q-RUN-9). due() seeds
+        lazily and answers False on its first evaluation, so a child resumed at step S first fired
+        each gate at S + 1 + period instead of on the parent's schedule. Driven: a 160-window parent
+        had fired dom.manage at 101; its child fired it next at 261 where the uninterrupted run
+        fires at 201, and dom.rekey (period 200) moved from 201 to 361 -- domain culls, folds,
+        MEM.apply_domain_plan and the rekey pushed back a period at every boundary, and a run
+        resumed in chunks shorter than a period never managed at all. tok/api.py::_due names the
+        same outcome as the defect it avoids for TOK's own cadences.
+        Plain ints, so the payload holds no Clock object: the kinds are put back by restore().
+        """
+        return {"seeded": {k: int(v) for k, v in self._seeded.items()},
+                "checks": dict(self._checks), "fires": dict(self._fires),
+                "last": {k: (None if v is None else int(v)) for k, v in self._last.items()}}
+
+    def restore(self, state):
+        """Put back what state() wrote, for the keys STILL DECLARED. Returns how many keys were
+        restored; 0 when `state` is None, which is what a checkpoint written before 2026-09-24
+        carries -- those resume the old way, seeding lazily at the resumed step.
+
+        A KEY THE PARENT HAD AND THIS RUN DOES NOT DECLARE IS DROPPED, and a key this run declares
+        that the parent did not have stays lazy: both are the KEYS ARE THE ROOT'S rule. A PERIOD
+        CHANGED AT THE BOUNDARY NEEDS NOTHING HERE: due() compares the elapsed windows since the
+        restored seed against the period it is handed NOW, and the whole-period advance bounds the
+        catch-up to one fire. A restored seed LATER than the clock (a non-final snapshot mixed with
+        a later one) makes `elapsed` negative and the gate only waits, which is harmless.
+        """
+        if not state:
+            return 0
+        n = 0
+        for k in self._periods:
+            if k in state.get("seeded", {}):
+                self._seeded[k] = U.Windows(int(state["seeded"][k]))
+            if k in state.get("checks", {}):
+                self._checks[k] = int(state["checks"][k])
+                self._fires[k] = int(state.get("fires", {}).get(k, 0))
+                _last = state.get("last", {}).get(k)
+                self._last[k] = None if _last is None else U.Windows(int(_last))
+                n += 1
+        return n
 
 
 def bench_summary(run: Config, clock, *, elapsed_s, bytes_per_window, n_params, timing=None):
@@ -1011,7 +1105,10 @@ def bench_summary(run: Config, clock, *, elapsed_s, bytes_per_window, n_params, 
         # battery should have been.
         return None
     c = clock.counters()
-    windows = int(c["step"])
+    # THIS PROCESS'S WINDOWS, NOT THE RUN TOTAL (2026-09-24, Q-RUN-10): `step` resumes from the
+    # checkpoint while elapsed_s is this process's wall clock, so on a resume the total divided by
+    # these seconds was a rate for windows that were trained somewhere else.
+    windows = int(c["step"]) - int(c["resumed_at"])
     # bytes_per_window IS AN ARGUMENT AND MUST BE THE LIVE VALUE, which is P1-L42 and is worth
     # restating at the arithmetic rather than only in the docstring: `_bpw` was initialised at the
     # SEED vocabulary (:6237) and refreshed only inside the RATE_EVERY tick (:6493), so a short
@@ -1023,7 +1120,8 @@ def bench_summary(run: Config, clock, *, elapsed_s, bytes_per_window, n_params, 
     secs = max(float(elapsed_s), 1e-9)
     lines = [
         f"bench: {windows} windows in {secs:.1f}s "
-        f"({windows / secs:.1f} windows/s, {int(c['opt_steps'])} optimizer steps)",
+        f"({windows / secs:.1f} windows/s, {int(c['opt_steps'])} optimizer steps run total"
+        + (f", resumed at step {int(c['resumed_at'])})" if int(c["resumed_at"]) else ")"),
         f"bench: {total_bytes / secs / 1024:.1f} kB/s over {total_bytes / 1024:.1f} kB, "
         f"at {float(bytes_per_window):.4f} bytes/window (LIVE, not the seed vocabulary)",
         f"bench: {total_bytes / secs * 86400 / 1e9:.3f} GB/day at this rate",
