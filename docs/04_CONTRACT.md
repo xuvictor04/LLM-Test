@@ -4774,7 +4774,11 @@ restored `OptState.n_backward` / `opt_step`; the loop compares the clock's backw
 due since the resume as `floor(n/k) − floor(base/k)` (the multiples of accum crossed), not
 `floor((n − base)/k)`, which differs exactly on a misaligned base and raised on a correct schedule;
 the parent's lost partial accumulation is counted as `opt.ckpt.partial_accum_dropped`
-(`n_backward % accum` at load — no checkpoint carries `.grad`); and the loop takes the final save
+(`n_backward % accum` at load — no checkpoint carries `.grad`; **the parent's accum**, which
+`OPT.state_dict` records since a later 2026-09-24 fix, with the live accum as the fallback for older
+checkpoints, flagged by `opt.ckpt.partial_accum_basis` 0 — it was the live accum, so a parent at
+accum 1 with nothing pending resumed at accum 4 reported 2 dropped; the live remainder is kept as
+`opt.ckpt.first_step_short_by`, the passes the child's first step lacks); and the loop takes the final save
 before re-raising a failed R stage. After: the same child took 8 steps (7 → 15), printed
 `opt.accum.invariant: FIRED (60 // 4 - 30 // 4 vs 8)` and `partial_accum_dropped 2`, and wrote its
 checkpoint. `opt_steps` in the report is now a run total, like `step`, which is what

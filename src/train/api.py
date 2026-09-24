@@ -482,17 +482,17 @@ def new_clock(run: Config, *, batch_windows, accum, resume_step=0, resume_epoch=
     would silently change period and nothing would say so. Clock._same raises across kinds, so the
     two cannot be one variable.
 
-    A MID-EPOCH RESUME REPLAYS THE EPOCH IT WAS INTERRUPTED IN, AND THIS IS THE SHARPEST EDGE OF
-    THE SAME LIMITATION. `_in_epoch` -- how far into the CURRENT stream the loop has read -- is not
-    among the two things a Snapshot hands back, so a clock resumed 400 windows into a 1000-window
-    epoch begins that epoch at 0 and rolls 1000 windows later instead of 600. The run then trains
-    1400 windows in an epoch declared to hold 1000, and the epoch boundary -- which is where DATA
-    draws a fresh stream and where a continual-learning result takes its measurement -- lands in a
-    place no lever asked for. Unlike the counters below this is not a reporting error: it changes
-    WHERE the roll happens, so it changes what the model sees. It is stated here because the frozen
-    signature cannot carry the number, and because a resume taken at an epoch boundary has none of
-    this problem -- which is the configuration every result in this project has been taken under so
-    far, and the reason it has not yet been paid for.
+    A MID-EPOCH RESUME REPLAYS THE EPOCH IT WAS INTERRUPTED IN, DELIBERATELY. `_in_epoch` -- how
+    far into the CURRENT stream the loop has read -- IS CHECKPOINTED since 2026-09-24
+    (payload['RUN']['clock'], from counters()), and it is deliberately NOT RESTORED: the child
+    re-segments the redrawn stream at the SAVED vocabulary, which can hold merges minted after the
+    epoch began, so the saved window index can name different bytes (Q-RUN-10; the byte-cursor
+    remap, Q-RUN-8 option (a), is the route when it is built). So a clock resumed 400 windows into a
+    1000-window epoch begins that epoch at 0 and rolls 1000 windows later instead of 600. The run
+    then trains 1400 windows in an epoch declared to hold 1000, and the epoch boundary -- which is
+    where DATA draws a fresh stream and where a continual-learning result takes its measurement --
+    lands in a place no lever asked for. It changes WHERE the roll happens, so it changes what the
+    model sees; a resume taken at an epoch boundary has none of this problem.
     TWO THINGS CHANGED ON 2026-09-24 AND THE REPLAY ITSELF DID NOT. The replay is now ANNOUNCED:
     spine/loop.py::_payload checkpoints counters()' in_epoch, and spine/compose.py warns on a
     mid-epoch resume with the windows replayed and the optimizer step it will end near against the
@@ -1204,7 +1204,9 @@ def startup_refusals(run: Config, *, disk_stream):
         # may read the other's lever.
         out.append(f"RUN_EPOCHS={epochs} with resampling off replays byte-identical text every "
                    f"epoch, so a continual-learning result taken this way is a MEMORISATION "
-                   f"result. Turn DATA resampling on, or run one epoch.")
+                   f"result. Turn DATA resampling on (DATA_RESAMPLE=1), or run one epoch -- "
+                   f"except on a resume of a finished run, which needs the second epoch and "
+                   f"therefore DATA_RESAMPLE=1.")
     # amp on a device with no autocast for it is NOT refused. It is legal and inert, and
     # Process.amp_state says "declined" with the sentence -- that is the reportable third state,
     # and refusing it here would make a legal configuration unrunnable.

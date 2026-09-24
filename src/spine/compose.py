@@ -2575,7 +2575,13 @@ def compose(environ=None, *, restored=None):
             f"RUN_EPOCHS={int(_c0['epochs_target'])} (step {int(_c0['step'])}), so the loop would "
             f"make no passes -- and before this refusal it trained one unrequested window and "
             f"overwrote the final checkpoint. Raise RUN_EPOCHS above {int(_c0['epoch'])} to "
-            f"continue training from it.")
+            f"continue training from it"
+            # ON THE SHIPPED DATA_RESAMPLE=0 ARM THAT ADVICE ALONE LED INTO RUN.startup_refusals'
+            # resampling refusal, whose "or run one epoch" led back here (driven 2026-09-24: only
+            # RUN_EPOCHS=2 DATA_RESAMPLE=1 ran). Both levers are named when resampling is off.
+            + ("." if bool(data.resample) else
+               f", with DATA_RESAMPLE=1 -- RUN_EPOCHS above 1 without resampling is refused "
+               f"(RUN.startup_refusals), and resampling is off on this run."))
     # THE THIRD STOP: a refused OPT restore (the `restore.opt` row) and a finished resume (just
     # above) stop here, before the SIG warm-up and before the mid-epoch accounting below reads a
     # clock that will never run.
@@ -2873,7 +2879,7 @@ def _run_windows(sysm):
     is row 30 of ASSEMBLY_ORDER's 40 and capacity/api.py::startup_refusals at row 29 is its ONLY
     blocker: make startup_refusals return an empty list and compose() runs straight through
     OPT.build and OPT.load_state -- this function is CALLED there, at the `optimizer` stage -- and
-    stops at row 32. RUN.cadence_audit is row 36 and has FOUR blockers above it, not one: row 29,
+    stops at row 32. RUN.cadence_audit is row 37 and has FOUR blockers above it, not one: row 29,
     then train/api.py::new_clock at row 32, train/api.py::RunClock.begin_epoch at row 33 and
     train/api.py::new_cadences at row 35, each raising NotImplementedError in its turn. So
     "unreachable today only because CAP.startup_refusals", which stood in this paragraph until
@@ -2883,7 +2889,7 @@ def _run_windows(sysm):
     ends: unpatched it stops at the `refuse` stage, row 29; with startup_refusals returning [] at
     `clock`, row 32; with new_clock also handing back a bare RunClock at `epoch0`, row 33; with the
     clock stubbed whole at `cadence`, row 35; and with new_cadences returning a mapping at `audit`,
-    row 36, which is this function's second call site and the audit's first. Rows 31 and 34
+    row 37, which is this function's second call site and the audit's first. Rows 31 and 34
     (OPT.load_state, SIG.warm_up) have bodies and pass through. A stack of stubs is this file's
     oldest shape and the reason K7 exists; what it costs is that "unreachable" needs the whole list
     to stay true, and one name is the answer a repair disproves. THE BLOCKER NAMED HERE UNTIL

@@ -86,6 +86,17 @@ def c1_accumulation():
     check("C1 the parent's lost partial accumulation is counted",
           c.optimizer.counters.get("opt.ckpt.partial_accum_dropped") == 2,
           c.optimizer.counters.get("opt.ckpt.partial_accum_dropped"))
+    # AT THE PARENT'S accum, NOT THE LIVE ONE (2026-09-24): OPT_ACCUM may change at the boundary.
+    for pa, ca, want_drop, want_short in ((1, 4, 0, 2), (4, 3, 2, 0)):
+        pp = build(OPT_ACCUM=pa)
+        loop.run(pp, max_windows=6, progress=False)
+        cc = build(restored=snapshot_of(pp), OPT_ACCUM=ca)
+        got = {k: cc.optimizer.counters.get("opt.ckpt." + k)
+               for k in ("partial_accum_dropped", "first_step_short_by", "partial_accum_basis")}
+        check(f"C1 parent accum={pa} (n_backward=6) resumed at accum={ca}: {want_drop} dropped, "
+              f"first step short by {want_short}",
+              got == {"partial_accum_dropped": want_drop, "first_step_short_by": want_short,
+                      "partial_accum_basis": 1}, got)
     res = loop.run(c, max_windows=6, progress=False)
     # BACKWARD 6 -> 12 CROSSES 8 AND 12, SO TWO STEPS; the old (n - base) // k said 6 // 4 = 1.
     check("C1 the child steps on OPT's schedule (backward 6 -> 12, steps 1 -> 3)",

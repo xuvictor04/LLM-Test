@@ -1120,7 +1120,8 @@ def accum_partial(n_backward, accum):
 
     THE COMPANION OF accum_due, AND IT EXISTS FOR ONE READER (2026-09-24, Q-RUN-9).
     opt/api.py::load_state counts opt.ckpt.partial_accum_dropped -- the passes of a parent's
-    unfinished accumulation whose gradients no checkpoint carries -- and that is `n % accum`, a
+    unfinished accumulation whose gradients no checkpoint carries, `n % the parent's accum` -- and
+    opt.ckpt.first_step_short_by, `n % the live accum`; each is `n % accum`, a
     remainder of a backward count by the accumulation rate. Written inline at the call site it is a
     cross-kind operation on a Clock-unit lever that O11 refuses and nobody can audit; here it is
     named once, with accum_due's refusals and accum_due's clamp, so the two answers cannot disagree:

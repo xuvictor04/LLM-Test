@@ -2539,7 +2539,7 @@ def state_dict(opt: Config, st):
     cost is written down here and in .rework/audits/repair_opt.json instead of being traded away
     quietly for a smaller file.
 
-    LEVERS READ: none (everything comes off st)
+    LEVERS READ: accum (recorded, so a resume can count the partial group this run leaves)
     WIRES READ: none
     DID IT FIRE: opt.ckpt.saved
     """
@@ -2562,6 +2562,10 @@ def state_dict(opt: Config, st):
         "param_group_shape": st.param_group_shape,
         "counters": dict(st.counters),
         "grad_norms": list(st.grad_norms),
+        # THE ACCUMULATION RATE THIS RUN STEPPED AT (2026-09-24). load_state needs it to count the
+        # passes this run leaves un-stepped: the pending partial group is n_backward % THIS accum,
+        # and OPT_ACCUM may legitimately change at the boundary, so the child's live value is not it.
+        "accum": int(opt.accum),
     }
 
 
@@ -2594,7 +2598,8 @@ def load_state(opt: Config, st, saved):
     (opt.ckpt.backward_at_load, opt.ckpt.step_at_load) so the invariant is a statement about this
     process's passes against this process's steps.
 
-    LEVERS READ: accum (only to stamp opt.ckpt.partial_accum_dropped at the live phase)
+    LEVERS READ: accum (only to stamp opt.ckpt.first_step_short_by at the live phase, and
+                 opt.ckpt.partial_accum_dropped on a checkpoint that predates the saved accum)
     WIRES READ: none
     DID IT FIRE: opt.ckpt.loaded, opt.ckpt.refused (with the reason),
                  opt.ckpt.moments_widened (how many tensors' moments were zero-padded for a dim-0
@@ -2612,8 +2617,13 @@ def load_state(opt: Config, st, saved):
                  the accumulation invariant from, because OPT_ACCUM may legitimately change at
                  exactly this boundary),
                  opt.ckpt.partial_accum_dropped (backward passes of the parent's unfinished
-                 accumulation whose gradients no checkpoint carries -- n_backward % accum at load;
-                 0 on an aligned boundary, ABSENT on a process that restored nothing)
+                 accumulation whose gradients no checkpoint carries -- n_backward % the PARENT's
+                 accum, which state_dict records; on a checkpoint written before that field, the
+                 live accum, and opt.ckpt.partial_accum_basis says which: 1 = the parent's, 0 =
+                 the live fallback; 0 on an aligned boundary, ABSENT on a process that restored
+                 nothing), opt.ckpt.first_step_short_by (n_backward % the LIVE accum: the passes
+                 the child's first step lacks, because its group began before the resume; equal
+                 to the dropped count when accum did not change, ABSENT likewise)
     """
     opt = opt.owned_by("OPT")
 
@@ -2699,12 +2709,21 @@ def load_state(opt: Config, st, saved):
     # THE PARENT'S UN-STEPPED ACCUMULATION, WHICH NO CHECKPOINT CARRIES, COUNTED (2026-09-24). A
     # parent saved partway through an accumulation had n_backward % accum backward passes whose
     # gradients sat in .grad waiting for a step; the checkpoint holds weights and moments, not
-    # .grad, so those passes are gone and the child's first step averages only the passes it runs
-    # itself (still scaled by 1/accum, so that step is proportionally smaller). Stamped with the
-    # LIVE accum, which is the one that decides when the child's first step lands; 0 on every
-    # boundary a multiple of accum, including every accum=1 run. ABSENT on a process that restored
-    # nothing, which is this tree's word for UNREACHABLE.
+    # .grad, so those passes are gone. THAT REMAINDER IS TAKEN AT THE PARENT'S accum, which
+    # state_dict now records: it was taken at the LIVE one, and OPT_ACCUM may change at exactly
+    # this boundary -- driven, a parent at accum=1 with n_backward=6 (nothing pending) resumed at
+    # accum=4 reported 2 dropped, and a parent at accum=4 with 2 pending resumed at accum=3
+    # reported 0. The live remainder is a different, real quantity -- how many passes the child's
+    # first step lacks, since its group started before the resume, so that step is proportionally
+    # smaller (still scaled by 1/accum) -- and it is kept under its own name,
+    # opt.ckpt.first_step_short_by. Both are 0 on every boundary a multiple of the accum they use,
+    # and ABSENT on a process that restored nothing, which is this tree's word for UNREACHABLE.
+    saved_accum = saved.get("accum")
+    st.counters["opt.ckpt.partial_accum_basis"] = 1 if saved_accum is not None else 0
     st.counters["opt.ckpt.partial_accum_dropped"] = int(
+        derive.accum_partial(st.n_backward,
+                             int(saved_accum) if saved_accum is not None else int(opt.accum)))
+    st.counters["opt.ckpt.first_step_short_by"] = int(
         derive.accum_partial(st.n_backward, int(opt.accum)))
 
     saved_h = dict(saved.get("horizon", {}))
