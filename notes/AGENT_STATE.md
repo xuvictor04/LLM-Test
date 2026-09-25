@@ -12,6 +12,21 @@ Updated 2026-09-25 at `ac94811` on `rm-predict-DC` (the only branch pushed to; n
   §16 lists the owner's rulings, each with the recommendation that gets built if unruled. Evidence:
   results/multimodal_design_2026-09-25/.
 
+## Owner's instruction, 2026-09-25 (supersedes parts of Proposal 03)
+> "I don't like the idea of frozen codecs, I don't want anything frozen or fixed unless absolutely
+> necessary. I am also reconsidering the hz. Otherwise things look pretty good."
+
+- The frozen codec (AUD_FREEZE_AT) and the hand-fixed 25 Hz in 03 are **rejected**. The rest of 03 stands.
+- "Frozen" here means LEARNED things frozen or fixed. Frozen Configs and frozen entry-point signatures
+  are software contracts and stay.
+- Finding: the TEXT tokenizer is already effectively frozen at RUN_EPOCHS=1. Minted ids never reach
+  training data because every retok waits for an epoch roll (Q-RUN-8), and TOK_RETOK_EVERY decides
+  nothing at any epoch count. A live codec and an adaptive rate need the same mid-epoch
+  re-segmentation (Q-RUN-8 option a), so that mechanism is now a prerequisite.
+- In flight: the design workflow wf_ba08e76a-a28 (map, literature, 3 prototyped designs, judge,
+  critic, reproduction). Scratch: .../scratchpad/mm2/. Its output folds into 03 as §0b, and its
+  evidence goes to results/.
+
 ## Next
 1. The owner rules on 03 §16, or accepts the recommendations.
 2. S1 per 03 Appendix A as amended by §0. **Step 0 is the baseline fixture (R7), before any tree edit.**
