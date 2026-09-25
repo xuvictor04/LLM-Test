@@ -1962,6 +1962,25 @@ def _remove(pop, slot):
     return moved
 
 
+def _merge_pairs(sim, merge_dist):
+    """Every pair i < j with 1 - sim[i, j] <= merge_dist, as (sim, i, j), DESCENDING.
+
+    ONE TENSOR PASS, NOT n^2/2 SCALAR READS. The scalar loop this replaced read sim[i, j] one element
+    at a time, and on a GPU each read is a device sync: at n=2049 a pass took 14 s on CPU and far
+    longer on the card, which is what put the 20k-window fleet at ~2.5 windows/s per run from window
+    501 (the first manage pass) onward. The result is the SAME LIST, element for element: the float32
+    difference is formed exactly as before and widened to double before the compare, which is what
+    float(...) <= merge_dist did, and .tolist() yields the same Python floats and ints, so the sort
+    (ties broken by i, then j, both descending) is unchanged.
+    """
+    hit = torch.triu((1.0 - sim).double() <= merge_dist, diagonal=1)
+    ij = hit.nonzero()
+    sv = sim[ij[:, 0], ij[:, 1]]
+    pairs = list(zip(sv.tolist(), ij[:, 0].tolist(), ij[:, 1].tolist()))
+    pairs.sort(reverse=True)
+    return pairs
+
+
 def _merge_into(pop, a, b, rank):
     """Consolidate expert `b` into expert `a` IN DELTA-W SPACE. Returns the truncation residual as
     a fraction of ||dW_a + dW_b||.
@@ -3614,12 +3633,7 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
         absorbed = set()
         # DESCENDING SIMILARITY so the closest pair merges first; a pair already consumed is
         # skipped rather than re-merged into a survivor whose centroid has since moved.
-        pairs = []
-        for i in range(n_live):
-            for j in range(i + 1, n_live):
-                if float(1.0 - sim[i, j]) <= merge_dist:
-                    pairs.append((float(sim[i, j]), i, j))
-        pairs.sort(reverse=True)
+        pairs = _merge_pairs(sim, merge_dist)
         for _sv, i, j in pairs:
             if i in absorbed or j in absorbed:
                 continue

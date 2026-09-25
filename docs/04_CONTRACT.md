@@ -3571,6 +3571,18 @@ the question is re-asked once the synthetic corpus varies with the seed (DEFECT 
 seeds trained on the same text, so this result spans initialisations, not data). The call site, the
 zero-born `world_proj` and the gauges all stay; `WORLD_FEEDBACK=1` restores the wired arm exactly.
 Results: `results/gpu_world_2026-09-24/ANALYSIS.txt`.
+**THE FLEET RAN ~15x SLOWER THAN ITS OWN CALIBRATION, AND THE CAUSE WAS THE MERGE SCAN (repaired
+2026-09-25).** Calibration measured 461.6 windows/s over 12 runs in the first 150 windows; the fleet
+then averaged ~25 windows/s over 21 runs x 20,000 windows (4.6 h against a 0.3 h estimate).
+FAB.manage's step 0 built its merge pairs with an n^2/2 loop of scalar `sim[i, j]` reads -- one
+device sync each on a GPU -- and the first manage pass is at window 501, past the calibration's
+reach. `_merge_pairs` is now one tensor pass: on CPU 14 s -> 0.033 s at n=2049 and 53 s -> 0.23 s at
+n=4001. It returns the scalar scan's list exactly (fabric-internals I10 holds it against the old loop,
+including thresholds one double-ulp under an entry), and a 300-window run with merges firing
+(`FAB_GRACE=1 FAB_MANAGE_EVERY=25`, seed 3, 2 merges) gives a byte-identical loss curve and log
+against d97779d, so **every number in the table above stands.** The GPU rate after the repair is a
+projection until the owner's next fleet measures it; `gpu_world.sh`'s ETA is still calibrated on
+windows before the first manage pass.
 
 **`WORLD_FEEDBACK` stayed `True` pending the GPU experiment in `sweep_world.sh`** (history, as written before the run) (5 seeds per arm,
 paired by seed, mean of loss_curve differences over the last half; flip the default if the gain is

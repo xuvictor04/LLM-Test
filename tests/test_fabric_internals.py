@@ -29,6 +29,10 @@ repository root as `python3 tests/test_fabric_internals.py`; exit 0 = every chec
       fab.depth_advance are UNREACHABLE predictions, and a manage pass replaces both.
   I9  the roll stamped OPT's shift at the steps already taken, one short of the step it applies to,
       so OPT_LR_SHIFT_WARM=1 re-warmed nothing. A two-epoch loop run at WARM=1 applies it once.
+  I10 FAB.manage's merge scan read sim[i, j] one scalar at a time (n^2/2 device syncs), which held
+      the 2026-09-24 GPU fleet at ~2.5 windows/s per run from window 501 on. _merge_pairs is one
+      tensor pass and must return the scalar loop's list EXACTLY -- same floats, same order, same
+      tie-breaks -- on random, clustered, tied and exactly-at-threshold similarity matrices.
 
 WHAT THIS FILE CANNOT CATCH: whether the new baselines make a LONG run better. That is a GPU-length
 measurement the owner runs; these checks pin the arithmetic each repair promises.
@@ -380,6 +384,56 @@ def check_i9_shift_warm_rewarms_n_steps():
                    findings)
 
 
+def _merge_pairs_scalar(sim, merge_dist):
+    """THE REFERENCE: the scan exactly as it shipped before 2026-09-25, kept here and nowhere else."""
+    n = sim.shape[0]
+    pairs = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            if float(1.0 - sim[i, j]) <= merge_dist:
+                pairs.append((float(sim[i, j]), i, j))
+    pairs.sort(reverse=True)
+    return pairs
+
+
+def check_i10_merge_pairs_match_the_scalar_scan():
+    findings = []
+    g = torch.Generator().manual_seed(10)
+    cases = []
+    for n, d in ((1, 4), (2, 4), (7, 3), (40, 8), (120, 16)):
+        cn = torch.nn.functional.normalize(torch.randn(n, d, generator=g), dim=-1)
+        cases.append((f"random n={n}", cn @ cn.t()))
+    # CLUSTERED: near-duplicates, the replicate/xover births the scan exists for.
+    base = torch.randn(6, 16, generator=g)
+    cn = torch.nn.functional.normalize(base.repeat(10, 1) + 1e-3 * torch.randn(60, 16, generator=g), dim=-1)
+    cases.append(("clustered n=60", cn @ cn.t()))
+    # TIED: exact duplicates, so equal similarities and the (i, j) tie-break decides the order.
+    cn = torch.nn.functional.normalize(torch.randn(3, 8, generator=g), dim=-1).repeat(5, 1)
+    cases.append(("tied n=15", cn @ cn.t()))
+    ran = 0
+    for name, sim in cases:
+        off = (1.0 - sim).double()
+        # THRESHOLDS INCLUDE VALUES THAT SIT EXACTLY ON AN ENTRY'S DISTANCE, where <= is decided.
+        cuts = [0.0, 1e-6, 0.01, 0.1, 0.5, 2.0]
+        if sim.shape[0] > 1:
+            cuts += [float(off[0, 1]), float(off[-2, -1])]
+            # ONE DOUBLE ULP UNDER AN ENTRY: excluded in double, INCLUDED if merge_dist were rounded to
+            # float32 -- the compare must stay in double, as float(...) <= merge_dist was.
+            cuts += [math.nextafter(float(off[0, 1]), -math.inf), math.nextafter(float(off[-2, -1]), -math.inf)]
+        for md in cuts:
+            want = _merge_pairs_scalar(sim, md)
+            got = FAB._merge_pairs(sim, md)
+            ran += 1
+            if got != want:
+                findings.append(f"{name} merge_dist={md!r}: {len(got)} pairs vs reference {len(want)}; "
+                                f"first difference at "
+                                f"{next((k for k, (x, y) in enumerate(zip(got, want)) if x != y), min(len(got), len(want)))}")
+            if any(type(v) is not float or type(i) is not int or type(j) is not int for v, i, j in got):
+                findings.append(f"{name} merge_dist={md!r}: element types are not (float, int, int)")
+    return _report("I10", "the vectorised merge scan returns the scalar scan's list exactly", not findings,
+                   f"{ran} (matrix, merge_dist) cases against the scalar reference", findings)
+
+
 CHECKS = (
     check_i1_failure_cull_baseline,
     check_i2_comp_protect_direction,
@@ -390,6 +444,7 @@ CHECKS = (
     check_i7_halt_competes_with_one_expert,
     check_i8_build_gates_are_predictions,
     check_i9_shift_warm_rewarms_n_steps,
+    check_i10_merge_pairs_match_the_scalar_scan,
 )
 
 
