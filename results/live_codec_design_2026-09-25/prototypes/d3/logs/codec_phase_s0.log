@@ -1,0 +1,16 @@
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+spec25 0 (250, 16, 1.628, 128)
+spec25 0 (500, 33, 0.876, 124)
+spec25 0 (750, 50, 0.981, 107)
+spec25 0 (1000, 66, 0.821, 119)
+spec25 0 (1250, 83, 0.535, 142)
+spec25 0 (1500, 98, 0.772, 137)
+{"arch": "spec25", "seed": 0, "steps": 1500, "s": 98, "s_per_step": 0.0654, "params": 1199621, "log": [[250, 16, 1.628, 128], [500, 33, 0.876, 124], [750, 50, 0.981, 107], [1000, 66, 0.821, 119], [1250, 83, 0.535, 142], [1500, 98, 0.772, 137]]}
+nested 0 (250, 16, 0.889, 172)
+nested 0 (500, 32, 1.319, 223)
+nested 0 (750, 48, 1.281, 198)
+nested 0 (1000, 63, 1.21, 188)
+nested 0 (1250, 79, 0.972, 243)
+nested 0 (1500, 96, 0.697, 219)
+{"arch": "nested", "seed": 0, "steps": 1500, "s": 96, "s_per_step": 0.0637, "params": 920837, "log": [[250, 16, 0.889, 172], [500, 32, 1.319, 223], [750, 48, 1.281, 198], [1000, 63, 1.21, 188], [1250, 79, 0.972, 243], [1500, 96, 0.697, 219]]}

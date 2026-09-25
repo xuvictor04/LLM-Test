@@ -1,0 +1,27 @@
+start frozen25 s0 12:53:41
+start ttcMR s0 12:55:05
+done frozen25 s0 rc=0 12:57:22
+start ttc25 s0 12:57:22
+done ttcMR s0 rc=143 12:58:23
+start live25 s0 12:58:23
+done ttc25 s0 (orphaned from queue A) 13:02:05
+start ttcMR s0 13:02:05
+done live25 s0 rc=0 13:03:04
+start ttcMR s1 13:03:04
+start ttc25c s0 13:05:34
+done ttcMR s0 rc=0 13:09:06
+start ttcN25 s0 13:09:06
+done ttcMR s1 rc=0 13:10:02
+start ttc25 s1 13:10:02
+done ttc25c s0 rc=0 13:10:34
+start frozen25c s0 13:10:34
+done frozen25c s0 rc=0 13:14:17
+done ttcN25 s0 (orphaned) 13:16:19
+start frozen25 s1 13:16:19
+start ttc25c s1 13:16:41
+done frozen25 s1 rc=0 13:20:05
+start ttcMRc s0 13:20:05
+done ttc25c s1 rc=0 13:21:44
+start frozen25c s1 13:21:44
+done frozen25c s1 rc=0 13:25:41
+done ttcMRc s0 rc=0 13:28:22

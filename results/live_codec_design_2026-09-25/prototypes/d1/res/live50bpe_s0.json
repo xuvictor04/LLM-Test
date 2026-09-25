@@ -1,0 +1,482 @@
+{
+ "arm": "live50bpe",
+ "seed": 0,
+ "args": {
+  "arm": "live50bpe",
+  "seed": 0,
+  "n_a": 8000,
+  "n_b": 8000,
+  "text_every": 4,
+  "text_len": 96,
+  "B": 8,
+  "codec_every": 4,
+  "codec_lr": 5e-05,
+  "codec_keep_opt": 1,
+  "anchor_scope": "all",
+  "anchor_w": null,
+  "act_every": 2000,
+  "bpe_burst": 32,
+  "bpe_min_pair": 50,
+  "bpe_max_frames": 16,
+  "p1_steps": 800,
+  "media_rows": "table",
+  "resume_test": 0,
+  "out": "res/live50bpe_s0.json"
+ },
+ "cfg": {
+  "stride": 1,
+  "live": 1,
+  "anchor_w": 10.0,
+  "snapshot": 1,
+  "bpe": "on"
+ },
+ "fps_base": 50,
+ "text_bpb_after_text_phase": 2.0508,
+ "after_A": {
+  "window": 5720,
+  "text_bpb": 2.0964,
+  "A_codec": {
+   "mel": 0.4629,
+   "recon_probe_exact": 0.236,
+   "codes_used": 582,
+   "world_rel_h1": 0.5408
+  },
+  "B_codec": {
+   "mel": 0.5813,
+   "recon_probe_exact": 0.219,
+   "codes_used": 480,
+   "world_rel_h1": 0.678
+  },
+  "A": {
+   "bits_per_s": 193.79,
+   "bits_per_pos": 4.86,
+   "caption_bits_per_byte": 0.3296,
+   "positions_per_s": 38.68,
+   "positions_per_s_by_kind": {
+    "beeps": 36.94,
+    "fall": 40.67,
+    "rise": 40.42,
+    "tone": 40.17
+   },
+   "understand_exact_train": 0.0,
+   "understand_exact_heldout": 0.0,
+   "generate_t1.0": {
+    "exact_train": 0.042,
+    "exact_heldout": 0.0,
+    "mean_frames": 38.4,
+    "short": 53
+   },
+   "generate_t0.7": {
+    "exact_train": 0.01,
+    "exact_heldout": 0.0,
+    "mean_frames": 40.9,
+    "short": 45
+   }
+  }
+ },
+ "final": {
+  "window": 12091,
+  "text_bpb": 2.06,
+  "A_codec": {
+   "mel": 0.4637,
+   "recon_probe_exact": 0.25,
+   "codes_used": 585,
+   "world_rel_h1": 0.6947
+  },
+  "B_codec": {
+   "mel": 0.575,
+   "recon_probe_exact": 0.302,
+   "codes_used": 497,
+   "world_rel_h1": 0.3801
+  },
+  "A": {
+   "bits_per_s": 251.53,
+   "bits_per_pos": 6.9309,
+   "caption_bits_per_byte": 2.3937,
+   "positions_per_s": 35.69,
+   "positions_per_s_by_kind": {
+    "beeps": 34.21,
+    "fall": 37.88,
+    "rise": 37.33,
+    "tone": 36.33
+   },
+   "understand_exact_train": 0.0,
+   "understand_exact_heldout": 0.0,
+   "generate_t1.0": {
+    "exact_train": 0.042,
+    "exact_heldout": 0.083,
+    "mean_frames": 40.0,
+    "short": 62
+   },
+   "generate_t0.7": {
+    "exact_train": 0.031,
+    "exact_heldout": 0.0,
+    "mean_frames": 40.1,
+    "short": 62
+   }
+  },
+  "B": {
+   "bits_per_s": 287.89,
+   "bits_per_pos": 6.5777,
+   "caption_bits_per_byte": 0.1227,
+   "positions_per_s": 42.71,
+   "positions_per_s_by_kind": {
+    "mel-arch": 42.79,
+    "mel-down": 43.0,
+    "mel-up": 43.25,
+    "mel-valley": 41.79
+   },
+   "understand_exact_train": 0.274,
+   "understand_exact_heldout": 0.0,
+   "generate_t1.0": {
+    "exact_train": 0.054,
+    "exact_heldout": 0.0,
+    "mean_frames": 39.5,
+    "short": 39
+   },
+   "generate_t0.7": {
+    "exact_train": 0.107,
+    "exact_heldout": 0.125,
+    "mean_frames": 42.5,
+    "short": 35
+   }
+  }
+ },
+ "windows_initial": 12991,
+ "windows_final": 12091,
+ "windows_consumed": 12091,
+ "clock": {
+  "step": 12091,
+  "epoch": 0,
+  "windows_in_epoch": 12091,
+  "in_epoch": 12091,
+  "epoch_revisions": 6
+ },
+ "counters": {
+  "acts": 6,
+  "mints": 192,
+  "retok_mid_epoch": 6,
+  "retok_deferred": 0,
+  "minted_in_consumed": 82133,
+  "media_pos_consumed": 684759,
+  "media_sec_consumed": 0.0,
+  "codec_steps": 378,
+  "jit_reencoded": 0,
+  "world_steps": 1512,
+  "stranded_mints": 0
+ },
+ "bpe_size": 1192,
+ "bpe_refused_len": 0,
+ "unconsumed_tail_positions": 48,
+ "wall_s": 376.9,
+ "timers": {
+  "lm": 192.4,
+  "codec": 23.9,
+  "act": 34.0,
+  "jit": 0.0,
+  "world": 28.5,
+  "eval": 63.4
+ },
+ "s_per_step_lm": 0.1273,
+ "s_per_window_total": 0.02593,
+ "acts": [
+  {
+   "window": 2000,
+   "in_epoch": 2000,
+   "wie_before": 12991,
+   "minted": 32,
+   "world_rel_before": 0.7554,
+   "world_rel_after": 0.7577,
+   "splice_pos": 256013,
+   "len_before": 1662937,
+   "len_after": 1594279,
+   "wie_after": 12455,
+   "tail_media_tokens_per_s": 44.87,
+   "tail_frac_minted": 0.1143,
+   "s": 8.86
+  },
+  {
+   "window": 4000,
+   "in_epoch": 4000,
+   "wie_before": 12455,
+   "minted": 32,
+   "world_rel_before": 0.6076,
+   "world_rel_after": 0.6079,
+   "splice_pos": 512020,
+   "len_before": 1594279,
+   "len_after": 1569872,
+   "wie_after": 12264,
+   "tail_media_tokens_per_s": 43.257,
+   "tail_frac_minted": 0.1013,
+   "s": 8.7
+  },
+  {
+   "window": 6000,
+   "in_epoch": 6000,
+   "wie_before": 12264,
+   "minted": 32,
+   "world_rel_before": 0.5564,
+   "world_rel_after": 0.5573,
+   "splice_pos": 768047,
+   "len_before": 1569872,
+   "len_after": 1560076,
+   "wie_after": 12188,
+   "tail_media_tokens_per_s": 43.538,
+   "tail_frac_minted": 0.096,
+   "s": 7.4
+  },
+  {
+   "window": 8000,
+   "in_epoch": 8000,
+   "wie_before": 12188,
+   "minted": 32,
+   "world_rel_before": 0.4359,
+   "world_rel_after": 0.4387,
+   "splice_pos": 1024051,
+   "len_before": 1560076,
+   "len_after": 1550907,
+   "wie_after": 12116,
+   "tail_media_tokens_per_s": 41.774,
+   "tail_frac_minted": 0.1337,
+   "s": 5.41
+  },
+  {
+   "window": 10000,
+   "in_epoch": 10000,
+   "wie_before": 12116,
+   "minted": 32,
+   "world_rel_before": 0.3939,
+   "world_rel_after": 0.3947,
+   "splice_pos": 1280078,
+   "len_before": 1550907,
+   "len_after": 1547811,
+   "wie_after": 12092,
+   "tail_media_tokens_per_s": 40.59,
+   "tail_frac_minted": 0.1553,
+   "s": 3.15
+  },
+  {
+   "window": 12000,
+   "in_epoch": 12000,
+   "wie_before": 12092,
+   "minted": 32,
+   "world_rel_before": 0.3747,
+   "world_rel_after": 0.3748,
+   "splice_pos": 1536025,
+   "len_before": 1547811,
+   "len_after": 1547696,
+   "wie_after": 12091,
+   "tail_media_tokens_per_s": 39.043,
+   "tail_frac_minted": 0.1885,
+   "s": 0.5
+  }
+ ],
+ "drift": [
+  {
+   "tag": "act",
+   "window": 2000,
+   "flipA_vs_prev": 0.1254,
+   "flipB_vs_prev": 0.1123,
+   "flipA_vs_codecphase": 0.1254,
+   "flipB_vs_codecphase": 0.1123,
+   "windows_since_prev": 2000
+  },
+  {
+   "tag": "act",
+   "window": 4000,
+   "flipA_vs_prev": 0.0853,
+   "flipB_vs_prev": 0.0854,
+   "flipA_vs_codecphase": 0.1813,
+   "flipB_vs_codecphase": 0.1633,
+   "windows_since_prev": 2000
+  },
+  {
+   "tag": "act",
+   "window": 6000,
+   "flipA_vs_prev": 0.0587,
+   "flipB_vs_prev": 0.066,
+   "flipA_vs_codecphase": 0.2147,
+   "flipB_vs_codecphase": 0.1977,
+   "windows_since_prev": 2000
+  },
+  {
+   "tag": "act",
+   "window": 8000,
+   "flipA_vs_prev": 0.0579,
+   "flipB_vs_prev": 0.0737,
+   "flipA_vs_codecphase": 0.2342,
+   "flipB_vs_codecphase": 0.2285,
+   "windows_since_prev": 2000
+  },
+  {
+   "tag": "act",
+   "window": 10000,
+   "flipA_vs_prev": 0.0487,
+   "flipB_vs_prev": 0.0787,
+   "flipA_vs_codecphase": 0.2479,
+   "flipB_vs_codecphase": 0.2558,
+   "windows_since_prev": 2000
+  },
+  {
+   "tag": "act",
+   "window": 12000,
+   "flipA_vs_prev": 0.0639,
+   "flipB_vs_prev": 0.0894,
+   "flipA_vs_codecphase": 0.2694,
+   "flipB_vs_codecphase": 0.2808,
+   "windows_since_prev": 2000
+  }
+ ],
+ "curve": [
+  [
+   400,
+   1.9453,
+   5.817
+  ],
+  [
+   800,
+   1.3382,
+   5.304
+  ],
+  [
+   1200,
+   1.5662,
+   4.2274
+  ],
+  [
+   1600,
+   1.5508,
+   4.3197
+  ],
+  [
+   2000,
+   1.4814,
+   4.2826
+  ],
+  [
+   2400,
+   1.4266,
+   4.7235
+  ],
+  [
+   2800,
+   1.4468,
+   4.4228
+  ],
+  [
+   3200,
+   1.4097,
+   3.623
+  ],
+  [
+   3600,
+   1.262,
+   3.9403
+  ],
+  [
+   4000,
+   1.3661,
+   3.2733
+  ],
+  [
+   4400,
+   1.2824,
+   3.9671
+  ],
+  [
+   4800,
+   1.3137,
+   3.6081
+  ],
+  [
+   5200,
+   1.4028,
+   3.9083
+  ],
+  [
+   5600,
+   1.1914,
+   4.036
+  ],
+  [
+   6000,
+   0.996,
+   5.557
+  ],
+  [
+   6400,
+   1.2051,
+   5.4733
+  ],
+  [
+   6800,
+   1.0632,
+   5.1234
+  ],
+  [
+   7200,
+   1.0255,
+   4.5758
+  ],
+  [
+   7600,
+   1.1672,
+   4.7281
+  ],
+  [
+   8000,
+   0.8911,
+   4.4311
+  ],
+  [
+   8400,
+   0.8354,
+   4.5
+  ],
+  [
+   8800,
+   0.9429,
+   4.5352
+  ],
+  [
+   9200,
+   0.8163,
+   4.2487
+  ],
+  [
+   9600,
+   0.8958,
+   4.4624
+  ],
+  [
+   10000,
+   1.0178,
+   4.3201
+  ],
+  [
+   10400,
+   0.8881,
+   4.3115
+  ],
+  [
+   10800,
+   0.8314,
+   4.7344
+  ],
+  [
+   11200,
+   1.1738,
+   4.7452
+  ],
+  [
+   11600,
+   0.9463,
+   3.9679
+  ],
+  [
+   12000,
+   0.866,
+   4.2767
+  ]
+ ]
+}

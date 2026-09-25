@@ -1,0 +1,186 @@
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+built: records=20000 positions=1263548 windows=9871 render_s=11.2 build_s=19.7
+after_A {"window": 4568, "text_bpb": 2.0839, "A_codec": {"mel": 0.5319, "recon_probe_exact": 0.347, "codes_used": 574, "world_rel_h1": 0.428}, "B_codec": {"mel": 0.6215, "recon_probe_exact": 0.271, "codes_used": 438, "world_rel_h1": 0.6468}, "A": {"bits_per_s": 122.94, "bits_per_pos": 4.7284, "caption_bits_per_byte": 0.3565, "positions_per_s": 25.0, "positions_per_s_by_kind": {"beeps": 25.0, "fall": 25.0, "rise": 25.0, "tone": 25.0}, "understand_exact_train": 0.016, "understand_exact_heldout": 0.0, "generate_t1.0": {"exact_train": 0.021, "exact_heldout": 0.0, "mean_frames": 25.0, "short": 0}, "generat
+{
+ "arm": "frozen25",
+ "seed": 2,
+ "args": {
+  "arm": "frozen25",
+  "seed": 2,
+  "n_a": 8000,
+  "n_b": 8000,
+  "text_every": 4,
+  "text_len": 96,
+  "B": 8,
+  "codec_every": 4,
+  "codec_lr": 5e-05,
+  "codec_keep_opt": 1,
+  "anchor_scope": "all",
+  "anchor_w": null,
+  "act_every": 2000,
+  "bpe_burst": 32,
+  "bpe_min_pair": 50,
+  "bpe_max_frames": 16,
+  "p1_steps": 800,
+  "media_rows": "lattice",
+  "resume_test": 0,
+  "out": "res/frozen25lat_s2.json"
+ },
+ "cfg": {
+  "stride": 2,
+  "live": 0,
+  "anchor_w": 0.0,
+  "snapshot": 1,
+  "bpe": "off"
+ },
+ "fps_base": 25,
+ "text_bpb_after_text_phase": 2.1268,
+ "after_A": {
+  "window": 4568,
+  "text_bpb": 2.0839,
+  "A_codec": {
+   "mel": 0.5319,
+   "recon_probe_exact": 0.347,
+   "codes_used": 574,
+   "world_rel_h1": 0.428
+  },
+  "B_codec": {
+   "mel": 0.6215,
+   "recon_probe_exact": 0.271,
+   "codes_used": 438,
+   "world_rel_h1": 0.6468
+  },
+  "A": {
+   "bits_per_s": 122.94,
+   "bits_per_pos": 4.7284,
+   "caption_bits_per_byte": 0.3565,
+   "positions_per_s": 25.0,
+   "positions_per_s_by_kind": {
+    "beeps": 25.0,
+    "fall": 25.0,
+    "rise": 25.0,
+    "tone": 25.0
+   },
+   "understand_exact_train": 0.016,
+   "understand_exact_heldout": 0.0,
+   "generate_t1.0": {
+    "exact_train": 0.021,
+    "exact_heldout": 0.0,
+    "mean_frames": 25.0,
+    "short": 0
+   },
+   "generate_t0.7": {
+    "exact_train": 0.042,
+    "exact_heldout": 0.0,
+    "mean_frames": 25.0,
+    "short": 0
+   }
+  }
+ },
+ "final": {
+  "window": 9871,
+  "text_bpb": 2.0471,
+  "A_codec": {
+   "mel": 0.5319,
+   "recon_probe_exact": 0.347,
+   "codes_used": 574,
+   "world_rel_h1": 0.5954
+  },
+  "B_codec": {
+   "mel": 0.6215,
+   "recon_probe_exact": 0.271,
+   "codes_used": 438,
+   "world_rel_h1": 0.347
+  },
+  "A": {
+   "bits_per_s": 165.01,
+   "bits_per_pos": 6.3466,
+   "caption_bits_per_byte": 2.4701,
+   "positions_per_s": 25.0,
+   "positions_per_s_by_kind": {
+    "beeps": 25.0,
+    "fall": 25.0,
+    "rise": 25.0,
+    "tone": 25.0
+   },
+   "understand_exact_train": 0.0,
+   "understand_exact_heldout": 0.0,
+   "generate_t1.0": {
+    "exact_train": 0.0,
+    "exact_heldout": 0.0,
+    "mean_frames": 25.0,
+    "short": 0
+   },
+   "generate_t0.7": {
+    "exact_train": 0.031,
+    "exact_heldout": 0.0,
+    "mean_frames": 25.0,
+    "short": 0
+   }
+  },
+  "B": {
+   "bits_per_s": 166.25,
+   "bits_per_pos": 6.3942,
+   "caption_bits_per_byte": 0.111,
+   "positions_per_s": 25.0,
+   "positions_per_s_by_kind": {
+    "mel-arch": 25.0,
+    "mel-down": 25.0,
+    "mel-up": 25.0,
+    "mel-valley": 25.0
+   },
+   "understand_exact_train": 0.214,
+   "understand_exact_heldout": 0.0,
+   "generate_t1.0": {
+    "exact_train": 0.071,
+    "exact_heldout": 0.0,
+    "mean_frames": 25.0,
+    "short": 0
+   },
+   "generate_t0.7": {
+    "exact_train": 0.054,
+    "exact_heldout": 0.125,
+    "mean_frames": 25.0,
+    "short": 0
+   }
+  }
+ },
+ "windows_initial": 9871,
+ "windows_final": 9871,
+ "windows_consumed": 9871,
+ "clock": {
+  "step": 9871,
+  "epoch": 0,
+  "windows_in_epoch": 9871,
+  "in_epoch": 9871,
+  "epoch_revisions": 0
+ },
+ "counters": {
+  "acts": 0,
+  "mints": 0,
+  "retok_mid_epoch": 0,
+  "retok_deferred": 0,
+  "minted_in_consumed": 0,
+  "media_pos_consumed": 400000,
+  "media_sec_consumed": 0.0,
+  "codec_steps": 0,
+  "jit_reencoded": 0,
+  "world_steps": 1234,
+  "stranded_mints": 0
+ },
+ "bpe_size": 1000,
+ "bpe_refused_len": 0,
+ "unconsumed_tail_positions": 60,
+ "wall_s": 320.8,
+ "timers": {
+  "lm": 190.2,
+  "codec": 0.0,
+  "act": 0.0,
+  "jit": 0.0,
+  "world": 21.5,
+  "eval": 74.0
+ },
+ "s_per_step_lm": 0.1541,
+ "s_per_window_total": 0.025
+}

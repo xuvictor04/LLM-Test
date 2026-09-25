@@ -1,0 +1,41 @@
+TREE MAPPER notes (HEAD a249595, rm-predict-DC). Source-read only; no experiments run.
+
+KEY LINE INDEX
+- RunClock: src/train/api.py:555 class; begin_epoch :619 (sets windows_in_epoch :658, zeroes _in_epoch :663);
+  advance :665, rolled test :704, roll re-arms windows_in_epoch=None :715; counters :753 (in_epoch, windows_in_epoch
+  published for ckpt since 2026-09-24); new_clock :463 (no in_epoch resume argument; mid-epoch resume replays, :485).
+- Loop: src/spine/loop.py run :559; win_in_epoch local ~685; ids = sysm.segmentation.ids ~770; retok_pending seed :708;
+  Due OR ~991-1003; flush call ~1060; epoch roll block ~1150-1300 (draw_stream, tokenize :1186, begin_epoch :1198,
+  shift stamps :1211/:1219, resegment :1225, DOM.on_retokenize gated on vocab.rev, retok_satisfied_by_roll :1273);
+  end-of-run due_dropped :1332-1343; stranded-mint warning :1344-1372; _flush :1651; token_seen index_add_ :1853;
+  due.retok -> retok_pending += 1 only :2208-2230; payload LOOP/RUN :410-446.
+- compose: _windows_in_epoch :2982 ((len(ids)-1)//ctx); _run_windows :2868; OPT.build(run_windows) :2509;
+  epoch0 begin_epoch :2584; resume position warning :2606-2660; token_seen restore :2541-2555;
+  _signature_width derive-and-keep :2803; _alphabet_size :2819; _signature_stream :3242; _signature_cursor :3367;
+  _sample_window :3391; _periods :3512 (no period derived from run length); System.retok_pending field :2145.
+- TOK: tokenize :1320 (start= segments only the unconsumed tail; byte_pos absolute; cache keyed on (data,start,len));
+  _segment :1264; Segmentation :156; on_window :1607; levers freeze_at :260, retok_every :280 (help admits the ask
+  waits for the roll), grow_every :307.
+- OPT: build :680; run_steps from run_windows :1062 (fixed at build); Horizon :164; residual reported :2063; groups
+  restricted to base/encoder :1040-1047.
+- MEM: store fields :190-200 (keys, tok, src, pos, ctx, own...); maintain :1872; resegment only retakes rekey
+  snapshot + counts :1953 (stale ctx NOT remapped); key_src frozen arm NotBuilt :239-316.
+- DOM: tokc :319, reservoir :311, rekey :887, on_retokenize :1605, prior :1689.
+- WORLD: target z_next from same encoder over UNDETACHED LM.embed :437-468; VICReg; WORLD_W folding record :429-434;
+  world_proj born zero, no grad at FEEDBACK=0 :707-712.
+- SIG: train_step :774, InfoNCE floor skip :923-931.
+- LM: decode dead mask :816 (minted rows below live_vocab are live -> trained as negatives until they appear);
+  on_mint :1020; anchor_term :908.
+- Archive: self_organize.py:7712-7722 (23 retoks, 22 no-op: 4.364 vs 2.175 b/B, attributed to side effects);
+  :7752-7761 tail-only retok (whole-stream retok taxed throughput x0.77 @10MB, x0.25 @100MB);
+  :3211 remap_mem_ctx (82.3% stored ctx stale after one growth step 647->1024; 200k entries in 2.0 s).
+- Tests pinning deferral: tests/test_tok_dom_cap.py:84-104 (T1, D1); tests/test_resume_clock.py:248.
+
+CORE INSIGHT
+- Live codec at FIXED fps does NOT need Q-RUN-8(a): F placeholders are fixed; codes can be (re)encoded in place or
+  just-in-time at the window cut. Only an ADAPTIVE fps (F changes) moves window boundaries and needs (a).
+- Text ids never change meaning (id2bytes append-only); retok changes segmentation, not meaning. Codec ids WOULD
+  change meaning under a live codec -> every persisted code id / code-derived statistic is invalidated, unlike text.
+- Tree precedents for live encoders with persisted outputs: SIG (trains in loop) + DOM.rekey of reservoirs + FAB
+  centroid EMA; MEM keys from live LM + rekey every 200 windows; WORLD live target + VICReg; TOK mint + LM.on_mint
+  row init + LM_COMPOSE/anchor_term handover; OPT_LR_SHIFT_WARM / FAB cooldown for self-inflicted shifts.

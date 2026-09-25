@@ -1,0 +1,19 @@
+start d1_resume 13:39:04
+start d3_flipdist 13:39:04
+start d1_live25_s0 13:39:04
+done d3_flipdist rc=0 13:39:45
+start d1_frozen25lat_s0 13:39:50
+done d1_resume rc=0 13:40:16
+start d2_dbggrad 13:40:20
+done d2_dbggrad rc=0 13:40:51
+start d1_live25lat_s0 13:40:55
+done d1_live25_s0 rc=0 13:43:15
+start d3_ttc25c_s0 13:43:15
+done d1_frozen25lat_s0 rc=0 13:43:36
+start d1_frozen25lat_s1 13:43:40
+done d1_live25lat_s0 rc=0 13:45:14
+start d1_live25lat_s1 13:45:15
+done d1_frozen25lat_s1 rc=0 13:47:22
+done d3_ttc25c_s0 rc=0 13:48:02
+done d1_live25lat_s1 rc=0 13:49:31
+ALLDONE

@@ -1,0 +1,19 @@
+start d3_frozen25c_s0 14:02:56
+done d3_frozen25c_s0 rc=0 14:07:01
+start d3_codecphase_s2 14:07:01
+done d3_codecphase_s2 rc=0 14:09:13
+start d3_codecphase_s3 14:09:13
+done d3_codecphase_s3 rc=0 14:11:35
+start d3_frozen25_s2 14:11:35
+done d3_frozen25_s2 rc=0 14:15:40
+start d3_frozen25c_s2 14:15:40
+done d3_frozen25c_s2 rc=0 14:21:16
+start d3_ttc25c_s2 14:21:16
+done d3_ttc25c_s2 rc=0 14:26:23
+start d3_frozen25_s3 14:26:23
+done d3_frozen25_s3 rc=0 14:30:18
+start d3_frozen25c_s3 14:30:18
+done d3_frozen25c_s3 rc=0 14:34:28
+start d3_ttc25c_s3 14:34:28
+done d3_ttc25c_s3 rc=0 14:39:39
+LANEDONE

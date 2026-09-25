@@ -1,0 +1,9 @@
+d3_frozen25c_s0|d3|python3 run.py frozen25c 0 res/frozen25c_s0.json
+d3_codecphase_s2|d3|python3 run.py codec_phase 2 spec25
+d3_codecphase_s3|d3|python3 run.py codec_phase 3 spec25
+d3_frozen25_s2|d3|python3 run.py frozen25 2 res/frozen25_s2.json
+d3_frozen25c_s2|d3|python3 run.py frozen25c 2 res/frozen25c_s2.json
+d3_ttc25c_s2|d3|python3 run.py ttc25c 2 res/ttc25c_s2.json
+d3_frozen25_s3|d3|python3 run.py frozen25 3 res/frozen25_s3.json
+d3_frozen25c_s3|d3|python3 run.py frozen25c 3 res/frozen25c_s3.json
+d3_ttc25c_s3|d3|python3 run.py ttc25c 3 res/ttc25c_s3.json

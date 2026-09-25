@@ -1,0 +1,119 @@
+{
+ "lr5e-5_noanchor": {
+  "cfg": {
+   "name": "lr5e-5_noanchor",
+   "lr": 5e-05,
+   "rewarm": null,
+   "anchor": "none"
+  },
+  "start": {
+   "A": {
+    "mel": 0.4992,
+    "recx": 0.292,
+    "codes_used": 597
+   },
+   "B": {
+    "mel": 0.586,
+    "recx": 0.219,
+    "codes_used": 476
+   }
+  },
+  "after_A": {
+   "A": {
+    "mel": 0.5062,
+    "recx": 0.292,
+    "codes_used": 599
+   },
+   "B": {
+    "mel": 0.5944,
+    "recx": 0.198,
+    "codes_used": 499
+   }
+  },
+  "after_B": {
+   "A": {
+    "mel": 0.4955,
+    "recx": 0.347,
+    "codes_used": 629
+   },
+   "B": {
+    "mel": 0.5702,
+    "recx": 0.198,
+    "codes_used": 518
+   }
+  },
+  "traj": [
+   {
+    "step": 50,
+    "flipA_vs_start": 0.3237,
+    "flipB_vs_start": 0.3306,
+    "flipA_per_50": 0.3237,
+    "flipB_per_50": 0.3306
+   },
+   {
+    "step": 100,
+    "flipA_vs_start": 0.3638,
+    "flipB_vs_start": 0.406,
+    "flipA_per_50": 0.1818,
+    "flipB_per_50": 0.199
+   },
+   {
+    "step": 150,
+    "flipA_vs_start": 0.5024,
+    "flipB_vs_start": 0.4552,
+    "flipA_per_50": 0.2769,
+    "flipB_per_50": 0.1923
+   },
+   {
+    "step": 200,
+    "flipA_vs_start": 0.48,
+    "flipB_vs_start": 0.4971,
+    "flipA_per_50": 0.2386,
+    "flipB_per_50": 0.2052
+   },
+   {
+    "step": 250,
+    "flipA_vs_start": 0.4613,
+    "flipB_vs_start": 0.4817,
+    "flipA_per_50": 0.2893,
+    "flipB_per_50": 0.3115
+   },
+   {
+    "step": 300,
+    "flipA_vs_start": 0.4814,
+    "flipB_vs_start": 0.51,
+    "flipA_per_50": 0.1406,
+    "flipB_per_50": 0.1754
+   },
+   {
+    "step": 350,
+    "flipA_vs_start": 0.5074,
+    "flipB_vs_start": 0.5458,
+    "flipA_per_50": 0.1461,
+    "flipB_per_50": 0.1875
+   },
+   {
+    "step": 400,
+    "flipA_vs_start": 0.5185,
+    "flipB_vs_start": 0.5675,
+    "flipA_per_50": 0.1465,
+    "flipB_per_50": 0.1719
+   },
+   {
+    "step": 450,
+    "flipA_vs_start": 0.5418,
+    "flipB_vs_start": 0.5892,
+    "flipA_per_50": 0.1157,
+    "flipB_per_50": 0.126
+   },
+   {
+    "step": 500,
+    "flipA_vs_start": 0.5529,
+    "flipB_vs_start": 0.609,
+    "flipA_per_50": 0.1411,
+    "flipB_per_50": 0.1713
+   }
+  ],
+  "s": 77.7
+ }
+}

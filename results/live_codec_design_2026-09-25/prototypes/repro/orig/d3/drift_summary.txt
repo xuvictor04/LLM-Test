@@ -1,0 +1,80 @@
+EMA decay sweep (nested codec, codec-only). flip_d500 = fraction of 50-fps frame codes changed over 500 codec steps = 1000 LM windows at AUD_TRAIN_EVERY=2;
+measured at codec step 500 (end of tones-only) and 1000 (end of melody+tones). l1 = log-mag L1 of the teacher's reconstruction on the probe set.
+decay 0.0:
+   @500: s0 flip 0.5706 flipS2 0.4956 mflip 0.7081 zd 0.1387 l1 0.6501/0.9503 pos 20.47/25.31 ; s1 flip 0.6122 flipS2 0.5633 mflip 0.7038 zd 0.1512 l1 0.6225/0.925 pos 22.11/25.41
+   @1000: s0 flip 0.7456 flipS2 0.6789 mflip 0.8706 zd 0.2965 l1 0.6514/0.7549 pos 21.06/26.75 ; s1 flip 0.6211 flipS2 0.5978 mflip 0.8325 zd 0.2925 l1 0.6394/0.7474 pos 21.75/28.16
+decay 0.9:
+   @500: s0 flip 0.5272 flipS2 0.4422 mflip 0.62 zd 0.1175 l1 0.631/0.9445 pos 21.19/24.59 ; s1 flip 0.5544 flipS2 0.5133 mflip 0.6419 zd 0.1358 l1 0.6063/0.9188 pos 21.06/24.62
+   @1000: s0 flip 0.7239 flipS2 0.6667 mflip 0.8438 zd 0.2833 l1 0.6402/0.7377 pos 21.11/26.59 ; s1 flip 0.6228 flipS2 0.5489 mflip 0.82 zd 0.2801 l1 0.6163/0.7349 pos 22.28/26.84
+decay 0.99:
+   @500: s0 flip 0.4933 flipS2 0.4044 mflip 0.6044 zd 0.0992 l1 0.6287/0.9379 pos 20.64/24.44 ; s1 flip 0.5661 flipS2 0.48 mflip 0.6269 zd 0.1181 l1 0.6029/0.906 pos 21.06/24.84
+   @1000: s0 flip 0.7039 flipS2 0.63 mflip 0.8556 zd 0.2557 l1 0.6314/0.7391 pos 21.47/26.5 ; s1 flip 0.6172 flipS2 0.5278 mflip 0.8075 zd 0.2667 l1 0.6069/0.7442 pos 22.89/26.38
+decay 0.995:
+   @500: s0 flip 0.4472 flipS2 0.3622 mflip 0.5512 zd 0.0843 l1 0.6326/0.9347 pos 20.44/25.0 ; s1 flip 0.5217 flipS2 0.4322 mflip 0.5987 zd 0.0997 l1 0.6051/0.9042 pos 21.19/24.88
+   @1000: s0 flip 0.6917 flipS2 0.59 mflip 0.8244 zd 0.2233 l1 0.6242/0.7543 pos 22.03/26.53 ; s1 flip 0.5789 flipS2 0.5 mflip 0.7675 zd 0.2247 l1 0.6037/0.7574 pos 22.78/26.47
+decay 0.999:
+   @500: s0 flip 0.215 flipS2 0.1556 mflip 0.2919 zd 0.0321 l1 0.6483/0.9324 pos 19.31/23.88 ; s1 flip 0.2539 flipS2 0.19 mflip 0.3356 zd 0.0379 l1 0.6217/0.9091 pos 20.83/25.19
+   @1000: s0 flip 0.3806 flipS2 0.3044 mflip 0.5131 zd 0.0808 l1 0.6337/0.862 pos 20.97/25.22 ; s1 flip 0.3678 flipS2 0.3078 mflip 0.465 zd 0.0815 l1 0.6094/0.8433 pos 21.69/25.72
+decay 1.0:
+   @500: s0 flip 0.0 flipS2 0.0 mflip 0.0 zd 0.0 l1 0.6705/0.9499 pos 19.17/22.75 ; s1 flip 0.0 flipS2 0.0 mflip 0.0 zd 0.0 l1 0.6406/0.9168 pos 20.97/25.69
+   @1000: s0 flip 0.0 flipS2 0.0 mflip 0.0 zd 0.0 l1 0.6705/0.9499 pos 19.17/22.75 ; s1 flip 0.0 flipS2 0.0 mflip 0.0 zd 0.0 l1 0.6406/0.9168 pos 20.97/25.69
+
+short horizon flips (d50 = 100 LM windows), mean over measure points 100..500 (tones phase) and 600..1000 (melody phase):
+  decay 0.0: s0: 0.473 / 0.496 | s1: 0.474 / 0.504
+  decay 0.9: s0: 0.345 / 0.384 | s1: 0.375 / 0.352
+  decay 0.99: s0: 0.136 / 0.184 | s1: 0.158 / 0.147
+  decay 0.995: s0: 0.089 / 0.152 | s1: 0.110 / 0.114
+  decay 0.999: s0: 0.032 / 0.059 | s1: 0.038 / 0.057
+  decay 1.0: s0: 0.000 / 0.000 | s1: 0.000 / 0.000
+
+allocation (teacher 0.995): pos/s, mel, probe exact per area
+alloc_start
+   rho0.0 s0 tones: 31.42/s mel 0.4729 px 0.306 melody: 36.06/s mel 0.6122 px 0.219 | s1 tones: 34.42/s mel 0.477 px 0.306 melody: 39.22/s mel 0.6119 px 0.156
+   rho0.05 s0 tones: 21.47/s mel 0.475 px 0.306 melody: 26.78/s mel 0.6147 px 0.219 | s1 tones: 24.19/s mel 0.4757 px 0.278 melody: 28.75/s mel 0.6162 px 0.188
+   rho0.1 s0 tones: 19.17/s mel 0.476 px 0.25 melody: 22.75/s mel 0.619 px 0.25 | s1 tones: 20.97/s mel 0.4805 px 0.222 melody: 25.69/s mel 0.619 px 0.156
+   rho0.2 s0 tones: 17.39/s mel 0.4792 px 0.278 melody: 18.62/s mel 0.6287 px 0.281 | s1 tones: 18.81/s mel 0.4818 px 0.222 melody: 20.69/s mel 0.6305 px 0.125
+   rho0.5 s0 tones: 15.25/s mel 0.4845 px 0.278 melody: 14.91/s mel 0.6442 px 0.344 | s1 tones: 16.11/s mel 0.4868 px 0.306 melody: 15.88/s mel 0.6474 px 0.156
+   rho1.0 s0 tones: 14.14/s mel 0.4925 px 0.25 melody: 13.38/s mel 0.6567 px 0.281 | s1 tones: 14.56/s mel 0.4938 px 0.25 melody: 13.62/s mel 0.6593 px 0.219
+   force1 s0 tones: 52.0/s mel 0.5052 px 0.278 melody: 52.0/s mel 0.6221 px 0.219 | s1 tones: 52.0/s mel 0.4913 px 0.333 melody: 52.0/s mel 0.6162 px 0.188
+   force2 s0 tones: 26.0/s mel 0.484 px 0.222 melody: 26.0/s mel 0.6229 px 0.312 | s1 tones: 26.0/s mel 0.4827 px 0.306 melody: 26.0/s mel 0.6337 px 0.125
+   force4 s0 tones: 13.0/s mel 0.5135 px 0.306 melody: 13.0/s mel 0.6618 px 0.25 | s1 tones: 13.0/s mel 0.5276 px 0.361 melody: 13.0/s mel 0.6671 px 0.188
+alloc_end
+   rho0.0 s0 tones: 34.08/s mel 0.4299 px 0.25 melody: 40.47/s mel 0.511 px 0.156 | s1 tones: 35.72/s mel 0.4246 px 0.278 melody: 40.28/s mel 0.514 px 0.094
+   rho0.05 s0 tones: 24.64/s mel 0.4318 px 0.25 melody: 30.06/s mel 0.5145 px 0.125 | s1 tones: 25.72/s mel 0.4272 px 0.25 melody: 30.72/s mel 0.5153 px 0.094
+   rho0.1 s0 tones: 22.03/s mel 0.4333 px 0.278 melody: 26.53/s mel 0.518 px 0.125 | s1 tones: 22.78/s mel 0.4288 px 0.25 melody: 26.47/s mel 0.5201 px 0.094
+   rho0.2 s0 tones: 19.42/s mel 0.4367 px 0.278 melody: 22.16/s mel 0.5245 px 0.125 | s1 tones: 20.22/s mel 0.4312 px 0.278 melody: 22.84/s mel 0.5285 px 0.094
+   rho0.5 s0 tones: 16.28/s mel 0.4434 px 0.278 melody: 16.88/s mel 0.5387 px 0.125 | s1 tones: 16.86/s mel 0.4392 px 0.25 melody: 17.38/s mel 0.549 px 0.125
+   rho1.0 s0 tones: 14.64/s mel 0.45 px 0.333 melody: 14.34/s mel 0.5534 px 0.125 | s1 tones: 15.06/s mel 0.4434 px 0.25 melody: 14.44/s mel 0.5607 px 0.125
+   force1 s0 tones: 52.0/s mel 0.441 px 0.306 melody: 52.0/s mel 0.5168 px 0.125 | s1 tones: 52.0/s mel 0.4318 px 0.306 melody: 52.0/s mel 0.5167 px 0.094
+   force2 s0 tones: 26.0/s mel 0.4298 px 0.278 melody: 26.0/s mel 0.5214 px 0.094 | s1 tones: 26.0/s mel 0.4309 px 0.306 melody: 26.0/s mel 0.5309 px 0.094
+   force4 s0 tones: 13.0/s mel 0.481 px 0.278 melody: 13.0/s mel 0.5701 px 0.125 | s1 tones: 13.0/s mel 0.4808 px 0.278 melody: 13.0/s mel 0.5769 px 0.125
+alloc_end_frozen
+   rho0.0 s0 tones: 31.42/s mel 0.4729 px 0.306 melody: 36.06/s mel 0.6122 px 0.219 | s1 tones: 34.42/s mel 0.477 px 0.306 melody: 39.22/s mel 0.6119 px 0.156
+   rho0.05 s0 tones: 21.47/s mel 0.475 px 0.306 melody: 26.78/s mel 0.6147 px 0.219 | s1 tones: 24.19/s mel 0.4757 px 0.278 melody: 28.75/s mel 0.6162 px 0.188
+   rho0.1 s0 tones: 19.17/s mel 0.476 px 0.25 melody: 22.75/s mel 0.619 px 0.25 | s1 tones: 20.97/s mel 0.4805 px 0.222 melody: 25.69/s mel 0.619 px 0.156
+   rho0.2 s0 tones: 17.39/s mel 0.4792 px 0.278 melody: 18.62/s mel 0.6287 px 0.281 | s1 tones: 18.81/s mel 0.4818 px 0.222 melody: 20.69/s mel 0.6305 px 0.125
+   rho0.5 s0 tones: 15.25/s mel 0.4845 px 0.278 melody: 14.91/s mel 0.6442 px 0.344 | s1 tones: 16.11/s mel 0.4868 px 0.306 melody: 15.88/s mel 0.6474 px 0.156
+   rho1.0 s0 tones: 14.14/s mel 0.4925 px 0.25 melody: 13.38/s mel 0.6567 px 0.281 | s1 tones: 14.56/s mel 0.4938 px 0.25 melody: 13.62/s mel 0.6593 px 0.219
+   force1 s0 tones: 52.0/s mel 0.5052 px 0.278 melody: 52.0/s mel 0.6221 px 0.219 | s1 tones: 52.0/s mel 0.4913 px 0.333 melody: 52.0/s mel 0.6162 px 0.188
+   force2 s0 tones: 26.0/s mel 0.484 px 0.222 melody: 26.0/s mel 0.6229 px 0.312 | s1 tones: 26.0/s mel 0.4827 px 0.306 melody: 26.0/s mel 0.6337 px 0.125
+   force4 s0 tones: 13.0/s mel 0.5135 px 0.306 melody: 13.0/s mel 0.6618 px 0.25 | s1 tones: 13.0/s mel 0.5276 px 0.361 melody: 13.0/s mel 0.6671 px 0.188
+
+flip destinations (spec25):
+  s0 0.0@125 {'flip': 0.5247, 'ndims_changed': {'1': 0.7, '2': 0.263, '3': 0.035, '4': 0.002}, 'max_step': {'1': 0.999, '2': 0.001, '3': 0.0}, 'max_step_ge4': 0.0, 'lm_windows_at_every2': 250}
+  s0 0.995@125 {'flip': 0.18, 'ndims_changed': {'1': 0.83, '2': 0.17, '3': 0.0, '4': 0.0}, 'max_step': {'1': 1.0, '2': 0.0, '3': 0.0}, 'max_step_ge4': 0.0, 'lm_windows_at_every2': 250}
+  s0 0.999@125 {'flip': 0.0559, 'ndims_changed': {'1': 0.937, '2': 0.063, '3': 0.0, '4': 0.0}, 'max_step': {'1': 1.0, '2': 0.0, '3': 0.0}, 'max_step_ge4': 0.0, 'lm_windows_at_every2': 250}
+  s0 0.0@250 {'flip': 0.4953, 'ndims_changed': {'1': 0.708, '2': 0.26, '3': 0.03, '4': 0.002}, 'max_step': {'1': 0.998, '2': 0.002, '3': 0.0}, 'max_step_ge4': 0.0, 'lm_windows_at_every2': 500}
+  s0 0.995@250 {'flip': 0.3153, 'ndims_changed': {'1': 0.823, '2': 0.174, '3': 0.004, '4': 0.0}, 'max_step': {'1': 1.0, '2': 0.0, '3': 0.0}, 'max_step_ge4': 0.0, 'lm_windows_at_every2': 500}
+  s0 0.999@250 {'flip': 0.1106, 'ndims_changed': {'1': 0.931, '2': 0.069, '3': 0.0, '4': 0.0}, 'max_step': {'1': 1.0, '2': 0.0, '3': 0.0}, 'max_step_ge4': 0.0, 'lm_windows_at_every2': 500}
+  s0 0.0@500 {'flip': 0.8065, 'ndims_changed': {'1': 0.487, '2': 0.351, '3': 0.142, '4': 0.02}, 'max_step': {'1': 0.862, '2': 0.134, '3': 0.004}, 'max_step_ge4': 0.0, 'lm_windows_at_every2': 1000}
+  s0 0.995@500 {'flip': 0.6171, 'ndims_changed': {'1': 0.629, '2': 0.306, '3': 0.055, '4': 0.01}, 'max_step': {'1': 0.989, '2': 0.011, '3': 0.0}, 'max_step_ge4': 0.0, 'lm_windows_at_every2': 1000}
+  s0 0.999@500 {'flip': 0.2729, 'ndims_changed': {'1': 0.834, '2': 0.164, '3': 0.002, '4': 0.0}, 'max_step': {'1': 1.0, '2': 0.0, '3': 0.0}, 'max_step_ge4': 0.0, 'lm_windows_at_every2': 1000}
+  s1 0.0@125 {'flip': 0.4871, 'ndims_changed': {'1': 0.729, '2': 0.242, '3': 0.028, '4': 0.001}, 'max_step': {'1': 1.0, '2': 0.0, '3': 0.0}, 'max_step_ge4': 0.0, 'lm_windows_at_every2': 250}
+  s1 0.995@125 {'flip': 0.1988, 'ndims_changed': {'1': 0.911, '2': 0.083, '3': 0.006, '4': 0.0}, 'max_step': {'1': 1.0, '2': 0.0, '3': 0.0}, 'max_step_ge4': 0.0, 'lm_windows_at_every2': 250}
+  s1 0.999@125 {'flip': 0.0518, 'ndims_changed': {'1': 0.955, '2': 0.045, '3': 0.0, '4': 0.0}, 'max_step': {'1': 1.0, '2': 0.0, '3': 0.0}, 'max_step_ge4': 0.0, 'lm_windows_at_every2': 250}
+  s1 0.0@250 {'flip': 0.5747, 'ndims_changed': {'1': 0.606, '2': 0.357, '3': 0.037, '4': 0.0}, 'max_step': {'1': 1.0, '2': 0.0, '3': 0.0}, 'max_step_ge4': 0.0, 'lm_windows_at_every2': 500}
+  s1 0.995@250 {'flip': 0.3671, 'ndims_changed': {'1': 0.865, '2': 0.119, '3': 0.016, '4': 0.0}, 'max_step': {'1': 1.0, '2': 0.0, '3': 0.0}, 'max_step_ge4': 0.0, 'lm_windows_at_every2': 500}
+  s1 0.999@250 {'flip': 0.1159, 'ndims_changed': {'1': 0.939, '2': 0.061, '3': 0.0, '4': 0.0}, 'max_step': {'1': 1.0, '2': 0.0, '3': 0.0}, 'max_step_ge4': 0.0, 'lm_windows_at_every2': 500}
+  s1 0.0@500 {'flip': 0.7988, 'ndims_changed': {'1': 0.493, '2': 0.338, '3': 0.138, '4': 0.03}, 'max_step': {'1': 0.951, '2': 0.049, '3': 0.0}, 'max_step_ge4': 0.0, 'lm_windows_at_every2': 1000}
+  s1 0.995@500 {'flip': 0.66, 'ndims_changed': {'1': 0.635, '2': 0.283, '3': 0.073, '4': 0.009}, 'max_step': {'1': 0.997, '2': 0.003, '3': 0.0}, 'max_step_ge4': 0.0, 'lm_windows_at_every2': 1000}
+  s1 0.999@500 {'flip': 0.2794, 'ndims_changed': {'1': 0.861, '2': 0.137, '3': 0.002, '4': 0.0}, 'max_step': {'1': 1.0, '2': 0.0, '3': 0.0}, 'max_step_ge4': 0.0, 'lm_windows_at_every2': 1000}

@@ -1,0 +1,21 @@
+{
+ "arm": "live50bpe",
+ "seed": 0,
+ "steps_uninterrupted": 29,
+ "steps_resumed_total": 29,
+ "save_at_step": 10,
+ "acts_before_save": 1,
+ "acts_total": 4,
+ "max_abs_loss_diff": 0.475543737411499,
+ "bit_identical": false,
+ "remeasured_vs_saved": [
+  231,
+  233
+ ],
+ "mints_between_acts": 100,
+ "windows_final_A": 229,
+ "windows_final_C": 229,
+ "epoch_revisions_A": 4,
+ "epoch_revisions_C": 4,
+ "s": 66.4
+}

@@ -1,0 +1,6 @@
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+before P2 {'cap_ce': (6.458, 3.99), 'all_ce': (4.297, 3.02), 'gmm': (1.21, 1.788), 'dur': (2.804, 2.594), 'logsig_mean': -0.062, 'frac_at_clamp': 0.0}
+49 {'cap_ce': (3.151, 1.796), 'all_ce': (2.065, 0.955), 'gmm': (0.196, 9.621), 'dur': (2.184, 1.813), 'logsig_mean': -1.662, 'frac_at_clamp': 0.0}
+99 {'cap_ce': (3.174, 1.502), 'all_ce': (1.694, 0.693), 'gmm': (-0.028, 8.924), 'dur': (1.053, 1.101), 'logsig_mean': -1.499, 'frac_at_clamp': 0.0}
+149 {'cap_ce': (3.027, 1.619), 'all_ce': (1.585, 0.659), 'gmm': (-0.137, 12.41), 'dur': (1.295, 0.55), 'logsig_mean': -1.624, 'frac_at_clamp': 0.0}

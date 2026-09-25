@@ -1,0 +1,33 @@
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+P1codec 0 (4.7906, 4.3799, 4.0)
+P1codec 200 (2.3523, 2.2492, 20.69)
+P1codec 400 (2.0886, 1.9901, 29.25)
+P1codec 600 (1.4796, 1.378, 20.31)
+P1codec 800 (1.3491, 1.2462, 20.88)
+P1codec 1000 (1.5123, 1.4123, 25.56)
+P1codec 1200 (1.5592, 1.4598, 29.19)
+P1codec 1400 (1.4085, 1.308, 23.25)
+P1codec 1600 (1.3612, 1.2611, 25.12)
+P1codec 1800 (1.2137, 1.1138, 25.81)
+P1codec 2000 (1.3136, 1.2125, 23.25)
+after_P1 {"text_bpb": 2.4001, "eval_s": 0.1}
+P2 0 {'lm': 5.5175, 'pos_per_s': 26.0} 0
+P2 100 {'lm': 1.6609, 'pos_per_s': 26.92} 8
+P2 200 {'lm': 1.3935, 'pos_per_s': 28.25} 16
+P2 300 {'lm': 1.4693, 'pos_per_s': 27.5} 24
+P2 400 {'lm': 1.4162, 'pos_per_s': 28.25} 31
+P2 500 {'lm': 1.3284, 'pos_per_s': 26.17} 39
+P2 600 {'lm': 1.0852, 'pos_per_s': 28.83} 47
+P2 700 {'lm': 1.0748, 'pos_per_s': 29.33} 55
+after_P2 {"text_bpb": 2.1301, "A": {"recon": {"mel": 0.4367, "logmag_l1": 0.6081, "probe_on_recon": {"kind": 0.7778, "band": 0.9167, "timbre": 0.5694, "count": 0.8056, "exact": 0.4583, "n": 72}}, "bits": {"a2t_caption_bits_per_byte": 0.2538, "t2a_stop_bits_per_pos": 0.0348, "t2a_dur_bits_per_pos": 1.0731, "t2a_gmm_nats_per_pos_DIFFERENTIAL": -2.3682, "pos_per_s": 25.583, "tf_pred_mel": 0.7616, "tf_pred_probe_exact": 0.1528}, "understand": {"train": {"kind": 0.5, "band": 0.375, "timbre": 0.5, "count": 0.5312, "exact": 0.0938, "n": 64}, "heldout": {"kind": 0.5, "band": 0.25, "timbre": 0.5, "count": 0.75, "exact": 0.0, "n": 8}, "samples": ["a low pure tone", "a low pure tone", "a low pure tone", "a low pure tone", "a low pure tone", "two low buzzy beeps"]}, "gen_t1": {"train": {"kind": 0.3906, "band": 0.4219, "timbre": 0.5156, "count": 0.4062, "exact": 0.0312, "n": 64}, "heldout": {"kind": 0.5, "band": 0.25, "timbre": 0.5, "count": 0.375, "exact": 0.125, "n": 8}, "mean_positions_per_clip": 22.99, "mean_frames_50fps": 48.78}, "gen_t07": {"train": {"kind": 0.4219, "band": 0.3438, "timbre": 0.4531, "count": 0.4062, "exact": 0.0312, "n": 64}, "heldout": {"kind": 0.5, "band": 0.25, "timbre": 0.5, "count": 0.375, "exact": 0.125, "n": 8}, "mean_positions_per_clip": 36.17, "mean_frames_50fps": 57.21}, "gen_t0": {"train": {"kind": 0.25, "band": 0.3438, "timbre": 0.4375, "count": 0.5625, "exact": 0.0, "n": 64}, "heldout": {"kind": 0.25, "band": 0.25, "timbre": 0.5, "count": 0.75, "exact": 0.0, "n": 8}, "mean_positions_per_clip": 64.0, "mean_frames_50fps": 82.0}}, "eval_s": 17.3}
+P3 0 {'lm': 2.5703, 'pos_per_s': 24.25} 0
+P3 100 {'lm': 1.3476, 'pos_per_s': 24.67} 8
+P3 200 {'lm': 1.3225, 'pos_per_s': 21.67} 17
+P3 300 {'lm': 1.2235, 'pos_per_s': 26.5} 25
+P3 400 {'lm': 0.9869, 'pos_per_s': 27.17} 33
+P3 500 {'lm': 1.1146, 'pos_per_s': 25.08} 41
+P3 600 {'lm': 1.2535, 'pos_per_s': 22.75} 49
+P3 700 {'lm': 1.1181, 'pos_per_s': 27.42} 57
+after_P3 {"text_bpb": 2.0204, "A": {"recon": {"mel": 0.4367, "logmag_l1": 0.6081, "probe_on_recon": {"kind": 0.7778, "band": 0.9167, "timbre": 0.5694, "count": 0.8056, "exact": 0.4583, "n": 72}}, "bits": {"a2t_caption_bits_per_byte": 0.2368, "t2a_stop_bits_per_pos": 0.0263, "t2a_dur_bits_per_pos": 1.1034, "t2a_gmm_nats_per_pos_DIFFERENTIAL": -1.1836, "pos_per_s": 25.583, "tf_pred_mel": 0.8, "tf_pred_probe_exact": 0.2083}, "understand": {"train": {"kind": 0.4062, "band": 0.4062, "timbre": 0.4062, "count": 0.5938, "exact": 0.0312, "n": 64}, "heldout": {"kind": 0.5, "band": 0.625, "timbre": 0.125, "count": 0.75, "exact": 0.0, "n": 8}, "samples": ["a mid buzzy tone", "a mid buzzy tone", "a mid buzzy tone", "a high pure rising chirp", "pure melody fdbe", "two mid buzzy beeps"]}, "gen_t1": {"train": {"kind": 0.375, "band": 0.375, "timbre": 0.5312, "count": 0.375, "exact": 0.0781, "n": 64}, "heldout": {"kind": 0.5, "band": 0.125, "timbre": 0.375, "count": 0.0, "exact": 0.0, "n": 8}, "mean_positions_per_clip": 22.54, "mean_frames_50fps": 46.83}, "gen_t07": {"train": {"kind": 0.4688, "band": 0.3594, "timbre": 0.4844, "count": 0.4062, "exact": 0.0625, "n": 64}, "heldout": {"kind": 0.5, "band": 0.25, "timbre": 0.375, "count": 0.125, "exact": 0.0, "n": 8}, "mean_positions_per_clip": 29.17, "mean_frames_50fps": 52.18}, "gen_t0": {"train": {"kind": 0.3438, "band": 0.3438, "timbre": 0.5625, "count": 0.1875, "exact": 0.0312, "n": 64}, "heldout": {"kind": 0.5, "band": 0.25, "timbre": 0.25, "count": 0.25, "exact": 0.0, "n": 8}, "mean_positions_per_clip": 79.69, "mean_frames_50fps": 87.22}}, "B": {"recon": {"mel": 0.228, "logmag_l1": 0.4207, "probe_on_recon": {"timbre": 1.0, "note": 1.0, "exact": 1.0, "n": 64}}, "bits": {"a2t_caption_bits_per_byte": 0.6092, "t2a_stop_bits_per_pos": 0.0134, "t2a_dur_bits_per_pos": 0.5351, "t2a_gmm_nats_per_pos_DIFFERENTIAL": -0.0906, "pos_per_s": 21.703, "tf_pred_mel": 0.6246, "tf_pred_probe_exact": 0.1875}, "understand": {"train": {"timbre": 1.0, "note": 0.1328, "exact": 0.0, "n": 64}, "samples": ["buzzy melody ffdb", "buzzy melody ffdb", "buzzy melody fdbe", "buzzy melody ffdb", "buzzy melody ffdb", "pure melody fdbe"]}, "gen_t1": {"train": {"timbre": 0.2917, "note": 0.1615, "exact": 0.0, "n": 48}, "mean_positions_per_clip": 30.56, "mean_frames_50fps": 56.44}, "gen_t07": {"train": {"timbre": 0.3333, "note": 0.1458, "exact": 0.0, "n": 48}, "mean_positions_per_clip": 37.31, "mean_frames_50fps": 62.17}, "gen_t0": {"train": {"timbre": 0.4583, "note": 0.125, "exact": 0.0, "n": 48}, "mean_positions_per_clip": 70.75, "mean_frames_50fps": 83.9}}, "eval_s": 29.5}
+DONE res/d2_frozen_s0.json {'p1_text_s_per_step': 0.058, 'p1_codec_s_per_step': 0.0809, 'p1_codec_steps': 2100, 'p1_codec_s': 169.8, 'p2_s_per_step': 0.079, 'p3_s_per_step': 0.081, 'total_s': 370.7}

@@ -1,0 +1,11 @@
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+0.0 125 {'flip': 0.4159, 'ndims_changed': {1: 0.809, 2: 0.174, 3: 0.017, 4: 0.0}, 'max_step': {1: 1.0, 2: 0.0, 3: 0.0}, 'max_step_ge4': 0.0, 'lm_windows_at_every2': 250} 12
+0.995 125 {'flip': 0.1565, 'ndims_changed': {1: 0.929, 2: 0.068, 3: 0.004, 4: 0.0}, 'max_step': {1: 1.0, 2: 0.0, 3: 0.0}, 'max_step_ge4': 0.0, 'lm_windows_at_every2': 250} 12
+0.999 125 {'flip': 0.0424, 'ndims_changed': {1: 0.986, 2: 0.014, 3: 0.0, 4: 0.0}, 'max_step': {1: 1.0, 2: 0.0, 3: 0.0}, 'max_step_ge4': 0.0, 'lm_windows_at_every2': 250} 12
+0.0 250 {'flip': 0.5141, 'ndims_changed': {1: 0.689, 2: 0.268, 3: 0.041, 4: 0.002}, 'max_step': {1: 0.994, 2: 0.006, 3: 0.0}, 'max_step_ge4': 0.0, 'lm_windows_at_every2': 500} 21
+0.995 250 {'flip': 0.2571, 'ndims_changed': {1: 0.879, 2: 0.119, 3: 0.002, 4: 0.0}, 'max_step': {1: 1.0, 2: 0.0, 3: 0.0}, 'max_step_ge4': 0.0, 'lm_windows_at_every2': 500} 21
+0.999 250 {'flip': 0.0859, 'ndims_changed': {1: 0.952, 2: 0.048, 3: 0.0, 4: 0.0}, 'max_step': {1: 1.0, 2: 0.0, 3: 0.0}, 'max_step_ge4': 0.0, 'lm_windows_at_every2': 500} 21
+0.0 500 {'flip': 0.6953, 'ndims_changed': {1: 0.494, 2: 0.376, 3: 0.112, 4: 0.018}, 'max_step': {1: 0.928, 2: 0.072, 3: 0.0}, 'max_step_ge4': 0.0, 'lm_windows_at_every2': 1000} 38
+0.995 500 {'flip': 0.5471, 'ndims_changed': {1: 0.665, 2: 0.272, 3: 0.057, 4: 0.006}, 'max_step': {1: 0.991, 2: 0.009, 3: 0.0}, 'max_step_ge4': 0.0, 'lm_windows_at_every2': 1000} 38
+0.999 500 {'flip': 0.2247, 'ndims_changed': {1: 0.903, 2: 0.089, 3: 0.008, 4: 0.0}, 'max_step': {1: 1.0, 2: 0.0, 3: 0.0}, 'max_step_ge4': 0.0, 'lm_windows_at_every2': 1000} 39

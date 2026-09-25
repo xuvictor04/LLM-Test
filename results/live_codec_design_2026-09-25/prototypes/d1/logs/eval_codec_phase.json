@@ -1,0 +1,41 @@
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+{
+ "codec25.pt": {
+  "fps": 25,
+  "A": {
+   "mel": 0.5319,
+   "mel_silence": 1.701,
+   "recon_probe_exact": 0.347,
+   "codes_used": 574,
+   "entropy_bits": 7.825,
+   "adjacent_repeat": 0.217
+  },
+  "B": {
+   "mel": 0.6215,
+   "mel_silence": 1.5268,
+   "recon_probe_exact": 0.271,
+   "codes_used": 438,
+   "entropy_bits": 8.032,
+   "adjacent_repeat": 0.043
+  }
+ },
+ "codec50.pt": {
+  "fps": 50,
+  "A": {
+   "mel": 0.4992,
+   "mel_silence": 1.701,
+   "recon_probe_exact": 0.292,
+   "codes_used": 597,
+   "entropy_bits": 7.309,
+   "adjacent_repeat": 0.349
+  },
+  "B": {
+   "mel": 0.586,
+   "mel_silence": 1.5268,
+   "recon_probe_exact": 0.219,
+   "codes_used": 476,
+   "entropy_bits": 7.672,
+   "adjacent_repeat": 0.218
+  }
+ }
+}

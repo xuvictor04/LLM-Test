@@ -1,0 +1,305 @@
+{
+ "arm": "live50bpe",
+ "seed": 0,
+ "args": {
+  "arm": "live50bpe",
+  "seed": 0,
+  "n_a": 240,
+  "n_b": 240,
+  "text_every": 4,
+  "text_len": 96,
+  "B": 8,
+  "codec_every": 4,
+  "codec_lr": 0.0003,
+  "codec_keep_opt": 1,
+  "anchor_scope": "old",
+  "act_every": 64,
+  "bpe_burst": 16,
+  "bpe_min_pair": 5,
+  "bpe_max_frames": 16,
+  "p1_steps": 800,
+  "resume_test": 0,
+  "out": "smoke/live50bpe.json"
+ },
+ "cfg": {
+  "stride": 1,
+  "live": 1,
+  "anchor_w": 1.0,
+  "snapshot": 1,
+  "bpe": "on"
+ },
+ "fps_base": 50,
+ "text_bpb_after_text_phase": 2.0508,
+ "after_A": {
+  "window": 176,
+  "text_bpb": 2.4257,
+  "A_codec": {
+   "mel": 0.4814,
+   "recon_probe_exact": 0.236,
+   "codes_used": 585,
+   "world_rel_h1": 2.211
+  },
+  "B_codec": {
+   "mel": 0.5867,
+   "recon_probe_exact": 0.208,
+   "codes_used": 480,
+   "world_rel_h1": 1.4685
+  },
+  "A": {
+   "bits_per_s": 401.85,
+   "bits_per_pos": 9.3169,
+   "caption_bits_per_byte": 2.1742,
+   "positions_per_s": 42.22,
+   "positions_per_s_by_kind": {
+    "beeps": 39.18,
+    "fall": 45.96,
+    "rise": 45.25,
+    "tone": 44.58
+   },
+   "understand_exact_train": 0.0,
+   "understand_exact_heldout": 0.0,
+   "generate_t1.0": {
+    "exact_train": 0.042,
+    "exact_heldout": 0.0,
+    "mean_frames": 41.2,
+    "short": 36
+   },
+   "generate_t0.7": {
+    "exact_train": 0.021,
+    "exact_heldout": 0.0,
+    "mean_frames": 37.1,
+    "short": 52
+   }
+  }
+ },
+ "final": {
+  "window": 372,
+  "text_bpb": 2.6002,
+  "A_codec": {
+   "mel": 0.4852,
+   "recon_probe_exact": 0.264,
+   "codes_used": 595,
+   "world_rel_h1": 1.7311
+  },
+  "B_codec": {
+   "mel": 0.5912,
+   "recon_probe_exact": 0.219,
+   "codes_used": 487,
+   "world_rel_h1": 1.1269
+  },
+  "A": {
+   "bits_per_s": 387.63,
+   "bits_per_pos": 9.5506,
+   "caption_bits_per_byte": 2.6564,
+   "positions_per_s": 39.86,
+   "positions_per_s_by_kind": {
+    "beeps": 36.69,
+    "fall": 44.0,
+    "rise": 43.17,
+    "tone": 41.92
+   },
+   "understand_exact_train": 0.0,
+   "understand_exact_heldout": 0.0,
+   "generate_t1.0": {
+    "exact_train": 0.021,
+    "exact_heldout": 0.0,
+    "mean_frames": 35.2,
+    "short": 55
+   },
+   "generate_t0.7": {
+    "exact_train": 0.021,
+    "exact_heldout": 0.0,
+    "mean_frames": 30.3,
+    "short": 63
+   }
+  },
+  "B": {
+   "bits_per_s": 398.74,
+   "bits_per_pos": 8.6647,
+   "caption_bits_per_byte": 0.74,
+   "positions_per_s": 45.05,
+   "positions_per_s_by_kind": {
+    "mel-arch": 44.96,
+    "mel-down": 44.83,
+    "mel-up": 46.33,
+    "mel-valley": 44.08
+   },
+   "understand_exact_train": 0.0,
+   "understand_exact_heldout": 0.0,
+   "generate_t1.0": {
+    "exact_train": 0.036,
+    "exact_heldout": 0.0,
+    "mean_frames": 34.4,
+    "short": 32
+   },
+   "generate_t0.7": {
+    "exact_train": 0.018,
+    "exact_heldout": 0.0,
+    "mean_frames": 23.9,
+    "short": 45
+   }
+  }
+ },
+ "windows_initial": 389,
+ "windows_final": 372,
+ "windows_consumed": 372,
+ "clock": {
+  "step": 372,
+  "epoch": 0,
+  "windows_in_epoch": 372,
+  "in_epoch": 372,
+  "epoch_revisions": 5
+ },
+ "counters": {
+  "acts": 5,
+  "mints": 80,
+  "retok_mid_epoch": 5,
+  "retok_deferred": 0,
+  "minted_in_consumed": 1554,
+  "media_pos_consumed": 21885,
+  "media_sec_consumed": 0.0,
+  "codec_steps": 11,
+  "jit_reencoded": 0,
+  "world_steps": 47,
+  "stranded_mints": 0
+ },
+ "bpe_size": 1080,
+ "bpe_refused_len": 0,
+ "unconsumed_tail_positions": 110,
+ "wall_s": 62.9,
+ "timers": {
+  "lm": 4.7,
+  "codec": 0.5,
+  "act": 2.8,
+  "jit": 0.0,
+  "world": 0.7,
+  "eval": 52.2
+ },
+ "s_per_step_lm": 0.1014,
+ "s_per_window_total": 0.02875,
+ "acts": [
+  {
+   "window": 64,
+   "in_epoch": 64,
+   "wie_before": 389,
+   "minted": 16,
+   "world_rel_before": 2.8612,
+   "world_rel_after": 2.7996,
+   "splice_pos": 8223,
+   "len_before": 49841,
+   "len_after": 48509,
+   "wie_after": 378,
+   "tail_media_tokens_per_s": 46.636,
+   "tail_frac_minted": 0.0721,
+   "s": 0.86
+  },
+  {
+   "window": 128,
+   "in_epoch": 128,
+   "wie_before": 378,
+   "minted": 16,
+   "world_rel_before": 2.4521,
+   "world_rel_after": 2.4536,
+   "splice_pos": 16390,
+   "len_before": 48509,
+   "len_after": 48091,
+   "wie_after": 375,
+   "tail_media_tokens_per_s": 45.984,
+   "tail_frac_minted": 0.0526,
+   "s": 0.63
+  },
+  {
+   "window": 192,
+   "in_epoch": 192,
+   "wie_before": 375,
+   "minted": 16,
+   "world_rel_before": 1.4276,
+   "world_rel_after": 1.4449,
+   "splice_pos": 24664,
+   "len_before": 48091,
+   "len_after": 47920,
+   "wie_after": 374,
+   "tail_media_tokens_per_s": 46.073,
+   "tail_frac_minted": 0.0516,
+   "s": 0.43
+  },
+  {
+   "window": 256,
+   "in_epoch": 256,
+   "wie_before": 374,
+   "minted": 16,
+   "world_rel_before": 1.2932,
+   "world_rel_after": 1.2809,
+   "splice_pos": 32774,
+   "len_before": 47920,
+   "len_after": 47766,
+   "wie_after": 373,
+   "tail_media_tokens_per_s": 45.035,
+   "tail_frac_minted": 0.0755,
+   "s": 0.41
+  },
+  {
+   "window": 320,
+   "in_epoch": 320,
+   "wie_before": 373,
+   "minted": 16,
+   "world_rel_before": 1.1728,
+   "world_rel_after": 1.1899,
+   "splice_pos": 40991,
+   "len_before": 47766,
+   "len_after": 47726,
+   "wie_after": 372,
+   "tail_media_tokens_per_s": 44.469,
+   "tail_frac_minted": 0.0917,
+   "s": 0.44
+  }
+ ],
+ "drift": [
+  {
+   "tag": "act",
+   "window": 64,
+   "flipA_vs_prev": 0.1711,
+   "flipB_vs_prev": 0.1663,
+   "flipA_vs_codecphase": 0.1711,
+   "flipB_vs_codecphase": 0.1663,
+   "windows_since_prev": 64
+  },
+  {
+   "tag": "act",
+   "window": 128,
+   "flipA_vs_prev": 0.1983,
+   "flipB_vs_prev": 0.2188,
+   "flipA_vs_codecphase": 0.2432,
+   "flipB_vs_codecphase": 0.2244,
+   "windows_since_prev": 64
+  },
+  {
+   "tag": "act",
+   "window": 192,
+   "flipA_vs_prev": 0.1363,
+   "flipB_vs_prev": 0.1417,
+   "flipA_vs_codecphase": 0.3061,
+   "flipB_vs_codecphase": 0.2804,
+   "windows_since_prev": 64
+  },
+  {
+   "tag": "act",
+   "window": 256,
+   "flipA_vs_prev": 0.1124,
+   "flipB_vs_prev": 0.1523,
+   "flipA_vs_codecphase": 0.3383,
+   "flipB_vs_codecphase": 0.3325,
+   "windows_since_prev": 64
+  },
+  {
+   "tag": "act",
+   "window": 320,
+   "flipA_vs_prev": 0.1222,
+   "flipB_vs_prev": 0.1663,
+   "flipA_vs_codecphase": 0.3358,
+   "flipB_vs_codecphase": 0.3335,
+   "windows_since_prev": 64
+  }
+ ],
+ "curve": []
+}

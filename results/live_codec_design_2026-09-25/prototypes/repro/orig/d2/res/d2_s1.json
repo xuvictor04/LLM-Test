@@ -1,0 +1,800 @@
+{
+ "arm": "d2",
+ "seed": 1,
+ "T1": 400,
+ "C1": 500,
+ "P2": 800,
+ "P3": 800,
+ "BS": 16,
+ "L": 80,
+ "W": 128,
+ "DMAX": 16,
+ "NRATIO": 2.0,
+ "RATIO_W": 0.1,
+ "VAR_W": 1.0,
+ "DLAT": 8,
+ "KMIX": 8,
+ "GMM_W": 0.1,
+ "LOGSIG_MIN": -4.0,
+ "lm_params": 288928,
+ "codec_params": 887369,
+ "probes": [
+  {
+   "step": 400,
+   "phase": "P1end",
+   "codec_steps": 500,
+   "A": {
+    "pos_per_s": 33.9,
+    "pos_per_s_by_kind": {
+     "tone": 33.75,
+     "rise": 29.83,
+     "fall": 28.58,
+     "beeps": 37.08
+    },
+    "lat_std": 0.6126,
+    "lat_pr": 2.178
+   },
+   "B": {
+    "pos_per_s": 22.75,
+    "pos_per_s_by_kind": {
+     "melody": 22.75
+    },
+    "lat_std": 0.6674,
+    "lat_pr": 3.877
+   }
+  },
+  {
+   "step": 600,
+   "phase": "P2",
+   "codec_steps": 700,
+   "A": {
+    "pos_per_s": 20.11,
+    "pos_per_s_by_kind": {
+     "tone": 23.25,
+     "rise": 21.5,
+     "fall": 18.42,
+     "beeps": 19.17
+    },
+    "lat_std": 0.6307,
+    "lat_pr": 2.763,
+    "drift_rel_l2_per_1k": 2.6163,
+    "boundary_flip_per_1k": 2.0597
+   },
+   "B": {
+    "pos_per_s": 14.0,
+    "pos_per_s_by_kind": {
+     "melody": 14.0
+    },
+    "lat_std": 0.6488,
+    "lat_pr": 4.336,
+    "drift_rel_l2_per_1k": 2.3213,
+    "boundary_flip_per_1k": 1.5719
+   }
+  },
+  {
+   "step": 800,
+   "phase": "P2",
+   "codec_steps": 900,
+   "A": {
+    "pos_per_s": 25.31,
+    "pos_per_s_by_kind": {
+     "tone": 20.42,
+     "rise": 24.25,
+     "fall": 20.92,
+     "beeps": 28.75
+    },
+    "lat_std": 0.6601,
+    "lat_pr": 2.527,
+    "drift_rel_l2_per_1k": 2.1726,
+    "boundary_flip_per_1k": 1.4056
+   },
+   "B": {
+    "pos_per_s": 11.5,
+    "pos_per_s_by_kind": {
+     "melody": 11.5
+    },
+    "lat_std": 0.5811,
+    "lat_pr": 4.807,
+    "drift_rel_l2_per_1k": 2.4613,
+    "boundary_flip_per_1k": 1.4219
+   }
+  },
+  {
+   "step": 1000,
+   "phase": "P2",
+   "codec_steps": 1100,
+   "A": {
+    "pos_per_s": 23.6,
+    "pos_per_s_by_kind": {
+     "tone": 19.17,
+     "rise": 21.75,
+     "fall": 18.17,
+     "beeps": 27.5
+    },
+    "lat_std": 0.6315,
+    "lat_pr": 2.711,
+    "drift_rel_l2_per_1k": 1.8732,
+    "boundary_flip_per_1k": 0.8486
+   },
+   "B": {
+    "pos_per_s": 9.19,
+    "pos_per_s_by_kind": {
+     "melody": 9.19
+    },
+    "lat_std": 0.5692,
+    "lat_pr": 4.722,
+    "drift_rel_l2_per_1k": 2.3282,
+    "boundary_flip_per_1k": 0.825
+   }
+  },
+  {
+   "step": 1200,
+   "phase": "P2",
+   "codec_steps": 1300,
+   "A": {
+    "pos_per_s": 24.86,
+    "pos_per_s_by_kind": {
+     "tone": 21.42,
+     "rise": 20.83,
+     "fall": 20.42,
+     "beeps": 28.83
+    },
+    "lat_std": 0.6162,
+    "lat_pr": 3.243,
+    "drift_rel_l2_per_1k": 1.9302,
+    "boundary_flip_per_1k": 0.9014
+   },
+   "B": {
+    "pos_per_s": 16.25,
+    "pos_per_s_by_kind": {
+     "melody": 16.25
+    },
+    "lat_std": 0.5714,
+    "lat_pr": 4.986,
+    "drift_rel_l2_per_1k": 2.0454,
+    "boundary_flip_per_1k": 0.9063
+   }
+  },
+  {
+   "step": 1400,
+   "phase": "P3",
+   "codec_steps": 1500,
+   "A": {
+    "pos_per_s": 31.03,
+    "pos_per_s_by_kind": {
+     "tone": 20.42,
+     "rise": 30.25,
+     "fall": 26.75,
+     "beeps": 36.25
+    },
+    "lat_std": 0.5929,
+    "lat_pr": 3.34,
+    "drift_rel_l2_per_1k": 1.8592,
+    "boundary_flip_per_1k": 1.5222
+   },
+   "B": {
+    "pos_per_s": 20.83,
+    "pos_per_s_by_kind": {
+     "melody": 20.83
+    },
+    "lat_std": 0.579,
+    "lat_pr": 4.99,
+    "drift_rel_l2_per_1k": 2.2259,
+    "boundary_flip_per_1k": 1.7141
+   }
+  },
+  {
+   "step": 1600,
+   "phase": "P3",
+   "codec_steps": 1700,
+   "A": {
+    "pos_per_s": 29.99,
+    "pos_per_s_by_kind": {
+     "tone": 18.92,
+     "rise": 25.67,
+     "fall": 25.75,
+     "beeps": 36.53
+    },
+    "lat_std": 0.5778,
+    "lat_pr": 3.418,
+    "drift_rel_l2_per_1k": 0.8712,
+    "boundary_flip_per_1k": 0.3736
+   },
+   "B": {
+    "pos_per_s": 20.28,
+    "pos_per_s_by_kind": {
+     "melody": 20.28
+    },
+    "lat_std": 0.5704,
+    "lat_pr": 5.454,
+    "drift_rel_l2_per_1k": 0.7616,
+    "boundary_flip_per_1k": 0.5172
+   }
+  },
+  {
+   "step": 1800,
+   "phase": "P3",
+   "codec_steps": 1900,
+   "A": {
+    "pos_per_s": 24.35,
+    "pos_per_s_by_kind": {
+     "tone": 18.58,
+     "rise": 21.5,
+     "fall": 20.58,
+     "beeps": 28.47
+    },
+    "lat_std": 0.5473,
+    "lat_pr": 4.358,
+    "drift_rel_l2_per_1k": 0.8291,
+    "boundary_flip_per_1k": 0.8056
+   },
+   "B": {
+    "pos_per_s": 20.39,
+    "pos_per_s_by_kind": {
+     "melody": 20.39
+    },
+    "lat_std": 0.552,
+    "lat_pr": 5.827,
+    "drift_rel_l2_per_1k": 0.7429,
+    "boundary_flip_per_1k": 0.3672
+   }
+  },
+  {
+   "step": 2000,
+   "phase": "P3",
+   "codec_steps": 2100,
+   "A": {
+    "pos_per_s": 25.11,
+    "pos_per_s_by_kind": {
+     "tone": 20.33,
+     "rise": 22.33,
+     "fall": 21.5,
+     "beeps": 28.83
+    },
+    "lat_std": 0.5408,
+    "lat_pr": 4.404,
+    "drift_rel_l2_per_1k": 0.4709,
+    "boundary_flip_per_1k": 0.1458
+   },
+   "B": {
+    "pos_per_s": 20.8,
+    "pos_per_s_by_kind": {
+     "melody": 20.8
+    },
+    "lat_std": 0.5446,
+    "lat_pr": 5.819,
+    "drift_rel_l2_per_1k": 0.334,
+    "boundary_flip_per_1k": 0.0687
+   }
+  }
+ ],
+ "curve": [
+  [
+   "P1text",
+   1,
+   7.999
+  ],
+  [
+   "P1text",
+   101,
+   3.682
+  ],
+  [
+   "P1text",
+   201,
+   3.135
+  ],
+  [
+   "P1text",
+   301,
+   2.825
+  ],
+  [
+   "P1codec",
+   0,
+   [
+    4.757,
+    4.339,
+    4.0
+   ]
+  ],
+  [
+   "P1codec",
+   200,
+   [
+    2.5316,
+    2.4256,
+    20.0
+   ]
+  ],
+  [
+   "P1codec",
+   400,
+   [
+    2.1839,
+    2.0733,
+    16.19
+   ]
+  ],
+  [
+   "P2",
+   401,
+   {
+    "lm": 5.3995,
+    "rec": 1.7577,
+    "gmm_nats_per_dim": 1.3248,
+    "pos_per_s": 30.5
+   }
+  ],
+  [
+   "P2",
+   501,
+   {
+    "lm": 1.5841,
+    "rec": 1.6239,
+    "gmm_nats_per_dim": 0.2001,
+    "pos_per_s": 23.33
+   }
+  ],
+  [
+   "P2",
+   601,
+   {
+    "lm": 1.9066,
+    "rec": 1.8402,
+    "gmm_nats_per_dim": 0.5665,
+    "pos_per_s": 20.83
+   }
+  ],
+  [
+   "P2",
+   701,
+   {
+    "lm": 2.2504,
+    "rec": 1.7099,
+    "gmm_nats_per_dim": 0.4631,
+    "pos_per_s": 13.42
+   }
+  ],
+  [
+   "P2",
+   801,
+   {
+    "lm": 1.3966,
+    "rec": 1.5701,
+    "gmm_nats_per_dim": 0.1316,
+    "pos_per_s": 23.42
+   }
+  ],
+  [
+   "P2",
+   901,
+   {
+    "lm": 1.2184,
+    "rec": 1.4614,
+    "gmm_nats_per_dim": 0.0888,
+    "pos_per_s": 29.58
+   }
+  ],
+  [
+   "P2",
+   1001,
+   {
+    "lm": 1.3477,
+    "rec": 1.4478,
+    "gmm_nats_per_dim": 0.2774,
+    "pos_per_s": 26.67
+   }
+  ],
+  [
+   "P2",
+   1101,
+   {
+    "lm": 1.5425,
+    "rec": 1.7092,
+    "gmm_nats_per_dim": 0.4427,
+    "pos_per_s": 18.58
+   }
+  ],
+  [
+   "P3",
+   1201,
+   {
+    "lm": 3.072,
+    "rec": 2.1681,
+    "gmm_nats_per_dim": 0.2861,
+    "pos_per_s": 12.83
+   }
+  ],
+  [
+   "P3",
+   1301,
+   {
+    "lm": 1.4864,
+    "rec": 1.289,
+    "gmm_nats_per_dim": 0.3295,
+    "pos_per_s": 22.17
+   }
+  ],
+  [
+   "P3",
+   1401,
+   {
+    "lm": 1.2914,
+    "rec": 1.4859,
+    "gmm_nats_per_dim": 0.356,
+    "pos_per_s": 23.58
+   }
+  ],
+  [
+   "P3",
+   1501,
+   {
+    "lm": 1.408,
+    "rec": 1.1769,
+    "gmm_nats_per_dim": 0.2657,
+    "pos_per_s": 16.08
+   }
+  ],
+  [
+   "P3",
+   1601,
+   {
+    "lm": 1.1917,
+    "rec": 1.4515,
+    "gmm_nats_per_dim": 0.1247,
+    "pos_per_s": 22.58
+   }
+  ],
+  [
+   "P3",
+   1701,
+   {
+    "lm": 1.3942,
+    "rec": 1.1866,
+    "gmm_nats_per_dim": 0.0821,
+    "pos_per_s": 24.5
+   }
+  ],
+  [
+   "P3",
+   1801,
+   {
+    "lm": 1.2084,
+    "rec": 1.0742,
+    "gmm_nats_per_dim": -0.0186,
+    "pos_per_s": 25.58
+   }
+  ],
+  [
+   "P3",
+   1901,
+   {
+    "lm": 1.0401,
+    "rec": 0.945,
+    "gmm_nats_per_dim": -0.2345,
+    "pos_per_s": 27.58
+   }
+  ]
+ ],
+ "evals": {
+  "after_P1": {
+   "text_bpb": 2.5081,
+   "eval_s": 0.2
+  },
+  "after_P2": {
+   "text_bpb": 2.1528,
+   "A": {
+    "recon": {
+     "mel": 0.47,
+     "logmag_l1": 0.6563,
+     "probe_on_recon": {
+      "kind": 0.625,
+      "band": 0.9028,
+      "timbre": 0.5417,
+      "count": 0.6806,
+      "exact": 0.3194,
+      "n": 72
+     }
+    },
+    "bits": {
+     "a2t_caption_bits_per_byte": 0.2378,
+     "t2a_stop_bits_per_pos": 0.0338,
+     "t2a_dur_bits_per_pos": 1.0423,
+     "t2a_gmm_nats_per_pos_DIFFERENTIAL": 0.5441,
+     "pos_per_s": 24.861,
+     "tf_pred_mel": 0.7764,
+     "tf_pred_probe_exact": 0.1111
+    },
+    "understand": {
+     "train": {
+      "kind": 0.625,
+      "band": 0.4219,
+      "timbre": 0.4531,
+      "count": 0.5625,
+      "exact": 0.0781,
+      "n": 64
+     },
+     "heldout": {
+      "kind": 0.75,
+      "band": 0.375,
+      "timbre": 0.375,
+      "count": 0.625,
+      "exact": 0.0,
+      "n": 8
+     },
+     "samples": [
+      "a mid buzzy falling chirp",
+      "three mid buzzy beeps",
+      "a mid buzzy falling chirp",
+      "three mid buzzy beeps",
+      "three mid buzzy beeps",
+      "three mid buzzy beeps"
+     ]
+    },
+    "gen_t1": {
+     "train": {
+      "kind": 0.2969,
+      "band": 0.3438,
+      "timbre": 0.3906,
+      "count": 0.3594,
+      "exact": 0.0,
+      "n": 64
+     },
+     "heldout": {
+      "kind": 0.25,
+      "band": 0.5,
+      "timbre": 0.5,
+      "count": 0.25,
+      "exact": 0.0,
+      "n": 8
+     },
+     "mean_positions_per_clip": 18.85,
+     "mean_frames_50fps": 41.85
+    },
+    "gen_t07": {
+     "train": {
+      "kind": 0.4531,
+      "band": 0.3594,
+      "timbre": 0.5625,
+      "count": 0.3125,
+      "exact": 0.0312,
+      "n": 64
+     },
+     "heldout": {
+      "kind": 0.5,
+      "band": 0.375,
+      "timbre": 0.5,
+      "count": 0.5,
+      "exact": 0.0,
+      "n": 8
+     },
+     "mean_positions_per_clip": 41.24,
+     "mean_frames_50fps": 59.97
+    },
+    "gen_t0": {
+     "train": {
+      "kind": 0.2188,
+      "band": 0.375,
+      "timbre": 0.4688,
+      "count": 0.4688,
+      "exact": 0.0312,
+      "n": 64
+     },
+     "heldout": {
+      "kind": 0.25,
+      "band": 0.25,
+      "timbre": 0.75,
+      "count": 0.5,
+      "exact": 0.0,
+      "n": 8
+     },
+     "mean_positions_per_clip": 88.75,
+     "mean_frames_50fps": 100.0
+    }
+   },
+   "eval_s": 22.9
+  },
+  "after_P3": {
+   "text_bpb": 2.0265,
+   "A": {
+    "recon": {
+     "mel": 0.4659,
+     "logmag_l1": 0.6652,
+     "probe_on_recon": {
+      "kind": 0.7222,
+      "band": 0.9444,
+      "timbre": 0.4722,
+      "count": 0.7639,
+      "exact": 0.3472,
+      "n": 72
+     }
+    },
+    "bits": {
+     "a2t_caption_bits_per_byte": 0.2329,
+     "t2a_stop_bits_per_pos": 0.0123,
+     "t2a_dur_bits_per_pos": 1.0698,
+     "t2a_gmm_nats_per_pos_DIFFERENTIAL": -0.1814,
+     "pos_per_s": 25.111,
+     "tf_pred_mel": 0.8297,
+     "tf_pred_probe_exact": 0.2083
+    },
+    "understand": {
+     "train": {
+      "kind": 0.5,
+      "band": 0.4531,
+      "timbre": 0.5625,
+      "count": 0.5625,
+      "exact": 0.0781,
+      "n": 64
+     },
+     "heldout": {
+      "kind": 0.75,
+      "band": 0.5,
+      "timbre": 0.5,
+      "count": 0.75,
+      "exact": 0.0,
+      "n": 8
+     },
+     "samples": [
+      "a low pure rising chirp",
+      "a low pure rising chirp",
+      "a low pure rising chirp",
+      "three high pure beeps",
+      "a low pure rising chirp",
+      "three high pure beeps"
+     ]
+    },
+    "gen_t1": {
+     "train": {
+      "kind": 0.25,
+      "band": 0.3906,
+      "timbre": 0.5,
+      "count": 0.3438,
+      "exact": 0.0,
+      "n": 64
+     },
+     "heldout": {
+      "kind": 0.125,
+      "band": 0.25,
+      "timbre": 0.625,
+      "count": 0.375,
+      "exact": 0.0,
+      "n": 8
+     },
+     "mean_positions_per_clip": 18.75,
+     "mean_frames_50fps": 36.68
+    },
+    "gen_t07": {
+     "train": {
+      "kind": 0.375,
+      "band": 0.4062,
+      "timbre": 0.5625,
+      "count": 0.3438,
+      "exact": 0.0156,
+      "n": 64
+     },
+     "heldout": {
+      "kind": 0.125,
+      "band": 0.125,
+      "timbre": 0.5,
+      "count": 0.375,
+      "exact": 0.0,
+      "n": 8
+     },
+     "mean_positions_per_clip": 36.19,
+     "mean_frames_50fps": 49.44
+    },
+    "gen_t0": {
+     "train": {
+      "kind": 0.1875,
+      "band": 0.3438,
+      "timbre": 0.4688,
+      "count": 0.5,
+      "exact": 0.0312,
+      "n": 64
+     },
+     "heldout": {
+      "kind": 0.0,
+      "band": 0.25,
+      "timbre": 0.5,
+      "count": 0.5,
+      "exact": 0.0,
+      "n": 8
+     },
+     "mean_positions_per_clip": 100.0,
+     "mean_frames_50fps": 100.0
+    }
+   },
+   "B": {
+    "recon": {
+     "mel": 0.2391,
+     "logmag_l1": 0.4493,
+     "probe_on_recon": {
+      "timbre": 1.0,
+      "note": 1.0,
+      "exact": 1.0,
+      "n": 64
+     }
+    },
+    "bits": {
+     "a2t_caption_bits_per_byte": 0.6279,
+     "t2a_stop_bits_per_pos": 0.0014,
+     "t2a_dur_bits_per_pos": 0.3717,
+     "t2a_gmm_nats_per_pos_DIFFERENTIAL": -1.2724,
+     "pos_per_s": 20.797,
+     "tf_pred_mel": 0.5885,
+     "tf_pred_probe_exact": 0.125
+    },
+    "understand": {
+     "train": {
+      "timbre": 1.0,
+      "note": 0.1836,
+      "exact": 0.0,
+      "n": 64
+     },
+     "samples": [
+      "buzzy melody aaaa",
+      "buzzy melody aaaa",
+      "buzzy melody aaaa",
+      "buzzy melody afae",
+      "buzzy melody aaaa",
+      "pure melody afae"
+     ]
+    },
+    "gen_t1": {
+     "train": {
+      "timbre": 0.4792,
+      "note": 0.1927,
+      "exact": 0.0,
+      "n": 48
+     },
+     "mean_positions_per_clip": 20.69,
+     "mean_frames_50fps": 42.06
+    },
+    "gen_t07": {
+     "train": {
+      "timbre": 0.5833,
+      "note": 0.2188,
+      "exact": 0.0,
+      "n": 48
+     },
+     "mean_positions_per_clip": 27.0,
+     "mean_frames_50fps": 49.79
+    },
+    "gen_t0": {
+     "train": {
+      "timbre": 0.5417,
+      "note": 0.3073,
+      "exact": 0.0,
+      "n": 48
+     },
+     "mean_positions_per_clip": 48.71,
+     "mean_frames_50fps": 85.29
+    }
+   },
+   "eval_s": 56.6
+  }
+ },
+ "timing": {
+  "p1_text_s_per_step": 0.0802,
+  "p1_codec_s_per_step": 0.1057,
+  "p1_codec_steps": 500,
+  "p1_codec_s": 52.9,
+  "p2_s_per_step": 0.1609,
+  "p3_s_per_step": 0.1982,
+  "total_s": 457.4
+ },
+ "stale_A_latents_decoded_by_P3_decoder": {
+  "mel": 0.5456,
+  "probe": {
+   "kind": 0.6667,
+   "band": 0.9167,
+   "timbre": 0.5,
+   "count": 0.7083,
+   "exact": 0.3194,
+   "n": 72
+  }
+ },
+ "codec_updates_total": 2100
+}

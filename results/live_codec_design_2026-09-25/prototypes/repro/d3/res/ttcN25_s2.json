@@ -1,0 +1,758 @@
+{
+ "arm": "ttcN25",
+ "seed": 2,
+ "arch": "nested",
+ "coord": false,
+ "decay": 0.995,
+ "rho": 0.1,
+ "force": 2,
+ "live": true,
+ "p0": 250,
+ "p1": 600,
+ "p2": 600,
+ "every": 2,
+ "codec_lr": 0.0003,
+ "V": 3264,
+ "lm_params": 1036992,
+ "codec_phase": {
+  "arch": "nested",
+  "seed": 2,
+  "steps": 1500,
+  "s": 102,
+  "s_per_step": 0.068,
+  "params": 920837,
+  "log": [
+   [
+    250,
+    17,
+    1.224,
+    172
+   ],
+   [
+    500,
+    35,
+    1.211,
+    174
+   ],
+   [
+    750,
+    52,
+    1.17,
+    184
+   ],
+   [
+    1000,
+    69,
+    1.131,
+    220
+   ],
+   [
+    1250,
+    85,
+    1.136,
+    195
+   ],
+   [
+    1500,
+    102,
+    0.852,
+    198
+   ]
+  ]
+ },
+ "meas": [
+  {
+   "step": 250,
+   "phase": "boundary",
+   "codec_steps": 0,
+   "tones_recon_logmag_l1": 0.6765,
+   "tones_pos_per_s": 26.0,
+   "tones_bits": {
+    "bits_per_pos": 11.7966,
+    "bits_per_s": 325.816,
+    "pos_per_s": 26.0,
+    "n": 32
+   },
+   "melody_recon_logmag_l1": 0.9252,
+   "melody_pos_per_s": 26.0,
+   "melody_bits": {
+    "bits_per_pos": 11.7746,
+    "bits_per_s": 325.249,
+    "pos_per_s": 26.0,
+    "n": 28
+   },
+   "text_bpb": 2.4808
+  },
+  {
+   "step": 400,
+   "phase": "P1",
+   "codec_steps": 75,
+   "tones_recon_logmag_l1": 0.6637,
+   "tones_pos_per_s": 26.0,
+   "tones_bits": {
+    "bits_per_pos": 6.5539,
+    "bits_per_s": 173.527,
+    "pos_per_s": 26.0,
+    "n": 32
+   },
+   "tones_flip_d1": 0.1011,
+   "tones_zdrift_d1": 0.0226,
+   "tones_bits_stale_d1": 6.4949,
+   "tones_steps_d1": 150,
+   "melody_recon_logmag_l1": 0.9147,
+   "melody_pos_per_s": 26.0,
+   "melody_bits": {
+    "bits_per_pos": 8.949,
+    "bits_per_s": 235.884,
+    "pos_per_s": 26.0,
+    "n": 28
+   },
+   "melody_flip_d1": 0.105,
+   "melody_zdrift_d1": 0.0196,
+   "melody_bits_stale_d1": 8.9299,
+   "melody_steps_d1": 150,
+   "text_bpb": 2.4249
+  },
+  {
+   "step": 550,
+   "phase": "P1",
+   "codec_steps": 150,
+   "tones_recon_logmag_l1": 0.6561,
+   "tones_pos_per_s": 26.0,
+   "tones_bits": {
+    "bits_per_pos": 5.1847,
+    "bits_per_s": 136.892,
+    "pos_per_s": 26.0,
+    "n": 32
+   },
+   "tones_flip_d1": 0.0956,
+   "tones_zdrift_d1": 0.0206,
+   "tones_bits_stale_d1": 5.1793,
+   "tones_steps_d1": 150,
+   "melody_recon_logmag_l1": 0.9057,
+   "melody_pos_per_s": 26.0,
+   "melody_bits": {
+    "bits_per_pos": 8.2031,
+    "bits_per_s": 215.299,
+    "pos_per_s": 26.0,
+    "n": 28
+   },
+   "melody_flip_d1": 0.1063,
+   "melody_zdrift_d1": 0.0196,
+   "melody_bits_stale_d1": 8.2194,
+   "melody_steps_d1": 150,
+   "text_bpb": 2.2696
+  },
+  {
+   "step": 700,
+   "phase": "P1",
+   "codec_steps": 225,
+   "tones_recon_logmag_l1": 0.648,
+   "tones_pos_per_s": 26.0,
+   "tones_bits": {
+    "bits_per_pos": 4.4841,
+    "bits_per_s": 118.187,
+    "pos_per_s": 26.0,
+    "n": 32
+   },
+   "tones_flip_d1": 0.1011,
+   "tones_zdrift_d1": 0.0224,
+   "tones_bits_stale_d1": 4.4552,
+   "tones_steps_d1": 150,
+   "melody_recon_logmag_l1": 0.9038,
+   "melody_pos_per_s": 26.0,
+   "melody_bits": {
+    "bits_per_pos": 7.9714,
+    "bits_per_s": 208.891,
+    "pos_per_s": 26.0,
+    "n": 28
+   },
+   "melody_flip_d1": 0.0887,
+   "melody_zdrift_d1": 0.0196,
+   "melody_bits_stale_d1": 8.0425,
+   "melody_steps_d1": 150,
+   "text_bpb": 2.1946
+  },
+  {
+   "step": 850,
+   "phase": "P1",
+   "codec_steps": 300,
+   "tones_recon_logmag_l1": 0.6415,
+   "tones_pos_per_s": 26.0,
+   "tones_bits": {
+    "bits_per_pos": 4.1245,
+    "bits_per_s": 108.824,
+    "pos_per_s": 26.0,
+    "n": 32
+   },
+   "tones_flip_d1": 0.0756,
+   "tones_zdrift_d1": 0.0164,
+   "tones_bits_stale_d1": 4.0716,
+   "tones_steps_d1": 150,
+   "tones_flip_d4": 0.2733,
+   "tones_zdrift_d4": 0.0701,
+   "tones_bits_stale_d4": 4.1603,
+   "tones_steps_d4": 600,
+   "melody_recon_logmag_l1": 0.9005,
+   "melody_pos_per_s": 26.0,
+   "melody_bits": {
+    "bits_per_pos": 7.7036,
+    "bits_per_s": 201.716,
+    "pos_per_s": 26.0,
+    "n": 28
+   },
+   "melody_flip_d1": 0.0712,
+   "melody_zdrift_d1": 0.0153,
+   "melody_bits_stale_d1": 7.695,
+   "melody_steps_d1": 150,
+   "melody_flip_d4": 0.2637,
+   "melody_zdrift_d4": 0.0632,
+   "melody_bits_stale_d4": 7.881,
+   "melody_steps_d4": 600,
+   "text_bpb": 2.1243
+  },
+  {
+   "step": 1000,
+   "phase": "P2",
+   "codec_steps": 375,
+   "tones_recon_logmag_l1": 0.6392,
+   "tones_pos_per_s": 26.0,
+   "tones_bits": {
+    "bits_per_pos": 4.1987,
+    "bits_per_s": 111.53,
+    "pos_per_s": 26.0,
+    "n": 32
+   },
+   "tones_flip_d1": 0.1411,
+   "tones_zdrift_d1": 0.0364,
+   "tones_bits_stale_d1": 4.1598,
+   "tones_steps_d1": 150,
+   "tones_flip_d4": 0.2589,
+   "tones_zdrift_d4": 0.0634,
+   "tones_bits_stale_d4": 4.1267,
+   "tones_steps_d4": 600,
+   "melody_recon_logmag_l1": 0.8704,
+   "melody_pos_per_s": 26.0,
+   "melody_bits": {
+    "bits_per_pos": 5.427,
+    "bits_per_s": 142.629,
+    "pos_per_s": 26.0,
+    "n": 28
+   },
+   "melody_flip_d1": 0.1925,
+   "melody_zdrift_d1": 0.0385,
+   "melody_bits_stale_d1": 5.3772,
+   "melody_steps_d1": 150,
+   "melody_flip_d4": 0.2587,
+   "melody_zdrift_d4": 0.0583,
+   "melody_bits_stale_d4": 5.458,
+   "melody_steps_d4": 600,
+   "text_bpb": 2.0932
+  },
+  {
+   "step": 1150,
+   "phase": "P2",
+   "codec_steps": 450,
+   "tones_recon_logmag_l1": 0.639,
+   "tones_pos_per_s": 26.0,
+   "tones_bits": {
+    "bits_per_pos": 3.9961,
+    "bits_per_s": 105.5,
+    "pos_per_s": 26.0,
+    "n": 32
+   },
+   "tones_flip_d1": 0.16,
+   "tones_zdrift_d1": 0.0397,
+   "tones_bits_stale_d1": 3.9667,
+   "tones_steps_d1": 150,
+   "tones_flip_d4": 0.3233,
+   "tones_zdrift_d4": 0.0825,
+   "tones_bits_stale_d4": 4.0327,
+   "tones_steps_d4": 600,
+   "melody_recon_logmag_l1": 0.8424,
+   "melody_pos_per_s": 26.0,
+   "melody_bits": {
+    "bits_per_pos": 4.8869,
+    "bits_per_s": 128.167,
+    "pos_per_s": 26.0,
+    "n": 28
+   },
+   "melody_flip_d1": 0.2075,
+   "melody_zdrift_d1": 0.0435,
+   "melody_bits_stale_d1": 4.9011,
+   "melody_steps_d1": 150,
+   "melody_flip_d4": 0.3887,
+   "melody_zdrift_d4": 0.085,
+   "melody_bits_stale_d4": 5.079,
+   "melody_steps_d4": 600,
+   "text_bpb": 2.06
+  },
+  {
+   "step": 1300,
+   "phase": "P2",
+   "codec_steps": 525,
+   "tones_recon_logmag_l1": 0.6398,
+   "tones_pos_per_s": 26.0,
+   "tones_bits": {
+    "bits_per_pos": 3.9534,
+    "bits_per_s": 104.295,
+    "pos_per_s": 26.0,
+    "n": 32
+   },
+   "tones_flip_d1": 0.1311,
+   "tones_zdrift_d1": 0.0386,
+   "tones_bits_stale_d1": 3.942,
+   "tones_steps_d1": 150,
+   "tones_flip_d4": 0.3756,
+   "tones_zdrift_d4": 0.1119,
+   "tones_bits_stale_d4": 4.018,
+   "tones_steps_d4": 600,
+   "melody_recon_logmag_l1": 0.8216,
+   "melody_pos_per_s": 26.0,
+   "melody_bits": {
+    "bits_per_pos": 4.7671,
+    "bits_per_s": 124.994,
+    "pos_per_s": 26.0,
+    "n": 28
+   },
+   "melody_flip_d1": 0.1725,
+   "melody_zdrift_d1": 0.0394,
+   "melody_bits_stale_d1": 4.6731,
+   "melody_steps_d1": 150,
+   "melody_flip_d4": 0.4688,
+   "melody_zdrift_d4": 0.1182,
+   "melody_bits_stale_d4": 4.9668,
+   "melody_steps_d4": 600,
+   "text_bpb": 2.0525
+  },
+  {
+   "step": 1450,
+   "phase": "P2",
+   "codec_steps": 600,
+   "tones_recon_logmag_l1": 0.6413,
+   "tones_pos_per_s": 26.0,
+   "tones_bits": {
+    "bits_per_pos": 3.883,
+    "bits_per_s": 102.38,
+    "pos_per_s": 26.0,
+    "n": 32
+   },
+   "tones_flip_d1": 0.0889,
+   "tones_zdrift_d1": 0.0288,
+   "tones_bits_stale_d1": 3.8815,
+   "tones_steps_d1": 150,
+   "tones_flip_d4": 0.4033,
+   "tones_zdrift_d4": 0.136,
+   "tones_bits_stale_d4": 4.0846,
+   "tones_steps_d4": 600,
+   "melody_recon_logmag_l1": 0.8041,
+   "melody_pos_per_s": 26.0,
+   "melody_bits": {
+    "bits_per_pos": 4.5459,
+    "bits_per_s": 118.945,
+    "pos_per_s": 26.0,
+    "n": 28
+   },
+   "melody_flip_d1": 0.1163,
+   "melody_zdrift_d1": 0.0313,
+   "melody_bits_stale_d1": 4.4854,
+   "melody_steps_d1": 150,
+   "melody_flip_d4": 0.5325,
+   "melody_zdrift_d4": 0.1434,
+   "melody_bits_stale_d4": 4.9726,
+   "melody_steps_d4": 600,
+   "text_bpb": 2.0453
+  }
+ ],
+ "rate_log": [
+  {
+   "step": 400,
+   "phase": "P1",
+   "tones/fall": 26.0,
+   "tones/beeps": 26.0,
+   "tones/tone": 26.0,
+   "tones/rise": 26.0
+  },
+  {
+   "step": 550,
+   "phase": "P1",
+   "tones/beeps": 26.0,
+   "tones/tone": 26.0,
+   "tones/fall": 26.0,
+   "tones/rise": 26.0
+  },
+  {
+   "step": 700,
+   "phase": "P1",
+   "tones/beeps": 26.0,
+   "tones/tone": 26.0,
+   "tones/fall": 26.0,
+   "tones/rise": 26.0
+  },
+  {
+   "step": 850,
+   "phase": "P1",
+   "tones/beeps": 26.0,
+   "tones/rise": 26.0,
+   "tones/tone": 26.0,
+   "tones/fall": 26.0
+  },
+  {
+   "step": 1000,
+   "phase": "P2",
+   "melody/melody": 26.0,
+   "tones/rise": 26.0,
+   "tones/tone": 26.0,
+   "tones/beeps": 26.0,
+   "tones/fall": 26.0
+  },
+  {
+   "step": 1150,
+   "phase": "P2",
+   "melody/melody": 26.0,
+   "tones/tone": 26.0,
+   "tones/beeps": 26.0,
+   "tones/fall": 26.0,
+   "tones/rise": 26.0
+  },
+  {
+   "step": 1300,
+   "phase": "P2",
+   "tones/beeps": 26.0,
+   "melody/melody": 26.0,
+   "tones/fall": 26.0,
+   "tones/tone": 26.0,
+   "tones/rise": 26.0
+  },
+  {
+   "step": 1450,
+   "phase": "P2",
+   "tones/tone": 26.0,
+   "tones/beeps": 26.0,
+   "melody/melody": 26.0,
+   "tones/rise": 26.0,
+   "tones/fall": 26.0
+  }
+ ],
+ "timing": {
+  "p0_s_per_step": 0.1747,
+  "P1_s_per_step": 0.2813,
+  "P1_parts_s_per_step": {
+   "encode": 0.0437,
+   "lm": 0.176,
+   "world": 0.0192,
+   "codec": 0.0343
+  },
+  "P2_s_per_step": 0.2779,
+  "P2_parts_s_per_step": {
+   "encode": 0.0426,
+   "lm": 0.1725,
+   "world": 0.0192,
+   "codec": 0.0336
+  }
+ },
+ "evals": {
+  "after_p0": {
+   "text_bpb": 2.4808
+  },
+  "after_P1": {
+   "text_bpb": 2.1243,
+   "codec_steps": 300,
+   "tones": {
+    "recon_mel": 0.4555,
+    "recon_probe": {
+     "kind": 0.778,
+     "band": 0.954,
+     "timbre": 0.565,
+     "count": 0.722,
+     "exact": 0.38,
+     "n": 108
+    },
+    "pos_per_s_by_kind": {
+     "tone": 26.0,
+     "rise": 26.0,
+     "fall": 26.0,
+     "beeps": 26.0
+    },
+    "pos_per_s": 26.0,
+    "stride_frac": {
+     "1": 0.0,
+     "2": 1.0,
+     "4": 0.0
+    },
+    "codes_used": 526,
+    "code_entropy_bits": 7.729,
+    "bits_train_combos": {
+     "bits_per_pos": 4.2256,
+     "bits_per_s": 111.385,
+     "pos_per_s": 26.0,
+     "n": 96
+    },
+    "bits_heldout_combos": {
+     "bits_per_pos": 4.685,
+     "bits_per_s": 123.225,
+     "pos_per_s": 26.0,
+     "n": 12
+    },
+    "understand": {
+     "train": {
+      "kind": 0.177,
+      "band": 0.521,
+      "timbre": 0.5,
+      "count": 0.5,
+      "exact": 0.052,
+      "n": 96
+     },
+     "held": {
+      "kind": 0.25,
+      "band": 0.5,
+      "timbre": 0.5,
+      "count": 0.5,
+      "exact": 0.0,
+      "n": 12
+     }
+    },
+    "generate_t1.0": {
+     "train": {
+      "kind": 0.344,
+      "band": 0.302,
+      "timbre": 0.542,
+      "count": 0.344,
+      "exact": 0.042,
+      "n": 96
+     },
+     "held": {
+      "kind": 0.333,
+      "band": 0.167,
+      "timbre": 0.667,
+      "count": 0.167,
+      "exact": 0.0,
+      "n": 12
+     },
+     "invalid_end_rate": 0.0812,
+     "pos_per_s": 26.0
+    },
+    "world": {
+     "rel_mse_40ms": 0.6117,
+     "rel_mse_200ms": 0.7473,
+     "target_std": 4.0325
+    }
+   },
+   "eval_s": 9.8
+  },
+  "after_P2": {
+   "text_bpb": 2.0453,
+   "codec_steps": 600,
+   "tones": {
+    "recon_mel": 0.4433,
+    "recon_probe": {
+     "kind": 0.833,
+     "band": 0.954,
+     "timbre": 0.537,
+     "count": 0.778,
+     "exact": 0.361,
+     "n": 108
+    },
+    "pos_per_s_by_kind": {
+     "tone": 26.0,
+     "rise": 26.0,
+     "fall": 26.0,
+     "beeps": 26.0
+    },
+    "pos_per_s": 26.0,
+    "stride_frac": {
+     "1": 0.0,
+     "2": 1.0,
+     "4": 0.0
+    },
+    "codes_used": 531,
+    "code_entropy_bits": 7.716,
+    "bits_train_combos": {
+     "bits_per_pos": 4.1622,
+     "bits_per_s": 109.26,
+     "pos_per_s": 26.0,
+     "n": 96
+    },
+    "bits_heldout_combos": {
+     "bits_per_pos": 4.3898,
+     "bits_per_s": 115.297,
+     "pos_per_s": 26.0,
+     "n": 12
+    },
+    "understand": {
+     "train": {
+      "kind": 0.062,
+      "band": 0.042,
+      "timbre": 0.062,
+      "count": 0.052,
+      "exact": 0.042,
+      "n": 96
+     },
+     "held": {
+      "kind": 0.25,
+      "band": 0.0,
+      "timbre": 0.0,
+      "count": 0.0,
+      "exact": 0.0,
+      "n": 12
+     }
+    },
+    "generate_t1.0": {
+     "train": {
+      "kind": 0.302,
+      "band": 0.406,
+      "timbre": 0.51,
+      "count": 0.344,
+      "exact": 0.031,
+      "n": 96
+     },
+     "held": {
+      "kind": 0.417,
+      "band": 0.25,
+      "timbre": 0.333,
+      "count": 0.333,
+      "exact": 0.0,
+      "n": 12
+     },
+     "invalid_end_rate": 0.073,
+     "pos_per_s": 26.01
+    },
+    "generate_t0.7": {
+     "train": {
+      "kind": 0.24,
+      "band": 0.427,
+      "timbre": 0.521,
+      "count": 0.385,
+      "exact": 0.062,
+      "n": 96
+     },
+     "held": {
+      "kind": 0.417,
+      "band": 0.333,
+      "timbre": 0.75,
+      "count": 0.583,
+      "exact": 0.083,
+      "n": 12
+     },
+     "invalid_end_rate": 0.0356,
+     "pos_per_s": 26.01
+    },
+    "world": {
+     "rel_mse_40ms": 0.4325,
+     "rel_mse_200ms": 0.749,
+     "target_std": 3.9139
+    },
+    "p1_codes_under_p2_teacher": {
+     "recon_mel": 0.4635,
+     "recon_probe": {
+      "kind": 0.787,
+      "band": 0.907,
+      "timbre": 0.546,
+      "count": 0.694,
+      "exact": 0.352,
+      "n": 108
+     },
+     "bits": {
+      "bits_per_pos": 4.2855,
+      "bits_per_s": 112.659,
+      "pos_per_s": 26.0,
+      "n": 96
+     },
+     "frac_ids_changed": 0.386
+    }
+   },
+   "melody": {
+    "recon_mel": 0.5487,
+    "recon_probe": {
+     "contour": 0.422,
+     "register": 0.906,
+     "timbre": 0.531,
+     "exact": 0.219,
+     "n": 64
+    },
+    "pos_per_s_by_kind": {
+     "melody": 26.0
+    },
+    "pos_per_s": 26.0,
+    "stride_frac": {
+     "1": 0.0,
+     "2": 1.0,
+     "4": 0.0
+    },
+    "codes_used": 442,
+    "code_entropy_bits": 8.139,
+    "bits_train_combos": {
+     "bits_per_pos": 4.7361,
+     "bits_per_s": 123.942,
+     "pos_per_s": 26.0,
+     "n": 56
+    },
+    "bits_heldout_combos": {
+     "bits_per_pos": 4.7817,
+     "bits_per_s": 125.149,
+     "pos_per_s": 26.0,
+     "n": 8
+    },
+    "understand": {
+     "train": {
+      "contour": 0.25,
+      "register": 1.0,
+      "timbre": 0.875,
+      "exact": 0.214,
+      "n": 56
+     },
+     "held": {
+      "contour": 0.0,
+      "register": 1.0,
+      "timbre": 1.0,
+      "exact": 0.0,
+      "n": 8
+     }
+    },
+    "generate_t1.0": {
+     "train": {
+      "contour": 0.286,
+      "register": 0.714,
+      "timbre": 0.595,
+      "exact": 0.048,
+      "n": 42
+     },
+     "held": {
+      "contour": 0.167,
+      "register": 0.333,
+      "timbre": 0.333,
+      "exact": 0.0,
+      "n": 6
+     },
+     "invalid_end_rate": 0.0545,
+     "pos_per_s": 25.98
+    },
+    "generate_t0.7": {
+     "train": {
+      "contour": 0.167,
+      "register": 0.667,
+      "timbre": 0.524,
+      "exact": 0.071,
+      "n": 42
+     },
+     "held": {
+      "contour": 0.167,
+      "register": 0.5,
+      "timbre": 0.5,
+      "exact": 0.0,
+      "n": 6
+     },
+     "invalid_end_rate": 0.0393,
+     "pos_per_s": 26.0
+    },
+    "world": {
+     "rel_mse_40ms": 0.3761,
+     "rel_mse_200ms": 0.5625,
+     "target_std": 3.3049
+    }
+   },
+   "eval_s": 25.6
+  }
+ },
+ "wall_s": 417
+}

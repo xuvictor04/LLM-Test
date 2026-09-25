@@ -1,0 +1,6 @@
+d3_codecphase_nested_s2|d3|python3 run.py codec_phase 2 nested
+d3_ttcMR_s2|d3|python3 run.py ttcMR 2 res/ttcMR_s2.json
+d3_ttcN25_s2|d3|python3 run.py ttcN25 2 res/ttcN25_s2.json
+d3_ttc25c_cold_s2|d3|python3 run.py ttc25c 2 res/ttc25c_cold_s2.json --codec_lr 5e-5 --every 8
+d1_live50bpe_s2|d1|python3 run_arm.py --arm live50bpe --seed 2 --out res/live50bpe_s2.json
+d1_live50def_s2|d1|python3 run_arm.py --arm live50def --seed 2 --out res/live50def_s2.json

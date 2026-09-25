@@ -1,0 +1,8 @@
+d1_resume_s0|d1|python3 run_arm.py --arm live50bpe --seed 0 --n_a 150 --n_b 150 --act_every 48 --bpe_min_pair 5 --bpe_burst 16 --resume_test 10 --out smoke/resume_save10.json
+d3_flipdist_s0|d3|python3 flipdist.py 0 500 res/flipdist_s0.json
+d2_dbggrad|d2|python3 dbg_grad.py
+d2_dbggrad_w1|d2|D2_GMM_W=1.0 D2_LOGSIG_MIN=-5 python3 dbg_grad.py
+d3_ttcN25_s1|d3|python3 run.py ttcN25 1 res/ttcN25_s1.json
+d3_ttcMRc_s1|d3|python3 run.py ttcMRc 1 res/ttcMRc_s1.json
+d3_ttc25_s2|d3|python3 run.py ttc25 2 res/ttc25_s2.json
+d1_live25hot_s2|d1|python3 run_arm.py --arm live25 --seed 2 --codec_lr 3e-4 --codec_every 1 --anchor_w 0 --out res/live25hot_s2.json

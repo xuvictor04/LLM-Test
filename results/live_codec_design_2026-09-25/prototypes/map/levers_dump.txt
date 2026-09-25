@@ -1,0 +1,288 @@
+=== src/capacity/levers.py
+
+targets = Lever("off", "Which populations the valve may lift: neither, the experts, the vocabulary, "  "or both.", U.NAME, choices=("off", "experts", "vocab", "both"))  # THE DEFAULT IS THE OLD DEFAULT RE-ENCODED, NOT A NEW DECISI
+fab_start = Lever(0, "Soft expert cap the valve starts from and only lifts; 0 means start at the "  "hard ceiling, i.e. no room to earn. Also the fabric growth clamp's operating "  "ceiling.", U.EXPERTS) 
+vocab_start = Lever(0, "Soft vocabulary cap the valve starts from and only lifts; 0 means start at "  "the model's row count, i.e. no room to earn.", U.TOKENS)  # SAME SENTINEL, SAME REASONING, DIFFERENT SOURCE PACKAGE -- and the 
+lift = Lever(0.08, "Fraction of the current soft cap added on each earned lift.", U.FRACTION)  # A FRACTION, WHICH IS THE ONLY FORM OF THIS KNOB THAT MEANS THE SAME THING AT EVERY CAP SIZE, and it  # reached that shape by failing 
+lift_min = Lever(8, "Absolute floor on one lift, so a small soft cap still moves.", U.SLOTS)  # KEPT ON ITS OWN MERITS, NOT ON AN ABSENCE OF EVIDENCE. It never bound in any GPU arm -- the  # smallest cap ever run is 160, where int
+pin_windows = Lever(20000, "Accumulated windows a population must sit pinned against its soft cap "  "before a lift is earned.", U.Windows)  # CENSUS NAME: CAP_PIN_STEPS, unit Steps. DECLARED HERE AS CAP_PIN_WINDOWS, unit U.Window
+stall_band = Lever(0.002, "Half-width of the band around zero improvement inside which the loss "  "counts as stalled and a lift is authorised.", U.FRACTION)  # A BAND, AND THE NAME HAS TO SAY SO OR THE ONE-SIDED FORM GROWS BACK. 
+=== src/ckpt/levers.py
+
+dir = Lever("", "Directory this run writes its checkpoint into -- model, tokenizer, memory store, "  "optimizer moments, domain centroids; empty turns saving off entirely.", U.PATH)  # Census: SAVE_CKPT -> CKPT.CKPT_DIR, verdict r
+resume = Lever("", "Checkpoint to continue training from -- a run directory or a .pt file; empty "  "starts from scratch.", U.PATH)  # Census: RESUME -> CKPT.CKPT_RESUME, verdict rename, unit path, default "". Field corrected 
+every = Lever(0, "How often a mid-run checkpoint is written, in windows elapsed since the last one; "  "0 disables periodic saving, leaving the final save and SIGUSR1.", U.Windows)  # Census: CKPT_EVERY -> CKPT.CKPT_EVERY, verdict
+best_keep = Lever(0, "How many recent local lows in held-out bits/byte to retain as rotating "  ".best1..bestN checkpoints, on top of the single global .best.", U.COUNT)  # Census: BEST_KEEP -> CKPT.CKPT_BEST_KEEP, verdict keep, d
+best_keep_tol = Lever(0.02, "How close to the best held-out bits/byte seen so far a descending probe "  "must land, as a fraction of it, to earn a rotation slot.", U.FRACTION)  # Census: BEST_KEEP_TOL -> CKPT.CKPT_BEST_KEEP_TOL, v
+=== src/data/levers.py
+
+source = Lever("synthetic", "Which stream the run trains on: `real` splices the corpora under "  "DATA_DIR, `synthetic` generates from Markov processes.",  U.NAME, choices=("real", "synthetic")) 
+dir = Lever("data", "Root of the corpus tree; an area with no '/' is read from "  "DATA_DIR/train/<area>/*, and an area containing '/' is joined under "  "DATA_DIR verbatim (DATA_AREAS=\"eng,continual/01_rust\").", 
+areas = Lever("eng,py,num,c", "The corpora to stream, in order; their names label every per-area "  "score in the report and across the run boundary. An entry may "  "contain '/' to reach a tree beside train/ (continual/01_rust); 
+n_processes = Lever(4, "How many synthetic Markov processes the stream is generated from, on "  "DATA_SOURCE=synthetic only.", U.COUNT)  # Census: N_PROCESSES -> DATA_N_PROCESSES, mis-tagged misc; the survey's so-config record say
+seg_min = Lever(700, "Shortest spliced segment drawn from one area before the stream switches.",  U.BYTES) 
+seg_max = Lever(1800, "Longest spliced segment drawn from one area before the stream switches.",  U.BYTES)  # Census: SEG_MIN/SEG_MAX, filed under `domains` and owned by DATA -- read only inside build_stream 
+seg_contig = Lever(False, "Read each area in order instead of seeking to a random offset every "  "segment, so the only boundaries left are the text's own.", U.FLAG)  # Census: SEG_CONTIG -> seg_contig. THE DEFAULT WAS COMPUTED AN
+stream_bytes = Lever(120000, "Bytes of stream one epoch draws from the areas.", U.BYTES)  # Census: STREAM_LEN -> DATA_STREAM_BYTES. THE UNIT IS IN THE NAME BECAUSE THE MISSING UNIT IS  # LOAD-BEARING. The survey record itself hed
+phase_sched = Lever("", "Explicit phase schedule, pipe-separated phases of comma-separated area "  "indices OR area names (\"0|0,1|0,1|1\", \"eng|eng|rust|rust\"); empty "  "generates a rehearsed sliding window from `phases` and `
+phases = Lever(4, "How many phases the generated sliding-window schedule has, when no explicit "  "schedule is given.", U.COUNT)  # Census: PHASES, verdict keep. Read once, at :1343, and only when PHASE_SCHED is empty -- narrow bu
+phase_live = Lever(0, "How many areas are live in each phase of the GENERATED schedule; 0 derives "  "it from the area count.", U.COUNT)  # Census: PHASE_W -> DATA_PHASE_LIVE. RENAMED BECAUSE "W" READS AS A WIDTH IN BYTES OR WINDO
+holdout_frac = Lever(0.05, "Fraction of each area held out and never sampled into the training "  "stream.", U.FRACTION, domain=(0.0, 1.0))  # DOMAIN (0.0, 1.0) -- A FRACTION OF A BODY, SUBTRACTED FROM THAT SAME BODY. 
+val_cap = Lever(4000000, "Maximum bytes of held-out tail kept per area.", U.BYTES)  # Census: VAL_CAP -> DATA_VAL_CAP, mis-tagged misc, and the row the adversarial reviewer cites by  # name as an instance of the doubled-name defec
+exposure_max = Lever(2.0, "Whole-run repetition multiple (bytes drawn x epochs / bytes on disk) "  "above which the data plan is flagged before training starts.", U.COUNT)  # Census: EXPOSURE_MAX, verdict keep, and it is explicitl
+exposure_skew = Lever(3.0, "Max/min exposure ratio across areas above which the data plan is "  "flagged as imbalanced.", U.COUNT)  # Census: EXPOSURE_SKEW, verdict keep. A DISTINCT QUANTITY FROM exposure_max -- imbalance BETWEEN 
+resample = Lever(False, "Redraw a fresh stream from the areas at the start of every epoch instead "  "of replaying the same bytes.", U.FLAG)  # Census: DISK_STREAM -> DATA_RESAMPLE. TWO DIFFERENT THINGS LIVED IN ONE KNOB AND ONLY 
+draw = Lever("planned", "How a phase's bytes are allocated across its live areas: 'planned' "  "gives each area its scheduled share and randomises only the order and "  "the offsets; 'uniform' picks an area independently per segme
+corpus_cap = Lever(2000000, "Bytes read from disk per area before any holdout split or stream "  "draw; the ceiling on how much of a corpus this run can see.", U.BYTES)  # Census: CORPUS_CAP, verdict keep. GENUINELY DISTINCT FROM 
+=== src/domains/levers.py
+
+enabled = Lever(True, "Assemble domains at all; off sends did=0 for every window, so there is one "  "bucket, no provenance and nothing to manage.", U.FLAG)  # Census: SELF_ORG -> DOM_ENABLED. Renamed because SELF_ORG names a phil
+manage = Lever(True, "Run merge, cull and fold over the population; off freezes the domain set "  "and lets it grow unbounded.", U.FLAG)  # Census: MANAGE -> DOM_MANAGE. THE OWNERSHIP SPLIT IS THE POINT. One field gated five call 
+manage_every = Lever(100, "Windows between management passes: merge, then cull, then fold.",  U.Windows)  # CLOCK: Windows, and the census and the source agree -- `step % DOM_MANAGE_EVERY` at :6693, and 
+shift_rule = Lever("constant", "Boundary test: `constant` trips at a fixed distance, `relative` "  "trips at a multiple of a running quantile of recent distances.",  U.NAME, choices=("constant", "relative")) 
+shift_dist = Lever(0.30, "Under shift_rule=constant, the adjacent-window cosine distance that "  "counts as a candidate boundary.", U.FRACTION,  domain=(0.0, 2.0)) 
+shift_q = Lever(0.50, "Under shift_rule=relative, the quantile of the last 512 adjacent distances "  "used as the base.", U.FRACTION, domain=(0.0, 1.0)) 
+shift_mult = Lever(1.5, "Under shift_rule=relative, trip when the jump exceeds this many times "  "the shift_q base.", U.COUNT)  # UNIT: a MULTIPLE of the shift_q base, not a fraction (module header). BOTH COORDINATES ARE 
+sustain = Lever(2, "Consecutive over-threshold windows required before a boundary is declared; "  "the pending signatures are then averaged into the assign query.", U.Windows)  # CLOCK CORRECTED FROM THE CENSUS (`count` -> Windows
+accept_rule = Lever("radius", "How re-entry is decided: `radius` uses each domain's own measured "  "acceptance radius, `margin` compares nearest against runner-up, "  "`constant` uses spawn_dist alone.", 
+spawn_dist = Lever(0.35, "Cosine distance beyond which an assign query spawns a new domain instead "  "of re-entering the nearest.", U.FRACTION,  domain=(0.0, 2.0)) 
+margin = Lever(0.75, "Under accept_rule=margin, re-identify when the nearest centroid is at most "  "this fraction of the runner-up's distance.", U.FRACTION)  # The sole parameter of the margin arm, probe-validated against 20 cell
+radius_q = Lever(0.85, "Quantile of d(reservoir window, own centroid) that defines a domain's "  "acceptance radius, and of the pooled distances for domains with none yet.",  U.FRACTION, domain=(0.0, 1.0)) 
+radius_mult = Lever(1.2, "Multiplier on the measured quantile that gives the acceptance radius.",  U.COUNT)  # UNIT: a MULTIPLE of the measured quantile (module header); >1 by design. NOT A FREE PARAMETER -- 
+radius_cap = Lever(2.0, "Voronoi guard: no radius may exceed this multiple of the distance to the "  "nearest OTHER centroid. 0 removes the guard.", U.COUNT)  # CALIBRATED, NOT ASSUMED, and the first value tried was the worst sett
+reservoir = Lever(40, "Sample windows kept per domain; the basis for rekey's centroid and for the "  "measured radius.", U.COUNT)  # Census: DOM_WINS -> DOM_RESERVOIR, because WINS reads as a win count and this is a window 
+merge_dist = Lever(0.28, "Cosine distance under which two domains are merged into one during a "  "management pass.", U.FRACTION,  domain=(0.0, 2.0)) 
+cull_frac = Lever(0.10, "Per-pass cull budget: the bottom fraction of domains by decayed activity "  "are considered.", U.FRACTION,  domain=(0.0, 1.0)) 
+cull_act_min = Lever(15, "Cull threshold on a domain's DECAYED activity counter -- not a window "  "count, and never readable as one.", U.COUNT)  # Census: MANAGE_MIN -> DOM_CULL_ACT_MIN, and the rename is mandatory rather than co
+cull_stale = Lever(500, "Windows since a domain was last fed before it counts as stale for the "  "cull.", U.Windows)  # CLOCK: Windows -- `step - s.last[d] > stale` at :3672 and `step` counts windows. 
+decay = Lever(0.9, "What each domain's activity counter keeps per management pass, so `act` "  "measures RECENT use rather than cumulative use.", U.FRACTION,  domain=(0.0, 1.0)) 
+grace = Lever(500, "Minimum age in windows since birth before a domain may be culled, on both cull "  "paths.", U.Windows)  # CLOCK: Windows (`step - s.born[d]`, :3638 and :3669). A newborn domain has BY DEFINITION not had 
+cull_respects_mem_floor = Lever(  True, "Refuse to cull a domain that still holds a per-source floor's worth of memory entries.",  U.FLAG) 
+fold = Lever(True, "Fold domains that never recur into their nearest neighbour instead of leaving "  "them standing.", U.FLAG)  # Census: DOM_RECUR -> DOM_FOLD, so that fold and fold_mult read as one mechanism. THIS IS THE 
+min_visits = Lever(2, "'Recurs' means entered on at least this many SEPARATE occasions; below it a "  "domain is a fold candidate.", U.COUNT)  # It is the operational definition of the question the partition exists to answer -- di
+recur_horizon = Lever(32, "Boundaries that must pass since a domain's birth before it is judged "  "for recurrence at all.", U.COUNT)  # THE CHOICE OF A BOUNDARY CLOCK OVER A STEP CLOCK IS DELIBERATE AND CORRECT: what a domain nee
+fold_mult = Lever(1.5, "Refuse to fold a domain further than this multiple of the POOLED radius.",  U.COUNT)  # UNIT: a MULTIPLE of the pooled radius (module header). 
+prior_blend = Lever(0.15, "Weight of the per-domain token histogram in the blended prediction; "  ">0 also switches on the per-window accumulation that feeds it.",  U.FRACTION, domain=(0.0, 1.0)) 
+tokc_decay = Lever(0.5, "What a domain's token histogram keeps when the tokenizer re-segments; "  "applied once per retok. 1.0 restores cumulative-forever.", U.FRACTION,  domain=(0.0, 1.0))
+=== src/eval/levers.py
+
+windows = Lever(  64, "Default number of windows an eval Sample draws when it does not declare its own.", U.COUNT)  # WAS EVAL_N, AND THE RENAME IS HALF THE FIX. Two defects rode on the old name. 
+holdout_windows = Lever(  32, "Held-out windows per domain for the retention probe -- the resolution of the R matrix.",  U.COUNT) 
+null_draws = Lever(  5, "Permutation draws used to build the null distribution every 2-sigma verdict is judged against.",  U.COUNT) 
+coh_seeds = Lever(  16, "Seed passages the coherence instrument draws -- the sample size behind its standard error.",  U.COUNT) 
+coh_len = Lever(  384, "Tokens of continuation per seed -- how far the model must stay in its seed's domain.",  U.TOKENS) 
+generate = Lever(  True, "Run the GENERATION section: model alone versus model+memory, from the same real seeds.",  U.FLAG) 
+gen_samples = Lever(  4, "Distinct seed passages sampled per domain in the GENERATION section.", U.COUNT)  # RENAMED FROM GEN_N TO SAY WHAT IT COUNTS. It exists because every text judgement this project ever 
+gen_domains = Lever(  4, "How many domains the GENERATION section samples -- it slices the sorted domain labels.",  U.DOMAINS) 
+gen_len = Lever(  200, "Tokens per printed continuation, model-only and model+memory, from the same seed.",  U.TOKENS) 
+gen_temp = Lever(  0.7, "Sampling temperature for every generated continuation, printed and scored alike.",  U.FRACTION) 
+curve_every = Lever(  2000, "Windows between learning-curve probes -- 16 fixed windows per domain under frozen RNG.",  U.Windows) 
+genuine_min = Lever(  20, "Minimum member count before a discovered domain is reported as genuine rather than noise.",  U.COUNT) 
+genuine_sil = Lever(  0.10, "Minimum silhouette (own-centroid similarity minus nearest-other) for a genuine domain.",  U.FRACTION) 
+aff_min = Lever(  0.10, "Minimum share of a domain's expert-usage mass at which an expert counts as SERVING it.",  U.FRACTION, domain=(0.0, 1.0)) 
+wrongness = Lever(  True, "Run the WRONGNESS section: self-consistency detection over the settled store, with its "  "precision and recall.", U.FLAG) 
+wrong_inject = Lever(  8, "Synthetic cross-domain wrong entries planted so precision and recall have a denominator.",  U.ENTRIES) 
+verify_fit_steps = Lever(  3000, "Optimizer steps spent fitting the Reconstructor post hoc on the final settled store.",  U.Steps)
+=== src/fabric/levers.py
+
+on = Lever(True, "Build the fabric and put it in the forward path; off removes it from the forward "  "pass, the optimizer and every fabric mechanism (the pool stays allocated and "  "checkpointed, Q-FAB-11).", U.FLAG) 
+norm_only = Lever(False, "Control arm: keep the fabric's normalization, remove nodes and routing "  "from the forward pass.", U.FLAG)  
+society = Lever(False, "One hop with experts blended at the PREDICTION level, instead of "  "multi-hop chaining through Fabric.forward.", U.FLAG)  # Census: SOCIETY -> FAB_SOCIETY. Needs a dated glossary entry: an archived decisio
+hop_mode = Lever("soc", "Which multi-hop path exists: 'soc' re-routes from scratch each hop with "  "the current state in the query, 'transition' walks the learned successor "  "matrix R with SRC marks.", U.NAME, 
+hop_vote = Lever(True, "Each hop's experts vote on the OUTPUT and the halting hop picks the "  "answer, instead of blending hidden states.", U.FLAG)  # SHIPPED ON AND NEVER FORMED UNTIL 2026-09-24 (Q-FAB-8): the loop passed no `he
+hop_sup = Lever(0.0, "Weight on per-hop deep supervision: a cross-entropy at every hop, not only "  "at the end of the walk.", U.FRACTION)  # ARMED AND INERT, by wiring rather than by design (ISSUES P1-M27): it reads fab._hops, wh
+hops = Lever(4, "Maximum hop budget for one routed forward pass; effective depth is "  "min(depth0-stage, hops, 2 + n_live//2).", U.COUNT)  # Census: FAB_STEPS -> FAB_HOPS, and the rename is the whole point of the row. "STEPS" her
+depth0 = Lever(1, "Hop count the chain starts at before staged depth extends it; 0 means start "  "at the full `hops` budget (no curriculum).", U.COUNT)  # ABSORBS TWO MERGED ROWS, and both merges remove a pair that could disagree
+depth_eps = Lever(0.01, "Improvement in the smoothed flush loss that still counts as progress, "  "so a depth stage does not advance while the loss is still falling.",  U.BITS_PER_BYTE) 
+depth_patience = Lever(6, "Consecutive flat depth-checks required before one more hop is added.",  U.COUNT) 
+depth_stage_max = Lever(40, "Depth-checks after which a stage ends regardless of the plateau "  "test.", U.COUNT)  # Genuinely separate from depth_patience: patience is "how much flatness proves the plateau", 
+halt = Lever(True, "HALT as a real operator on both paths: its mass says 'no expert is needed "  "here' and the caller spends that mass on model.head directly.", U.FLAG) 
+halt_max = Lever(0.9, "Ceiling on halt mass, so at least 1-halt_max of the blend and its "  "gradient always reaches the population.", U.FRACTION, domain=(0.0, 1.0))  # A BARRIER, NOT A PREFERENCE (:1735-1738). At halt=1 the exper
+alpha = Lever(0.5, "Residual mixing coefficient of one fabric step: h <- norm(h + alpha*(mixture "  "- h)).", U.FRACTION)  
+ponder = Lever(0.01, "Charge on routed depth, so the chain does not take hops it does not need.",  U.FRACTION) 
+ponder_warm = Lever(8000, "Anneal window for the depth charge, so the fabric is not billed for "  "depth before its experts can be worth using.", U.Windows)  # CLOCK: Windows, and the census had this one right. `_pw = min(1.0, ste
+n0 = Lever(2048, "Founding population: how many experts are BUILT at construction.", U.EXPERTS)  # With the ramp dropped this is the only thing that sets initial population size, which is why  # the ramp was dropped. Signals, not 
+slots = Lever(4096, "Preallocated slot count: cap = max(n0, slots); memory cost is 2*cap*d*rank "  "floats and it is the hard ceiling on every growth path.", U.SLOTS)  # NAMED `slots`, NOT `nmax`, AND THE ENVIRONMENT NAME MOVES WI
+pressure = Lever(0.45, "Occupancy SETPOINT: below pressure x slots the utilization cull, the "  "utilization spare and `rescue` are all unreachable, so it chooses the "  "operating population size.", U.FRACTION, domain=(0.0, None)
+grow = Lever(True, "Master switch for population growth: off freezes the population at n0 while "  "routing, selection, replication and the cull all still run.", U.FLAG)  # The one arm that isolates GROWTH from everything else the
+route_region_w = Lever(1.0, "Weight on the signature-region cosine term in the routing logits; 0 "  "routes on predicted weights alone.", U.FRACTION)  # For the equivalence report: this is one of only TWO knobs that six named grid
+route_learn = Lever(True, "Add the learned bilinear identity term to the routing logits.", U.FLAG)  
+route_t = Lever(0.1, "Routing temperature on the region cosine, the normalized identity term and "  "the HALT logit.", U.FRACTION)  # Load-bearing, not cosmetic: a cosine over thousands of experts is near-uniform, and 0.1 is what 
+cent_topk = Lever(8, "How many routed centroids EMA toward the served signature on each grounded "  "update.", U.EXPERTS) 
+cent_ema = Lever(0.02, "Rate at which a node's centroid moves toward the signatures it actually "  "served.", U.FRACTION)  # CENTROID LEARNING IS THE ROUTING FUNCTION now that ROUTE_GROUNDED's alternative router is 
+discover = Lever(0.35, "Cosine distance beyond which a signature counts as material NOTHING owns "  "and is handed to the least-used expert.", U.FRACTION, domain=(0.0, 2.0))  # DOMAIN (0.0, 2.0), AND THE 2.0 IS THE WHOLE POINT: TH
+chain_k = Lever(8, "How many experts are COMPUTED per hop (top-k by routing mass); per-hop cost "  "is k, not the population size.", U.EXPERTS)  # The knob that makes a 4096-expert population affordable at all: it decouples popula
+ens_k = Lever(2, "How many of the computed experts actually decode logits per hop or per window.",  U.EXPERTS)  # Separate from chain_k on purpose: chain_k is what is computed, this is what is decoded. 
+explore = Lever(0.15, "Fraction of rows whose lowest-ranked computed slot is swapped for a "  "randomly chosen low-use expert, on training passes only.", U.FRACTION)  # THE ONLY THING BETWEEN THE UTILIZATION CULL AND A SELF-FULFIL
+ec_w = Lever(0.0, "Expert-choice deficit bonus: nudge routing toward experts under their share, "  "by construction rather than by a loss.", U.FRACTION)  # Off by default and identical to the previous router at 0, kept because it 
+balance = Lever(0.01, "Load-balance pressure on the routing distribution, so every expert keeps "  "accruing use-age instead of a few absorbing all traffic.", U.FRACTION) 
+bal_floor = Lever(0.15, "Permanent floor under the load-balance pressure, as a fraction of full, "  "so traffic never stops reaching the tail of the population.", U.FRACTION) 
+bal_warm = Lever(4000, "How long the load-balance pressure takes to decay from full to its "  "floor.", U.Windows)  # CLOCK CORRECTED, Steps -> Windows (census defect 2, the one row corrected). The consumer is 
+dom_frac = Lever(0.10, "Breadth cap: an expert serving more than this share of the live domain "  "population is masked out of routing for domains it does not hold.",  U.FRACTION) 
+dom_min = Lever(4, "Absolute floor on the breadth cap, so a small domain population cannot ban an "  "expert from everything.", U.DOMAINS)  # The live domain count is DOM's number and arrives as the wire d_live_domains; the fabric
+div_w = Lever(0.02, "Weight on the distinctness penalty that rewards the experts a hop leans on "  "for producing different outputs.", U.FRACTION)  # Differentiation is one of the two things the fabric is FOR. The society branch's
+ind_k = Lever(2, "How many of the society's experts are charged with solving the task alone.",  U.EXPERTS) 
+ind_w = Lever(0.5, "Independence loss weight: each of those experts must solve the task ALONE, "  "weighted by its routing mass.", U.FRACTION)  # ind_k silently widens how many experts the society computes, via `k=max(ENS_K, IND_K
+dk = Lever(32, "Width of the routing identity space: the shared query projection's output and "  "every per-expert K and SRC vector.", U.COUNT)  # What made per-source routing affordable: a dk-vector per expert restores per-source
+rank = Lever(8, "Low-rank width r of every expert; also the number of crossover-able rank slices "  "and the size of the embedder's input (2*d*r).", U.COUNT)  # The parameter that decides whether a population of thousands is affor
+emb_hid = Lever(128, "Hidden width of the shared identity embedder eemb and its inverse edec.",  U.COUNT) 
+emb_var = Lever(1.0, "Weight on the variance + decorrelation term that stops every expert "  "embedding collapsing to one point.", U.FRACTION)  # ON A MEASURED FAILURE: nearest-neighbour distance in identity space was measured at 
+emb_every = Lever(1, "Cadence at which every expert's identity is re-embedded from its weights.",  U.Windows)  # CLOCK: Windows -- compared against `step`, which advances per window. The cost valve on an 
+ae_w = Lever(0.5, "Weight on the weights -> identity -> weights round trip that keeps the "  "identity decoder edec honest.", U.FRACTION)  # edec is what makes spawn-by-specification possible at all. Without this term the decoder 
+spawn = Lever(True, "Spawn-by-specification: decode the router's own query into a new expert when "  "nothing near it exists; also gates the identity autoencoder loss.", U.FLAG)  # The structurally distinct growth path: discovery 
+spawn_mult = Lever(2.0, "How many times the population's own median nearest-neighbour distance a "  "query must exceed to count as material nothing serves.", U.COUNT)  # UNIT: a multiple of a measured distance, not a fraction -- s
+spawn_floor = Lever(0.02, "Absolute distance floor under the spawn test, so a degenerate "  "population cannot spawn on every query.", U.FRACTION)  # The guard that keeps a relative test safe, on the measured collapse above: when 
+burst = Lever(1, "How many experts a REGRESSION grows at once.", U.EXPERTS)  # One node cannot answer a distribution shift that needs several, and the size of that reply is  # the thing under test on the add-area benchmark -- this
+z = Lever(4.0, "How many robust deviations (running MAD) above the slow EMA a loss must sit to "  "count as an unexpected REGRESSION.", U.COUNT)  # UNIT: a multiple of a deviation, not a fraction (module docstring, the five multip
+plateau = Lever(0.002, "Relative improvement of the slow EMA below which progress counts as "  "stalled: arms the stall growth and releases RECOVER.", U.FRACTION)  # Read at two points of one state machine (arming a stall, leaving
+warmup = Lever(300, "How long before the stall trigger may fire at all, so early noise is not "  "read as a plateau.", U.Windows)  # CLOCK: Windows -- compared against `step` (:6796, :7708). PlateauGrowth's own class-signature 
+cooldown = Lever(400, "Minimum spacing between growth firings, and the window over which recent "  "births are counted for the new_frac budget.", U.Windows)  # CLOCK: Windows, corrected in the census and worth restating -- it is c
+recover_min = Lever(600, "Minimum RECOVER lockout after a growth burst, so the burst's own "  "transient worsening cannot re-trigger growth.", U.Windows) 
+recover_max = Lever(20000, "Hard ceiling on the RECOVER lockout, so growth re-arms even if "  "improvement never flattens.", U.Windows)  # CLOCK: Windows for both. recover_max is the escape hatch that stops RECOVER becoming absorb
+new_frac = Lever(0.04, "The most of the population that may be newborn at once; growth takes "  "whatever is left of the budget rather than being refused outright.",  U.FRACTION, domain=(0.0, 1.0)) 
+replicate = Lever(True, "Grow by cloning a fit parent plus mutation, instead of minting a fresh "  "random expert.", U.FLAG)  # A real arm on goal B: inheritance is the claim that a new expert starts from something already 
+parent_k = Lever(8, "Shortlist size: how many region-owners compete to be the parent of a new "  "expert.", U.EXPERTS)  # Sampling a parent from a region-relevant shortlist is what makes a birth land near the material 
+parent_max = Lever(0.20, "Maximum share of recent births any one parent may account for.",  U.FRACTION, domain=(0.0, 1.0))  # DOMAIN (0.0, 1.0): a SHARE OF THE birth_win RECORD, not of anything unbounded. 
+birth_win = Lever(256, "Size of the sliding per-parent birth record that parent_max is measured "  "against.", U.COUNT)  # Without a per-parent quota the fittest expert clones itself into the whole growth budget, which 
+mut = Lever(0.25, "Mutation size at birth, as a fraction of the parent's own weight std.",  U.FRACTION) 
+mut_big = Lever(6.0, "Size of the heavy-tail mutation, as a multiple of the ordinary mutation "  "scale.", U.COUNT) 
+mut_big_p = Lever(0.1, "Probability that a birth takes the heavy-tail mutation instead of the "  "ordinary one.", U.PROBABILITY, domain=(0.0, 1.0))  # DOMAIN (0.0, 1.0) ON mut_big_p AND DELIBERATELY NOT ON mut_big BESIDE IT. This 
+xover = Lever(0.35, "Fraction of births assembled from several parents by taking whole rank "  "slices from a second parent.", U.FRACTION, domain=(0.0, 1.0))  # DOMAIN (0.0, 1.0): a RATE PER BIRTH -- fabric/api.py::grow_check asse
+birth_jitter = Lever(0.15, "Perturbation added to a newborn's centroid so a growth burst does not "  "mint exact clones.", U.FRACTION)  # Its own source comment states the defect it fixes: a burst grows several experts at ONE 
+grow_on_mem_pressure = Lever(False, "Let the memory-pressure signal make fabric growth eligible, "  "instead of only being printed.", U.FLAG)  # WRONG OWNER IN THE OLD TREE, NOT A WRONG KNOB. It was tagged into the memory block, b
+manage_every = Lever(500, "Cadence of the management pass: the fabric cull, spares, replication "  "and the staged-depth check.", U.Windows)  # CLOCK CONFLICT, NAMED RATHER THAN RESOLVED (census defect 2). Two files disagree about
+cull_frac = Lever(0.02, "Fraction of the ELIGIBLE (past-grace) set removed per manage pass, "  "floored at one.", U.FRACTION, domain=(0.0, 1.0))  # DOMAIN (0.0, 1.0): the budget is int(cull_frac * len(eligible)) in fabric/api.py::
+grace = Lever(48, "How many times an expert must have been SELECTED before the cull may touch "  "it.", U.Selections)  # CLOCK: Selections, which is the distinction that kind exists for, and the merge that produced 
+comp_ema = Lever(0.02, "EMA rate for the per-node competence and marginal-contribution signals "  "that gate cull-sparing.", U.FRACTION) 
+comp_protect = Lever(True, "Spare a unit from the cull when it models its own material better "  "than the population does, however rarely it is selected.", U.FLAG)  # BOTH HAD TWO READERS IN THE OLD TREE -- the fabric and the dom
+err_fast = Lever(0.05, "EMA rate of the per-expert FAST error signal.", U.FRACTION) 
+err_slow = Lever(0.005, "EMA rate of the per-expert SLOW error signal, the baseline the fast one "  "is judged against.", U.FRACTION)  # THE 10x SEPARATION IS THE MECHANISM (:1757-1761, :2186-2194): an expert whose fast error sits
+shift_tol = Lever(0.05, "How far the fast error may sit above the slow error before the expert "  "counts as ADAPTING and is spared.", U.FRACTION) 
+fail_tol = Lever(0.15, "How far BOTH error EMAs must sit above the population before an expert "  "counts as in sustained failure and is cullable at any occupancy.",  U.FRACTION) 
+rescue = Lever(0.0, "Give an expert about to be culled one heavy mutation and a reset use-clock "  "instead of deleting it.", U.FRACTION)  # THE CLEAREST DO-NOT-DROP CASE IN THE FAMILY. It fired zero times for a whole investigatio
+merge_dist = Lever(0.10, "Cosine distance under which two redundant experts are MERGED by "  "averaging their adapters, instead of one being culled.",  U.FRACTION, domain=(0.0, 2.0)) 
+lr_own = Lever(False, "Put each expert on its own cyclical learning-rate schedule, clocked from "  "its own use count.", U.FLAG)  # The saving from leaving it off is real and belongs in the docs: the rescaling path clones every 
+lr_cycle = Lever(24.0, "Half-cycle of the per-expert triangular2 schedule, measured on the "  "expert's own use clock.", U.Selections)  # CLOCK: Selections, and the clock IS the mechanism -- an expert the router calls often cycles
+lr_gamma = Lever(0.5, "Per-cycle envelope decay: 0.5 is triangular2 exactly, 1.0 degenerates to "  "plain triangular.", U.FRACTION, domain=(0.0, 1.0)) 
+lr_amin = Lever(0.15, "Floor under the decaying envelope, so a long-lived expert keeps a small "  "permanent capacity to move.", U.FRACTION, domain=(0.0, 1.0))  # DOMAIN (0.0, 1.0) ON BOTH, OUT OF ONE EXPRESSION. fabric/api.py::ow
+lr_maxr = Lever(4.0, "Ceiling on the ratio of an expert's own rate to the global rate.", U.COUNT) 
+lr_boost = Lever(2.0, "Multiply the own-rate for the cull-eligible bottom of the utilization "  "ranking: exploration before removal.", U.COUNT)  # UNIT: both are MULTIPLES of the global rate, not fractions (module docstring). lr_
+=== src/lm/levers.py
+
+arch = Lever("gru", "Which base language model is constructed: the GRU (MiniLM) or the transformer "  "(TinyTransformer).",  U.NAME, choices=("gru", "transformer")) 
+width = Lever(128, "Hidden width of the base LM, and through it the width of every representation "  "keyed off it -- memory keys, expert bodies, the world-model projection.",  U.COUNT) 
+layers = Lever(0, "Depth of the base LM -- transformer blocks or GRU layers; 0 means take the "  "current arm's depth (4 for transformer, 1 for gru).", U.COUNT)  # Census: LAYERS -> LM_LAYERS, verdict keep. Field corrected from `L
+heads = Lever(8, "Attention heads per transformer block; read only when arch is transformer.",  U.COUNT)  # Census: HEADS -> LM_HEADS, verdict keep. Field corrected from `LM_HEADS` to `heads` (DEFECT 1). 
+ctx = Lever(128, "The model's context width -- how many tokens one training or eval window holds.",  U.TOKENS)  # Census: WIN -> LM_CTX, verdict rename. Field corrected from `LM_CTX` to `ctx` (DEFECT 1). 
+dropout = Lever(0.0, "Dropout probability, at three sites: the token embedding, between GRU layers "  "when depth is greater than one, and the READOUT in LM.decode before the head. "  "It does NOT reach LM.encode's return, which i
+vocab_slots = Lever(4096, "How many vocabulary rows the model preallocates -- emb.weight, "  "head.weight and head.bias are all this tall, and the tokenizer may not "  "mint past it.", U.SLOTS) 
+mask_dead_rows = Lever(False, "Take never-minted and retired vocabulary rows out of the distribution "  "wherever logits become one.", U.FLAG)  # Census: LOSS_MASK_DEAD -> LM_MASK_DEAD_ROWS, verdict rename, default 0. Field correc
+new_row_init = Lever("mean", "How a newly minted token's embedding and head rows are initialized "  "from its two parent tokens.",  U.NAME, choices=("random", "mean", "last_first")) 
+compose = Lever(False, "Build each token's vector from its bytes plus a learned residual, instead of "  "storing a free row per token.", U.FLAG)  # Census: TOK_COMPOSE -> LM_COMPOSE, verdict rename, default 0. Field corrected from
+anchor_w = Lever(0.05, "Weight of the loss term holding a newly minted token's residual near its "  "byte composite, so the mint is a handover rather than a jump.", U.FRACTION)  # Census: TOK_ANCHOR -> LM_ANCHOR_W, verdict rename,
+anchor_uses = Lever(400.0, "How many appearances in trained-on material a new token is held near its "  "composite for, before the anchor releases it.", U.COUNT)  # Census: TOK_ANCHOR_USES -> LM_ANCHOR_USES, verdict rename, defaul
+=== src/memory/levers.py
+
+quota = Lever(  128, "Entries each owner block may hold; blocks x quota is the whole store.", U.ENTRIES)  # WHY IT MATTERS MORE THAN IT DID: with capacity derived, this is where store size is actually 
+owners = Lever(  64, "How many eviction partitions the store is split into; 1 is the single global store.", U.COUNT)  # ABSORBS MEM_PER_EXPERT (census merge). owners=1 IS the global store and owners>1 IS the partition, 
+write_mode = Lever(  "fixed", "Which rule admits a surprising item: a fixed threshold, the additive controller, or "  "the quantile controller.", U.NAME, choices=("fixed", "adaptive", "quantile")) 
+write_gate = Lever(  0.3, "Fixed surprise threshold: store an item only when 1 - p_model(true token) is at least this.",  U.PROBABILITY, domain=(0.0, 1.0)) 
+write_target = Lever(  0.5, "Fraction of candidate writes the adaptive and quantile arms aim to keep.", U.FRACTION,  domain=(0.0, 1.0)) 
+evict = Lever(  "lru", "Which clock picks the victim: write order, decayed retrieval mass, or last retrieval.",  U.NAME, choices=("recency", "usage", "lru")) 
+use_decay = Lever(  0.98, "Multiplier applied to every entry's retrieval count when the decay interval elapses.",  U.FRACTION, domain=(0.0, 1.0)) 
+use_decay_every = Lever(  20000, "How many entries must be WRITTEN before the retrieval counters are decayed.", U.ENTRIES)  # NOT A CLOCK, AND THAT IS THE POINT OF THE RENAME. The old name DECAY_EVERY says cadence and every 
+src_share = Lever(  0.5, "Share of the store each live source is entitled to (src_share * cap / live sources); "  "under D3 both the floor eviction may not cross and the ceiling admission may not exceed.", 
+probation_frac = Lever(  0.10, "Share of the store the never-retrieved region may occupy before eviction narrows to "  "probation's own oldest.", U.FRACTION, domain=(0.0, 1.0)) 
+pressure_thresh = Lever(  0.80, "Threshold on pressure() -- the share of evictions destroying PROMOTED entries -- above "  "which the store is declared genuinely short of room.", U.FRACTION, 
+key_src = Lever(  "model", "Which representation keys the store: the live model's own encoding, or a frozen "  "byte-statistic table used only as a testing baseline.", U.NAME, 
+key_win = Lever(  8, "How many preceding input positions the encoder sees when it builds one memory key.", U.TOKENS)  # TOKENS, NOT BYTES, and the factor is real: _windows() slices the model input x, which under the 
+key_depth = Lever(  0, "Cap the transformer depth used for the memory key path only; 0 = the full stack.", U.COUNT)  # KEPT UNDER THE OWNER'S RULE -- not a duplicate, nothing removes its mechanism, and the code reads it 
+rekey_every = Lever(  200, "Period over which the whole readable store is re-encoded once, so keys track the model as "  "it drifts.", U.Windows) 
+probe_every = Lever(  25, "Cadence of the training-time read probe: real retrievals issued against the text being "  "trained on.", U.Windows) 
+probe_rows = Lever(  64, "How many query rows each probe read issues; it bounds how many entries can leave probation "  "per probe.", U.COUNT) 
+topk = Lever(  8, "How many neighbours each retrieval mixes into the returned token distribution.", U.ENTRIES)  # Read at the store construction (:4868) and used as `kk = min(self.topk, vi.numel())` in 
+blend_max = Lever(  0.5, "Maximum share of the output probability mass retrieval may take when the match is perfect; "  "0 turns retrieval's contribution off.", U.FRACTION) 
+match_floor = Lever(  0.3, "Top cosine similarity below which a retrieved neighbour contributes nothing; between it "  "and 1.0 the blend ramps linearly to blend_max.", U.FRACTION) 
+verify = Lever(  "selfcon", "Which mechanism judges a stored entry wrong: self-consistency, a fitted "  "reconstructor, or nothing.", U.NAME, choices=("selfcon", "recon", "off")) 
+wrong_read = Lever(  True, "Whether the wrong flag excludes an entry from every retrieval, or only from the sweep.",  U.FLAG) 
+wrong_sweep = Lever(  False, "Whether the selected wrongness detector DELETES flagged entries or only flags them.",  U.FLAG) 
+judge_frac = Lever(  0.0, "Share of the ALREADY-CHECKED store that judge() re-scores on each pass, on top of the "  "entries written since the last one. 0.0 re-scores nothing.", U.FRACTION) 
+recon_hid = Lever(  64, "Hidden width of the reconstructor that maps a stored key to its expected token code.",  U.COUNT) 
+recon_tok = Lever(  32, "Width of the fixed token-code space the reconstructor predicts into.", U.COUNT)  # THE OLD NAME WAS ACTIVELY MISLEADING AND THAT IS WHY THE RENAME EARNS ITS PLACE: RECON_TOK is
+=== src/opt/levers.py
+
+lr = Lever(2e-3, "Peak learning rate; every rate the system applies is this times a schedule "  "multiplier in 0..1.", U.FRACTION)  # Census: LR -> OPT_LR, verdict keep, default 2e-3 (CENSUS.md:388). Field corrected from `OPT_LR` 
+weight_decay = Lever(0.0, "AdamW decoupled weight decay, applied to the base optimizer and the "  "encoder optimizer alike.", U.FRACTION)  # Census: WEIGHT_DECAY -> OPT_WEIGHT_DECAY, verdict keep, default 0.0 (CENSUS.md:396). Fiel
+grad_clip = Lever(0.0, "Global gradient-norm clip applied to the BASE parameter group before "  "each optimizer step. 0.0 is OFF, which is what every recorded number "  "in this project was measured under.", U.FRACTION) 
+lr_sched = Lever("cosine", "Selects the rate schedule: the warmup-then-cosine shape, or a constant "  "peak rate for the whole run.",  U.NAME, choices=("cosine", "none")) 
+lr_warmup = Lever(1000, "Linear ramp from zero to the peak rate at the start of a run, paid once.",  U.Steps)  # Census: LR_WARMUP -> OPT_LR_WARMUP, verdict keep, default 1000 (CENSUS.md:395). Field corrected 
+lr_wavelength = Lever(0, "Length of one cosine cycle, stated directly in optimizer steps; 0 means "  "one wavelength spans the whole run.", U.Steps)  # Census: LR_STEPS -> OPT_LR_WAVELENGTH, verdict RENAME, default 0 (CENSUS.md:40
+lr_min_frac = Lever(0.05, "Floor of the cosine as a fraction of peak -- the schedule never returns "  "zero.", U.FRACTION, domain=(0.0, 1.0))  # DOMAIN (0.0, 1.0) -- FROM THE ARITHMETIC, NOT FROM THE UNIT LABEL. src/opt/api.py::_s
+lr_restarts = Lever(True, "Whether the cosine wraps into repeated warm restarts, with a whole number "  "of cycles fitted to the run, instead of holding at the floor.", U.FLAG)  # Census: LR_RESTARTS -> OPT_LR_RESTARTS, verdict ke
+lr_restart_damp = Lever(0.5, "Multiplier on the next restart's swing when the cycle that just ended "  "failed to beat the best held-out it inherited; cumulative.",  U.FRACTION, domain=(0.0, 1.0)) 
+lr_decay = Lever(1.0, "Strength of a monotone envelope over successive restart peaks, so each cycle "  "keeps its own high phase while the ceiling comes down.", U.FRACTION,  domain=(0.0, 1.0)) 
+lr_shift_warm = Lever(0, "Re-warm length after a distribution shift the system caused itself, "  "applied as an attenuation of the current cycle.", U.Steps)  # Census: LR_SHIFT_WARM -> OPT_LR_SHIFT_WARM, verdict keep, default 0 (C
+batch_windows = Lever(1, "How many stream windows are accumulated into one forward/backward; this "  "sets the flush cadence the whole loop body runs on.", U.Windows)  # Census: BATCH_W -> OPT_BATCH_WINDOWS, verdict RENAME, defaul
+accum = Lever(1, "Backward passes accumulated before one optimizer step -- with batch_windows, the "  "effective batch, and the only way to reach a large one on a small GPU.",  U.Backwards)
+=== src/sig/levers.py
+
+mode = Lever("learned", "Which signature function the run uses: the online contrastive encoder, "  "or the frozen hashed-bigram control.", U.NAME,  choices=("learned", "bigram")) 
+space = Lever("bytes", "Alphabet the signature is built over: raw bytes, or the LM's token "  "stream.", U.NAME,  choices=("bytes", "tokens")) 
+d = Lever(64, "Dimension of the signature vector -- the space domain centroids, fabric routing "  "keys and every separability instrument live in.", U.COUNT)  # Census: SIG_D -> SIG_D, verdict keep. Read at :541 and used at :3373 
+bigram_dim = Lever(512, "Width of the hashed bigram feature vector used by the frozen-statistic "  "control; inert unless mode='bigram'.", U.COUNT)  # Census: SIG_DIM -> SIG_BIGRAM_DIM. THE RENAME IS THE ENTIRE ROW. SIG_DIM sat on
+contrastive_batch = Lever(48, "Anchor/positive pairs drawn per InfoNCE step; also fixes the "  "collapse reference ln(B) and the K-floor ln(1+(B-1)/K).", U.COUNT)  # Census: ENC_BATCH -> SIG_CONTRASTIVE_BATCH. Used at :3313 (ancho
+temp = Lever(0.1, "InfoNCE softmax temperature: the divisor on the cosine logits that decides "  "how sharply a near-miss counts as a negative.", U.FRACTION)  # Census: TEMP -> SIG_TEMP. One reader, `logits = za @ zp.t() / TEMP` a
+positive_radius_windows = Lever(2.0, "Furthest offset at which the InfoNCE positive is drawn "  "from its anchor, as a MULTIPLE of the loop window -- i.e. "  "what the encoder is taught to be invariant to.", U.COUNT) 
+prototype_frac = Lever(0.0, "Fraction of the InfoNCE batch replaced by pairs drawn from ONE "  "domain's reservoir, so the encoder is trained on kind-invariance "  "and not only on locality.", U.FRACTION) 
+floor_kinds = Lever(8, "Assumed number of distinct kinds of material in the stream; sets the "  "InfoNCE loss floor ln(1+(B-1)/K) below which the encoder step is "  "skipped.", U.DOMAINS) 
+var_weight = Lever(5.0, "Weight on the variance hinge that stops the encoder collapsing to a "  "single point.", U.COUNT)  # Census: ENC_VREG -> SIG_VAR_WEIGHT, renamed only to say what it weights. Read once at MODULE 
+cov_weight = Lever(0.0, "Weight on the covariance (decorrelation) term of the same "  "anti-collapse regulariser.", U.COUNT)  # Census: ENC_CREG -> SIG_COV_WEIGHT. Read at :1418, applied at :3371-3373 through the same 
+train_every = Lever(1, "Encoder training cadence while the stream is near a detected boundary "  "-- the dense arm of the shift gate.", U.Windows)  # Census: ENC_EVERY -> SIG_TRAIN_EVERY, typed Windows by the census and confirmed 
+train_every_idle = Lever(12, "Throttled encoder cadence once the stream has been stable for "  "longer than the dense window.", U.Windows)  # Census: ENC_EVERY_IDLE -> SIG_TRAIN_EVERY_IDLE. Resolved at :5306, consumed at :5320 and
+dense_window = Lever(400, "How long after a detected boundary the encoder stays on the dense "  "cadence before falling back to the idle one.", U.Windows)  # Census: ENC_SHIFT_WIN -> SIG_DENSE_WINDOW. Read at :5307, used at :5318-
+warmup = Lever(800, "Budget of unsupervised contrastive steps run before the main loop starts.",  U.Steps)  # Census: ENC_WARMUP -> SIG_WARMUP. Read at :5012 and again for the ETA at :4319 at the same 
+warmup_min_frac = Lever(0.25, "Share of the warmup budget that must be spent before the plateau "  "test is allowed to stop it early.", U.FRACTION, domain=(0.0, 1.0))  # DOMAIN (0.0, 1.0) -- A SHARE OF A BUDGET, MULTIPLIED BY THAT
+warmup_plateau_eps = Lever(0.015, "Relative gain in separation below which the adaptive warmup "  "declares the curve flat and stops early.", U.FRACTION)  # Census: ENC_WARMUP_EPS -> SIG_WARMUP_PLATEAU_EPS. Read at :5021, tested a
+warmup_probe_every = Lever(500, "How often, during warmup, the separation probe is taken -- the "  "sample grid the plateau test reads.", U.Steps)  # Census: ENC_WARMUP_PROBE -> SIG_WARMUP_PROBE_EVERY. Read at :5021, tested at :50
+=== src/tok/levers.py
+
+mode = Lever("online", "Which tokenization regime the run uses: raw bytes, a vocabulary built once "  "before training, or an online byte-BPE that keeps minting while it trains.",  U.NAME, choices=("bytes", "fixed", "online")) 
+freeze_at = Lever(0, "Window after which no further token is minted; the vocabulary is fixed from "  "there to the end of the run. 0 means never freeze.", U.Windows)  # Census: TOK_MINT_UNTIL -> TOK_FREEZE_AT, verdict rename, unit
+retok_every = Lever(3000, "How often the retok cadence asks for the stream to be re-segmented with the "  "vocabulary as it now stands; 0 disarms the ask. The ask waits for the next "  "epoch roll, which re-segments whatever this 
+grow_every = Lever(200, "Cadence at which the vocabulary mints a burst of new tokens.", U.Windows)  # Census: GROW_EVERY -> TOK_GROW_EVERY, verdict rename, unit "windows" (lowercase in the row; the  # kind is the same). Filed unde
+grow_burst = Lever(6, "How many new tokens are minted at each grow event.", U.TOKENS)  # Census: GROW_BURST -> TOK_GROW_BURST, verdict rename, filed under `misc`. Field corrected (DEFECT 1).  # IT IS HALF OF THE MINT BUDGET AND TH
+seed_vocab = Lever(512, "Target vocabulary size the pre-training build aims for, before any online "  "minting.", U.TOKENS)  # Census: SEED_VOCAB -> TOK_SEED_VOCAB, verdict rename. Field corrected (DEFECT 1). 
+build_passes = Lever(2, "How many tally-and-mint passes over the build corpus the pre-training "  "vocabulary build takes.", U.COUNT)  # Census: SEED_PASSES -> TOK_BUILD_PASSES, verdict rename, ABSORBING GROW_PASSES (verdict merge
+build_bytes = Lever(1000000, "How many bytes are taken from the head of each corpus for the "  "pre-training vocabulary build.", U.BYTES)  # Census: TOK_GROW_CAP -> TOK_BUILD_BYTES, verdict rename. Field corrected (DEFECT 1). 
+min_pair = Lever(50, "How many times an adjacent pair must have been counted before it is a "  "candidate for minting at all.", U.COUNT)  # Census: MIN_PAIR -> TOK_MIN_PAIR, verdict rename. Field corrected (DEFECT 1). 
+max_bytes = Lever(16, "The longest byte string a single token may stand for; a candidate merge "  "longer than this is refused.", U.BYTES_PER_TOKEN)  # Census: MAX_TOK -> TOK_MAX_BYTES, verdict rename. Field corrected (DEFECT 1). 
+cand_window = Lever(1024, "How many candidates deep the mint ranking is materialized, so a "  "re-ranker has something to choose from.", U.COUNT)  # Census: TOK_MINT_GATE_K -> TOK_CAND_WINDOW, verdict rename, absorbing the unregis
+mint_pmin = Lever(0.0, "Minimum p(b|a) for a merge to be accepted as a unit rather than a frequent "  "collision across a boundary; 0 mints on frequency alone.", U.PROBABILITY)  # Census: TOK_MINT_PMIN -> TOK_MINT_PMIN, verdict ke
+mint_novel = Lever(0.0, "Exponent re-ranking mint candidates by how much a pair has grown since it "  "was last considered; 0 reproduces plain most-frequent minting.", U.FRACTION)  # Census: TOK_MINT_NOVEL -> TOK_MINT_NOVEL, verdi
+dropout = Lever(0.0, "Probability of skipping an available merge during a counting segmentation, so "  "byte-level material still reaches the tally.", U.PROBABILITY,  domain=(0.0, 1.0)) 
+probation_uses = Lever(0, "How many appearances a newly minted token must earn before it keeps its "  "place in the match table; below it the merge is undone.", U.COUNT)  # Census: TOK_PROBATION -> TOK_PROBATION_USES, verdict rena
+probation_deadline = Lever(5000, "The window by which a minted token must have earned its "  "appearances, after which it is judged.", U.Windows)  # Census: TOK_PROBATION_STEPS -> TOK_PROBATION_DEADLINE, verdict rename, unit Windo
+probation_by = Lever("use", "Which post-mint test decides whether a token keeps its slot: did it get "  "used, or did its learned residual move away from what its bytes say.",  U.NAME, choices=("use", "embed")) 
+probation_residual = Lever(0.10, "Minimum ratio of a token's learned residual to its byte composite "  "for the token to be judged worth its slot.", U.FRACTION)  # Census: TOK_PROBATION_MIN -> TOK_PROBATION_RESIDUAL, verdict renam
+=== src/train/levers.py
+
+epochs = Lever(1, "How many passes over the stream the run makes; the loop's termination test.",  U.Epochs)  # Census: EPOCHS -> RUN.RUN_EPOCHS, verdict rename, default 1, unit Epochs (CENSUS.md:340). Field 
+seed = Lever(0, "Root seed for the whole run; every module's initialisation and the data stream "  "derive from it.", U.COUNT)  # Census: SEED -> RUN.RUN_SEED, verdict rename, default 0, unit count (CENSUS.md:404). Field corrected
+device = Lever("cpu", "The torch device every module's .to() targets, and the gate on the "  "mixed-precision branch.", U.NAME, choices=("cpu", "cuda"))  # Census: DEVICE -> RUN.RUN_DEVICE, verdict rename, default cpu (CENSUS.md:4
+tf32 = Lever(True, "Allow TF32 matmul and cuDNN kernels; changes how matmuls execute, not what is "  "computed.", U.FLAG)  # Census: TF32 -> RUN.RUN_TF32, verdict rename, default 1, unit on/off (CENSUS.md:405). Field 
+amp = Lever("off", "Autocast precision for the LM step: off runs fp32, bf16 runs the step in "  "bfloat16 while memory keys stay fp32.", U.NAME, choices=("off", "bf16"))  # Census: AMP -> RUN.RUN_AMP, verdict rename, default "off"
+bench = Lever(False, "Stop immediately after the training loop and print throughput instead of "  "running the eval battery.", U.FLAG)  # Census: BENCH -> RUN.RUN_BENCH, verdict keep, default 0, unit FLAG (CENSUS.md:352). Field co
+profile = Lever(False, "Per-component wall-clock attribution of the training step, rendered at "  "the end of the run and in the throughput summary.", U.FLAG)  # THE HELP TEXT SAID "dumped on the rate cadence" UNTIL 2026-09-24. Th
+=== src/world/levers.py
+
+enabled = Lever(True, "Build the world encoder and the dynamics population, and add their terms to "  "the training loss; off builds a null world that no other package can "  "dereference.", U.FLAG) 
+feedback = Lever(False, "Condition the base LM on the forecast (h += world_proj(forecast)) instead "  "of leaving the world model as an unused side head.", U.FLAG)  # SHIPS False SINCE 2026-09-24, BY THE RULE Q-WORLD-10 SET BEFORE
+lat = Lever(32, "Width of the shared latent world-state the encoder produces and every dynamics "  "predictor operates in.", U.COUNT)  # Census: WORLD_LAT, verdict keep (the name is already clear); doubled name corrected to `lat`.
+hid = Lever(128, "Hidden width of the world encoder MLP and of every forward-dynamics predictor "  "MLP.", U.COUNT)  # Census: WORLD_HID, verdict keep; doubled name corrected to `hid`. Old default `_i("WORLD_HID", 
+route_d = Lever(24, "Width of the routing key space: the output width of qproj and the length of "  "each predictor's key vector.", U.COUNT)  # Census: WORLD_ROUTE -> WORLD.WORLD_ROUTE_D, doubled name corrected to `route_d`. Old d
+n0 = Lever(3, "Number of dynamics predictors the population is built with before any growth.",  U.COUNT)  # Census: WORLD_N0, verdict keep; doubled name corrected to `n0`. Old default `_i("WORLD_N0", 3)` at 
+nmax = Lever(6, "Hard cap on the number of LIVE dynamics predictors; also sizes the "  "per-predictor fitness, routing-mass and alive buffers.", U.COUNT)  # Census: WORLD_NMAX, verdict keep; doubled name corrected to `nmax`. Old d
+grow = Lever(True, "Selection on the population: clone a predictor from the fittest on a "  "forward-loss plateau, and soft-cull predictors whose routing mass has decayed "  "away.", U.FLAG) 
+collapse_w = Lever(1.0, "Weight on the VICReg-style variance+covariance anti-collapse term applied "  "to the encoder's latent.", U.FRACTION)  # Census: WORLD_VAR -> WORLD.WORLD_COLLAPSE_W, doubled name corrected to `collapse_w`. 
+predict_w = Lever(0.1, "Weight on the population forward-prediction (plus load-balance) term in the "  "total training loss.", U.FRACTION)  # Census: WORLD_W -> WORLD.WORLD_PREDICT_W, doubled name corrected to `predict_w`. Old def
+horizon = Lever(1, "Prediction horizon in stream positions: the latent at t is trained to predict "  "the latent at t+horizon.", U.TOKENS)  # Census: WORLD_K -> WORLD.WORLD_HORIZON, doubled name corrected to `horizon`. Old default

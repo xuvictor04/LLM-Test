@@ -1,0 +1,17 @@
+{
+ "base": {
+  "text_step": 0.0816,
+  "codec_only_step": 0.091,
+  "media_step_P2": 0.1063
+ },
+ "d2": {
+  "text_step": 0.0626,
+  "codec_only_step": 0.0812,
+  "media_step_P2": 0.1308
+ },
+ "d2_frozen": {
+  "text_step": 0.0596,
+  "codec_only_step": 0.0746,
+  "media_step_P2": 0.0791
+ }
+}

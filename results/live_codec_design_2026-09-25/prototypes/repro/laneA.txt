@@ -1,0 +1,6 @@
+d1_frozen25lat_s0|d1|python3 run_arm.py --arm frozen25 --seed 0 --media_rows lattice --out res/frozen25lat_s0.json
+d1_live25_s0|d1|python3 run_arm.py --arm live25 --seed 0 --out res/live25_s0.json
+d1_frozen25_s2|d1|python3 run_arm.py --arm frozen25 --seed 2 --out res/frozen25_s2.json
+d1_frozen25lat_s2|d1|python3 run_arm.py --arm frozen25 --seed 2 --media_rows lattice --out res/frozen25lat_s2.json
+d1_live25_s2|d1|python3 run_arm.py --arm live25 --seed 2 --out res/live25_s2.json
+d1_live25lat_s2|d1|python3 run_arm.py --arm live25 --seed 2 --media_rows lattice --out res/live25lat_s2.json

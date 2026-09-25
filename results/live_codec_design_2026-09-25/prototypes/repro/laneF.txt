@@ -1,0 +1,2 @@
+d2_fixed_s1|d2|python3 d2run.py d2_fixed 1 res/d2_fixed_s1.json
+d3_ttcMRc_s2|d3|python3 run.py ttcMRc 2 res/ttcMRc_s2.json

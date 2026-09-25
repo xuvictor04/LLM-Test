@@ -1,0 +1,20 @@
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+after_A {"window": 112, "text_bpb": 3.1368, "A_codec": {"mel": 0.4831, "recon_probe_exact": 0.299, "codes_used": 594, "world_rel_h1": 2.6244}, "B_codec": {"mel": 0.5833, "recon_probe_exact": 0.24, "codes_used": 476, "world_rel_h1": 1.7014}, "A": {"bits_per_s": 414.5, "bits_per_pos": 9.8367, "caption_bits_per_byte": 2.7123, "positions_per_s": 40.9, "positions_per_s_by_kind": {"beeps": 38.28, "fall": 44.42, "rise": 43.29, "tone": 42.88}, "understand_exact_train": 0.0, "understand_exact_heldout": 0.0, "generate_t1.0": {"exact_train": 0.021, "exact_heldout": 0.0, "mean_frames": 31.4, "short": 75}, "genera
+after_A {"window": 112, "text_bpb": 3.1368, "A_codec": {"mel": 0.4831, "recon_probe_exact": 0.299, "codes_used": 594, "world_rel_h1": 2.6244}, "B_codec": {"mel": 0.5833, "recon_probe_exact": 0.24, "codes_used": 476, "world_rel_h1": 1.7014}, "A": {"bits_per_s": 414.5, "bits_per_pos": 9.8367, "caption_bits_per_byte": 2.7123, "positions_per_s": 40.9, "positions_per_s_by_kind": {"beeps": 38.28, "fall": 44.42, "rise": 43.29, "tone": 42.88}, "understand_exact_train": 0.0, "understand_exact_heldout": 0.0, "generate_t1.0": {"exact_train": 0.021, "exact_heldout": 0.0, "mean_frames": 31.4, "short": 75}, "genera
+{
+ "arm": "live50bpe",
+ "seed": 0,
+ "steps_uninterrupted": 29,
+ "steps_resumed_total": 29,
+ "save_at_step": 10,
+ "acts_before_save": 1,
+ "acts_total": 4,
+ "max_abs_loss_diff": 0.0,
+ "bit_identical": true,
+ "windows_final_A": 232,
+ "windows_final_C": 232,
+ "epoch_revisions_A": 4,
+ "epoch_revisions_C": 4,
+ "s": 74.0
+}

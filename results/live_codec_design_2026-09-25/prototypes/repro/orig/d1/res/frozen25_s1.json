@@ -1,0 +1,306 @@
+{
+ "arm": "frozen25",
+ "seed": 1,
+ "args": {
+  "arm": "frozen25",
+  "seed": 1,
+  "n_a": 8000,
+  "n_b": 8000,
+  "text_every": 4,
+  "text_len": 96,
+  "B": 8,
+  "codec_every": 4,
+  "codec_lr": 5e-05,
+  "codec_keep_opt": 1,
+  "anchor_scope": "all",
+  "anchor_w": null,
+  "act_every": 2000,
+  "bpe_burst": 32,
+  "bpe_min_pair": 50,
+  "bpe_max_frames": 16,
+  "p1_steps": 800,
+  "media_rows": "table",
+  "resume_test": 0,
+  "out": "res/frozen25_s1.json"
+ },
+ "cfg": {
+  "stride": 2,
+  "live": 0,
+  "anchor_w": 0.0,
+  "snapshot": 1,
+  "bpe": "off"
+ },
+ "fps_base": 25,
+ "text_bpb_after_text_phase": 2.065,
+ "after_A": {
+  "window": 4568,
+  "text_bpb": 2.0468,
+  "A_codec": {
+   "mel": 0.5319,
+   "recon_probe_exact": 0.347,
+   "codes_used": 574,
+   "world_rel_h1": 0.42
+  },
+  "B_codec": {
+   "mel": 0.6215,
+   "recon_probe_exact": 0.271,
+   "codes_used": 438,
+   "world_rel_h1": 0.6886
+  },
+  "A": {
+   "bits_per_s": 138.07,
+   "bits_per_pos": 5.3104,
+   "caption_bits_per_byte": 0.3145,
+   "positions_per_s": 25.0,
+   "positions_per_s_by_kind": {
+    "beeps": 25.0,
+    "fall": 25.0,
+    "rise": 25.0,
+    "tone": 25.0
+   },
+   "understand_exact_train": 0.047,
+   "understand_exact_heldout": 0.0,
+   "generate_t1.0": {
+    "exact_train": 0.031,
+    "exact_heldout": 0.083,
+    "mean_frames": 25.0,
+    "short": 0
+   },
+   "generate_t0.7": {
+    "exact_train": 0.01,
+    "exact_heldout": 0.0,
+    "mean_frames": 25.0,
+    "short": 0
+   }
+  }
+ },
+ "final": {
+  "window": 9870,
+  "text_bpb": 2.0343,
+  "A_codec": {
+   "mel": 0.5319,
+   "recon_probe_exact": 0.347,
+   "codes_used": 574,
+   "world_rel_h1": 0.5743
+  },
+  "B_codec": {
+   "mel": 0.6215,
+   "recon_probe_exact": 0.271,
+   "codes_used": 438,
+   "world_rel_h1": 0.3475
+  },
+  "A": {
+   "bits_per_s": 176.31,
+   "bits_per_pos": 6.7812,
+   "caption_bits_per_byte": 2.4144,
+   "positions_per_s": 25.0,
+   "positions_per_s_by_kind": {
+    "beeps": 25.0,
+    "fall": 25.0,
+    "rise": 25.0,
+    "tone": 25.0
+   },
+   "understand_exact_train": 0.0,
+   "understand_exact_heldout": 0.0,
+   "generate_t1.0": {
+    "exact_train": 0.01,
+    "exact_heldout": 0.0,
+    "mean_frames": 25.0,
+    "short": 0
+   },
+   "generate_t0.7": {
+    "exact_train": 0.0,
+    "exact_heldout": 0.0,
+    "mean_frames": 25.0,
+    "short": 0
+   }
+  },
+  "B": {
+   "bits_per_s": 185.11,
+   "bits_per_pos": 7.1195,
+   "caption_bits_per_byte": 0.1316,
+   "positions_per_s": 25.0,
+   "positions_per_s_by_kind": {
+    "mel-arch": 25.0,
+    "mel-down": 25.0,
+    "mel-up": 25.0,
+    "mel-valley": 25.0
+   },
+   "understand_exact_train": 0.155,
+   "understand_exact_heldout": 0.0,
+   "generate_t1.0": {
+    "exact_train": 0.107,
+    "exact_heldout": 0.125,
+    "mean_frames": 25.0,
+    "short": 0
+   },
+   "generate_t0.7": {
+    "exact_train": 0.018,
+    "exact_heldout": 0.0,
+    "mean_frames": 25.0,
+    "short": 0
+   }
+  }
+ },
+ "windows_initial": 9870,
+ "windows_final": 9870,
+ "windows_consumed": 9870,
+ "clock": {
+  "step": 9870,
+  "epoch": 0,
+  "windows_in_epoch": 9870,
+  "in_epoch": 9870,
+  "epoch_revisions": 0
+ },
+ "counters": {
+  "acts": 0,
+  "mints": 0,
+  "retok_mid_epoch": 0,
+  "retok_deferred": 0,
+  "minted_in_consumed": 0,
+  "media_pos_consumed": 400000,
+  "media_sec_consumed": 0.0,
+  "codec_steps": 0,
+  "jit_reencoded": 0,
+  "world_steps": 1234,
+  "stranded_mints": 0
+ },
+ "bpe_size": 1000,
+ "bpe_refused_len": 0,
+ "unconsumed_tail_positions": 88,
+ "wall_s": 201.4,
+ "timers": {
+  "lm": 117.6,
+  "codec": 0.0,
+  "act": 0.0,
+  "jit": 0.0,
+  "world": 14.4,
+  "eval": 46.4
+ },
+ "s_per_step_lm": 0.0953,
+ "s_per_window_total": 0.0157,
+ "acts": [],
+ "drift": [],
+ "curve": [
+  [
+   400,
+   1.6725,
+   6.6563
+  ],
+  [
+   800,
+   1.443,
+   5.6509
+  ],
+  [
+   1200,
+   1.543,
+   4.494
+  ],
+  [
+   1600,
+   1.4036,
+   4.5548
+  ],
+  [
+   2000,
+   1.4143,
+   4.7419
+  ],
+  [
+   2400,
+   1.4209,
+   4.1209
+  ],
+  [
+   2800,
+   1.3254,
+   4.1802
+  ],
+  [
+   3200,
+   1.2775,
+   3.9372
+  ],
+  [
+   3600,
+   1.2389,
+   4.2968
+  ],
+  [
+   4000,
+   1.2005,
+   3.8977
+  ],
+  [
+   4400,
+   1.1368,
+   3.4432
+  ],
+  [
+   4800,
+   1.2186,
+   5.8318
+  ],
+  [
+   5200,
+   1.0862,
+   5.0608
+  ],
+  [
+   5600,
+   1.0421,
+   4.7306
+  ],
+  [
+   6000,
+   0.999,
+   4.3327
+  ],
+  [
+   6400,
+   1.0126,
+   4.7617
+  ],
+  [
+   6800,
+   1.0197,
+   4.6163
+  ],
+  [
+   7200,
+   1.0336,
+   4.2938
+  ],
+  [
+   7600,
+   0.9757,
+   3.8208
+  ],
+  [
+   8000,
+   1.0062,
+   4.411
+  ],
+  [
+   8400,
+   1.0068,
+   4.3047
+  ],
+  [
+   8800,
+   1.0009,
+   4.0118
+  ],
+  [
+   9200,
+   1.0035,
+   4.3465
+  ],
+  [
+   9600,
+   1.009,
+   4.0897
+  ]
+ ]
+}
