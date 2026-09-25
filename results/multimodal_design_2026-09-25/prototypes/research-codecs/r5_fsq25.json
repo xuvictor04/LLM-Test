@@ -1,0 +1,81 @@
+{
+ "snr_db": -0.013498528860509396,
+ "sisnr_db": -43.5574951171875,
+ "stft": 3.679539918899536,
+ "mel": 1.1162973642349243,
+ "l1": 0.18307538330554962,
+ "rtf_encode_decode": 0.02235698699951172,
+ "codebooks": [
+  {
+   "used": 1,
+   "of": 1000,
+   "frac": 0.001,
+   "perplexity": 1.0,
+   "entropy_bits": -0.0,
+   "max_bits": 9.966,
+   "n_tokens": 800
+  }
+ ],
+ "tokens_per_s": 25.0,
+ "bits_per_s_nominal": 249.14460711655218,
+ "bits_per_s_entropy": 0.0,
+ "baseline_zero_stft": 4.918335914611816,
+ "baseline_zero_mel": 1.8279465436935425,
+ "baseline_mulaw8_bps": 64000,
+ "baseline_mulaw8_snr_db": 37.931236267089844,
+ "baseline_mulaw8_mel": 0.5013025403022766,
+ "args": {
+  "quant": "fsq",
+  "sr": 8000,
+  "stride": 320,
+  "C": 16,
+  "D": 64,
+  "levels": "8,5,5,5",
+  "nq": 4,
+  "K": 256,
+  "minutes": 8.0,
+  "bs": 8,
+  "seg": 0.5,
+  "out": "/tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/mm/research-codecs/r5_fsq25.json",
+  "seed": 0,
+  "arch": "v1",
+  "act": "elu",
+  "eval_every": 500,
+  "prenorm": 0,
+  "cplx_w": 0.0,
+  "l1_w": 1.0,
+  "lr": 0.001
+ },
+ "params": 680581,
+ "steps": 2333,
+ "train_seconds": 480.1,
+ "audio_seconds_seen": 9332.0,
+ "frames_per_s": 25.0,
+ "log": [
+  [
+   292.5,
+   1400,
+   4.3054
+  ],
+  [
+   333.1,
+   1600,
+   5.4082
+  ],
+  [
+   373.5,
+   1800,
+   5.6723
+  ],
+  [
+   412.6,
+   2000,
+   4.2774
+  ],
+  [
+   453.4,
+   2200,
+   4.9702
+  ]
+ ]
+}

@@ -1,0 +1,16 @@
+import os, sys, time
+os.environ.update(OMP_NUM_THREADS="1", MKL_NUM_THREADS="1", DATA_STREAM_BYTES="120000")
+sys.path.insert(0, "/tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/mm/design-stream/tree/src")
+import torch; torch.set_num_threads(1)
+from spine.compose import compose
+t=time.time()
+sysm = compose(environ=dict(os.environ))
+print("compose s", time.time()-t)
+print(type(sysm), [a for a in dir(sysm) if not a.startswith('_')])
+seg=sysm.segmentation; print(type(seg), len(seg.ids), seg.bytes_per_token, seg.ids[:20])
+v=sysm.vocab; print(type(v), v.size() if hasattr(v,'size') else None)
+print("labels", sorted(set(seg.labels))[:10])
+print("stream bytes", len(sysm.stream.bytes), sysm.stream.bytes[:200])
+print("areas", type(sysm.areas), list(sysm.areas.bodies.keys()) if hasattr(sysm.areas,'bodies') else None)
+m=sysm.model; print(m)
+print(sysm.configs.keys() if hasattr(sysm.configs,'keys') else type(sysm.configs))

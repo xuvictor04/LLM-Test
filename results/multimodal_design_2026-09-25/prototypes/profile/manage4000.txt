@@ -1,0 +1,12 @@
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+n_live 4001 warm win/s 2.31
+manage seconds 53.0 n_live after 4001
+         32012159 function calls in 52.997 seconds
+
+   Ordered by: internal time
+   List reduced from 50 to 12 due to restriction <12>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1   24.075   24.075   52.997   52.997 /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/mm/profile/tree/src/fabric/api.py:3415(manage)
+  8002000   21.333    0.000   21.333    0.000 {built-in method torch.rsub}
+  8002000    4.778    0.000   28.920    0.000 /usr/local/lib/python3.11/dist-packages/torch/_tensor.py:32(wrapped)

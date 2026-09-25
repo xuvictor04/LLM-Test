@@ -1,0 +1,1 @@
+{"n_train": 2400, "n_eval": 144, "gen_s": 1.0, "encode_s": 1.9, "audio_s_encoded": 2544, "encode_rtf": 0.0008, "codes_per_clip": 50, "latent_dim": 64, "train_codes_used": 830}

@@ -1,0 +1,58 @@
+{
+ "params": 654085,
+ "steps": 2153,
+ "train_s": 486,
+ "frames_per_s": 50.0,
+ "mel_heldout": 1.1686,
+ "mel_silence": 1.7054,
+ "codes_used": 292,
+ "code_entropy_bits": 6.288,
+ "perplexity": 78.1,
+ "rtf_encode_decode": 0.0359,
+ "probe_acc_true": {
+  "kind": 1.0,
+  "band": 1.0,
+  "timbre": 1.0,
+  "count": 1.0,
+  "exact": 1.0
+ },
+ "probe_acc_codec_recon": {
+  "kind": 0.188,
+  "band": 0.333,
+  "timbre": 0.5,
+  "count": 0.424,
+  "exact": 0.028
+ },
+ "log": [
+  [
+   376,
+   1700,
+   3.698,
+   82
+  ],
+  [
+   399,
+   1800,
+   3.572,
+   91
+  ],
+  [
+   422,
+   1900,
+   2.895,
+   94
+  ],
+  [
+   445,
+   2000,
+   2.925,
+   94
+  ],
+  [
+   468,
+   2100,
+   2.772,
+   94
+  ]
+ ]
+}

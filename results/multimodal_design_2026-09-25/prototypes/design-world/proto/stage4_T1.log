@@ -1,0 +1,9 @@
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+T1 (0, 1.339, 0.46124) 0
+T1 (400, 0.1211, 0.00951) 25
+T1 (800, 0.0946, 0.00556) 42
+T1 (1200, 0.0797, 0.00445) 61
+T1 (1600, 0.08, 0.00412) 80
+T1 (1999, 0.0637, 0.00329) 98
+{"arm": "T1", "steps": 2000, "input_noise": 0.0, "train_s": 98, "curve[it,loss,readout_or_mse]": [[0, 1.339, 0.46124], [400, 0.1211, 0.00951], [800, 0.0946, 0.00556], [1200, 0.0797, 0.00445], [1600, 0.08, 0.00412], [1999, 0.0637, 0.00329]], "hold": {"note_acc_by_position": [1.0, 0.11, 0.105, 0.09], "note_acc": 0.326, "timbre_acc": 0.625, "all4_notes_and_timbre": 0.002, "L1_logmel_vs_truth": 1.201, "gen_ms_per_2.56s_clip": 0.31}, "combo": {"note_acc_by_position": [0.42, 0.135, 0.01, 0.035], "note_acc": 0.15, "timbre_acc": 0.0, "all4_notes_and_timbre": 0.0, "L1_logmel_vs_truth": 1.676, "gen_ms_per_2.56s_clip": 0.33}}

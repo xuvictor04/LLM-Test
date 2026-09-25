@@ -1,0 +1,9 @@
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+prefix world (0, 8.0014) 0
+prefix world (300, 0.9908) 4
+prefix world (600, 0.6678) 9
+prefix world (900, 0.2318) 13
+prefix world (1200, 0.1022) 17
+prefix world (1499, 0.0603) 23
+{"cond": "prefix", "src": "world", "K": 8, "train_s": 23, "curve_bits_per_byte": [[0, 8.0014], [300, 0.9908], [600, 0.6678], [900, 0.2318], [1200, 0.1022], [1499, 0.0603]], "hold": {"caption_bits": 0.374, "bits_per_byte": 0.0386, "exact": 0.94, "timbre_acc": 1.0, "note_acc": 0.978}, "combo": {"caption_bits": 8.012, "bits_per_byte": 0.8902, "exact": 0.03, "timbre_acc": 1.0, "note_acc": 0.271}, "ms_per_B16_ctx128_fwd_bwd": 48.5}

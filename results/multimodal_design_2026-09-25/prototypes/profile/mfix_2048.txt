@@ -1,0 +1,14 @@
+n_live 2049 warm win/s 4.1
+manage seconds 0.03 n_live after 2049
+         2223 function calls in 0.033 seconds
+
+   Ordered by: internal time
+   List reduced from 59 to 12 due to restriction <12>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.013    0.013    0.033    0.033 /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/mm/profile/tree2/src/fabric/api.py:3415(manage)
+        1    0.013    0.013    0.013    0.013 {method 'double' of 'torch._C.TensorBase' objects}
+        1    0.003    0.003    0.003    0.003 {built-in method torch.rsub}
+        1    0.002    0.002    0.002    0.002 {built-in method torch.triu}
+        1    0.001    0.001    0.001    0.001 {method 'nonzero' of 'torch._C.TensorBase' objects}
+     2050    0.000    0.000    0.000    0.000 /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/mm/profile/tree2/src/fabric/api.py:3847(<genexpr>)

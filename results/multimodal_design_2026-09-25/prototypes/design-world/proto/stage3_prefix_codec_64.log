@@ -1,0 +1,9 @@
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+prefix codec (0, 8.1071) 0
+prefix codec (300, 1.0015) 18
+prefix codec (600, 0.7426) 29
+prefix codec (900, 0.5604) 40
+prefix codec (1200, 0.3439) 51
+prefix codec (1499, 0.1716) 61
+{"cond": "prefix", "src": "codec", "K": 64, "train_s": 61, "curve_bits_per_byte": [[0, 8.1071], [300, 1.0015], [600, 0.7426], [900, 0.5604], [1200, 0.3439], [1499, 0.1716]], "hold": {"caption_bits": 1.472, "bits_per_byte": 0.1519, "exact": 0.74, "timbre_acc": 1.0, "note_acc": 0.882}, "combo": {"caption_bits": 8.881, "bits_per_byte": 0.9868, "exact": 0.005, "timbre_acc": 1.0, "note_acc": 0.211}, "ms_per_B16_ctx128_fwd_bwd": 58.2}

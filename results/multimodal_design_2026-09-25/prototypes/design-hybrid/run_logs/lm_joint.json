@@ -1,0 +1,174 @@
+{
+ "arm": "joint",
+ "p1": 1500,
+ "p2": 3000,
+ "V": 1264,
+ "L": 96,
+ "W": 128,
+ "params": 522992,
+ "p1_s_per_step": 0.1295,
+ "after_p1": {
+  "text_bpb": 1.9967
+ },
+ "p2_s_per_step": 0.1292,
+ "p2_s_per_window": 0.00808,
+ "after_p2": {
+  "text_bpb": 8.5487,
+  "text_bpb_evaluated_with_mask": 8.127,
+  "bits_per_code_t2a": 3.2804,
+  "bits_per_code_a2t": 3.4139,
+  "caption_bits_per_byte_a2t": 0.0737
+ },
+ "understand_a2t": {
+  "train_combos": {
+   "kind": 0.609,
+   "band": 0.953,
+   "timbre": 0.883,
+   "count": 0.703,
+   "exact": 0.336,
+   "n": 128
+  },
+  "heldout_combos": {
+   "kind": 0.5,
+   "band": 0.938,
+   "timbre": 0.812,
+   "count": 0.438,
+   "exact": 0.0,
+   "n": 16
+  }
+ },
+ "generate_t2a_temp1": {
+  "train_combos": {
+   "kind": 0.406,
+   "band": 0.344,
+   "timbre": 0.521,
+   "count": 0.396,
+   "exact": 0.052,
+   "n": 96
+  },
+  "heldout_combos": {
+   "kind": 0.333,
+   "band": 0.5,
+   "timbre": 0.583,
+   "count": 0.25,
+   "exact": 0.0,
+   "n": 12
+  },
+  "invalid_id_rate": 0.0589,
+  "distinct_codes": 525
+ },
+ "generate_t2a_temp0.7": {
+  "train_combos": {
+   "kind": 0.438,
+   "band": 0.365,
+   "timbre": 0.49,
+   "count": 0.365,
+   "exact": 0.062,
+   "n": 96
+  },
+  "heldout_combos": {
+   "kind": 0.417,
+   "band": 0.5,
+   "timbre": 0.667,
+   "count": 0.417,
+   "exact": 0.083,
+   "n": 12
+  },
+  "invalid_id_rate": 0.0359,
+  "distinct_codes": 448
+ },
+ "generate_s": 15.0,
+ "curve": [
+  [
+   "P1",
+   0,
+   10.33
+  ],
+  [
+   "P1",
+   250,
+   3.191
+  ],
+  [
+   "P1",
+   500,
+   2.618
+  ],
+  [
+   "P1",
+   750,
+   2.245
+  ],
+  [
+   "P1",
+   1000,
+   2.104
+  ],
+  [
+   "P1",
+   1250,
+   2.0
+  ],
+  [
+   "P2",
+   0,
+   19.917
+  ],
+  [
+   "P2",
+   250,
+   2.822
+  ],
+  [
+   "P2",
+   500,
+   2.01
+  ],
+  [
+   "P2",
+   750,
+   2.144
+  ],
+  [
+   "P2",
+   1000,
+   1.524
+  ],
+  [
+   "P2",
+   1250,
+   1.897
+  ],
+  [
+   "P2",
+   1500,
+   1.728
+  ],
+  [
+   "P2",
+   1750,
+   1.765
+  ],
+  [
+   "P2",
+   2000,
+   1.635
+  ],
+  [
+   "P2",
+   2250,
+   1.365
+  ],
+  [
+   "P2",
+   2500,
+   1.489
+  ],
+  [
+   "P2",
+   2750,
+   1.503
+  ]
+ ],
+ "forgetting_text_bpb": 6.552
+}

@@ -1,0 +1,62 @@
+{
+ "snr_db": -0.049082718789577484,
+ "sisnr_db": -43.870723724365234,
+ "stft": 2.584782838821411,
+ "mel": 0.6688674092292786,
+ "l1": 0.18410834670066833,
+ "rtf_encode_decode": 0.019359424710273743,
+ "baseline_zero_stft": 4.918916702270508,
+ "baseline_zero_mel": 1.8279203176498413,
+ "baseline_mulaw8_bps": 64000,
+ "baseline_mulaw8_snr_db": 37.931236267089844,
+ "baseline_mulaw8_mel": 0.5013025403022766,
+ "args": {
+  "quant": "none",
+  "sr": 8000,
+  "stride": 160,
+  "C": 16,
+  "D": 64,
+  "levels": "8,5,5,5",
+  "nq": 4,
+  "K": 256,
+  "minutes": 8.0,
+  "bs": 8,
+  "seg": 0.5,
+  "out": "/tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/mm/research-codecs/r2_none.json",
+  "seed": 0,
+  "arch": "v1",
+  "lr": 0.001
+ },
+ "params": 566913,
+ "steps": 2142,
+ "train_seconds": 480.1,
+ "audio_seconds_seen": 8568.0,
+ "frames_per_s": 50.0,
+ "log": [
+  [
+   307.4,
+   1200,
+   3.1123
+  ],
+  [
+   351.2,
+   1400,
+   3.3981
+  ],
+  [
+   385.9,
+   1600,
+   3.8975
+  ],
+  [
+   421.0,
+   1800,
+   4.2917
+  ],
+  [
+   455.9,
+   2000,
+   3.2774
+  ]
+ ]
+}

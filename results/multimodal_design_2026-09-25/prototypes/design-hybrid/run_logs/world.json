@@ -1,0 +1,208 @@
+{
+ "latent_dim": 64,
+ "frames_per_s": 50,
+ "steps": 1500,
+ "horizons_frames": [
+  1,
+  5
+ ],
+ "persistence": {
+  "train_s": 0.0,
+  "params": 0,
+  "rel_mse_vs_persistence": {
+   "h1": 1.0,
+   "h5": 1.0
+  },
+  "tf_h1_decoded_mel": 0.545,
+  "tf_h1_decoded_probe": {
+   "train_combos": {
+    "kind": 0.812,
+    "band": 0.938,
+    "timbre": 0.562,
+    "count": 0.719,
+    "exact": 0.383,
+    "n": 128
+   },
+   "heldout_combos": {
+    "kind": 0.812,
+    "band": 0.938,
+    "timbre": 0.688,
+    "count": 0.688,
+    "exact": 0.312,
+    "n": 16
+   }
+  }
+ },
+ "linres_memoryless": {
+  "train_s": 5.7,
+  "params": 8192,
+  "rel_mse_vs_persistence": {
+   "h1": 0.3208,
+   "h5": 0.6781
+  },
+  "tf_h1_decoded_mel": 0.5016,
+  "tf_h1_decoded_probe": {
+   "train_combos": {
+    "kind": 0.773,
+    "band": 0.938,
+    "timbre": 0.602,
+    "count": 0.68,
+    "exact": 0.391,
+    "n": 128
+   },
+   "heldout_combos": {
+    "kind": 0.75,
+    "band": 0.938,
+    "timbre": 0.688,
+    "count": 0.75,
+    "exact": 0.312,
+    "n": 16
+   }
+  }
+ },
+ "mlp_memoryless": {
+  "train_s": 8.7,
+  "params": 33152,
+  "rel_mse_vs_persistence": {
+   "h1": 0.1624,
+   "h5": 0.5673
+  },
+  "tf_h1_decoded_mel": 0.4707,
+  "tf_h1_decoded_probe": {
+   "train_combos": {
+    "kind": 0.805,
+    "band": 0.953,
+    "timbre": 0.602,
+    "count": 0.703,
+    "exact": 0.414,
+    "n": 128
+   },
+   "heldout_combos": {
+    "kind": 0.875,
+    "band": 0.938,
+    "timbre": 0.625,
+    "count": 0.812,
+    "exact": 0.5,
+    "n": 16
+   }
+  }
+ },
+ "gru_temporal": {
+  "train_s": 30.1,
+  "params": 91008,
+  "rel_mse_vs_persistence": {
+   "h1": 0.134,
+   "h5": 0.3862
+  },
+  "tf_h1_decoded_mel": 0.475,
+  "tf_h1_decoded_probe": {
+   "train_combos": {
+    "kind": 0.805,
+    "band": 0.938,
+    "timbre": 0.586,
+    "count": 0.703,
+    "exact": 0.406,
+    "n": 128
+   },
+   "heldout_combos": {
+    "kind": 0.688,
+    "band": 0.938,
+    "timbre": 0.625,
+    "count": 0.688,
+    "exact": 0.312,
+    "n": 16
+   }
+  }
+ },
+ "gru_temporal_caption": {
+  "train_s": 32.6,
+  "params": 140288,
+  "rel_mse_vs_persistence": {
+   "h1": 0.1377,
+   "h5": 0.314
+  },
+  "tf_h1_decoded_mel": 0.4931,
+  "tf_h1_decoded_probe": {
+   "train_combos": {
+    "kind": 0.82,
+    "band": 0.953,
+    "timbre": 0.625,
+    "count": 0.773,
+    "exact": 0.477,
+    "n": 128
+   },
+   "heldout_combos": {
+    "kind": 0.875,
+    "band": 0.938,
+    "timbre": 0.625,
+    "count": 0.875,
+    "exact": 0.5,
+    "n": 16
+   }
+  }
+ },
+ "codec_recon_mel": 0.4599,
+ "rollout_gru_temporal_prompt10f": {
+  "probe": {
+   "train_combos": {
+    "kind": 0.305,
+    "band": 0.469,
+    "timbre": 0.562,
+    "count": 0.344,
+    "exact": 0.062,
+    "n": 128
+   },
+   "heldout_combos": {
+    "kind": 0.375,
+    "band": 0.438,
+    "timbre": 0.688,
+    "count": 0.375,
+    "exact": 0.0,
+    "n": 16
+   }
+  },
+  "mel_vs_truth": 1.1568
+ },
+ "rollout_gru_temporal_caption_prompt10f": {
+  "probe": {
+   "train_combos": {
+    "kind": 0.375,
+    "band": 0.633,
+    "timbre": 0.555,
+    "count": 0.414,
+    "exact": 0.094,
+    "n": 128
+   },
+   "heldout_combos": {
+    "kind": 0.375,
+    "band": 0.375,
+    "timbre": 0.688,
+    "count": 0.562,
+    "exact": 0.125,
+    "n": 16
+   }
+  },
+  "mel_vs_truth": 1.124
+ },
+ "rollout_gru_temporal_caption_prompt0f": {
+  "probe": {
+   "train_combos": {
+    "kind": 0.32,
+    "band": 0.438,
+    "timbre": 0.578,
+    "count": 0.258,
+    "exact": 0.031,
+    "n": 128
+   },
+   "heldout_combos": {
+    "kind": 1.0,
+    "band": 0.25,
+    "timbre": 0.5,
+    "count": 0.75,
+    "exact": 0.0,
+    "n": 16
+   }
+  },
+  "mel_vs_truth": 1.7027
+ }
+}

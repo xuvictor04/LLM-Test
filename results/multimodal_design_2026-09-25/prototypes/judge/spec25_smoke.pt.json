@@ -1,0 +1,41 @@
+{
+ "params": 1199621,
+ "steps": 53,
+ "train_s": 14,
+ "frames_per_s": 25,
+ "logmag_l1_heldout": 1.4998,
+ "mel_heldout": 1.1197,
+ "mel_griffinlim_oracle": 0.1845,
+ "mel_silence": 1.7057,
+ "rms_true": 0.2707,
+ "rms_recon": 0.0042,
+ "codes_used": 260,
+ "code_entropy_bits": 6.014,
+ "perplexity": 64.6,
+ "encode_rtf": 0.00185,
+ "decode_rtf_gl32": 0.0334,
+ "probe_acc": {
+  "true": {
+   "kind": 1.0,
+   "band": 1.0,
+   "timbre": 1.0,
+   "count": 1.0,
+   "exact": 1.0
+  },
+  "griffinlim_oracle": {
+   "kind": 1.0,
+   "band": 1.0,
+   "timbre": 1.0,
+   "count": 1.0,
+   "exact": 1.0
+  },
+  "codec_recon": {
+   "kind": 0.368,
+   "band": 0.375,
+   "timbre": 0.5,
+   "count": 0.326,
+   "exact": 0.028
+  }
+ },
+ "log": []
+}

@@ -1,0 +1,36 @@
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+N0 2048 n_live 2093 ms/window 246.6
+  flush                        237.5 ms/w
+  flush/backward               100.3 ms/w
+  flush/opt.maybe_step         71.9 ms/w
+  flush/fab.forward            47.9 ms/w
+  sig.train_step               5.2 ms/w
+  flush/lm.embed_encode_world  5.0 ms/w
+  flush/mem.write              4.8 ms/w
+  flush/world.loss             1.3 ms/w
+  flush/mem.maintain           1.1 ms/w
+  flush/decode_loss            1.0 ms/w
+         752424 function calls (749197 primitive calls) in 14.797 seconds
+
+   Ordered by: internal time
+   List reduced from 560 to 15 due to restriction <15>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+      116    6.133    0.053    6.133    0.053 {method 'run_backward' of 'torch._C._EngineBase' objects}
+     1340    1.661    0.001    1.661    0.001 {built-in method torch._C._nn.linear}
+     2384    1.145    0.000    1.145    0.000 {method 'sqrt' of 'torch._C.TensorBase' objects}
+      116    0.848    0.007    3.869    0.033 /usr/local/lib/python3.11/dist-packages/torch/optim/adam.py:347(_single_tensor_adam)
+     2328    0.510    0.000    0.510    0.000 {method 'lerp_' of 'torch._C.TensorBase' objects}
+      183    0.494    0.003    0.494    0.003 {built-in method torch.gru}
+     2328    0.489    0.000    0.489    0.000 {method 'addcdiv_' of 'torch._C.TensorBase' objects}
+     2328    0.376    0.000    0.376    0.000 {method 'addcmul_' of 'torch._C.TensorBase' objects}
+      359    0.330    0.001    0.330    0.001 {built-in method torch.cat}
+     3240    0.278    0.000    0.278    0.000 {built-in method torch._C._linalg.linalg_vector_norm}
+     2328    0.274    0.000    0.274    0.000 {method 'mul_' of 'torch._C.TensorBase' objects}
+       60    0.212    0.004    2.869    0.048 /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/mm/profile/tree/src/fa
+     2328    0.204    0.000    0.204    0.000 {method 'add_' of 'torch._C.TensorBase' objects}
+      116    0.116    0.001    0.130    0.001 /usr/local/lib/python3.11/dist-packages/torch/optim/optimizer.py:1047(zero_grad)
+        1    0.104    0.104    0.154    0.154 /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/mm/profile/tree/src/me
+
+

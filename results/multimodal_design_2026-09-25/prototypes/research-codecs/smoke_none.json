@@ -1,0 +1,29 @@
+{
+ "snr_db": -0.016871200874447823,
+ "sisnr_db": -49.452877044677734,
+ "stft": 3.911836624145508,
+ "l1": 0.19192923605442047,
+ "rtf_encode_decode": 0.06921038031578064,
+ "baseline_zero_stft": 4.4331183433532715,
+ "args": {
+  "quant": "none",
+  "sr": 16000,
+  "stride": 320,
+  "C": 16,
+  "D": 64,
+  "levels": "8,5,5,5",
+  "nq": 4,
+  "K": 256,
+  "minutes": 0.15,
+  "bs": 8,
+  "seg": 0.5,
+  "out": "/tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/mm/research-codecs/smoke_none.json",
+  "seed": 0
+ },
+ "params": 593537,
+ "steps": 31,
+ "train_seconds": 9.0,
+ "audio_seconds_seen": 124.0,
+ "frames_per_s": 50.0,
+ "log": []
+}

@@ -1,0 +1,81 @@
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+(22, 100, 5.216, 82)
+(43, 200, 4.005, 70)
+(65, 300, 3.442, 89)
+(86, 400, 3.93, 80)
+(109, 500, 3.663, 79)
+(132, 600, 4.896, 77)
+(154, 700, 3.683, 63)
+(177, 800, 3.384, 68)
+(199, 900, 4.325, 86)
+(222, 1000, 3.758, 79)
+(244, 1100, 3.248, 76)
+(267, 1200, 3.539, 81)
+(289, 1300, 3.804, 75)
+(311, 1400, 3.692, 62)
+(332, 1500, 2.85, 84)
+(354, 1600, 2.95, 94)
+(376, 1700, 3.698, 82)
+(399, 1800, 3.572, 91)
+(422, 1900, 2.895, 94)
+(445, 2000, 2.925, 94)
+(468, 2100, 2.772, 94)
+{
+ "params": 654085,
+ "steps": 2153,
+ "train_s": 486,
+ "frames_per_s": 50.0,
+ "mel_heldout": 1.1686,
+ "mel_silence": 1.7054,
+ "codes_used": 292,
+ "code_entropy_bits": 6.288,
+ "perplexity": 78.1,
+ "rtf_encode_decode": 0.0359,
+ "probe_acc_true": {
+  "kind": 1.0,
+  "band": 1.0,
+  "timbre": 1.0,
+  "count": 1.0,
+  "exact": 1.0
+ },
+ "probe_acc_codec_recon": {
+  "kind": 0.188,
+  "band": 0.333,
+  "timbre": 0.5,
+  "count": 0.424,
+  "exact": 0.028
+ },
+ "log": [
+  [
+   376,
+   1700,
+   3.698,
+   82
+  ],
+  [
+   399,
+   1800,
+   3.572,
+   91
+  ],
+  [
+   422,
+   1900,
+   2.895,
+   94
+  ],
+  [
+   445,
+   2000,
+   2.925,
+   94
+  ],
+  [
+   468,
+   2100,
+   2.772,
+   94
+  ]
+ ]
+}

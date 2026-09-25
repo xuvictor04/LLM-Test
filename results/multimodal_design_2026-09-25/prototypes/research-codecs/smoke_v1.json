@@ -1,0 +1,50 @@
+{
+ "snr_db": -0.024513427168130875,
+ "sisnr_db": -47.55968475341797,
+ "stft": 3.7921254634857178,
+ "mel": 1.12507164478302,
+ "l1": 0.18351872265338898,
+ "rtf_encode_decode": 0.018301203846931458,
+ "codebooks": [
+  {
+   "used": 2,
+   "of": 1000,
+   "frac": 0.002,
+   "perplexity": 1.5,
+   "entropy_bits": 0.573,
+   "max_bits": 9.966,
+   "n_tokens": 1600
+  }
+ ],
+ "tokens_per_s": 50.0,
+ "bits_per_s_nominal": 498.28921423310436,
+ "bits_per_s_entropy": 28.65,
+ "baseline_zero_stft": 4.918426990509033,
+ "baseline_zero_mel": 1.827540397644043,
+ "baseline_mulaw8_bps": 64000,
+ "baseline_mulaw8_snr_db": 37.931236267089844,
+ "baseline_mulaw8_mel": 0.5013025403022766,
+ "args": {
+  "quant": "fsq",
+  "sr": 8000,
+  "stride": 160,
+  "C": 16,
+  "D": 64,
+  "levels": "8,5,5,5",
+  "nq": 4,
+  "K": 256,
+  "minutes": 0.5,
+  "bs": 8,
+  "seg": 0.5,
+  "out": "/tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/mm/research-codecs/smoke_v1.json",
+  "seed": 0,
+  "arch": "v1",
+  "lr": 0.001
+ },
+ "params": 567493,
+ "steps": 174,
+ "train_seconds": 30.1,
+ "audio_seconds_seen": 696.0,
+ "frames_per_s": 50.0,
+ "log": []
+}

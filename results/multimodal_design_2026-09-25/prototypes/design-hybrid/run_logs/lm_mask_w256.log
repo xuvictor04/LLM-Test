@@ -1,0 +1,195 @@
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+mask after P1 {'text_bpb': 8.0711}
+('P2', 0, 9.442) 0
+('P2', 250, 2.256) 48
+('P2', 500, 2.022) 97
+('P2', 750, 1.609) 146
+('P2', 1000, 1.553) 194
+('P2', 1250, 1.409) 243
+('P2', 1500, 1.285) 291
+('P2', 1750, 1.124) 339
+('P2', 2000, 0.843) 387
+('P2', 2250, 0.983) 435
+('P2', 2500, 0.694) 485
+('P2', 2750, 0.827) 535
+('P2', 3000, 0.927) 587
+('P2', 3250, 0.66) 636
+('P2', 3500, 0.709) 683
+('P2', 3750, 0.616) 733
+('P2', 4000, 0.522) 782
+('P2', 4250, 0.602) 829
+{
+ "arm": "mask",
+ "p1": 0,
+ "p2": 4500,
+ "V": 1264,
+ "L": 96,
+ "W": 256,
+ "params": 1437936,
+ "p1_s_per_step": 0.0,
+ "after_p1": {
+  "text_bpb": 8.0711
+ },
+ "p2_s_per_step": 0.1947,
+ "p2_s_per_window": 0.01217,
+ "after_p2": {
+  "text_bpb": 16.0048,
+  "text_bpb_evaluated_with_mask": 16.0048,
+  "bits_per_code_t2a": 4.2996,
+  "bits_per_code_a2t": 4.3592,
+  "caption_bits_per_byte_a2t": 0.0655
+ },
+ "understand_a2t": {
+  "train_combos": {
+   "kind": 0.719,
+   "band": 0.914,
+   "timbre": 0.891,
+   "count": 0.648,
+   "exact": 0.461,
+   "n": 128
+  },
+  "heldout_combos": {
+   "kind": 0.5,
+   "band": 0.938,
+   "timbre": 0.75,
+   "count": 0.438,
+   "exact": 0.0,
+   "n": 16
+  }
+ },
+ "generate_t2a_temp1": {
+  "train_combos": {
+   "kind": 0.427,
+   "band": 0.677,
+   "timbre": 0.562,
+   "count": 0.375,
+   "exact": 0.094,
+   "n": 96
+  },
+  "heldout_combos": {
+   "kind": 0.583,
+   "band": 0.583,
+   "timbre": 0.5,
+   "count": 0.583,
+   "exact": 0.0,
+   "n": 12
+  },
+  "invalid_id_rate": 0.0691,
+  "distinct_codes": 541
+ },
+ "generate_t2a_temp0.7": {
+  "train_combos": {
+   "kind": 0.542,
+   "band": 0.635,
+   "timbre": 0.604,
+   "count": 0.542,
+   "exact": 0.208,
+   "n": 96
+  },
+  "heldout_combos": {
+   "kind": 0.25,
+   "band": 0.417,
+   "timbre": 0.667,
+   "count": 0.417,
+   "exact": 0.0,
+   "n": 12
+  },
+  "invalid_id_rate": 0.0285,
+  "distinct_codes": 485
+ },
+ "generate_s": 7.9,
+ "curve": [
+  [
+   "P2",
+   0,
+   9.442
+  ],
+  [
+   "P2",
+   250,
+   2.256
+  ],
+  [
+   "P2",
+   500,
+   2.022
+  ],
+  [
+   "P2",
+   750,
+   1.609
+  ],
+  [
+   "P2",
+   1000,
+   1.553
+  ],
+  [
+   "P2",
+   1250,
+   1.409
+  ],
+  [
+   "P2",
+   1500,
+   1.285
+  ],
+  [
+   "P2",
+   1750,
+   1.124
+  ],
+  [
+   "P2",
+   2000,
+   0.843
+  ],
+  [
+   "P2",
+   2250,
+   0.983
+  ],
+  [
+   "P2",
+   2500,
+   0.694
+  ],
+  [
+   "P2",
+   2750,
+   0.827
+  ],
+  [
+   "P2",
+   3000,
+   0.927
+  ],
+  [
+   "P2",
+   3250,
+   0.66
+  ],
+  [
+   "P2",
+   3500,
+   0.709
+  ],
+  [
+   "P2",
+   3750,
+   0.616
+  ],
+  [
+   "P2",
+   4000,
+   0.522
+  ],
+  [
+   "P2",
+   4250,
+   0.602
+  ]
+ ],
+ "forgetting_text_bpb": 7.9337
+}

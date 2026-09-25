@@ -1,0 +1,13 @@
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+/tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/mm/design-world/proto/stage2_world.py:21: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /__w/pytorch/pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:820.)
+  curve.append((it, round(float(wl), 4), round(float(inv), 5), round(float(ls), 3), round(rd.item(), 5))); print(arm, curve[-1], round(time.time() - t0), flush=True)
+W2 (0, 0.8289, 0.00282, 0.116, 0.46109) 0
+W2 (250, 0.0811, 0.12698, 0.998, 0.01418) 53
+W2 (500, 0.0484, 0.15504, 0.985, 0.0097) 113
+W2 (750, -0.0193, 0.14436, 1.004, 0.01088) 139
+W2 (1000, -0.0571, 0.14397, 1.001, 0.01396) 160
+W2 (1250, -0.0931, 0.14492, 1.018, 0.01522) 180
+W2 (1499, -0.1329, 0.14369, 0.997, 0.01583) 198
+{"arm": "W2_ctx_gru_gmm", "steps": 1500, "train_s": 198, "curve[it,world_loss,inv,latent_std,readout_mse]": [[0, 0.8289, 0.00282, 0.116, 0.46109], [250, 0.0811, 0.12698, 0.998, 0.01418], [500, 0.0484, 0.15504, 0.985, 0.0097], [750, -0.0193, 0.14436, 1.004, 0.01088], [1000, -0.0571, 0.14397, 1.001, 0.01396], [1250, -0.0931, 0.14492, 1.018, 0.01522], [1499, -0.1329, 0.14369, 0.997, 0.01583]], "onestep_mse_over_persistence_all": 0.6906, "onestep_mse_over_persistence_within_note": 1.0969, "onestep_mse_over_persistence_note_boundary": 0.2652, "readout_mse_hold": 0.01545, "codec_latent_var": 0.45168, "gen_argmax": {"note3_legal": 0.642, "note3_mode(0.7)": 0.427, "note4_legal": 0.27, "timbre_kept": 0.855, "probe_conf_gen_notes": 0.647, "L1_vs_true_continuation": 1.58, "rollout_ms_per_frame_B400": 3.98}, "gen_sampled": {"note3_legal": 0.54, "note3_mode(0.7)": 0.39, "note4_legal": 0.255, "timbre_kept": 0.777, "probe_conf_gen_notes": 0.707, "L1_vs_true_continuation": 1.819, "rollout_ms_per_frame_B400": 4.57}, "ref_true_note3_legal": 1.0, "chance_note3_legal": 0.25, "order1_best_note3_legal_estimate": "see stage2 notes"}

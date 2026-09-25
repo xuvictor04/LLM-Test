@@ -1,0 +1,9 @@
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+xattn codec (0, 8.0252) 0
+xattn codec (300, 0.2885) 12
+xattn codec (600, 0.1631) 18
+xattn codec (900, 0.104) 23
+xattn codec (1200, 0.1348) 29
+xattn codec (1499, 0.0985) 34
+{"cond": "xattn", "src": "codec", "K": null, "train_s": 34, "curve_bits_per_byte": [[0, 8.0252], [300, 0.2885], [600, 0.1631], [900, 0.104], [1200, 0.1348], [1499, 0.0985]], "hold": {"caption_bits": 0.666, "bits_per_byte": 0.0688, "exact": 0.863, "timbre_acc": 0.998, "note_acc": 0.912}, "combo": {"caption_bits": 13.489, "bits_per_byte": 1.4988, "exact": 0.095, "timbre_acc": 0.865, "note_acc": 0.395}, "ms_per_B16_ctx128_fwd_bwd": 60.2}

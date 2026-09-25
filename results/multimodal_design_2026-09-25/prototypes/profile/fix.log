@@ -1,0 +1,542 @@
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+=== device=cpu amp=off tf32=(True, True) torch_seed=3734753547471956429
+===   amp: RUN_AMP=off: the step runs in fp32.
+=== 10130057 trainable parameter(s) in the base group
+=== composed: stage=assembled, 0 refusal(s), 1 warning(s)
+WARNING: cadence audit: 'ckpt' has a period of 0 windows, so it is DISARMED rather than starved -- it cannot fire at ANY run length, and lengthening the run will not reach it. Whatever it gates does not happen in this run, and a report that says it did nothing is reporting a mechanism that was never armed, which is a different statement. Set a period of 1 or more on the package that owns this threshold.
+=== data plan: protocol=generated, per-area whole-run exposure (bytes drawn x epochs / bytes on disk):
+      c            0.25x
+      eng          0.25x
+      num          0.75x
+      py           0.75x
+      Gate data.exposure_max: armed, did not fire (0.75 vs 2.0)
+      Gate data.exposure_skew: armed, did not fire (3.0 vs 3.0)
+      Gate data.splice_window: FIRED (6.495 vs 8.0)
+        data.splice_window is a STARTUP PREDICTION from the declared seg_min/seg_max mean, never measured from the actual draw (data_plan runs before a single byte is drawn). Under DATA_DRAW=planned (the shipped default) draw_stream additionally truncates segments to each area's remaining per-phase budget, so the realized mean segment length runs measurably below this estimate -- measured over an 8-seed sweep at the shipped defaults, 'armed, did not fire' here read true on 8/8 seeds while the realized windows-per-segment was already below 8.0 on all 8; the gap widens with phase count. A reading near the threshold should be corroborated against the actual Stream draw, not trusted alone.
+[101 windows] loss=6.6439 opt_steps=101 n_live=2049 vocab=512 uncalled=0
+[201 windows] loss=4.4588 opt_steps=201 n_live=2051 vocab=518 uncalled=0
+[301 windows] loss=4.7936 opt_steps=301 n_live=2074 vocab=518 uncalled=0
+[401 windows] loss=5.5588 opt_steps=401 n_live=2086 vocab=524 uncalled=0
+[501 windows] loss=4.5020 opt_steps=501 n_live=2094 vocab=524 uncalled=0
+[601 windows] loss=4.3886 opt_steps=601 n_live=2172 vocab=530 uncalled=0
+[701 windows] loss=4.2562 opt_steps=701 n_live=2240 vocab=530 uncalled=0
+[801 windows] loss=4.6092 opt_steps=801 n_live=2290 vocab=536 uncalled=0
+[901 windows] loss=4.1530 opt_steps=901 n_live=2345 vocab=536 uncalled=0
+[1001 windows] loss=4.0391 opt_steps=1001 n_live=2374 vocab=542 uncalled=0
+[1101 windows] loss=3.4412 opt_steps=1101 n_live=2396 vocab=542 uncalled=0
+
+=== 1150 windows, 1150 flushes, 1150 optimizer steps, 0 epoch(s) in 276.6s (4.2 w/s)
+=== loss 8.3606 -> 3.0306
+=== amp asked=off observed step dtype=torch.float32
+=== 0 MECHANISM(S) ON LOOP_ORDER HAVE NO CALL SITE AT ALL:
+=== GATED CALL SITES (a call site is not a call):
+      - FAB.own_lr_scale: fired 1150 time(s) -- gated on a flush on which the optimizer actually stepped
+      - LM.residual_ratios: UNREACHABLE -- gated on Due.probation, TOK's probation_deadline cadence (armed only at TOK_MODE=online with TOK_PROBATION_USES > 0), acted on once per flush. A CALL IS NOT A READING: it returns None at LM_COMPOSE=0, the only arm that builds, and TOK(vocab.gates)'s tok.probation_embed says when no ratio was supplied; the count here is TOK's calls, and tok.probation_calls is ABSENT, which in this tree means the mechanism was never armed on the arm this run took
+      - TOK.judge_probation: UNREACHABLE -- gated on Due.probation, TOK's probation_deadline cadence (armed only at TOK_MODE=online with TOK_PROBATION_USES > 0), acted on once per flush. A CALL IS NOT A JUDGEMENT: tok.probation_judged counts those, and TOK(vocab.gates)'s tok.probation_embed says when none could run, and tok.probation_calls is ABSENT, which in this tree means the mechanism was never armed on the arm this run took
+      - TOK.mint_burst: fired 5 time(s) -- gated on Due.mint, TOK's grow_every cadence asked at row A (armed only at TOK_MODE=online with TOK_GROW_EVERY > 0), acted on once per flush
+      - CKPT.save: 0 checkpoint(s) written by this run (periodic, SIGUSR1 and the final one together); 0 means CKPT_DIR names no directory and saving is off
+=== R STAGE -- the did-it-fire surfaces:
+    -- LM.counters
+       gate:lm.anchor.unreachable                   ('unreachable', 1150, 'False vs True -- the LM_COMPOSE arm is off, so the token table is emb.weight and a row has no byte composite to be held near or measured against')
+       gate:lm.residual_unreachable                 ('unreachable', 0, 'False vs True -- the LM_COMPOSE arm is off, so the token table is emb.weight and a row has no byte composite to be held near or measured against')
+       lm.anchor.calls                              1150
+       lm.anchor.unreachable                        1150
+       lm.build.arm_gru                             1
+       lm.build.arm_transformer                     0
+       lm.build.compose_on                          0
+       lm.build.emb_head_allocated                  1
+       lm.build.heads_used                          0
+       lm.compose.table_calls                       0
+       lm.decode.calls                              2300
+       lm.embed.calls                               1150
+       lm.embed.from_emb_weight                     1150
+       lm.encode.calls                              3494
+       lm.loss.calls                                1150
+       lm.mint.compose_skip                         0
+       lm.mint.last_window                          1001
+       lm.mint.rows_init_last_first                 0
+       lm.mint.rows_init_mean                       30
+       lm.mint.rows_init_random                     0
+       lm.mint.set_vocab_calls                      5
+       lm.mint.sig_rows                             0
+       lm.resolve.calls                             1
+       lm.resolve.layers_from_sentinel              1
+    -- SIG.counters
+       gate:sig.adaptive_stop                       ('unreachable', 0, "200 vs 800 -- SIG_WARMUP_PROBE_EVERY=500 against SIG_WARMUP=800 puts 1 separation probe(s) in the budget, at step(s) [500], and none of them is BOTH the second probe or later AND at or after the floor of 200 step(s) -- so the flatness test, which compares a probe against the one before it, has nothing to compare. Lower SIG_WARMUP_PROBE_EVERY or raise SIG_WARMUP until at least two probes land inside the budget. WHAT IS STILL LIVE ON THIS SETTING: the 'collapsing' verdict's ABSOLUTE arm (separation below 0.15) is a statement about ONE probe and needs no predecessor, and the probe(s) at step(s) [500] are at or after the floor -- so a collapse CAN be declared here and sig.warmup_verdict is the surface that says so; what cannot fire is the early stop this gate names.")
+       gate:sig.cadence_dense                       ('fired', 1150, '1 vs 400')
+       gate:sig.cadence_idle                        ('armed-but-zero', 0, "12 vs 400 -- throttled arm: windows_since_boundary >= SIG_DENSE_WINDOW, firing every SIG.d_idle_cadence = max(SIG_TRAIN_EVERY x 6, SIG_TRAIN_EVERY_IDLE=12) = 12 window(s) -- THE WIRE AND NOT THE LEVER, which is what makes 'the idle cadence follows the dense one' true rather than a sentence in a comment; 0 fire(s) in 1150 check(s)")
+       gate:sig.emb_handed_out                      ('unreachable', 0, "0 vs 1 -- SIG_SPACE='bytes': the encoder's alphabet is bytes, so it has no row for a token id and a minted id needs none from this package")
+       gate:sig.encoder_params                      ('fired', 3, '3 vs 1')
+       gate:sig.floor_skips                         ('armed-but-zero', 0, '0 vs 0 -- the InfoNCE floor is ln(1 + (B-1)/K) = ln(1 + (48-1)/8) = 1.9279; 0 of 1146 step(s) were at or below it and left the optimizer untouched. Skips are the encoder being FINISHED on that batch, not the encoder failing to train')
+       gate:sig.prototype_pairs                     ('unreachable', 0, '0 vs 0 -- SIG_PROTOTYPE_FRAC=0.0: the prototype arm is off by configuration')
+       sig.alphabet_size                            256
+       sig.bigram_built                             0
+       sig.cadence_checks                           1150
+       sig.cadence_dense                            1150
+       sig.cadence_idle                             0
+       sig.emb_handed_out                           0
+       sig.encode_calls                             1156
+       sig.encode_width_mismatch                    0
+       sig.encode_width_seen                        192
+       sig.encode_windows                           1865
+       sig.encoder_built                            1
+       sig.encoder_params                           3
+       sig.floor_skips                              0
+       sig.prototype_pairs                          0
+       sig.train_stepped                            1146
+       sig.train_steps                              1146
+       sig.train_stream_short                       4
+       sig.varcov_applied                           1146
+       sig.warmup_probes                            1
+       sig.warmup_separation_final                  0.9188480973243713
+       sig.warmup_separation_peak                   0.9188480973243713
+       sig.warmup_skipped_resume                    0
+       sig.warmup_steps                             800
+       sig.warmup_verdict                           budget
+       sig.width_units                              192
+    -- FAB.counters
+       fab.balance_nonzero                          1150
+       fab.banned_experts                           399817
+       fab.births                                   350
+       fab.built                                    1
+       fab.cap                                      4096
+       fab.cap_lift_period                          20000
+       fab.comp_glob                                3.409292
+       fab.crossed                                  1
+       fab.cull_fail                                0
+       fab.cull_util                                0
+       fab.declined_cap                             0
+       fab.declined_newfrac                         0
+       fab.deepened                                 0
+       fab.depth_compared_in                        bits_per_token
+       fab.depth_forced                             0
+       fab.depth_now                                1
+       fab.discover_targets                         34
+       fab.discovered                               199
+       fab.distinct_parents                         1
+       fab.div_applied                              1150
+       fab.ec_applied                               0
+       fab.experts_past_grace_ever                  0
+       fab.experts_with_use                         1886
+       fab.explore_distinct_targets                 163
+       fab.explored_rows                            177
+       fab.grow                                     1
+       fab.grow_asked_regression                    1
+       fab.grow_asked_stall                         0
+       fab.grow_checks                              1150
+       fab.grow_dev                                 1.46199
+       fab.grow_fast                                3.409292
+       fab.grow_improving                           0.288962
+       fab.grow_mem_eligible                        0
+       fab.grow_recover_passes                      1143
+       fab.grow_regression_refused_cooldown         4
+       fab.grow_slow                                4.794811
+       fab.grow_stall_refused_cooldown              0
+       fab.grow_warmup_refused                      6
+       fab.grown_regression                         1
+       fab.grown_stall                              0
+       fab.growth_blackout_suppressed.regression    0
+       fab.growth_blackout_suppressed.stall         0
+       fab.halt                                     1
+       fab.halt_clamped                             575
+       fab.halt_mass_train                          0.899422
+       fab.holdout_applied                          0
+       fab.hop_arm                                  soc
+       fab.hops_taken                               1150
+       fab.ident_refreshed                          1150
+       fab.ident_trained                            1150
+       fab.lr_boosted                               0
+       fab.lr_calls                                 1150
+       fab.lr_cycle_max                             0
+       fab.lr_eligible                              0
+       fab.lr_envelope_pinned                       0
+       fab.lr_ratio_clamped                         0
+       fab.lr_scaled_experts                        0
+       fab.lr_zero_applied                          0
+       fab.manage_every_windows                     500
+       fab.manage_passes                            2
+       fab.manage_period_flushes                    500
+       fab.mass_per_selection                       0.008254
+       fab.merge_declined_grace                     0
+       fab.merge_declined_residual                  0
+       fab.merged                                   0
+       fab.n0                                       2048
+       fab.n_live                                   2398
+       fab.newfrac_spent_on_spawn                   349
+       fab.norm_only                                0
+       fab.observe_unrouted                         0
+       fab.observed_windows                         1150
+       fab.off                                      0
+       fab.operating_population                     1844
+       fab.parent_quota_refusals                    0
+       fab.random_born                              0
+       fab.replicated                               1
+       fab.rescued                                  0
+       fab.route_calls                              1150
+       fab.shift_notifications                      0
+       fab.spared_comp                              0
+       fab.spared_contrib                           0
+       fab.spared_shift                             0
+       fab.spawn_declined                           801
+       fab.spawn_gap                                0.16235
+       fab.spawn_typ                                0.13599
+       fab.spawned                                  349
+       fab.uage_mean                                3.83653
+       fab.uage_per_expert_per_pass                 0.003336
+       gate:fab.balance                             ('fired', 1150, "'balance=0.01 x warm=0.7125 at window 1150 of FAB_BAL_WARM=4000 (floor 0.15)' vs '> 0'")
+       gate:fab.breadth_cap                         ('fired', 'last pass', "'limit=4 of live_domains=13' vs 'dom_frac=0.1, dom_min=4'")
+       gate:fab.cull_gate                           ('fired', 0, "'2373/4096=0.579' vs 0.45")
+       gate:fab.depth_advance                       ('armed-but-zero', 0, "'depth 1 of FAB_HOPS=4' vs 'wait>=6 flat check(s) or 40 check(s) per stage' -- 0 advance(s) so far, 0 forced by the stage cap; stage check 2 of FAB_DEPTH_STAGE_MAX=40, plateau wait 0 of FAB_DEPTH_PATIENCE=6; the stage cap advances depth in 38 more check(s) at the latest (window 20001 at FAB_MANAGE_EVERY=500), and 6 more flat check(s) would advance it sooner")
+       gate:fab.depth_curriculum                    ('fired', 'last pass', "'depth0=1' vs 'hops=4'")
+       gate:fab.discover                            ('fired', 199, "'1 handover(s), 34 distinct recipient(s)' vs 'cosine distance > 0.35'")
+       gate:fab.distinctness                        ('fired', 1150, "'div_w=0.02' vs 'chain_k=8 >= 2, n_live=2398'")
+       gate:fab.expert_choice                       ('unreachable', 0, "'ec_w=0.0' vs 'sum(use)=75.81521819077898' -- FAB_EC_W=0.0: allocation by loss pressure (`balance`) only.")
+       gate:fab.explore                             ('armed-but-zero', 'last pass', "'0 row(s) swapped, 163 distinct cold target(s)' vs 'explore=0.15, computed=8 of n_live=2398'")
+       gate:fab.forward.routed                      ('fired', 1150, "'1 hop(s) over 2398 experts' vs 'depth=1'")
+       gate:fab.growth_armed                        ('fired', 0, "'FAB_GROW=True' vs 'FAB_GROW=True'")
+       gate:fab.halt                                ('fired', 'last pass', "'mean halted mass 0.9' vs 'halt_max=0.9'")
+       gate:fab.halt_spent_on_base                  ('unreachable', 0, "'max entry halt 0.9' vs 'society=False, halt=True' -- FAB_SOCIETY=0: the looped walk spends halt mass on the hop that stopped, so there is no leftover mass for the base representation to complete.")
+       gate:fab.hop_sup                             ('unreachable', 0, "'hop_sup=0.0' vs '1 hop logits collected over depth=1' -- FAB_HOP_SUP=0.0")
+       gate:fab.identity_round_trip                 ('fired', 1150, "'ae_w=0.5, emb_var=1.0, 256 embedding(s) scored (rows 1588..1843 of 2398, wrapping; every row once per 10 pass(es))' vs 'spawn=True, training=True, counterfactual=False'")
+       gate:fab.independence                        ('unreachable', 0, "'ind_w=0.5, ind_k=2' vs 'society=True and targets supplied' -- FAB_SOCIETY=0: per-expert logits are not retained on the looped arm, so 'solve it alone' has no per-expert prediction to score")
+       gate:fab.lr_own                              ('armed-but-zero', 0, "'FAB_LR_OWN=False' vs 'FAB_LR_OWN=True' -- FAB_LR_OWN=False: every expert trains at the global rate. The per-expert triangular2 envelope, its lr_boost for the cull-eligible bottom and the lr_maxr ratio clamp are all inert, and FAB.own_lr_scale returns None rather than a table of ones -- a table of ones is a schedule that ran and chose 1.0, which is a different statement.")
+       gate:fab.merged                              ('unreachable', 0, '0 vs 0.1 -- unreachable (mean uage 3.4 at n_live=2373 after 1001 window(s); grace=48 selection(s)): the absorbed expert must be past grace and no expert is. 0 pair(s) were close enough and declined for it')
+       gate:fab.on                                  ('fired', 0, 'True vs True')
+       gate:fab.ponder                              ('fired', 'last pass', "'ponder=0.01 x warm=0.1437 at window 1150 of FAB_PONDER_WARM=8000' vs '> 0'")
+       gate:fab.route_learned                       ('fired', 'last pass', "'route_learn=True' vs 'route_learn=True'")
+       gate:fab.spawn                               ('armed-but-zero', 349, "'gap=0.16235' vs 'max(2.0*typ=0.13599, floor=0.02)'")
+       gate:fabric.cull_eligible                    ('unreachable', 0, "0 vs 48 -- unreachable (mean uage 3.4 at n_live=2373 after 1001 window(s); grace=48 selection(s)): NO expert has been SELECTED grace times, so the eligible set is empty and every ranking, budget and spare on this pass is sized on nothing. This is not 'armed and did not fire'")
+    -- OPT.counters
+       opt.accum                                    1
+       opt.accum.invariant                          Gate(name='opt.accum.invariant', fired=True, value='1150 backward // 1', threshold=1150, reachable=True, reason='backward // accum == step -- the one statement that proves ISSUES P3-H29 dead')
+       opt.backward                                 1150
+       opt.batch_windows                            1
+       opt.build.calls                              1
+       opt.build.cycles_fitted                      1
+       opt.build.grad_clip                          Gate(name='opt.build.grad_clip', fired=False, value='off (0.0)', threshold='> 0.0', reachable=False, reason="OPT_GRAD_CLIP=0.0 is OFF, which is the setting every recorded number in this project was taken under (Q-OPT-3). 'No clipping' is a run-level fact the report states rather than leaving to be inferred from a missing line.")
+       opt.build.group_overlap                      0
+       opt.build.params.base                        38
+       opt.build.params.encoder                     3
+       opt.build.run_steps                          10500
+       opt.build.warmup                             1000
+       opt.build.warmup_asked                       1000
+       opt.build.warmup_clamped                     0
+       opt.build.wavelength                         10500
+       opt.build.wavelength_from_sentinel           1
+       opt.ckpt.backward_at_load                    0
+       opt.ckpt.horizon_changed                     Gate(name='opt.ckpt.horizon_changed', fired=False, value=0, threshold='a checkpoint loaded', reachable=False, reason="no checkpoint has been loaded in this process (opt.ckpt.loaded == 0), so no boundary exists for a horizon to change across. This is not 'a resume happened and the horizon held'.")
+       opt.ckpt.loaded                              0
+       opt.ckpt.lr_prev_cleared                     0
+       opt.ckpt.refused                             0
+       opt.ckpt.saved                               0
+       opt.ckpt.step_at_load                        0
+       opt.clip.applied                             Gate(name='opt.clip.applied', fired=False, value=0, threshold='n/a', reachable=False, reason="OPT_GRAD_CLIP=0.0 is OFF, so no step can clip. This is not 'armed and did not fire'.")
+       opt.clip.armed_no_clip                       0
+       opt.d_effective_batch_windows                1
+       opt.encoder_steps_here                       Gate(name='opt.encoder_steps_here', fired=False, value=0, threshold=0, reachable=True, reason="Q-OPT-6 REGRESSION COUNTER, READ BACKWARDS: this MUST be 0, so 'armed, did not fire' IS the passing state and FIRED is the defect. A nonzero value is the double step returning -- SIG.train_step on SIG's cadence and this flush gate both stepping the encoder, which makes SIG's InfoNCE floor and its three cadence levers inert by construction, and it returns silently because both call sites look correct in isolation. IT IS NOW DERIVED AND NOT DECLARED: maybe_step fingerprints the encoder optimizer's own step state before and after its body, so only a step taken INSIDE maybe_step can raise it. Until 2026-09-04 nothing in the tree incremented it at all, which made it a tripwire whose only possible trigger was the edit that introduces the defect -- armed-and-inert words printed for a guard that could not be satisfied.")
+       opt.grad_norm                                Gate(name='opt.grad_norm', fired=True, value='p50=1.556 p99=14.49', threshold='1150 step(s)', reachable=True, reason="read in maybe_step between the gradient's last use and the zero_grad; rendered here, never computed here")
+       opt.grad_norm.p50                            1.5561841622172017
+       opt.grad_norm.p99                            14.494147808750679
+       opt.grad_norm.samples                        1150
+       opt.horizon.cycle_steps                      9500.0
+       opt.horizon.residual_steps                   9350
+       opt.horizon.run_steps                        10500
+       opt.horizon.steps_taken                      1150
+       opt.lr.damped_this_step                      0
+       opt.lr.decay                                 Gate(name='opt.lr.decay', fired=False, value=1.0, threshold='> 0.0 and n_cycles > 1', reachable=False, reason='the envelope is gated on n_cycles > 1 and 1 cycle(s) fit, so OPT_LR_DECAY=1.0 is off BY ARITHMETIC. Without that gate it squeezed a single cycle to lr_min_frac SQUARED.')
+       opt.lr.envelope_applied                      0
+       opt.lr.floor_applied                         0
+       opt.lr.in_warmup                             999
+       opt.lr.min_frac                              Gate(name='opt.lr.min_frac', fired=False, value=0, threshold='min_frac=0.05 clamping a composed modifier', reachable=False, reason='OPT_LR_MIN_FRAC=0.05 IS the floor and the cosine bottoms AT it, never under it -- and so does the damping, which is written above the floor by construction. Only a MULTIPLIED modifier can dive under, and neither exists here: the envelope needs OPT_LR_DECAY > 0 with more than one cycle fitted (OPT_LR_DECAY=1.0, 1 cycle(s) fitted over 10500 steps against a warmup of 1000), and the re-warm needs OPT_LR_SHIFT_WARM > 0 with a shift_at supplied (OPT_LR_SHIFT_WARM=0, 0 notification(s)). So no step of THIS run CAN need pulling back. The floor is still in force and still reached; it is never breached.')
+       opt.lr.restart_damp                          Gate(name='opt.lr.restart_damp', fired=False, value=0.5, threshold='< 1.0 past cycle 0', reachable=False, reason='the damping is gated on cycle_index > 0 and only 1 cycle(s) fit this run, so OPT_LR_RESTART_DAMP=0.5 is off BY ARITHMETIC rather than armed and inert.')
+       opt.lr.restarts                              Gate(name='opt.lr.restarts', fired=False, value=1, threshold='> 1 cycle', reachable=False, reason='OPT_LR_RESTARTS is on and exactly ONE cycle fits: OPT_LR_WAVELENGTH=0 against a horizon of 10500 steps (the 0 sentinel makes one wavelength span the whole run), so no restart can occur and the schedule is bit-identical to restarts=off.')
+       opt.lr.sched                                 Gate(name='opt.lr.sched', fired=True, value='cosine', threshold='cosine', reachable=True, reason='')
+       opt.lr.shift_warm                            Gate(name='opt.lr.shift_warm', fired=False, value=0, threshold='> 0', reachable=False, reason='OPT_LR_SHIFT_WARM=0, at or below the 0 that is the shipped default and the setting every recorded result was produced under.')
+       opt.lr.shift_warm_applied                    0
+       opt.lr.warmup                                Gate(name='opt.lr.warmup', fired=True, value=999, threshold='999 step(s) below peak, peak at step 1000', reachable=True, reason="the ramp is linear FROM ZERO and is not floored at lr_min_frac, which is why lr_at's minimum property is scoped post-warmup")
+       opt.lr.writes.base                           1150
+       opt.lr.writes.encoder                        1150
+       opt.report_lines                             ('opt.backward=1150  opt.step=1150  accum=1  batch_windows=1  d_effective_batch_windows=1  -- the batch this run TRAINED at, printed rather than configured', 'opt.lr.writes.base=1150  opt.lr.writes.encoder=1150  (each must equal opt.step=1150)', "opt.horizon: run_steps=10500 (projected once at build, from run_windows) vs steps_taken=1150; residual=9350 steps. Q-OPT-5's residual is against the OBSERVED WINDOW TOTAL and this signature has no parameter for it -- see this function's docstring.", 'opt.horizon: warmup=1000 (asked 1000, clamped=False, 999 step(s) priced below peak)  wavelength=10500 asked (from the 0 sentinel=True)  cycles_fitted=1  REALIZED cycle=9500 steps -- the number the cosine is actually priced against, which the whole-cycle fit moves by at most the rounding it does', 'opt.restart: wraps=0 (cycle-index advances)  detected=0 (what the rate ratio saw)  below_bar=0  damped=0  refused_n1=0  no_reading=0  readings=0 (arrivals)  restart_amp=1', 'opt.params: base=38 tensor(s), encoder=3 tensor(s), overlap=0', 'Gate opt.accum.invariant: FIRED (1150 backward // 1 vs 1150) -- backward // accum == step -- the one statement that proves ISSUES P3-H29 dead', 'Gate opt.lr.sched: FIRED (cosine vs cosine)', "Gate opt.lr.warmup: FIRED (999 vs 999 step(s) below peak, peak at step 1000) -- the ramp is linear FROM ZERO and is not floored at lr_min_frac, which is why lr_at's minimum property is scoped post-warmup", 'Gate opt.lr.min_frac: UNREACHABLE (0 vs min_frac=0.05 clamping a composed modifier) -- OPT_LR_MIN_FRAC=0.05 IS the floor and the cosine bottoms AT it, never under it -- and so does the damping, which is written above the floor by construction. Only a MULTIPLIED modifier can dive under, and neither exists here: the envelope needs OPT_LR_DECAY > 0 with more than one cycle fitted (OPT_LR_DECAY=1.0, 1 cycle(s) fitted over 10500 steps against a warmup of 1000), and the re-warm needs OPT_LR_SHIFT_WARM > 0 with a shift_at supplied (OPT_LR_SHIFT_WARM=0, 0 notification(s)). So no step of THIS run CAN need pulling back. The floor is still in force and still reached; it is never breached.', "Gate opt.build.grad_clip: UNREACHABLE (off (0.0) vs > 0.0) -- OPT_GRAD_CLIP=0.0 is OFF, which is the setting every recorded number in this project was taken under (Q-OPT-3). 'No clipping' is a run-level fact the report states rather than leaving to be inferred from a missing line.", "Gate opt.clip.applied: UNREACHABLE (0 vs n/a) -- OPT_GRAD_CLIP=0.0 is OFF, so no step can clip. This is not 'armed and did not fire'.", 'Gate opt.lr.restarts: UNREACHABLE (1 vs > 1 cycle) -- OPT_LR_RESTARTS is on and exactly ONE cycle fits: OPT_LR_WAVELENGTH=0 against a horizon of 10500 steps (the 0 sentinel makes one wavelength span the whole run), so no restart can occur and the schedule is bit-identical to restarts=off.', 'Gate opt.lr.restart_damp: UNREACHABLE (0.5 vs < 1.0 past cycle 0) -- the damping is gated on cycle_index > 0 and only 1 cycle(s) fit this run, so OPT_LR_RESTART_DAMP=0.5 is off BY ARITHMETIC rather than armed and inert.', 'Gate opt.lr.decay: UNREACHABLE (1.0 vs > 0.0 and n_cycles > 1) -- the envelope is gated on n_cycles > 1 and 1 cycle(s) fit, so OPT_LR_DECAY=1.0 is off BY ARITHMETIC. Without that gate it squeezed a single cycle to lr_min_frac SQUARED.', 'Gate opt.lr.shift_warm: UNREACHABLE (0 vs > 0) -- OPT_LR_SHIFT_WARM=0, at or below the 0 that is the shipped default and the setting every recorded result was produced under.', "Gate opt.weight_decay: UNREACHABLE (0.0 vs > 0.0) -- OPT_WEIGHT_DECAY=0.0. AdamW's own default is 0.01, so before this lever existed the run WAS decaying dormant experts and nobody had chosen it; a dormant expert loses ~71% of its magnitude over a 62.5k-step run.", "Gate opt.encoder_steps_here: armed, did not fire (0 vs 0) -- Q-OPT-6 REGRESSION COUNTER, READ BACKWARDS: this MUST be 0, so 'armed, did not fire' IS the passing state and FIRED is the defect. A nonzero value is the double step returning -- SIG.train_step on SIG's cadence and this flush gate both stepping the encoder, which makes SIG's InfoNCE floor and its three cadence levers inert by construction, and it returns silently because both call sites look correct in isolation. IT IS NOW DERIVED AND NOT DECLARED: maybe_step fingerprints the encoder optimizer's own step state before and after its body, so only a step taken INSIDE maybe_step can raise it. Until 2026-09-04 nothing in the tree incremented it at all, which made it a tripwire whose only possible trigger was the edit that introduces the defect -- armed-and-inert words printed for a guard that could not be satisfied.", "Gate opt.ckpt.horizon_changed: UNREACHABLE (0 vs a checkpoint loaded) -- no checkpoint has been loaded in this process (opt.ckpt.loaded == 0), so no boundary exists for a horizon to change across. This is not 'a resume happened and the horizon held'.", "Gate opt.grad_norm: FIRED (p50=1.556 p99=14.49 vs 1150 step(s)) -- read in maybe_step between the gradient's last use and the zero_grad; rendered here, never computed here")
+       opt.restart.below_bar                        0
+       opt.restart.damp_refused_n1                  0
+       opt.restart.damped                           0
+       opt.restart.detected                         0
+       opt.restart.no_reading                       0
+       opt.restart.readings                         0
+       opt.restart.wraps                            0
+       opt.restart_amp                              1.0
+       opt.rows.cleared                             0
+       opt.rows.moved                               0
+       opt.rows.not_in_optimizer                    0
+       opt.rows.reborn                              350
+       opt.rows.remap_calls                         350
+       opt.shift.notifications                      0
+       opt.step                                     1150
+       opt.step.not_due                             0
+       opt.step.refused_nonfinite                   0
+       opt.weight_decay                             Gate(name='opt.weight_decay', fired=False, value=0.0, threshold='> 0.0', reachable=False, reason="OPT_WEIGHT_DECAY=0.0. AdamW's own default is 0.01, so before this lever existed the run WAS decaying dormant experts and nobody had chosen it; a dormant expert loses ~71% of its magnitude over a 62.5k-step run.")
+    -- CAP.counters
+       cap.best_improving                           0.0
+       cap.block_reasons                            {}
+       cap.cap_experts                              4096
+       cap.cap_vocab                                4096
+       cap.clamp                                    Gate(name='cap.clamp', fired=False, value='0 clamped of 0 lift(s) taken', threshold='0 clamped -- every earned lift applied in full', reachable=False, reason="NO LIFT CAN BE HELD AT A HARD CEILING on this configuration, which is the only event this gate counts. A clamp needs three things IN ORDER -- a lift EARNED, that lift APPLIED rather than refused, and its unclamped arithmetic ABOVE the hard ceiling -- and on every arm here one of the three fails first: (expert) NOT ARMED, so NO LIFT IS EVER EARNED on it: CAP_TARGETS=off does not arm this arm, and a clamp is a property of a lift; (vocabulary) NOT ARMED, so NO LIFT IS EVER EARNED on it: CAP_TARGETS=off does not arm this arm, and a clamp is a property of a lift. THE VERDICT ABOVE IS NOT A CLAIM THAT NO LIFT IS EARNED and must not be read as one -- the clauses above say, per arm, which case it is in: an arm's earned lifts can be refused by name, and an applied lift can move nothing, and either of those reaches this verdict with lifts having been earned all along. What became of an EARNED lift is cap.valve's line and the block-reason histogram's number; what became of an APPLIED one that overshot is this line's, and there are none here. Reported unreachable rather than as 0 clamped lifts, which would read as a valve that lifted freely and was never held -- the same confusion between an inert mechanism and an absent one that cap.valve is unreachable here to avoid.")
+       cap.hard_experts                             4096
+       cap.hard_vocab                               4096
+       cap.hi_experts                               0
+       cap.hi_pin_experts                           0
+       cap.hi_pin_vocab                             0
+       cap.hi_vocab                                 0
+       cap.lifts_clamped_experts                    0
+       cap.lifts_clamped_vocab                      0
+       cap.lifts_experts                            0
+       cap.lifts_vocab                              0
+       cap.mask_dead_rows                           False
+       cap.origin_experts                           off (valve disabled; the cap is the hard ceiling)
+       cap.origin_vocab                             off (valve disabled; the cap is the hard ceiling)
+       cap.stall_checks                             0
+       cap.state_refused                            0
+       cap.state_restored                           0
+       cap.state_written                            0
+       cap.targets                                  off
+    -- TOK(vocab.counters)
+       tok.build_converged                          0
+       tok.build_mint                               256
+       tok.build_pass                               1
+       tok.build_refused                            0
+       tok.byte_fallback                            688100
+       tok.due_dropped                              0
+       tok.due_mint                                 5
+       tok.due_retok                                0
+       tok.mint                                     30
+       tok.mint_bursts                              5
+       tok.mint_ceiling_refused                     0
+       tok.mint_exhausted                           0
+       tok.mint_last_window                         1001
+       tok.mint_reinstated                          0
+       tok.mint_rescued                             19
+       tok.mint_seeded_window                       1001
+       tok.mint_skipped                             10
+       tok.mint_widened                             0
+       tok.retok_seeded_window                      1
+       tok.segment                                  1
+       tok.tally                                    147200
+    -- TOK(vocab.gates)
+       gate:tok.build_passes_advice                 ('unreachable', '2 vs 8 -- mode != fixed')
+    -- MEM(store.counters)
+       store.blocks                                 64
+       store.census_drift                           0
+       store.census_slots                           8192
+       store.n_census_reconciles                    1
+       store.n_deletes_applied                      0
+       store.n_dup_refused                          0
+       store.n_entries_deleted_by_cull              0
+       store.n_entries_refiled_by_fold              39424
+       store.n_evict_free                           8192
+       store.n_evict_main                           35584
+       store.n_evict_probation                      103424
+       store.n_floor_at_plan                        240
+       store.n_floor_blocked                        41588
+       store.n_floor_dropped_deadlock               558
+       store.n_fold_targets_culled                  0
+       store.n_folds_applied                        132
+       store.n_live_sources                         13
+       store.n_opened                               8192
+       store.n_orphan_sources                       0
+       store.n_probe_fired                          46
+       store.n_probe_hits                           45
+       store.n_probe_rows                           2880
+       store.n_promoted                             12670
+       store.n_read_empty                           0
+       store.n_reads                                45
+       store.n_rekey_entries                        39507
+       store.n_rekey_passes                         6
+       store.n_rekey_slices                         1149
+       store.n_restore_refused                      0
+       store.n_restored_entries                     0
+       store.n_src_underflow                        0
+       store.n_use_decays                           7
+       store.n_writes_by_block                      [2944, 3840, 1792, 2560, 2176, 1536, 2176, 2560, 1792, 1664, 2816, 2560, 3072, 1920, 2432, 2304, 2304, 2432, 2560, 1920, 2176, 2688, 2560, 1664, 3840, 2432, 1280, 2944, 2944, 2048, 1408, 1792, 2048, 3456, 1664, 3200, 2560, 3200, 3328, 1920, 2944, 1536, 2304, 2176, 2560, 2688, 1664, 2560, 1152, 1920, 1536, 1024, 1408, 1920, 2048, 2560, 2304, 1920, 2176, 1408, 3072, 3456, 2432, 1920]
+       store.n_writes_committed                     147200
+       store.n_writes_kept                          147200
+       store.n_writes_offered                       147200
+       store.n_wrong_blocked                        0
+       store.n_wrong_read_hit                       0
+       store.n_wrong_reads                          45
+       store.probe_last_window                      1126
+       store.rekey_last_window                      1150
+    -- WORLD(w.counters)
+       world.built                                  live
+       world.ctx_tokens                             128
+       world.feedback                               0
+       world.fitness_updates                        1150
+       world.forecast.calls                         1150
+       world.forecast.inert                         1150
+       world.forecast.unreachable                   WORLD_FEEDBACK=0: the world model is built and trains, and its forecast is deliberately not applied -- the costed side head this lever exists to turn into a contribution
+       world.horizon                                1
+       world.inv                                    0.826318
+       world.lat                                    32
+       world.latent_std                             0.912031
+       world.live                                   3
+       world.loss_terms.calls                       1150
+       world.nmax                                   6
+       world.route_d                                24
+    -- MEM.census(reconcile=True)
+       census_drift                                 0
+       floor_entries                                315
+       gate:mem.key_depth                           ('unreachable', "0 vs 0 -- MEM_KEY_SRC='model' on LM_ARCH='gru': there is no layer stack to take a depth from, so this knob cannot select anything. Reported unreachable rather than as a depth of 0, which would read as a choice the operator made.")
+       gate:mem.pressure                            ('armed-but-zero', "'probation_share 0.908 against probation_frac 0.1 STORE-WIDE, while the PER-BLOCK distribution the eviction branch actually tests is min/median/max 28/127/128 against 12.8; n_probe_fired 46; n_promoted 12670; pressure 35584/139008 = 0.256' vs 0.8 -- MEM_PRESSURE_THRESH=0.8 is MEM's own bar and THIS COMPARISON IS ITS ONLY READER: what the composition root hands fabric/api.py::grow_check is this verdict and not this ratio. MEM_EVICT='lru' ranks the victims the two branches are counted over, and MEM_SRC_SHARE=0.5 puts quota_arm at 'reservoir'. The denominator is PRINTED beside the ratio rather than suppressed below a minimum: the frozen tree returned None under 1,000 evictions (memory.py:415), that floor was chosen at a capacity of 200,000 against this store's 8192, and porting it would be re-tuning an instrument by importing a constant -- so at 35584/139008 a reader can see for themselves how many samples this verdict rests on.")
+       gate:mem.probation                           ('fired', '103424 vs 0')
+       gate:mem.probe                               ('fired', "'n_probe_rows=2880 over n_probe_fired=46' vs '0 rows'")
+       gate:mem.rekey                               ('fired', '6 vs 0')
+       gate:mem.use_decay                           ('fired', '147200 vs 20000')
+       gate:mem.write_target                        ('unreachable', "0.5 vs 0.5 -- MEM_WRITE_MODE='fixed' admits on MEM_WRITE_GATE=0.3 alone, so this setpoint selects nothing and neither do GATE_STEP, GATE_FLOOR or GATE_CEIL. The kept fraction is still measured -- n_writes_committed/n_writes_offered = 147200/147200 -- it is simply not controlled by anything.")
+       live_src                                     13
+       n_census_reconciles                          1
+       nsrc                                         22
+       nsrc_max                                     5888
+       pressure                                     False
+       probation_share                              0.9082
+       quota_arm                                    reservoir
+       sources_holding_entries                      22
+    -- DATA(stream.gates)
+       gate:data.contig_wrap                        ('unreachable', 'None vs 1616 -- DATA_SEG_CONTIG=0 (the shipped default, and a LITERAL rather than a computed one): every segment seeks to randint(0, len(body) - want) and is cut to fit, so no read can run off the end of a body and there is no cursor to wrap. Wrapping is not something this configuration did zero times -- it is something it cannot do, and the threshold is the segments that were read the other way')
+       gate:data.phase_entered                      ('fired', '4 vs 4')
+       gate:data.resample                           ('unreachable', "None vs 0 -- DATA_RESAMPLE=0: every epoch after the first returns the byte-identical replay of this draw instead of redrawing (the arm at the top of this function), so 'redraws so far' is not a number this configuration has. This call is the FIRST draw for this Areas in this process and it happened; what cannot happen here is a redraw. train/api.py::startup_refusals refuses RUN_EPOCHS>1 under this lever for the same reason -- a continual-learning result taken on replayed text is a memorisation result")
+       gate:data.stream_draw                        ('fired', '2000000 vs 2000000')
+    -- FAB.grow_check(last call's gates)
+       gate:fab.grow_cap                            ('armed-but-zero', "'0 of 0 refused by the ceiling' vs 'Caps.headroom(2398)=1698, pool 1698 of 4096'")
+       gate:fab.grow_mem_pressure                   ('unreachable', '\'FAB_GROW_ON_MEM_PRESSURE=False, memory_pressure=False\' vs "MEM\'s own verdict, already compared against MEM_PRESSURE_THRESH" -- FAB_GROW_ON_MEM_PRESSURE=False: the memory-pressure signal is printed and does not make growth eligible.')
+       gate:fab.grow_recover                        ('fired', "'|improving|=0.288962, in RECOVER since window 7, 1143 of 1150 check(s) spent there' vs 'plateau=0.002 after recover_min=600, or recover_max=20000'")
+       gate:fab.growth                              ('armed-but-zero', "'0 asked, 0 grown, n_live=2398' vs 'soft cap headroom + new_frac=0.04 of 2398 (FAB_N0=2048, FAB_SLOTS=4096)'")
+       gate:fab.growth_blackout                     ('unreachable', "'0 notification(s)' vs 'cooldown=400 windows' -- NO SHIFT HAS BEEN STAMPED: shift_at is a defaulted keyword, which is invisible to K10, and 0 notifications means the blackout cannot open at all -- not that it was armed and no shift happened. ONE of the three stamping sites is driven: the root stamps the epoch roll (RUN_EPOCHS > 1), so a run that takes no roll before it ends has nothing to black out; TOK.mint_burst's retok is deferred to that same roll and OPT's LR restart stamps nothing.")
+       gate:fab.growth_regression                   ('armed-but-zero', "'loss-slow=-1.764217' vs 'z=4.0 x dev=1.461990'")
+    -- DOM.census
+       boundaries                                   190
+       collapsed_at                                 None
+       created                                      159
+       culled                                       0
+       emptied                                      0
+       folded                                       15
+       held                                         0
+       live                                         [2, 3, 85, 127, 129, 133, 135, 136, 137, 138, 139, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158]
+       merged                                       117
+       n_live                                       27
+       partition_off                                False
+       pooled_radius                                0.103834
+       spared                                       0
+    -- DOM(part.counters)
+       part.boundary_clock                          0
+       part.id_namespace                            4096
+       part.n_bootstrap_radius                      107
+       part.n_bootstrap_spawn_dist                  22
+       part.n_boundaries                            190
+       part.n_capped                                0
+       part.n_censuses                              23
+       part.n_competence_domains                    27
+       part.n_competence_seeded                     159
+       part.n_competence_updates                    1150
+       part.n_created                               159
+       part.n_cull_budget_zero                      7
+       part.n_cull_candidates                       4
+       part.n_cull_refused_activity                 0
+       part.n_culled                                0
+       part.n_emptied                               0
+       part.n_fold_candidates                       23
+       part.n_fold_refused_far                      8
+       part.n_fold_refused_no_pooled_radius         0
+       part.n_folded                                15
+       part.n_grace_skips                           4
+       part.n_held_by_mem_floor                     0
+       part.n_manage_calls                          11
+       part.n_manage_passes                         11
+       part.n_mem_floor_entries                     240
+       part.n_merged                                117
+       part.n_opened                                0
+       part.n_pooled_only                           21
+       part.n_prior_accumulated                     1150
+       part.n_prior_domains                         27
+       part.n_prior_empty                           0
+       part.n_prior_reads                           27
+       part.n_radius_capped_voronoi                 28
+       part.n_radius_from_cap_only                  21
+       part.n_radius_measured                       30
+       part.n_reentered                             37
+       part.n_reentered_by_radius                   37
+       part.n_rekey_domains                         51
+       part.n_rekey_empty                           0
+       part.n_rekey_passes                          5
+       part.n_rekey_reservoir_size                  40
+       part.n_rekey_windows                         619
+       part.n_reservoir_kept                        1007
+       part.n_reservoir_ragged_dropped              0
+       part.n_reservoir_replaced                    61
+       part.n_restored_domains                      0
+       part.n_spared_by_competence                  0
+       part.n_sustain_partial                       63
+       part.n_windows                               1150
+    -- DOM.prior(live)
+       consumed_by                                  nothing in training: the histogram is read only by this R-stage row; its blend into a prediction belongs to the deferred eval battery
+       n_empty                                      0
+       n_live                                       27
+       n_with_histogram                             27
+       weight                                       0.15
+    -- CKPT.Retention.counters
+       inert_reason                                 no curve value has ever arrived: CKPT.Retention.consider has not been called once, so 0 new bests and 0 rotations are not a measurement of this run's curve. EVAL.curve_probe is deferred (spine/compose.py::DEFERRED_ENTRY_POINTS -- nothing produces units_by_domain or logits_fn), which is the whole reason the event cannot arrive.
+       new_bests                                    0
+       probes_seen                                  0
+       rotations                                    0
+       slots_used                                   0
+    -- RUN.RunClock.counters
+       backwards                                    1150
+       batch_len                                    0
+       dropped_windows                              0
+       epoch                                        0
+       epochs_target                                1
+       flushes                                      1150
+       in_epoch                                     1150
+       opt_steps                                    1150
+       resumed_at                                   0
+       step                                         1150
+       windows_in_epoch                             10500
+    -- RUN.Timing.spans
+       dom.manage                                   0.035
+       dom.observe                                  0.2
+       dom.rekey                                    0.021
+       fab.manage                                   0.108
+       flush                                        269.137
+       flush/anchor                                 0.01
+       flush/backward                               115.488
+       flush/cap.caps                               0.015
+       flush/decode_loss                            0.968
+       flush/fab.forward                            54.291
+       flush/fab.grow_check                         0.336
+       flush/fab.observe                            0.327
+       flush/lm.embed_encode_world                  5.979
+       flush/mem.maintain                           2.146
+       flush/mem.write                              5.493
+       flush/opt.maybe_step                         79.099
+       flush/opt.remap_rows                         0.037
+       flush/tok.due                                0.018
+       flush/world.loss                             1.438
+       sample_window                                0.022
+       sig.encode                                   0.307
+       sig.train_step                               6.418
+       tok.on_window                                0.117
+    -- RUN.bench_summary
+       RUN_BENCH=0: off
+    -- R ROWS WITH NO PRODUCER
+       EVAL.*: the whole package is deferred; its holdout probe has no logits_fn that spans FAB.forward, which is the same missing join that deferred FAB.contribution.
+    -- LOOP(flush books)
+       no key is reachable on this arm: loop.flush_mixed_domain needs OPT_BATCH_WINDOWS > 1 and loop.owners_from_domain needs FAB_ON=0 or FAB_NORM_ONLY=1
+=== cadence ledger (checks=0 means the gate was never evaluated, which is a different fact from fires=0):
+      ckpt         checks=1150   fires=0     period=0 windows
+      curve        checks=0      fires=0     period=2000 windows
+      dom.manage   checks=1150   fires=11    period=100 windows
+      dom.rekey    checks=1150   fires=5     period=200 windows
+      fab.manage   checks=1150   fires=2     period=500 windows
+      progress     checks=1150   fires=11    period=100 windows
+WARNING: loop: stopped at max_windows=1150 window(s) trained by THIS process (the clock reads step 1150), which is a DRIVER argument and not a lever -- this run is shorter than RUN.epochs and DATA asked for, and no report line should be read as a full run.
+WARNING: loop: 30 token(s) were minted AFTER THE LAST RE-SEGMENTATION and cannot appear in this run's training stream -- their rows are initialised and a resume carries them (a resumed run segments at the restored vocabulary, so they reach the data there), but nothing has re-segmented since they were born. On a fresh RUN_EPOCHS=1 run that is every mint the run makes: the single roll a one-epoch run takes is the one that also finishes it, and Tick requires `finished` to be tested first.
+WARNING: loop: no final checkpoint was written -- CKPT_DIR names no directory, so saving is off and this run's weights end with the process. Set CKPT_DIR to keep them.

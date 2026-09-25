@@ -1,0 +1,189 @@
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+mask_replay after P1 {'text_bpb': 1.9358}
+('P2', 0, 8.056) 0
+('P2', 250, 2.45) 22
+('P2', 500, 2.067) 45
+('P2', 750, 1.869) 68
+('P2', 1000, 1.902) 90
+('P2', 1250, 1.912) 111
+('P2', 1500, 1.625) 133
+('P2', 1750, 1.617) 155
+('P2', 2000, 1.751) 177
+('P2', 2250, 1.57) 199
+('P2', 2500, 1.734) 219
+('P2', 2750, 1.533) 240
+{
+ "arm": "mask_replay",
+ "p1": 1500,
+ "p2": 3000,
+ "V": 1264,
+ "L": 96,
+ "W": 128,
+ "params": 522992,
+ "p1_s_per_step": 0.0907,
+ "after_p1": {
+  "text_bpb": 1.9358
+ },
+ "p2_s_per_step": 0.0869,
+ "p2_s_per_window": 0.00543,
+ "after_p2": {
+  "text_bpb": 1.931,
+  "text_bpb_evaluated_with_mask": 1.931,
+  "bits_per_code_t2a": 3.2555,
+  "bits_per_code_a2t": 3.4005,
+  "caption_bits_per_byte_a2t": 0.0886
+ },
+ "understand_a2t": {
+  "train_combos": {
+   "kind": 0.578,
+   "band": 0.922,
+   "timbre": 0.797,
+   "count": 0.555,
+   "exact": 0.32,
+   "n": 128
+  },
+  "heldout_combos": {
+   "kind": 0.5,
+   "band": 0.938,
+   "timbre": 0.562,
+   "count": 0.375,
+   "exact": 0.0,
+   "n": 16
+  }
+ },
+ "generate_t2a_temp1": {
+  "train_combos": {
+   "kind": 0.396,
+   "band": 0.552,
+   "timbre": 0.542,
+   "count": 0.333,
+   "exact": 0.083,
+   "n": 96
+  },
+  "heldout_combos": {
+   "kind": 0.417,
+   "band": 0.5,
+   "timbre": 0.5,
+   "count": 0.417,
+   "exact": 0.0,
+   "n": 12
+  },
+  "invalid_id_rate": 0.0389,
+  "distinct_codes": 544
+ },
+ "generate_t2a_temp0.7": {
+  "train_combos": {
+   "kind": 0.354,
+   "band": 0.469,
+   "timbre": 0.562,
+   "count": 0.396,
+   "exact": 0.062,
+   "n": 96
+  },
+  "heldout_combos": {
+   "kind": 0.083,
+   "band": 0.667,
+   "timbre": 0.667,
+   "count": 0.25,
+   "exact": 0.0,
+   "n": 12
+  },
+  "invalid_id_rate": 0.0085,
+  "distinct_codes": 426
+ },
+ "generate_s": 6.8,
+ "curve": [
+  [
+   "P1",
+   0,
+   8.061
+  ],
+  [
+   "P1",
+   250,
+   2.329
+  ],
+  [
+   "P1",
+   500,
+   2.154
+  ],
+  [
+   "P1",
+   750,
+   2.025
+  ],
+  [
+   "P1",
+   1000,
+   1.946
+  ],
+  [
+   "P1",
+   1250,
+   1.885
+  ],
+  [
+   "P2",
+   0,
+   8.056
+  ],
+  [
+   "P2",
+   250,
+   2.45
+  ],
+  [
+   "P2",
+   500,
+   2.067
+  ],
+  [
+   "P2",
+   750,
+   1.869
+  ],
+  [
+   "P2",
+   1000,
+   1.902
+  ],
+  [
+   "P2",
+   1250,
+   1.912
+  ],
+  [
+   "P2",
+   1500,
+   1.625
+  ],
+  [
+   "P2",
+   1750,
+   1.617
+  ],
+  [
+   "P2",
+   2000,
+   1.751
+  ],
+  [
+   "P2",
+   2250,
+   1.57
+  ],
+  [
+   "P2",
+   2500,
+   1.734
+  ],
+  [
+   "P2",
+   2750,
+   1.533
+  ]
+ ],
+ "forgetting_text_bpb": -0.0048
+}

@@ -1,0 +1,4 @@
+0.1 tree2: PAIRSCAN_CHECK ok n=513 pairs=0
+0.1 tree2: PAIRSCAN_CHECK ok n=515 pairs=0
+0.1 tree2: PAIRSCAN_CHECK ok n=535 pairs=0
+0.1 tree2: {"secs": 44.8, "n_live": 559, "curve_tail": [6.626197, 6.678206, 5.314583, 4.018915, 4.268241], "hash": "ba4e940085ea8010513323d74a872c0daa29191e", "merged": {"fab.cull_fail": 0, "fab.cull_util": 0, "fab.merged": 0, "fab.merge_declined_grace": 0, "fab.merge_declined_residual": 0}}

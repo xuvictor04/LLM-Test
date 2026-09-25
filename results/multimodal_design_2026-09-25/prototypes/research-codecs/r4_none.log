@@ -1,0 +1,83 @@
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+(44.9, 200, 4.6001)
+(90.1, 400, 4.1477)
+EVAL 500 113 mel 0.7708 snr -0.02 used -1
+(135.0, 600, 4.2881)
+(179.7, 800, 3.7597)
+(225.0, 1000, 4.345)
+EVAL 1000 225 mel 0.8224 snr -0.02 used -1
+(270.1, 1200, 3.8127)
+(315.5, 1400, 3.8279)
+EVAL 1500 338 mel 0.7953 snr -0.01 used -1
+(360.6, 1600, 3.9389)
+(405.7, 1800, 4.287)
+(451.2, 2000, 3.7794)
+EVAL 2000 451 mel 0.6682 snr -0.06 used -1
+(495.6, 2200, 3.765)
+{
+ "snr_db": -0.047041669487953186,
+ "sisnr_db": -41.158084869384766,
+ "stft": 2.3967244625091553,
+ "mel": 0.6046887040138245,
+ "l1": 0.1839631199836731,
+ "rtf_encode_decode": 0.012272380292415619,
+ "baseline_zero_stft": 4.9175496101379395,
+ "baseline_zero_mel": 1.8278727531433105,
+ "baseline_mulaw8_bps": 64000,
+ "baseline_mulaw8_snr_db": 37.931236267089844,
+ "baseline_mulaw8_mel": 0.5013025403022766,
+ "args": {
+  "quant": "none",
+  "sr": 8000,
+  "stride": 160,
+  "C": 16,
+  "D": 64,
+  "levels": "8,5,5,5",
+  "nq": 4,
+  "K": 256,
+  "minutes": 9.0,
+  "bs": 8,
+  "seg": 0.5,
+  "out": "/tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/mm/research-codecs/r4_none.json",
+  "seed": 0,
+  "arch": "spec",
+  "act": "elu",
+  "eval_every": 500,
+  "prenorm": 1,
+  "cplx_w": 1.0,
+  "lr": 0.001
+ },
+ "params": 6366594,
+ "steps": 2396,
+ "train_seconds": 540.2,
+ "audio_seconds_seen": 9584.0,
+ "frames_per_s": 50.0,
+ "log": [
+  [
+   315.5,
+   1400,
+   3.8279
+  ],
+  [
+   360.6,
+   1600,
+   3.9389
+  ],
+  [
+   405.7,
+   1800,
+   4.287
+  ],
+  [
+   451.2,
+   2000,
+   3.7794
+  ],
+  [
+   495.6,
+   2200,
+   3.765
+  ]
+ ]
+}

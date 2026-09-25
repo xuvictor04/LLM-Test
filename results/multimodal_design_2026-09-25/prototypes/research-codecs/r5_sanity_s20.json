@@ -1,0 +1,67 @@
+{
+ "snr_db": 8.844301223754883,
+ "sisnr_db": 4.891711711883545,
+ "stft": 2.027251720428467,
+ "mel": 0.5656523704528809,
+ "l1": 0.07371275126934052,
+ "rtf_encode_decode": 0.023255109786987305,
+ "baseline_zero_stft": 4.9169921875,
+ "baseline_zero_mel": 1.8279110193252563,
+ "baseline_mulaw8_bps": 64000,
+ "baseline_mulaw8_snr_db": 37.931236267089844,
+ "baseline_mulaw8_mel": 0.5013025403022766,
+ "args": {
+  "quant": "none",
+  "sr": 8000,
+  "stride": 20,
+  "C": 16,
+  "D": 64,
+  "levels": "8,5,5,5",
+  "nq": 4,
+  "K": 256,
+  "minutes": 4.0,
+  "bs": 8,
+  "seg": 0.5,
+  "out": "/tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/mm/research-codecs/r5_sanity_s20.json",
+  "seed": 0,
+  "arch": "v1",
+  "act": "elu",
+  "eval_every": 250,
+  "prenorm": 0,
+  "cplx_w": 0.0,
+  "l1_w": 10.0,
+  "lr": 0.001
+ },
+ "params": 152641,
+ "steps": 1183,
+ "train_seconds": 240.2,
+ "audio_seconds_seen": 4732.0,
+ "frames_per_s": 400.0,
+ "log": [
+  [
+   40.7,
+   200,
+   3.2164
+  ],
+  [
+   80.8,
+   400,
+   4.1308
+  ],
+  [
+   121.0,
+   600,
+   4.3496
+  ],
+  [
+   162.3,
+   800,
+   3.0439
+  ],
+  [
+   203.2,
+   1000,
+   3.9673
+  ]
+ ]
+}

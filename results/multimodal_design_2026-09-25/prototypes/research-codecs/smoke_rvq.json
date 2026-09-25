@@ -1,0 +1,92 @@
+{
+ "snr_db": -0.004437930881977081,
+ "sisnr_db": -47.456329345703125,
+ "stft": 3.949500799179077,
+ "l1": 0.19167238473892212,
+ "rtf_encode_decode": 0.050685711205005646,
+ "codebooks": [
+  {
+   "used": 1,
+   "of": 256,
+   "frac": 0.0039,
+   "perplexity": 1.0,
+   "entropy_bits": -0.0,
+   "max_bits": 8.0,
+   "n_tokens": 1600
+  },
+  {
+   "used": 1,
+   "of": 256,
+   "frac": 0.0039,
+   "perplexity": 1.0,
+   "entropy_bits": -0.0,
+   "max_bits": 8.0,
+   "n_tokens": 1600
+  },
+  {
+   "used": 1,
+   "of": 256,
+   "frac": 0.0039,
+   "perplexity": 1.0,
+   "entropy_bits": -0.0,
+   "max_bits": 8.0,
+   "n_tokens": 1600
+  },
+  {
+   "used": 1,
+   "of": 256,
+   "frac": 0.0039,
+   "perplexity": 1.0,
+   "entropy_bits": -0.0,
+   "max_bits": 8.0,
+   "n_tokens": 1600
+  }
+ ],
+ "tokens_per_s": 200.0,
+ "bits_per_s_nominal": 1600.0,
+ "bits_per_s_entropy": 0.0,
+ "by_nq": {
+  "1": {
+   "snr_db": -0.0,
+   "stft": 3.9953,
+   "tokens_per_s": 50.0
+  },
+  "2": {
+   "snr_db": -0.01,
+   "stft": 4.1209,
+   "tokens_per_s": 100.0
+  },
+  "3": {
+   "snr_db": -0.01,
+   "stft": 4.0877,
+   "tokens_per_s": 150.0
+  },
+  "4": {
+   "snr_db": -0.0,
+   "stft": 3.9495,
+   "tokens_per_s": 200.0
+  }
+ },
+ "baseline_zero_stft": 4.432171821594238,
+ "args": {
+  "quant": "rvq",
+  "sr": 16000,
+  "stride": 320,
+  "C": 16,
+  "D": 64,
+  "levels": "8,5,5,5",
+  "nq": 4,
+  "K": 256,
+  "minutes": 0.15,
+  "bs": 8,
+  "seg": 0.5,
+  "out": "/tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/mm/research-codecs/smoke_rvq.json",
+  "seed": 0
+ },
+ "params": 597921,
+ "steps": 28,
+ "train_seconds": 9.0,
+ "audio_seconds_seen": 112.0,
+ "frames_per_s": 50.0,
+ "log": []
+}

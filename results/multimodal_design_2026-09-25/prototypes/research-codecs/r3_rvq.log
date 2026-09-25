@@ -1,0 +1,140 @@
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+(48.0, 200, 3.8932)
+(121.2, 400, 4.636)
+EVAL 500 163 mel 1.4765 snr -0.7
+(210.8, 600, 4.7027)
+(308.3, 800, 3.4342)
+(404.9, 1000, 4.735)
+EVAL 1000 405 mel 1.2643 snr -0.0
+{
+ "snr_db": -0.0026422978844493628,
+ "sisnr_db": -47.78285598754883,
+ "stft": 4.390298843383789,
+ "mel": 1.418709635734558,
+ "l1": 0.1826053410768509,
+ "rtf_encode_decode": 0.013455919921398163,
+ "codebooks": [
+  {
+   "used": 107,
+   "of": 256,
+   "frac": 0.418,
+   "perplexity": 39.5,
+   "entropy_bits": 5.304,
+   "max_bits": 8.0,
+   "n_tokens": 1600
+  },
+  {
+   "used": 77,
+   "of": 256,
+   "frac": 0.3008,
+   "perplexity": 30.7,
+   "entropy_bits": 4.938,
+   "max_bits": 8.0,
+   "n_tokens": 1600
+  },
+  {
+   "used": 125,
+   "of": 256,
+   "frac": 0.4883,
+   "perplexity": 53.1,
+   "entropy_bits": 5.731,
+   "max_bits": 8.0,
+   "n_tokens": 1600
+  },
+  {
+   "used": 148,
+   "of": 256,
+   "frac": 0.5781,
+   "perplexity": 72.1,
+   "entropy_bits": 6.172,
+   "max_bits": 8.0,
+   "n_tokens": 1600
+  }
+ ],
+ "tokens_per_s": 200.0,
+ "bits_per_s_nominal": 1600.0,
+ "bits_per_s_entropy": 1107.25,
+ "by_nq": {
+  "1": {
+   "snr_db": -0.0,
+   "stft": 4.4269,
+   "mel": 1.4275,
+   "tokens_per_s": 50.0
+  },
+  "2": {
+   "snr_db": -0.0,
+   "stft": 4.3927,
+   "mel": 1.4157,
+   "tokens_per_s": 100.0
+  },
+  "3": {
+   "snr_db": -0.0,
+   "stft": 4.4174,
+   "mel": 1.4296,
+   "tokens_per_s": 150.0
+  },
+  "4": {
+   "snr_db": -0.0,
+   "stft": 4.3903,
+   "mel": 1.4187,
+   "tokens_per_s": 200.0
+  }
+ },
+ "baseline_zero_stft": 4.918964862823486,
+ "baseline_zero_mel": 1.8288789987564087,
+ "baseline_mulaw8_bps": 64000,
+ "baseline_mulaw8_snr_db": 37.931236267089844,
+ "baseline_mulaw8_mel": 0.5013025403022766,
+ "args": {
+  "quant": "rvq",
+  "sr": 8000,
+  "stride": 160,
+  "C": 16,
+  "D": 64,
+  "levels": "8,5,5,5",
+  "nq": 4,
+  "K": 256,
+  "minutes": 8.0,
+  "bs": 8,
+  "seg": 0.5,
+  "out": "/tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/mm/research-codecs/r3_rvq.json",
+  "seed": 0,
+  "arch": "spec",
+  "act": "elu",
+  "eval_every": 500,
+  "lr": 0.001
+ },
+ "params": 6370978,
+ "steps": 1155,
+ "train_seconds": 480.4,
+ "audio_seconds_seen": 4620.0,
+ "frames_per_s": 50.0,
+ "log": [
+  [
+   48.0,
+   200,
+   3.8932
+  ],
+  [
+   121.2,
+   400,
+   4.636
+  ],
+  [
+   210.8,
+   600,
+   4.7027
+  ],
+  [
+   308.3,
+   800,
+   3.4342
+  ],
+  [
+   404.9,
+   1000,
+   4.735
+  ]
+ ]
+}

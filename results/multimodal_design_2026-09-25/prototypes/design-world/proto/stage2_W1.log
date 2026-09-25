@@ -1,0 +1,13 @@
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+/tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/mm/design-world/proto/stage2_world.py:21: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /__w/pytorch/pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:820.)
+  curve.append((it, round(float(wl), 4), round(float(inv), 5), round(float(ls), 3), round(rd.item(), 5))); print(arm, curve[-1], round(time.time() - t0), flush=True)
+W1 (0, 0.8909, 0.00284, 0.11, 0.44656) 0
+W1 (250, 0.1189, 0.079, 1.015, 0.01573) 24
+W1 (500, 0.1259, 0.05439, 1.015, 0.00819) 45
+W1 (750, 0.1039, 0.05535, 1.001, 0.00592) 59
+W1 (1000, 0.0925, 0.05645, 0.998, 0.00471) 72
+W1 (1250, 0.0798, 0.0521, 1.015, 0.00416) 87
+W1 (1499, 0.0712, 0.05557, 1.016, 0.00388) 104
+{"arm": "W1_ctx_gru", "steps": 1500, "train_s": 104, "curve[it,world_loss,inv,latent_std,readout_mse]": [[0, 0.8909, 0.00284, 0.11, 0.44656], [250, 0.1189, 0.079, 1.015, 0.01573], [500, 0.1259, 0.05439, 1.015, 0.00819], [750, 0.1039, 0.05535, 1.001, 0.00592], [1000, 0.0925, 0.05645, 0.998, 0.00471], [1250, 0.0798, 0.0521, 1.015, 0.00416], [1499, 0.0712, 0.05557, 1.016, 0.00388]], "onestep_mse_over_persistence_all": 0.1896, "onestep_mse_over_persistence_within_note": 0.2252, "onestep_mse_over_persistence_note_boundary": 0.1342, "readout_mse_hold": 0.00392, "codec_latent_var": 0.45168, "gen_argmax": {"note3_legal": 0.887, "note3_mode(0.7)": 0.645, "note4_legal": 0.343, "timbre_kept": 0.962, "probe_conf_gen_notes": 0.88, "L1_vs_true_continuation": 1.341, "rollout_ms_per_frame_B400": 4.75}, "ref_true_note3_legal": 1.0, "chance_note3_legal": 0.25, "order1_best_note3_legal_estimate": "see stage2 notes"}

@@ -1,0 +1,133 @@
+{
+ "snr_db": -0.003344302996993065,
+ "sisnr_db": -43.134674072265625,
+ "stft": 4.011956691741943,
+ "mel": 1.2726558446884155,
+ "l1": 0.18262019753456116,
+ "rtf_encode_decode": 0.012506455183029175,
+ "codebooks": [
+  {
+   "used": 60,
+   "of": 256,
+   "frac": 0.2344,
+   "perplexity": 34.0,
+   "entropy_bits": 5.085,
+   "max_bits": 8.0,
+   "n_tokens": 1600
+  },
+  {
+   "used": 100,
+   "of": 256,
+   "frac": 0.3906,
+   "perplexity": 41.0,
+   "entropy_bits": 5.356,
+   "max_bits": 8.0,
+   "n_tokens": 1600
+  },
+  {
+   "used": 132,
+   "of": 256,
+   "frac": 0.5156,
+   "perplexity": 45.7,
+   "entropy_bits": 5.514,
+   "max_bits": 8.0,
+   "n_tokens": 1600
+  },
+  {
+   "used": 8,
+   "of": 256,
+   "frac": 0.0312,
+   "perplexity": 2.9,
+   "entropy_bits": 1.537,
+   "max_bits": 8.0,
+   "n_tokens": 1600
+  }
+ ],
+ "tokens_per_s": 200.0,
+ "bits_per_s_nominal": 1600.0,
+ "bits_per_s_entropy": 874.5999999999999,
+ "by_nq": {
+  "1": {
+   "snr_db": -0.0,
+   "stft": 4.3586,
+   "mel": 1.4116,
+   "tokens_per_s": 50.0
+  },
+  "2": {
+   "snr_db": -0.0,
+   "stft": 4.1415,
+   "mel": 1.3218,
+   "tokens_per_s": 100.0
+  },
+  "3": {
+   "snr_db": -0.0,
+   "stft": 4.1391,
+   "mel": 1.3255,
+   "tokens_per_s": 150.0
+  },
+  "4": {
+   "snr_db": -0.0,
+   "stft": 4.012,
+   "mel": 1.2727,
+   "tokens_per_s": 200.0
+  }
+ },
+ "baseline_zero_stft": 4.918307781219482,
+ "baseline_zero_mel": 1.8280606269836426,
+ "baseline_mulaw8_bps": 64000,
+ "baseline_mulaw8_snr_db": 37.931236267089844,
+ "baseline_mulaw8_mel": 0.5013025403022766,
+ "args": {
+  "quant": "rvq",
+  "sr": 8000,
+  "stride": 160,
+  "C": 16,
+  "D": 64,
+  "levels": "8,5,5,5",
+  "nq": 4,
+  "K": 256,
+  "minutes": 9.0,
+  "bs": 8,
+  "seg": 0.5,
+  "out": "/tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/mm/research-codecs/r4_rvq.json",
+  "seed": 0,
+  "arch": "spec",
+  "act": "elu",
+  "eval_every": 500,
+  "prenorm": 1,
+  "cplx_w": 1.0,
+  "lr": 0.001
+ },
+ "params": 6370978,
+ "steps": 1082,
+ "train_seconds": 540.5,
+ "audio_seconds_seen": 4328.0,
+ "frames_per_s": 50.0,
+ "log": [
+  [
+   48.8,
+   200,
+   4.6071
+  ],
+  [
+   136.5,
+   400,
+   5.1475
+  ],
+  [
+   244.2,
+   600,
+   5.2245
+  ],
+  [
+   358.4,
+   800,
+   4.5382
+  ],
+  [
+   490.4,
+   1000,
+   4.5752
+  ]
+ ]
+}

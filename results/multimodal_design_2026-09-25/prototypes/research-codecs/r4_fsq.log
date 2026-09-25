@@ -1,0 +1,97 @@
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+(44.4, 200, 4.5405)
+(96.2, 400, 4.8348)
+EVAL 500 120 mel 1.6429 snr -0.39 used 1
+(142.6, 600, 4.7832)
+(190.5, 800, 6.2308)
+(243.1, 1000, 5.4284)
+EVAL 1000 243 mel 1.2682 snr -0.0 used 1
+(292.1, 1200, 5.2856)
+(337.1, 1400, 5.0403)
+EVAL 1500 360 mel 1.2621 snr -0.0 used 1
+(383.3, 1600, 5.7087)
+(434.8, 1800, 6.0015)
+(486.9, 2000, 5.074)
+EVAL 2000 487 mel 1.2594 snr -0.0 used 1
+(539.1, 2200, 5.5401)
+{
+ "snr_db": -0.003325273049995303,
+ "sisnr_db": -43.08034896850586,
+ "stft": 3.819842576980591,
+ "mel": 1.159867763519287,
+ "l1": 0.18269112706184387,
+ "rtf_encode_decode": 0.013530567288398743,
+ "codebooks": [
+  {
+   "used": 1,
+   "of": 1000,
+   "frac": 0.001,
+   "perplexity": 1.0,
+   "entropy_bits": -0.0,
+   "max_bits": 9.966,
+   "n_tokens": 1600
+  }
+ ],
+ "tokens_per_s": 50.0,
+ "bits_per_s_nominal": 498.28921423310436,
+ "bits_per_s_entropy": 0.0,
+ "baseline_zero_stft": 4.91918420791626,
+ "baseline_zero_mel": 1.8283544778823853,
+ "baseline_mulaw8_bps": 64000,
+ "baseline_mulaw8_snr_db": 37.931236267089844,
+ "baseline_mulaw8_mel": 0.5013025403022766,
+ "args": {
+  "quant": "fsq",
+  "sr": 8000,
+  "stride": 160,
+  "C": 16,
+  "D": 64,
+  "levels": "8,5,5,5",
+  "nq": 4,
+  "K": 256,
+  "minutes": 9.0,
+  "bs": 8,
+  "seg": 0.5,
+  "out": "/tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/mm/research-codecs/r4_fsq.json",
+  "seed": 0,
+  "arch": "spec",
+  "act": "elu",
+  "eval_every": 500,
+  "prenorm": 1,
+  "cplx_w": 1.0,
+  "lr": 0.001
+ },
+ "params": 6367174,
+ "steps": 2204,
+ "train_seconds": 540.2,
+ "audio_seconds_seen": 8816.0,
+ "frames_per_s": 50.0,
+ "log": [
+  [
+   337.1,
+   1400,
+   5.0403
+  ],
+  [
+   383.3,
+   1600,
+   5.7087
+  ],
+  [
+   434.8,
+   1800,
+   6.0015
+  ],
+  [
+   486.9,
+   2000,
+   5.074
+  ],
+  [
+   539.1,
+   2200,
+   5.5401
+  ]
+ ]
+}

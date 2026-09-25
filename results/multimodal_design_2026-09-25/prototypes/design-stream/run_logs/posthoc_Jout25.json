@@ -1,0 +1,31 @@
+{
+ "ceiling_codeclf_on_real_codes": 0.78125,
+ "T1.0": {
+  "codeclf_acc": 0.2265625,
+  "probe_acc": 0.28125,
+  "family_acc": 0.4921875,
+  "distinct_codes": 148,
+  "s": 6.1
+ },
+ "T0.7": {
+  "codeclf_acc": 0.234375,
+  "probe_acc": 0.28125,
+  "family_acc": 0.5234375,
+  "distinct_codes": 123,
+  "s": 6.3
+ },
+ "T0.3": {
+  "codeclf_acc": 0.234375,
+  "probe_acc": 0.2421875,
+  "family_acc": 0.5234375,
+  "distinct_codes": 70,
+  "s": 6.3
+ },
+ "T0.0": {
+  "codeclf_acc": 0.1875,
+  "probe_acc": 0.1875,
+  "family_acc": 0.3125,
+  "distinct_codes": 17,
+  "s": 5.9
+ }
+}

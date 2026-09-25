@@ -1,0 +1,43 @@
+{
+ "snr_db": -0.003820475423708558,
+ "sisnr_db": -42.4895133972168,
+ "stft": 3.877657651901245,
+ "l1": 0.19164025783538818,
+ "rtf_encode_decode": 0.05126953125,
+ "codebooks": [
+  {
+   "used": 1,
+   "of": 1000,
+   "frac": 0.001,
+   "perplexity": 1.0,
+   "entropy_bits": -0.0,
+   "max_bits": 9.966,
+   "n_tokens": 1600
+  }
+ ],
+ "tokens_per_s": 50.0,
+ "bits_per_s_nominal": 498.28921423310436,
+ "bits_per_s_entropy": 0.0,
+ "baseline_zero_stft": 4.431644439697266,
+ "args": {
+  "quant": "fsq",
+  "sr": 16000,
+  "stride": 320,
+  "C": 16,
+  "D": 64,
+  "levels": "8,5,5,5",
+  "nq": 4,
+  "K": 256,
+  "minutes": 0.15,
+  "bs": 8,
+  "seg": 0.5,
+  "out": "/tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/mm/research-codecs/smoke_fsq.json",
+  "seed": 0
+ },
+ "params": 594117,
+ "steps": 26,
+ "train_seconds": 9.3,
+ "audio_seconds_seen": 104.0,
+ "frames_per_s": 50.0,
+ "log": []
+}
