@@ -23,9 +23,27 @@ Updated 2026-09-25 at `ac94811` on `rm-predict-DC` (the only branch pushed to; n
   training data because every retok waits for an epoch roll (Q-RUN-8), and TOK_RETOK_EVERY decides
   nothing at any epoch count. A live codec and an adaptive rate need the same mid-epoch
   re-segmentation (Q-RUN-8 option a), so that mechanism is now a prerequisite.
-- In flight: the design workflow wf_ba08e76a-a28 (map, literature, 3 prototyped designs, judge,
-  critic, reproduction). Scratch: .../scratchpad/mm2/. Its output folds into 03 as §0b, and its
-  evidence goes to results/.
+- DONE: design workflow wf_ba08e76a-a28. Evidence is in results/live_codec_design_2026-09-25/
+  (eac5e59). The judge picked D3 (EMA teacher + lattice-coordinate rows + nested multi-rate) with
+  D1's act mechanics grafted on. The critic returned sound-with-fixes: 1 blocking (resume vs mint
+  cadence) and 9 major.
+- Decisions taken on the critic's open points (applied by the revision workflow wf_c04d7ab1-d11):
+  - D-1: resume segments at vocab.rev as of the last act.
+  - D-2: AUD_ARCH 'spec' is the default; 'nested' is an arm.
+  - D-3: AUD_RATE_MODE='measured' picks the stride from rate-distortion at readiness, before any
+    media is consumed.
+  - D-4: default plasticity is the regime measured to cost nothing (D1 low-plasticity), and
+    AUD_REWARM is off.
+  - D-5: codes come from a snapshot refreshed at each act; EMA just-in-time is an arm.
+  - D-6: coordinate rows are the default, justified as sample efficiency, with media rehearsal
+    0.25 and 'table' kept as an arm.
+  - D-7: anchor on, with 0 as an arm.
+  - D-8: SIG sees media through lattice coordinates, and every snapshot refresh stamps a shift.
+  - D-9: the splice goes after the unit under the cursor, and TOK owns it.
+  - D-10: labels are honest about seeds and budget.
+- In flight: wf_c04d7ab1-d11 writes the revised §0b plus section deltas to
+  .../scratchpad/mm2/rev/03_live_codec.md and checks them. Next: fold that into
+  docs/proposals/03_AUDIO_VIDEO.md, then report to the owner.
 
 ## Next
 1. The owner rules on 03 §16, or accepts the recommendations.
