@@ -41,7 +41,12 @@ Updated 2026-09-25 at `ac94811` on `rm-predict-DC` (the only branch pushed to; n
   - D-8: SIG sees media through lattice coordinates, and every snapshot refresh stamps a shift.
   - D-9: the splice goes after the unit under the cursor, and TOK owns it.
   - D-10: labels are honest about seeds and budget.
-- wf_c04d7ab1-d11 is DONE: .../scratchpad/mm2/rev/03_live_codec.md (228k chars) and checklist.md.
+- DONE: docs/proposals/03b_LIVE_CODEC.md is committed, binding over 03. It was verified by
+  wf_68221f90-158 (serious findings 7 -> 4 -> 4, tree-fit clean), then by hand fixes and a targeted
+  check. Its record is in results/live_codec_design_2026-09-25/prototypes/rev/.
+  AWAITING the owner's rulings on 03b §16. The next build is S0b, the mid-epoch act (Q-RUN-8
+  option b-resume), which is text-only and independent of the media rulings.
+- (history) wf_c04d7ab1-d11 was DONE: .../scratchpad/mm2/rev/03_live_codec.md (228k chars) and checklist.md.
   The last fix pass was never re-checked, so verify loop wf_68221f90-158 is IN FLIGHT and must end
   on a clean check. Plan: commit it as docs/proposals/03b_LIVE_CODEC.md (binding over 03), and copy
   rev/{probe_time,audit_d1}.{py,txt} to results/live_codec_design_2026-09-25/prototypes/rev/.

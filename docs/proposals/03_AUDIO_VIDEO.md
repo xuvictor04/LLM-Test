@@ -1,5 +1,7 @@
 # Proposal 03 — Audio and video: understand and generate, learned from scratch, synthetic first
 
+> **Superseded in part (2026-09-25) by [03b — Nothing frozen](03b_LIVE_CODEC.md).** The owner rejected the frozen codec and the hand-fixed 25 Hz. Where 03b disagrees with anything here, 03b wins; §6 is replaced whole.
+
 Status: **design, reviewed, not built.** The judge's synthesis of three prototyped designs, on tree d97779d (rm-predict-DC), then reviewed by an adversarial critic (verdict: *sound with fixes*). **§0 carries the review's fixes and overrides any sentence below that disagrees with it.** Prototypes, logs and measurements: `results/multimodal_design_2026-09-25/prototypes/{design-stream,design-world,design-hybrid,judge,map,research-codecs,profile}/`; the full workflow output (research, three designs, judge, critic, profile) is `results/multimodal_design_2026-09-25/workflow_result.json`. Every number here is a CPU prototype measurement at toy scale, one seed unless stated: a signal, not a result.
 
 This document supersedes the build-order section of `docs/proposals/01_MODALITIES.md` for audio and video. It answers M1, M3, M4, M5, M8 and M10. It leaves M2 as the first measurement of stage S5.

@@ -15,6 +15,7 @@ page — and raise the questions that only the design work can surface.
 | 01 | [Modalities](01_MODALITIES.md) — image, audio and video, read and generated, through the common router | *not yet cut* | design only |
 | 02 | [Router recursion](02_ROUTER_RECURSION.md) — stacked independent routers, experts at the leaves, results passed up | *not yet cut* | design only |
 | 03 | [Audio and video](03_AUDIO_VIDEO.md) — understand and generate, codecs learned from scratch, synthetic first; supersedes 01's build order for audio and video | *not yet cut* | design, reviewed (sound with fixes, all adopted in its §0) |
+| 03b | [Nothing frozen: live codec, measured rate](03b_LIVE_CODEC.md) — binding over 03: the codec never freezes, the Hz is measured per run, and the mid-epoch act (Q-RUN-8) makes text and media tokenization live | *not yet cut* | design, reviewed and checked |
 
 **They are one change wearing two names, and the order matters.** Proposal 02 is what makes 01
 tractable: a flat population routed by one signature has to put an image window and a text window in
