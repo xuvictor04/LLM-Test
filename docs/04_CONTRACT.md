@@ -28,10 +28,11 @@ unchanged by either) — and
 (`FAB.hop_mode`, `FAB.merge_dist`) readers rather than dropping either, so **UNCONSUMED LEVERS**
 below is now an empty table with the two rulings under it. K4 reads that table, so a future lever
 with no reader still lands there with a reason or the check fails.
-**Naming is not calling**: which stubs the composition root actually reaches is section 3, and 110
+**Naming is not calling**: which stubs the composition root actually reaches is section 3, and 118
 of the entry points (§7 holds the count, and it is the only place that does — this sentence was one
-of five copies) are named by a row — 94 in a row's entry column and 16 by a call written
-into a row's note — with the remaining **24 declared deferred**, each with the argument that has no
+of five copies) are named by a row — 102 in a row's entry column and 16 by a call written
+into a row's note (2026-09-26, after 03b S0b's act rows and its MEM remap) — with the remaining
+**23 declared deferred**, each with the argument that has no
 producer as the reason. That number was seven until the order tables grew a `produces` column and
 the same standard was applied to every row rather than to EVAL alone (§3.6). *(This sentence said
 "14" while `DEFERRED_ENTRY_POINTS` held 15; corrected 2026-09-02. K6 prints all three numbers, so
@@ -4918,6 +4919,20 @@ reproduces the uninterrupted run's losses EXACTLY with no act, with a save betwe
 next act, with a save after an act, and at `TOK_DROPOUT` 0.1. A checkpoint without the log still
 replays and is warned (`tests/test_resume_clock.py` C9).
 
+### Q-MEM-13 — stored memory contexts stayed spelled in the vocabulary that wrote them — **RESOLVED 2026-09-26 (03b S0b): `MEM.maintain(..., remap=None)`, A ROOT-COMPOSED RE-CUT. ⚠ A SIGNATURE MOVED; `TOK.Vocabulary.decode` LEAVES `DEFERRED_ENTRY_POINTS` (24 → 23)**
+A stored context is a fixed-width window of token ids. Ids never change meaning (the vocabulary is
+append-only), but after an act the same text is spelled in newer, longer tokens, so a context written
+earlier encodes to a key in a different part of key space than the query the model now forms for the
+same text -- the archive measured 82.3% of contexts stale after one growth step. The act records its
+view as `System.mem_remap` (data, so a save before the next flush carries it in `loop_carried`); the
+next flush builds the re-cut (`spine/loop.py::_mem_remap_fn`: strip the 0 pad, `TOK.Vocabulary.decode`,
+`TOK.tokenize(view=)` with no labels, which counts `tok.segment_remap`) and hands it to `MEM.maintain`,
+which keeps the last `key_win` ids, left-pads with 0 as the write path does, leaves the stored target
+id alone (it names the same bytes), and retakes the rekey snapshot so the keys follow. MEM may not
+import TOK (O10), which is why the callable is the root's. Counters: `store.n_remap_events`,
+`store.n_remapped_entries` (ABSENT until a remap). Driven: `tests/test_continuation.py` S6 (a re-cut
+decodes to the same bytes in the newer token; an act in a run remapped 448 entries).
+
 ### Q-OPT-10 — revising the LR horizon mid-run — **RESOLVED 2026-09-26 (03b S0b): `OPT.revise_horizon`, LR-CONTINUOUS, AN APPEND-ONLY CHECKPOINTED LOG; IT REOPENS Q-OPT-5's (b) AND ANSWERS BOTH OF ITS GROUNDS. +1 ENTRY POINT**
 The act re-measures the run (minting merges bytes, so it shortens), and a horizon fixed at build
 would then overshoot -- Q-OPT-5's under-anneal inside every run. Q-OPT-5 refused revision on two
@@ -5521,7 +5536,7 @@ MEM: open_store(mem: Config, *, key_dim, vocab_slots, device, rng, lm_kind, rest
 MEM: write(mem: Config, store, *, contexts, tokens, surprise, sources, owners, positions, key_fn, now)
 MEM: read(mem: Config, store, *, queries, promote=True)
 MEM: blend(mem: Config, model_probs, retrieval)
-MEM: maintain(mem: Config, store, *, now, key_fn, probe_contexts=None, resegment=None)
+MEM: maintain(mem: Config, store, *, now, key_fn, probe_contexts=None, resegment=None, remap=None)
 MEM: apply_domain_plan(mem: Config, store, *, folds, deletions, live_sources)
 MEM: judge(mem: Config, store, *, scorer=None, reconstructor=None)
 MEM: census(mem: Config, store, *, reconcile=False)

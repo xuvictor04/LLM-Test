@@ -186,7 +186,7 @@ class Vocabulary:
     __slots__ = ("id2bytes", "seq2id", "merges", "bytes_per_id", "mlbf", "maxlen", "retired",
                  "prov", "pair", "ceiling", "soft_cap", "v0", "bytes_per_token", "max_bytes",
                  "dropout_rng", "counters", "gates", "tally", "tally_seen", "rev",
-                 "_retok_cache")
+                 "_retok_cache", "_view_cache")
 
     def __init__(self, *, ceiling, soft_cap=None, max_bytes=16):
         self.id2bytes = [bytes([b]) for b in range(256)]
@@ -347,6 +347,9 @@ class Vocabulary:
         #                 warning asked for. There is no longer a match-table change this stamp
         #                 cannot see.
         self._retok_cache = None
+        # THE LAST VIEW'S MATCH TABLE (03b S0b): (view, table), so a batch of re-cuts at one view -- the
+        # MEM remap after an act -- builds the table once. A view is immutable, so the entry never goes stale.
+        self._view_cache = None
 
     def size(self):
         return len(self.id2bytes)
@@ -1326,11 +1329,16 @@ def _segment(vocab, data, *, dropout=0.0, stream=None, start=0, counts=None, vie
 
 
 def _view_table(vocab, view):
-    size, gone = int(view[0]), frozenset(int(r) for r in view[1])
+    key = (int(view[0]), tuple(int(r) for r in view[1]))
+    cached = getattr(vocab, "_view_cache", None)
+    if cached is not None and cached[0] == key:
+        return cached[1]
+    size, gone = key[0], frozenset(key[1])
     table = {}
     for j in range(size):
         if j not in gone:
             table.setdefault(vocab.id2bytes[j], j)
+    vocab._view_cache = (key, table)
     return table
 
 
@@ -1417,7 +1425,8 @@ def tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False
 
     LEVERS READ: dropout
     WIRES READ: none
-    DID IT FIRE: tok.segment, tok.segment_view (a view call; ABSENT until one), tok.retok,
+    DID IT FIRE: tok.segment, tok.segment_view (a view call on a stream; ABSENT until one),
+                 tok.segment_remap (a view call with no labels -- the MEM remap), tok.retok,
                  tok.retok_noop (reported SEPARATELY so a frozen run's 39
                  no-op re-tokenizations read as skipped rather than as activity), tok.dropout_skip
                  (ABSENT, not 0, at dropout=0.0, the default -- the branch is unreachable there and a
@@ -1502,7 +1511,10 @@ def tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False
         counts = {"skip": 0, "byte": 0}
         ids, byte_pos = _segment(vocab, data, dropout=drop, stream=stream, start=start,
                                  counts=counts, view=view)
-        vocab.counters["tok.segment_view"] = vocab.counters.get("tok.segment_view", 0) + 1
+        # A CALL WITH NO labels IS NOT A STREAM (the MEM remap's re-cut of a stored context): it counts
+        # in its own tok.segment_remap, so the stream's rows stay the stream's (Q-TOK-15).
+        _k = "tok.segment_view" if labels is not None else "tok.segment_remap"
+        vocab.counters[_k] = vocab.counters.get(_k, 0) + 1
         out_labels = None if labels is None else [labels[q] for q in byte_pos]
         return Segmentation(ids=ids, byte_pos=byte_pos, labels=out_labels,
                             bytes_per_token=_derive.bytes_per_token(len(data) - start, len(ids)))

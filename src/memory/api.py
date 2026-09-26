@@ -1869,7 +1869,7 @@ def blend(mem: Config, model_probs, retrieval):
         "docs/04_CONTRACT.md, section MEM.")
 
 
-def maintain(mem: Config, store, *, now, key_fn, probe_contexts=None, resegment=None):
+def maintain(mem: Config, store, *, now, key_fn, probe_contexts=None, resegment=None, remap=None):
     """The three cadenced maintenance jobs, in ONE call, ON THE WINDOW CLOCK.
 
     `now` is units.Windows -- the loop counter, which advances once per window while this call is
@@ -1913,6 +1913,16 @@ def maintain(mem: Config, store, *, now, key_fn, probe_contexts=None, resegment=
     3. RESEGMENT. `resegment` non-None means a retokenization happened and every stored ctx holds
        token ids under a segmentation that no longer exists. Applying it FORCES THE REKEY SNAPSHOT
        TO BE RETAKEN.
+    4. REMAP (03b S0b, Q-MEM-13). `remap`, when given, is a root-composed callable (MEM may not
+       import TOK, O10) that takes stored contexts as lists of token ids and returns each re-cut at
+       the vocabulary the stream was just re-segmented at -- the ids are decoded to their bytes and
+       segmented again, so a stored context is spelled the way new text now is. Ids never change
+       meaning (the vocabulary is append-only), but a context spelled under an older table encodes to
+       a key in a different part of key space than the same text spelled now, which the archive
+       measured as 82.3% of contexts stale after one growth step. The re-cut keeps the LAST key_win
+       ids and left-pads with 0, the write path's own pad; the stored target token is unchanged (it
+       names the same bytes). Every active entry is re-cut once, and the rekey snapshot is retaken
+       so the keys follow.
 
     LEVERS READ: probe_every, probe_rows, rekey_every, key_src, key_depth, key_win
     WIRES READ: none
@@ -1922,7 +1932,8 @@ def maintain(mem: Config, store, *, now, key_fn, probe_contexts=None, resegment=
                  ABSENT at MEM_PROBE_EVERY=0 or MEM_PROBE_ROWS=0, the disarmed arms; Gate
                  mem.probe fires on n_probe_rows > 0, not on the cadence),
                  n_rekey_slices, n_rekey_passes, n_rekey_entries, n_resegment_events,
-                 n_keys_at_capped_depth
+                 n_keys_at_capped_depth, store.n_remap_events and store.n_remapped_entries (both
+                 ABSENT until a remap is handed in; entries counts the contexts the re-cut changed)
     """
     mem = mem.owned_by("MEM")
     every_p, probe_rows = int(mem.probe_every), int(mem.probe_rows)
@@ -1950,6 +1961,24 @@ def maintain(mem: Config, store, *, now, key_fn, probe_contexts=None, resegment=
     # every stored token under a guess. So the declared consequence is performed -- the rekey
     # snapshot is dropped and retaken, which is this docstring's own sentence -- the event is
     # counted, and the stale ids are left visibly stale rather than silently rewritten.
+    if remap is not None:
+        _idx = torch.nonzero(store.active, as_tuple=False).flatten().tolist()
+        _bump(store, "store.n_remap_events")
+        store.counters.setdefault("store.n_remapped_entries", 0)
+        if _idx and int(store.ctx.shape[1]) > 0:
+            _w = int(store.ctx.shape[1])
+            _old = store.ctx[_idx].tolist()
+            _new = remap(_old)
+            _rows = []
+            for o, n in zip(_old, _new):
+                n = list(n)[-_w:]
+                _rows.append([0] * (_w - len(n)) + n)
+            _t = torch.as_tensor(_rows, dtype=torch.long, device=store.ctx.device)
+            _changed = int((_t != store.ctx[_idx]).any(dim=1).sum())
+            store.ctx[_idx] = _t
+            store.counters["store.n_remapped_entries"] += _changed
+        if resegment is None:
+            resegment = True
     if resegment is not None:
         _bump(store, "store.n_resegment_events")
         store.rekey_snap, store.rekey_cursor = None, 0

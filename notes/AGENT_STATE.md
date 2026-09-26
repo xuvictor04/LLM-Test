@@ -50,6 +50,18 @@ Updated 2026-09-25 at `ac94811` on `rm-predict-DC` (the only branch pushed to; n
   preferred over hand-built behaviour.
   S0b step 0 DONE: tests/test_baseline.py plus tests/_baseline_fixture.json (80-window trace at the
   base commit).
+  S0b BUILT:
+  - 54378b8: the act.
+  - c8d8e33: the continuing resume, bit-exact, and gpu_world.sh EXP=retok.
+  - next commit: the MEM remap (Q-MEM-13).
+  Owed:
+  - the owner's GPU ship-rule fleet (EXP=retok bash gpu_world.sh);
+  - the CPU regression check in scratch/s0b (4000 windows, seeds 0-1, k0 vs k1000).
+  Seed 0 retok-every-1000 measured 2.6995 prequential bpb; the k0 controls are being rerun after a
+  script crash.
+  IN FLIGHT: self-regulation design workflow wf_3b1b5d92-dc4 (scratch mm3/). It produces
+  docs/proposals/04_SELF_REGULATION.md text; commit its evidence under
+  results/self_regulation_design_2026-09-26/.
   AWAITING the owner's rulings on the rest of 03b §16. The next build is S0b, the mid-epoch act (Q-RUN-8
   option b-resume), which is text-only and independent of the media rulings.
 - (history) wf_c04d7ab1-d11 was DONE: .../scratchpad/mm2/rev/03_live_codec.md (228k chars) and checklist.md.

@@ -70,6 +70,17 @@ SEEDS=${SEEDS:-$([[ "$EXP" == retok ]] && echo "0 1 2" || echo "0 1 2 3 4")}
 # the stream. A run that ran out of stream is flagged in the summary; it is a different length of
 # experiment wearing the same label.
 BYTES=${BYTES:-$(( WINDOWS * 1000 > 2000000 ? WINDOWS * 1000 : 2000000 ))}
+# EXP=retok COMPARES THE ARMS OVER THE SAME BYTES, NOT THE SAME WINDOWS. An arm that retokenizes packs
+# more bytes into a window, so at a fixed window count it would score a longer stretch of the stream
+# than the control and the two averages would be over different text. Every retok run therefore reads
+# ONE WHOLE EPOCH of the same stream -- sized so the control takes about WINDOWS windows at the 189
+# bytes/window measured on CPU (2026-09-26) -- and the window cap (RUN_WIN) is set out of reach.
+if [[ "$EXP" == retok ]]; then
+  BYTES=${RETOK_BYTES:-$(( WINDOWS * 189 ))}
+  RUN_WIN=$(( WINDOWS * 3 ))
+else
+  RUN_WIN=$WINDOWS
+fi
 SMOKE_WINDOWS=${SMOKE_WINDOWS:-60}
 EXTRA=${EXTRA:-}
 ARCH_ALSO=${ARCH_ALSO:-}
@@ -261,7 +272,8 @@ print(f"=== RUNS (prequential bits/byte = sum(loss) x LM_CTX {ctx} / ln 2 / loop
 for (name, seed), v in sorted(runs.items()):
     print(f"  {name:<10} s{seed:<3} {v['n']:>6} flushes  acts {v['acts']:>4}  vocab {v['vocab']:>5}  "
           f"preq {v['bpb'] if v['bpb'] is None else round(v['bpb'], 5)}"
-          + ("" if v["stopped"] else "  RAN OUT OF STREAM (raise BYTES)"))
+          + ("  STOPPED AT THE WINDOW CAP: this run did not read the whole stream, so its bytes differ "
+             "from the other arms'" if v["stopped"] else ""))
 a, b = runs.get(("k0", 0)), runs.get(("k0_rerun", 0))
 if a and b and a["bpb"] is not None and b["bpb"] is not None:
     print(f"\n=== RUN-TO-RUN (k0 seed 0 twice): |diff| {abs(a['bpb'] - b['bpb']):.3g}")
@@ -599,8 +611,8 @@ fi
 
 # ---------------------------------------------------------------- 2. the job list and its size
 JOBS=()
-for s in $SEEDS; do for a in $BASE_ARMS; do add_job "$a $s $WINDOWS $(arm_env $a)"; done; done
-add_job "${CTRL}_rerun 0 $WINDOWS $(arm_env $CTRL)"
+for s in $SEEDS; do for a in $BASE_ARMS; do add_job "$a $s $RUN_WIN $(arm_env $a)"; done; done
+add_job "${CTRL}_rerun 0 $RUN_WIN $(arm_env $CTRL)"
 if [[ -n "$ARCH_ALSO" ]]; then
   for s in $SEEDS; do for a in fb_off fb_on; do add_job "${a}@$ARCH_ALSO $s $WINDOWS LM_ARCH=$ARCH_ALSO $(arm_env $a)"; done; done
 fi
@@ -613,7 +625,7 @@ if [[ "$FILL" == 1 && "${#JOBS[@]}" -lt "$PAR" ]]; then
   n_seeds=$(echo $SEEDS | wc -w); next=$(( $(echo $SEEDS | tr ' ' '\n' | sort -n | tail -1) + 1 ))
   added=""
   while [[ $(( ${#JOBS[@]} + 4 )) -le "$PAR" && "$n_seeds" -lt "$MAX_SEEDS" ]]; do
-    for a in $BASE_ARMS; do add_job "$a $next $WINDOWS $(arm_env $a)"; done
+    for a in $BASE_ARMS; do add_job "$a $next $RUN_WIN $(arm_env $a)"; done
     added="$added $next"; next=$(( next + 1 )); n_seeds=$(( n_seeds + 1 ))
   done
   [[ -n "$added" ]] && say "=== FILL: spare slots -> extra seeds$added on every base arm (now $n_seeds seeds)"
@@ -625,7 +637,8 @@ say "=== ${#JOBS[@]} run(s), $PAR at a time"
 python3 - "${CAL_RATE:-0}" "$SMOKE_WPS" "$PAR" <<PY | tee -a "$S"
 import math
 jobs = """$(printf '%s\n' "${JOBS[@]}")""".split("\n")
-total = sum(int(j.split()[2]) for j in jobs if j.strip())
+# A retok job's window count is its cap, set out of reach; it reads about WINDOWS windows.
+total = sum(min(int(j.split()[2]), int("$WINDOWS")) for j in jobs if j.strip())
 rate, smoke, par = float("${CAL_RATE:-0}"), float("$SMOKE_WPS" or 0), int("$PAR")
 if rate <= 0: rate = smoke * par
 if rate > 0:

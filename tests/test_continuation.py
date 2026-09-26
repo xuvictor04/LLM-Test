@@ -16,6 +16,9 @@ parent's exact stream and continue. Each check below pins one promise of that pa
   S3  TOK.splice keeps every unit up to and including the one under the cursor; tokenize(view=) at a
       recorded view rebuilds the segmentation cut then, after later mints and a retirement.
   S4  the act fires after a mint and changes the stream; TOK_RETOK_EVERY=0 arms no act.
+  S6  MEM's stored contexts are re-cut at the act's view (MEM.maintain(remap=), Q-MEM-13): a re-cut
+      context decodes to the same bytes it held, spelled in the newer tokens, and an act in a run
+      remaps the store.
   S5  THE CONTINUATION IS BIT-EXACT: a run saved at window n1 and resumed for n2 windows produces the
       uninterrupted run's losses for those n2 windows exactly -- with no act, with a save between a
       mint and the next act (the critic's blocking case), with a save after an act, and at
@@ -143,6 +146,19 @@ check("S3 splice keeps every unit up to and including the one under the cursor",
       sp.ids[:3] == ids0[:3] and sp.byte_pos[:3] == pos0[:3] and sp.ids != ids0,
       f"{sp.ids} from {ids0}")
 
+# ---- S6 (unit): the MEM remap re-cuts a stored context to the same bytes -------------------------
+from spine import loop as _loop                                    # noqa: E402
+v2 = tok_api.Vocabulary(ceiling=600)
+v2._add(b"ab", prov="t")
+text = b"xxabcabcab abcabc"
+old_ctx = tok_api._segment(v2, text)[0][-8:]
+_abc = v2._add(b"abc", prov="t")
+fn = _loop._mem_remap_fn(_T(), v2, list(tok_api.view_of(v2))[:1] + [[]])
+new_ctx = fn([[0, 0] + old_ctx])[0]
+check("S6 a re-cut context decodes to the bytes it held and uses the newer token",
+      v2.decode(new_ctx) == v2.decode(old_ctx) and _abc in new_ctx and _abc not in old_ctx,
+      f"{old_ctx} -> {new_ctx} (new id {_abc})")
+
 # ---- S4: the act in a run -----------------------------------------------------------------------
 s = build(TOK_GROW_EVERY=30, TOK_RETOK_EVERY=40)
 r = loop.run(s, max_windows=130, progress=False)
@@ -153,6 +169,11 @@ s0 = build(TOK_GROW_EVERY=30, TOK_RETOK_EVERY=0)
 r0 = loop.run(s0, max_windows=130, progress=False)
 check("S4 TOK_RETOK_EVERY=0 arms no act (loop.acts ABSENT)", "loop.acts" not in books(r0),
       str(books(r0)))
+_sc = s.store.counters
+check("S6 an act in a run remaps MEM's stored contexts",
+      int(_sc.get("store.n_remap_events", 0)) >= 1 and int(_sc.get("store.n_remapped_entries", 0)) > 0
+      and int(s.vocab.counters.get("tok.segment_remap", 0)) > 0,
+      f"events {_sc.get('store.n_remap_events')}, entries {_sc.get('store.n_remapped_entries')}")
 
 # ---- S5: the continuation is bit-exact ----------------------------------------------------------
 TMP = tempfile.mkdtemp(prefix="s0b_cont_")

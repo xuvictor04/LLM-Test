@@ -1245,6 +1245,9 @@ LOOP_ORDER = (
                                       "`queries` and maintain reaches it in-package (Q-MEM-9). Its "
                                       "probe_contexts is the PREVIOUS flush's x, carried by the "
                                       "loop (None on the first flush of a run and of each epoch), "
+                                      "SINCE 03b S0b an act hands the next maintain remap= -- the "
+                                      "stored contexts decoded by TOK.Vocabulary.decode(ids) and re-cut "
+                                      "at the act's view by TOK.tokenize(view=) (Q-MEM-13) -- "
                                       "and maintain issues probe_rows queries out of it, one per "
                                       "POSITION (Q-MEM-12). maintain ALSO compares "
                                       "probe_every and rekey_every against `now` INTERNALLY: two "
@@ -1631,10 +1634,6 @@ DEFERRED_ENTRY_POINTS = {
     "TOK.Vocabulary.blen":
         "P4, with the byte-length accounting in EVAL's bits/byte and DATA's exposure audit. Its one "
         "argument `i` is a token id the caller already holds, not a value any entry point returns.",
-    "TOK.Vocabulary.decode":
-        "P4, with EVAL's generation and the report's sample lines. Its one argument `ids` is a "
-        "Segmentation.ids the caller already holds -- TOK.tokenize produces it, and that entry "
-        "point HAS a body; what is missing is the eval row that calls both.",
     "RUN.Timing.span":
         "CALLED BY spine/loop.py SINCE 2026-09-24, around the per-window and per-flush components "
         "(sig.train_step, sig.encode, dom.observe, tok.on_window, fab.manage, the flush and six "
@@ -2207,6 +2206,9 @@ class System:
                  # continuing mid-epoch resume puts them back, because the uninterrupted run would
                  # have read them at the very next window.
                  "loop_carried",
+                 # THE MEM REMAP AN ACT HANDS THE NEXT FLUSH (03b S0b): a callable re-cutting stored
+                 # contexts at the act's view, consumed by MEM.maintain(remap=) and cleared.
+                 "mem_remap",
                  # `process_dtype` IS AN OBSERVATION AND NOT A DECISION, and it is here because
                  # RUN_AMP had no did-it-fire surface and was inert for the life of the driver
                  # because of it. Process.amp_state says what was ASKED FOR and what
@@ -2701,6 +2703,7 @@ def compose(environ=None, *, restored=None):
             sysm.novelty = _car.get("novelty")
             sysm.due = _car.get("due")
             sysm.retok_pending = int(_car.get("retok_pending") or 0)
+            sysm.mem_remap = _car.get("mem_remap")
             if _car.get("shift_at_windows") is not None:
                 sysm.shift_at_windows = _Uc.Windows(int(_car["shift_at_windows"]))
             if _car.get("shift_at_steps") is not None:

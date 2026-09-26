@@ -181,7 +181,9 @@ _CALLS_FLAT = frozenset().union(*_CALLS.values())
 # passing.
 _OFF_TABLE = frozenset({"LM.on_mint", "MEM.apply_domain_plan", "TOK.lift_vocab_cap",
                         # named in TOK.splice's X-row text: the act's view test (03b S0b)
-                        "TOK.view_of"})
+                        "TOK.view_of",
+                        # named in MEM.write/maintain's B-row text: the remap's decode (03b S0b)
+                        "TOK.Vocabulary.decode"})
 
 # WHY EACH UNCALLED MECHANISM'S ABSENCE MATTERS, in the consequence a reader needs rather than the
 # name they already have. Missing keys fall back to a plain sentence; nothing here is load-bearing
@@ -549,6 +551,26 @@ def _save(sysm, clock, reason, suffix=""):
     return wrote
 
 
+def _mem_remap_fn(tok_cfg, vocab, view):
+    """The MEM remap for a pending act view (03b S0b), or None: each stored context -- token ids, left
+    padded with 0 -- is decoded to its bytes (TOK.Vocabulary.decode) and cut again at `view`
+    (TOK.tokenize with no labels, which counts tok.segment_remap)."""
+    if not view:
+        return None
+    v = (int(view[0]), tuple(int(x) for x in view[1]))
+
+    def remap(rows):
+        out = []
+        for r in rows:
+            k = 0
+            while k < len(r) and r[k] == 0:
+                k += 1
+            out.append(tok_api.tokenize(tok_cfg, vocab, vocab.decode(r[k:]), view=v).ids
+                       if k < len(r) else [])
+        return out
+    return remap
+
+
 def _window_bounds(ids, i, ctx):
     """The ONE cut, named once, as LOOP_ORDER requires. Window i is ids[i*ctx : (i+1)*ctx].
 
@@ -810,6 +832,7 @@ def run(sysm, *, max_windows=None, progress=True):
             "since_boundary": since_boundary, "manage_losses": list(manage_losses),
             "novelty": sysm.novelty, "due": sysm.due,
             "retok_pending": int(sysm.retok_pending or 0),
+            "mem_remap": getattr(sysm, "mem_remap", None),
             "resegment_pending": resegment is not None,
             "shift_at_windows": (None if getattr(sysm, "shift_at_windows", None) is None
                                  else int(sysm.shift_at_windows)),
@@ -1211,8 +1234,15 @@ def run(sysm, *, max_windows=None, progress=True):
                                 opt_cfg, sysm.optimizer,
                                 run_windows=U.Windows(int(_cc["step"]) + (n_new - int(_cc["in_epoch"]))
                                                       + _later * n_new))
-                        # MEM hears of the event on the next flush, as it does after a roll.
+                        # MEM hears of the event on the next flush, as it does after a roll -- and,
+                        # since 03b S0b, gets its stored contexts RE-CUT at this act's view: each is
+                        # decoded to its bytes (TOK.Vocabulary.decode) and segmented again
+                        # (TOK.tokenize at the view, no labels, so it counts tok.segment_remap).
                         resegment = sysm.segmentation
+                        # PENDING AS DATA (the view), not as a closure, so a save between this act and
+                        # the next flush carries it (loop_carried) and a resume performs it.
+                        _va = tok_api.view_of(vocab)
+                        sysm.mem_remap = [int(_va[0]), [int(x) for x in _va[1]]]
                         sysm.partition.counters.setdefault("part.n_retok_events", 0)
                         if _moved:
                             dom_api.on_retokenize(dom_cfg, sysm.partition)
@@ -2306,7 +2336,9 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     # Windows and elapsed-since-last-fire is phase-independent.
     with _timing.span("flush/mem.maintain"):
         mem_api.maintain(cfg_mem, sysm.store, now=now_w, key_fn=key_fn,
-                         probe_contexts=probe_prev, resegment=resegment)
+                         probe_contexts=probe_prev, resegment=resegment,
+                         remap=_mem_remap_fn(tok_cfg, vocab, getattr(sysm, "mem_remap", None)))
+    sysm.mem_remap = None
 
     # ---- THE EVENT-DRIVEN ROWS: what THIS BATCH'S Dues made due ---------------------------------
     # ACTED ON PER FLUSH, ASKED PER WINDOW. The Due was OR-ed across the batch in `run`; it is
