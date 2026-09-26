@@ -109,6 +109,27 @@ Updated 2026-09-26 (the decision register, Proposal 05) on `rm-predict-DC` (the 
   shape-dependent (revision-log parent: floor for good; k0 parent: ~0.48 of peak at 756 KB, ~0.22 at
   3.78 MB, the floor only for a full 20 MB epoch).
 
+## OPERATING MODEL, 2026-09-26 (the owner's words; supersedes "the owner rules O1-O20")
+> "In a sense, your session is that of a middle manager. You can resolve most of the questions, or we
+> will need to do the testing to figure it out. Maintain documentation standards. Your job is to
+> figure out how to do it, and implement it. If something is not working out, keep trying. Just
+> because one result was bad does not mean the entire path is impractical or impossible. My job is to
+> lead and monitor, ensuring that my goals are not being drifted, and adding new ideas, and expanding
+> the project. Exact details of how things are run need to be documented thoroughly for future review
+> and reference, but do not have to be brought up directly to me. Brought to me should be major issues
+> that threaten the project, potential expansions, and testing (from bashes that you create, and with
+> quick copy paste roll out. I want to be up to date, but much of the work will need to be done on
+> your end"
+- The manager (this agent) resolves decisions, designs, builds, documents, runs CPU operation checks,
+  writes GPU scripts and reads their results. Rulings are logged in the repo (Proposal 05 and its
+  decision log), not brought to the owner.
+- Brought to the owner, in notes/OWNER_BRIEF.md and the chat: major issues that threaten A or B,
+  potential expansions, and GPU tests as copy-paste blocks. Results come back as each script's
+  "PASTE THIS BACK" block (the GPU box has a checkout but no push token).
+- Explicit owner rulings stand (D2, D8, D16, Q-RUN-8's 3000, WORLD kept for A, the CPU rule); a GPU
+  result that contradicts one is a major issue for the owner. A bad result is a reason to try the next
+  arm, not to drop the path.
+
 ## OWNER RULE, 2026-09-26: CPU tests operation, GPU tests whether it works
 > "CPU check should only be to test operation ability. To test whether something works, it will
 > require a gpu."
@@ -116,7 +137,7 @@ Updated 2026-09-26 (the decision register, Proposal 05) on `rm-predict-DC` (the 
   model-free replays of the tree's functions, arithmetic. Never an efficacy verdict.
 - Efficacy (which arm is better, retention, plasticity, the belief, preset values) is decided only on
   the owner's GPU. Toy readings may order the GPU queue; they set no default.
-- The owner will rule O1-O20 (Proposal 05 §3.3) next.
+- O1-O20 are resolved by the manager (see OPERATING MODEL).
 
 ## Next
 0. Proposal 05 §8 orders everything: Stage 0 (owner rulings O1-O20; the fleet-archive reads; the
