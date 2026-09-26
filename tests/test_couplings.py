@@ -558,6 +558,11 @@ RESUME_SPELLINGS = {
     ("runs/parent/ckpt.pt", True):  "runs/parent.dyntok.json",
     ("runs/x/ckpt.pt.best3", True): "runs/x.best3.dyntok.json",
     ("runs/x.best3/ckpt.pt", True): "runs/x.best3.dyntok.json",
+    # THE ONE PREVIOUS GENERATION CKPT.save KEEPS, suffixed or not (2026-09-26, LOW-Q-TOK-13-PREV).
+    # TOK.save_vocabulary rotates its file to exactly these paths as the new one lands; the read side
+    # already resolved them, and these rows pin that it still does.
+    ("runs/x/ckpt.pt.prev", True):  "runs/x.prev.dyntok.json",
+    ("runs/x/ckpt.pt.best3.prev", True): "runs/x.best3.prev.dyntok.json",
     ("runs/q.pt", True):            "runs/q.pt.dyntok.json",
     ("runs/q.pt/ckpt.pt", True):    "runs/q.pt.dyntok.json",
     ("runs/q.pt", False):           "runs/q.pt.dyntok.json",

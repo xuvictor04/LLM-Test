@@ -486,6 +486,15 @@ def _save(sysm, clock, reason, suffix=""):
     falls through to "build", and the restored embedding table is indexed by a different
     vocabulary. TOK.save_vocabulary takes the same suffix for exactly this reason, so the two go
     out together, here, and cannot drift apart.
+
+    AND THE ONE KEPT GENERATION ROTATES AS A PAIR (2026-09-26, LOW-Q-TOK-13-PREV). CKPT.save moves
+    ckpt.pt<suffix> to ckpt.pt<suffix>.prev inside itself, and TOK.save_vocabulary moves its own
+    file to <base><suffix>.prev.dyntok.json inside itself -- each package renames only what it owns,
+    and this function only sequences the two calls. THE ORDER BELOW IS NOW LOAD-BEARING: the
+    vocabulary is saved only when CKPT.save returned True, and every CKPT refusal (saving off, a
+    non-finite payload) returns before CKPT touches a file, so the two rotations happen in the same
+    save or not at all. Calling save_vocabulary first, as the C rows list it, would rotate the
+    vocabulary for a checkpoint CKPT then refuses.
     """
     # THE RECORDED MANIFEST IS THE LIVE ONE PLUS WORLD'S GROWN COUNT, AND THE OVERLAY WAS MISSING.
     # compose.py's C row for WORLD.geometry: "IT IS THE OVERLAY, NOT THE RECORD ... the one thing
@@ -546,6 +555,8 @@ def _save(sysm, clock, reason, suffix=""):
     except _gate.NonFinite as e:
         _save_refused.append(str(e))
         return False
+    # ONLY WHEN CKPT WROTE, AND THE CONDITION CARRIES THE PAIRING OF THE TWO ROTATIONS (see the
+    # docstring): TOK rotates its file by CKPT's rule on the assumption that CKPT just did the same.
     if wrote:
         tok_api.save_vocabulary(sysm.configs["TOK"], sysm.vocab, suffix=suffix)
     return wrote
@@ -1581,6 +1592,29 @@ def run(sysm, *, max_windows=None, progress=True):
         warnings.append(
             "loop: no final checkpoint was written -- CKPT_DIR names no directory, so saving is "
             "off and this run's weights end with the process. Set CKPT_DIR to keep them.")
+    # THE VOCABULARY ROTATION'S TWO BAD OUTCOMES ARE READ HERE, AFTER THE FINAL SAVE (2026-09-26,
+    # LOW-Q-TOK-13-PREV), BECAUSE THE REPORT CANNOT SEE THE LAST ONE. _report snapshotted
+    # TOK(vocab.counters) above, before this save ran, so a rotation that failed at the final save
+    # would be in no line the run prints. The rows are per process (TOK.restore_vocab drops a
+    # parent's copies), so the counts are this run's own and need no start value to subtract.
+    _rot_failed = int(vocab.counters.get("tok.vocab_rotate_failed", 0))
+    if _rot_failed:
+        warnings.append(
+            f"loop: the vocabulary rotation failed {_rot_failed} time(s) -- "
+            f"{vocab.counters.get('tok.vocab_rotate_failed_detail')} (the last). The new "
+            f"generation was written each time. After a failed rotation the .prev generation's "
+            f"vocabulary is stale or missing until a later save rotates cleanly, and a resume "
+            f"from ckpt.pt.prev meanwhile is refused by TOK's merge-count check (whenever a mint "
+            f"separates the two generations) or by its missing-file refusal.")
+    _rot_refused = int(vocab.counters.get("tok.vocab_rotate_refused", 0))
+    if _rot_refused:
+        warnings.append(
+            f"loop: the vocabulary was NOT rotated {_rot_refused} time(s), because its .prev path "
+            f"is the file this run resumed from (CKPT_RESUME names a ckpt.pt.prev inside CKPT_DIR), "
+            f"and TOK never writes onto the parent's file. Where a ckpt.pt stood in CKPT_DIR, "
+            f"CKPT.save rotated it onto ckpt.pt.prev, so that .prev pair no longer matches and a "
+            f"resume from it is refused by TOK's merge-count check whenever a mint separates the "
+            f"two. Save a rolled-back run into a directory of its own to keep both generations.")
 
     c = clock.counters()
     return RunResult(

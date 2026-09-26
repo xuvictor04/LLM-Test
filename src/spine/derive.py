@@ -1476,7 +1476,10 @@ def checkpoint_base(path, *, file_form, suffix=""):
     writes exactly one file name, '<dir>/ckpt.pt' plus the snapshot's suffix (ckpt/api.py::save), so
     a trailing component named 'ckpt.pt<suffix>' is mapped to '<dir><suffix>': 'runs/x/ckpt.pt' ->
     'runs/x', and a best snapshot 'runs/x/ckpt.pt.best3' -> 'runs/x.best3', which is the base
-    TOK.save_vocabulary spliced the same suffix into ('runs/x.best3.dyntok.json'). ONLY THAT NAME IS
+    TOK.save_vocabulary spliced the same suffix into ('runs/x.best3.dyntok.json'). The one previous
+    generation CKPT.save keeps reads the same way: 'runs/x/ckpt.pt.prev' -> 'runs/x.prev', whose
+    vocabulary TOK.save_vocabulary now rotates to 'runs/x.prev.dyntok.json' as the new one lands
+    (2026-09-26, LOW-Q-TOK-13-PREV; before that date nothing wrote it). ONLY THAT NAME IS
     STRIPPED (2026-09-24). The rule was "any trailing component ending in '.pt'", which also cut a
     run DIRECTORY named 'q.pt' back to its parent -- CKPT_DIR accepts that name and saves under it,
     and its resume then read the wrong vocabulary -- and it described the best-snapshot layout as

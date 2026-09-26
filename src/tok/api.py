@@ -2829,16 +2829,55 @@ def save_vocabulary(tok: Config, vocab, *, suffix=""):
     purpose. If the owner rules that a checkpoint plus a sidecar is one artifact too many, that
     ruling overrides this one and the full cost above is what it costs.
 
-    RECEIVES: suffix <- the same value the root hands CKPT.save on this save, on the C rows.
+    THE PREVIOUS GENERATION'S FILE ROTATES WITH ckpt.pt<suffix>.prev (2026-09-26, register
+    LOW-Q-TOK-13-PREV). CKPT.save keeps ONE previous generation -- it moves ckpt.pt<suffix> to
+    ckpt.pt<suffix>.prev before its new file lands -- and until this date this function kept none:
+    the next save overwrote <base><suffix>.dyntok.json, and CKPT_RESUME='<dir>/ckpt.pt.prev'
+    resolved d_vocab_read_path to '<dir>.prev.dyntok.json' (spine/derive.py::checkpoint_base maps
+    '<dir>/ckpt.pt<suffix>.prev' to '<dir><suffix>.prev'), A FILE NOTHING EVER WROTE, so
+    build_vocabulary refused the only older generation on disk by name. The file standing at the
+    destination is now moved to exactly that path -- the file a save under the suffix
+    '<suffix>.prev' would write, spliced by the same rule as the destination -- so the read side
+    needed no edit at all. THE ORDER AND THE FAILURE RULE ARE CKPT's OWN (ckpt/api.py::save): the
+    new file is written to a .tmp first, the current file is rotated IFF IT EXISTS, and the .tmp
+    then replaces it. A failed json.dump therefore leaves both generations as they were, and A
+    FAILED ROTATION NEVER LOSES THE NEW GENERATION: it is counted, its reason recorded, and the new
+    file is written anyway. TOK does not ask whether CKPT rotated; it applies CKPT's rule, and the
+    root calls this only when CKPT.save returned True (every CKPT refusal returns before CKPT
+    touches a file), so the two rotations happen in one save or not at all. A pairing that slips
+    anyway -- either side's rotation failing, or a crash between the two calls -- is caught at the
+    next resume by restore_vocab's merge-count refusal whenever a mint separates the two
+    generations; on one lineage the merge list is append-only, so equal counts there mean equal
+    files. ACROSS two lineages (a reused CKPT_DIR) equal counts prove nothing, and that residual
+    is stated, not closed.
+    NEVER ONTO THE PARENT'S FILE. A run resumed from '<dir>/ckpt.pt<suffix>.prev' that saves back
+    into '<dir>' would rotate onto d_vocab_read_path, and the rule at the top of this docstring
+    says that file is the parent's. The rotation is SKIPPED there and counted, the root warns, and
+    the new file is written as usual. Skipping never destroys a consistent parent pair (an operator
+    who rolled back by deleting ckpt.pt still has ckpt.pt.prev and its vocabulary afterwards),
+    where rotating could. What it costs: where a ckpt.pt stood, CKPT.save has meanwhile rotated it
+    onto ckpt.pt.prev, so that .prev pair no longer matches and a later resume from it is refused by
+    the merge count whenever a mint separates the two. In-place rollback policy belongs to the rollback harness (Proposal 05 §8 4.4,
+    C09), and this function only declines to destroy the parent's record.
+
+    RECEIVES: suffix <- the same value the root hands CKPT.save on this save, on the C rows. The
+              root (spine/loop.py::_save) calls this only when CKPT.save returned True, which is
+              what keeps the vocabulary's rotation in step with the checkpoint's.
     RETURNS: str path, or None.
 
     LEVERS READ: min_pair, max_bytes, dropout (RECORDED in the file under min_pair, max_tok and
                  dropout, for _replay_merges' reconciliation on the next resume)
-    WIRES READ: d_vocab_save_path, d_vocab_read_path (the refusal to overwrite the parent's file),
-                d_vocab_ceiling (recorded as vmax, for the same reconciliation)
+    WIRES READ: d_vocab_save_path, d_vocab_read_path (the refusal to overwrite the parent's file,
+                and the refusal to rotate onto it), d_vocab_ceiling (recorded as vmax, for the same
+                reconciliation)
     DID IT FIRE: tok.vocab_saved, tok.vocab_saved_suffixed (a snapshot-suffixed write; 0 means no
                  bestN save has happened, which at CKPT.best_keep=0 is "unreachable" and must say
-                 so rather than read 0)
+                 so rather than read 0); tok.vocab_rotated and tok.vocab_rotate_failed (SEEDED AT 0
+                 on every call with saving on, ABSENT with saving off, which is the unreachable
+                 arm), tok.vocab_rotate_failed_detail (the last failure's paths and reason, present
+                 once one has failed), and tok.vocab_rotate_refused (seeded only where the rotation
+                 target IS d_vocab_read_path, so ABSENT means that arm is not this run's). All four
+                 are PER PROCESS: restore_vocab drops a parent's copies
     """
     tok = tok.owned_by("TOK")
     base = str(tok.d_vocab_save_path or "").strip()      # WIRE READ HERE -- this run's own file
@@ -2856,7 +2895,10 @@ def save_vocabulary(tok: Config, vocab, *, suffix=""):
     # THE TAIL IS NAMED IN THREE PLACES AND THEY MOVE TOGETHER: the two couplings in
     # spine/assemble.py, once per direction, and this splice.
     tail = ".dyntok.json"
-    dst = (base[:-len(tail)] + (suffix or "") + tail) if base.endswith(tail) else base + (suffix or "")
+
+    def _at(sfx):
+        return (base[:-len(tail)] + sfx + tail) if base.endswith(tail) else base + sfx
+    dst = _at(suffix or "")
     # NEVER WRITES TO d_vocab_read_path: THAT FILE IS THE PARENT'S. A resume that overwrote the file
     # it is reading from would destroy the only record of what the parent actually used, mid-run,
     # and the corruption would surface as a vocabulary mismatch on the NEXT resume.
@@ -2866,6 +2908,25 @@ def save_vocabulary(tok: Config, vocab, *, suffix=""):
             f"TOK.save_vocabulary would write {dst!r}, which is d_vocab_read_path -- the file this "
             f"run is RESUMING FROM. That file is the parent's record of what it actually used, and "
             f"overwriting it mid-run destroys the only thing a later resume could check against.")
+    # THE PREVIOUS GENERATION'S PATH IS THE FILE A SAVE UNDER THE SUFFIX '<suffix>.prev' WOULD
+    # WRITE (2026-09-26, LOW-Q-TOK-13-PREV). CKPT.save rotates ckpt.pt<suffix> to
+    # ckpt.pt<suffix>.prev, derive.checkpoint_base maps a resume from that file to the base
+    # '<dir><suffix>.prev', and the read side adds the tail -- which is this splice with '.prev'
+    # appended to the suffix, so the two sides meet with no edit on the read side.
+    prev = _at((suffix or "") + ".prev")
+    # AND NEVER ONTO THE PARENT'S FILE EITHER. The rotation target is d_vocab_read_path only for a
+    # run resumed from '<dir>/ckpt.pt<suffix>.prev' that saves back into '<dir>'; moving this run's
+    # current file there would destroy the parent's record by the other route. See the docstring for
+    # why that arm skips rather than rotates, and what the skip costs.
+    parent = bool(read_path) and os.path.abspath(prev) == os.path.abspath(read_path)
+    # SEEDED AT 0 ON EVERY SAVE WITH SAVING ON, which is the DID IT FIRE convention: PRESENT-and-0 is
+    # "armed and there was nothing to rotate" (the first save into an empty directory), ABSENT is
+    # "saving is off" -- the early return above never reaches this line. `refused` is seeded only on
+    # the in-place arm, because everywhere else it is unreachable and must read so.
+    vocab.counters.setdefault("tok.vocab_rotated", 0)
+    vocab.counters.setdefault("tok.vocab_rotate_failed", 0)
+    if parent:
+        vocab.counters.setdefault("tok.vocab_rotate_refused", 0)
     d = os.path.dirname(dst)
     if d:
         os.makedirs(d, exist_ok=True)
@@ -2916,6 +2977,26 @@ def save_vocabulary(tok: Config, vocab, *, suffix=""):
     tmp = dst + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(blob, fh)
+    # THE ROTATION RUNS AFTER THE .tmp IS WRITTEN AND BEFORE IT LANDS, WHICH IS ckpt/api.py::save's
+    # ORDER. A json.dump that fails above leaves both generations exactly as they were; a rotation
+    # that fails here still writes the new generation below. The rule is CKPT's too -- rotate IFF
+    # the current file exists -- so under normal operation ckpt.pt<suffix>.prev and this `prev`
+    # hold one generation.
+    if os.path.exists(dst):
+        if parent:
+            vocab.counters["tok.vocab_rotate_refused"] += 1
+        else:
+            try:
+                os.replace(dst, prev)
+                vocab.counters["tok.vocab_rotated"] += 1
+            except OSError as e:
+                # A FAILED ROTATION MUST NOT LOSE THE NEW GENERATION, and unlike CKPT's own it is
+                # COUNTED: the .prev generation's vocabulary is now stale or missing, and a resume
+                # from ckpt.pt<suffix>.prev is refused by restore_vocab's merge count or by
+                # build_vocabulary's missing-file refusal. The root reads this after the final save.
+                vocab.counters["tok.vocab_rotate_failed"] += 1
+                vocab.counters["tok.vocab_rotate_failed_detail"] = (
+                    f"{dst!r} -> {prev!r}: {type(e).__name__}: {e.strerror or e}")
     os.replace(tmp, dst)
     vocab.counters["tok.vocab_saved"] = vocab.counters.get("tok.vocab_saved", 0) + 1
     return dst
@@ -3043,6 +3124,11 @@ def restore_vocab(tok: Config, state, vocab):
     a resume -- so a plain counters.update overwrote this resume's reconciliation with the parent's
     (a grandchild that changed a lever read the parent's "0, agreed"). The parent's copies are
     dropped and this process's are put back after the update.
+    THE SAME HOLDS FOR save_vocabulary's ROTATION ROWS (2026-09-26): tok.vocab_rotated,
+    tok.vocab_rotate_failed (with its _detail) and tok.vocab_rotate_refused are PER PROCESS and the
+    parent's copies are dropped the same way, while tok.vocab_saved stays lineage-cumulative -- the lineage-or-process
+    question for `saved` counters is Proposal 05 §8 1.6 (LOW-RESUME-SAVED-COUNTERS) and does not
+    cover the rotation rows.
 
     LEVERS READ: none
     WIRES READ: none
@@ -3097,9 +3183,18 @@ def restore_vocab(tok: Config, state, vocab):
     if state.get("counters"):
         _replay_rows = ("tok.load_reconciled", "tok.load_reconciled_detail", "tok.bpt_adopted",
                         "tok.bpt_mismatch", "tok.bpt_mismatch_detail", "tok.tally_restored")
-        mine = {k: vocab.counters[k] for k in _replay_rows if k in vocab.counters}
+        # THE ROTATION ROWS ARE THIS PROCESS'S TOO (2026-09-26, LOW-Q-TOK-13-PREV). They describe
+        # what save_vocabulary did to files on THIS run's saves, and a parent's copies would read as
+        # the child's own -- a parent's tok.vocab_rotate_refused, whose arm the child may not even
+        # be on, among them. This process has saved nothing yet at restore time, so nothing of its
+        # own is lost. tok.vocab_saved is NOT one of them and stays lineage-cumulative; whether
+        # `saved` counters should be lineage or process is Proposal 05 §8 1.6
+        # (LOW-RESUME-SAVED-COUNTERS), which does not cover these rows.
+        _here_rows = ("tok.vocab_rotated", "tok.vocab_rotate_failed",
+                      "tok.vocab_rotate_failed_detail", "tok.vocab_rotate_refused")
+        mine = {k: vocab.counters[k] for k in _replay_rows + _here_rows if k in vocab.counters}
         vocab.counters.update(state["counters"])
-        for k in _replay_rows:
+        for k in _replay_rows + _here_rows:
             vocab.counters.pop(k, None)
         vocab.counters.update(mine)
     if state.get("tally") is not None:

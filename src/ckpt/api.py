@@ -643,6 +643,11 @@ def save(ckpt: Config, *, payload, geometry, step, epoch, reason, best_state=Non
     # ATOMIC, AND ONE PREVIOUS GENERATION KEPT. A half-written checkpoint that replaces a good one
     # is worse than no checkpoint: torch.save straight onto `dst` leaves exactly that on any
     # interruption, and a run's whole history is in this one file.
+    # THE VOCABULARY FILE ROTATES WITH THIS ONE, BY THE SAME RULE (2026-09-26, LOW-Q-TOK-13-PREV),
+    # inside TOK.save_vocabulary: TOK owns that file and this package never names it (O10). The root
+    # calls it only when this function returned True, so ckpt.pt<suffix>.prev and
+    # <base><suffix>.prev.dyntok.json hold one generation; before that date the older generation had
+    # no vocabulary of its own and could not be resumed.
     torch.save(blob, tmp)
     if os.path.exists(dst):
         prev = dst + ".prev"
@@ -650,6 +655,11 @@ def save(ckpt: Config, *, payload, geometry, step, epoch, reason, best_state=Non
             os.replace(dst, prev)
         except OSError:
             # A FAILED ROTATION MUST NOT LOSE THE NEW GENERATION. The replace below still runs.
+            # STILL UNCOUNTED HERE, where TOK's twin now counts (tok.vocab_rotate_failed): nothing
+            # in the run's report reads _SAVES today, so a key there would be invisible. It is left
+            # for whoever gives this ledger a reader (the nearest is the `saved`-counter work of
+            # Proposal 05 §8 1.6). A .prev pair this leaves mismatched is refused at resume by TOK's
+            # merge-count check whenever a mint separates the two generations.
             pass
     os.replace(tmp, dst)
     _SAVES[reason] = _SAVES.get(reason, 0) + 1

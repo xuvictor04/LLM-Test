@@ -23,11 +23,19 @@ parent's exact stream and continue. Each check below pins one promise of that pa
       uninterrupted run's losses for those n2 windows exactly -- with no act, with a save between a
       mint and the next act (the critic's blocking case), with a save after an act, and at
       TOK_DROPOUT > 0.
+  S7  THE OLDER GENERATION RESUMES TOO (register LOW-Q-TOK-13-PREV, Proposal 05 §8 1.1): a parent
+      that saved twice, with a mint between the saves, is resumed from '<dir>/ckpt.pt.prev' and its
+      continuation equals the uninterrupted run's losses exactly, because TOK.save_vocabulary
+      rotated the vocabulary with the checkpoint. The wrong pairings are still refused both ways,
+      a missing file is still refused, a failed rotation keeps the new generation and says so, and
+      an in-place resume from .prev never rotates onto the parent's file.
 
 WHAT THIS FILE CANNOT SEE: whether live retokenization helps a long run. That is the owner-scale
 ship-rule measurement 03b S0b names (prequential bits/byte, 3 paired seeds).
 """
+import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -214,6 +222,155 @@ try:
           same and int(bp.get("loop.acts", 0)) >= 1, f"first differing {diff}")
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
+
+# ---- S7: the older generation resumes -----------------------------------------------------------
+# THE REGISTER'S KNOWN ANSWER: save twice, resume from ckpt.pt.prev, bit-exact against an
+# uninterrupted run. S5's mint_then_act levers, so a mint lands between the two saves and the two
+# generations' vocabularies differ -- without that, pairing the wrong file could not be told from
+# pairing the right one, and every check below would pass on a tree that never rotates.
+TMP7 = tempfile.mkdtemp(prefix="s7_prev_")
+E7 = {"TOK_GROW_EVERY": 30, "TOK_RETOK_EVERY": 150}
+
+
+def _saves(res):
+    """The run's own save count, off the gated line `run` appends from `_save`'s return value."""
+    line = next((g for g in res.gated if g.startswith("CKPT.save:")), "")
+    m = re.match(r"CKPT\.save: (\d+) checkpoint", line)
+    return int(m.group(1)) if m else -1
+
+
+def _entries(path):
+    with open(path, encoding="utf-8") as fh:
+        return len(json.load(fh)["entries"])
+
+
+def _refusal(**env):
+    """What composing a resume raised: (type name, message), or (None, '') when it composed."""
+    try:
+        build(**env)
+        return None, ""
+    except Exception as e:                                         # noqa: BLE001 -- reported
+        return type(e).__name__, str(e)
+
+
+try:
+    d7 = TMP7
+    u = build(**E7)
+    ru = loop.run(u, max_windows=135, progress=False)
+    p = build(CKPT_DIR=d7 + "/p", CKPT_EVERY=100, **E7)
+    rp = loop.run(p, max_windows=135, progress=False)
+    check("S7 setup: the saving parent's losses equal the uninterrupted run's (a rename changes no "
+          "number)", tuple(rp.loss_curve) == tuple(ru.loss_curve[:135]))
+    cur_ck, prev_ck = d7 + "/p/ckpt.pt", d7 + "/p/ckpt.pt.prev"
+    cur_v, prev_v = d7 + "/p.dyntok.json", d7 + "/p.prev.dyntok.json"
+    check("S7 setup: two saves left both generations on disk, each with its own vocabulary",
+          _saves(rp) == 2 and all(os.path.isfile(f) for f in (cur_ck, prev_ck, cur_v, prev_v)),
+          f"saves {_saves(rp)}; " + ", ".join(f"{os.path.basename(f)} {os.path.isfile(f)}"
+                                                for f in (cur_ck, prev_ck, cur_v, prev_v)))
+    bc = torch.load(cur_ck, map_location="cpu", weights_only=False)
+    bp = torch.load(prev_ck, map_location="cpu", weights_only=False)
+    m7, mc_prev, mc_cur = int(bp["step"]), bp["payload"]["TOK"]["merge_count"], \
+        bc["payload"]["TOK"]["merge_count"]
+    check("S7 setup: the older generation is a periodic save before the final one, and a mint lies "
+          "between them (so the wrong vocabulary is distinguishable from the right one)",
+          bp["reason"] == "periodic" and bc["reason"] == "final" and m7 < 135
+          and mc_prev < mc_cur, f"step {m7}, merges {mc_prev} -> {mc_cur}")
+    check("S7 each vocabulary file matches its own checkpoint's merge count",
+          _entries(prev_v) == mc_prev and _entries(cur_v) == mc_cur,
+          f"{_entries(prev_v)}/{mc_prev}, {_entries(cur_v)}/{mc_cur}")
+    pc = p.vocab.counters
+    check("S7 the parent's rotation rows: tok.vocab_rotated = saves - 1, tok.vocab_rotate_failed "
+          "= 0, tok.vocab_rotate_refused ABSENT (not the in-place arm)",
+          pc.get("tok.vocab_rotated") == _saves(rp) - 1 and pc.get("tok.vocab_rotate_failed") == 0
+          and "tok.vocab_rotate_refused" not in pc,
+          str({k: pc.get(k) for k in ("tok.vocab_rotated", "tok.vocab_rotate_failed",
+                                      "tok.vocab_rotate_refused")}))
+
+    c = build(CKPT_RESUME=prev_ck, CKPT_DIR=d7 + "/c", **E7)
+    cont = [w for w in c.warnings if w.startswith("MID-EPOCH RESUME CONTINUES")]
+    mint0 = int(c.vocab.counters.get("tok.mint", 0))
+    n2 = 135 - m7
+    rc = loop.run(c, max_windows=n2, progress=False)
+    a, b = ru.loss_curve[m7:135], rc.loss_curve[:n2]
+    diff = next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), None)
+    check("S7 THE KNOWN ANSWER: resumed from ckpt.pt.prev, the continuation equals the "
+          "uninterrupted run's losses exactly",
+          len(a) == len(b) == n2 and diff is None and len(cont) == 1,
+          f"{n2} windows from step {m7}; first differing {diff}; {len(cont)} continue warning(s)")
+    cc = c.vocab.counters
+    check("S7 the child minted on the way (the continuation crossed a mint)",
+          int(cc.get("tok.mint", 0)) > mint0, f"tok.mint {mint0} -> {cc.get('tok.mint')}")
+    check("S7 the child's rotation rows are its own: tok.vocab_rotated PRESENT at 0 (one save into "
+          "an empty directory), the parent's tok.vocab_rotated not carried, no refused row",
+          cc.get("tok.vocab_rotated") == 0 and cc.get("tok.vocab_rotate_failed") == 0
+          and "tok.vocab_rotate_refused" not in cc,
+          str({k: cc.get(k) for k in ("tok.vocab_rotated", "tok.vocab_rotate_failed",
+                                      "tok.vocab_rotate_refused")}))
+
+    # THE MISMATCH REFUSALS STILL FIRE: each generation's checkpoint beside the OTHER generation's
+    # vocabulary, and the older checkpoint with none.
+    os.makedirs(d7 + "/w")
+    shutil.copy(prev_ck, d7 + "/w/ckpt.pt.prev")
+    shutil.copy(cur_v, d7 + "/w.prev.dyntok.json")
+    kind, msg = _refusal(CKPT_RESUME=d7 + "/w/ckpt.pt.prev", CKPT_DIR=d7 + "/wc", **E7)
+    check("S7 the older checkpoint beside the NEWER vocabulary is refused by the merge count",
+          kind == "LeverError" and "TOK resume refused" in msg
+          and f"records {mc_prev} merges" in msg and f"has {mc_cur}" in msg, f"{kind}: {msg[:140]}")
+    os.makedirs(d7 + "/v")
+    shutil.copy(cur_ck, d7 + "/v/ckpt.pt")
+    shutil.copy(prev_v, d7 + "/v.dyntok.json")
+    kind, msg = _refusal(CKPT_RESUME=d7 + "/v", CKPT_DIR=d7 + "/vc", **E7)
+    check("S7 the newer checkpoint beside the OLDER vocabulary is refused the other way",
+          kind == "LeverError" and "TOK resume refused" in msg
+          and f"records {mc_cur} merges" in msg and f"has {mc_prev}" in msg, f"{kind}: {msg[:140]}")
+    os.makedirs(d7 + "/n")
+    shutil.copy(prev_ck, d7 + "/n/ckpt.pt.prev")
+    kind, msg = _refusal(CKPT_RESUME=d7 + "/n/ckpt.pt.prev", CKPT_DIR=d7 + "/nc", **E7)
+    check("S7 the older checkpoint with no vocabulary beside it is still refused by name",
+          kind == "ValueError" and "does not exist" in msg, f"{kind}: {msg[:140]}")
+
+    # A FAILED ROTATION KEEPS THE NEW GENERATION: a directory stands where the rotation must land.
+    os.makedirs(d7 + "/f.prev.dyntok.json")
+    f = build(CKPT_DIR=d7 + "/f", CKPT_EVERY=20)
+    rf = loop.run(f, max_windows=45, progress=False)
+    fc = f.vocab.counters
+    fw = [w for w in rf.warnings if "vocabulary rotation failed" in w]
+    check("S7 a failed rotation is counted once per save that had a file to move, with its reason",
+          _saves(rf) >= 2 and fc.get("tok.vocab_rotate_failed") == _saves(rf) - 1
+          and fc.get("tok.vocab_rotated") == 0
+          and "f.prev.dyntok.json" in str(fc.get("tok.vocab_rotate_failed_detail")),
+          f"saves {_saves(rf)}; {fc.get('tok.vocab_rotate_failed')}; "
+          f"{fc.get('tok.vocab_rotate_failed_detail')}")
+    check("S7 ... the run completes, the loop warns after the final save, and the new generation "
+          "landed", len(fw) == 1 and _entries(d7 + "/f.dyntok.json") == f.vocab.size() - 256
+          and os.path.isdir(d7 + "/f.prev.dyntok.json"), f"{len(fw)} warning(s)")
+    kind, msg = _refusal(CKPT_RESUME=d7 + "/f", CKPT_DIR=d7 + "/f2")
+    check("S7 ... and the current generation it wrote resumes", kind is None, f"{kind}: {msg[:140]}")
+
+    # IN PLACE: a resume from .prev that saves back into the same directory never rotates onto the
+    # file it read, and the .prev pair CKPT then leaves mismatched is refused by name.
+    shutil.copytree(d7 + "/p", d7 + "/ip")
+    shutil.copy(cur_v, d7 + "/ip.dyntok.json")
+    shutil.copy(prev_v, d7 + "/ip.prev.dyntok.json")
+    with open(d7 + "/ip.prev.dyntok.json", "rb") as fh:
+        parent_bytes = fh.read()
+    ip = build(CKPT_RESUME=d7 + "/ip/ckpt.pt.prev", CKPT_DIR=d7 + "/ip", **E7)
+    rip = loop.run(ip, max_windows=10, progress=False)
+    with open(d7 + "/ip.prev.dyntok.json", "rb") as fh:
+        after_bytes = fh.read()
+    ipc = ip.vocab.counters
+    check("S7 in place: the parent's .prev vocabulary is byte-unchanged, the skip is counted and "
+          "warned, and the new generation landed",
+          after_bytes == parent_bytes and ipc.get("tok.vocab_rotate_refused") == 1
+          and ipc.get("tok.vocab_rotated") == 0
+          and any("vocabulary was NOT rotated" in w for w in rip.warnings)
+          and _entries(d7 + "/ip.dyntok.json") == ip.vocab.size() - 256,
+          str({k: ipc.get(k) for k in ("tok.vocab_rotated", "tok.vocab_rotate_refused")}))
+    kind, msg = _refusal(CKPT_RESUME=d7 + "/ip/ckpt.pt.prev", CKPT_DIR=d7 + "/ipc", **E7)
+    check("S7 in place: the .prev pair CKPT's rotation left mismatched is refused by the merge count",
+          kind == "LeverError" and "TOK resume refused" in msg, f"{kind}: {msg[:140]}")
+finally:
+    shutil.rmtree(TMP7, ignore_errors=True)
 
 print(f"\n=== {len(FAILS)} failing ===")
 sys.exit(1 if FAILS else 0)

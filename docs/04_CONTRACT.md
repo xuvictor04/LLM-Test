@@ -541,10 +541,17 @@ vocabulary FILE (`save_vocabulary`), which a resume replays and whose recorded `
 put back by `restore_vocab` after its merge-count refusal. The match-table revision `rev` is
 per-process and deliberately not carried. A save/load round trip **used to undo every retirement**
 (D-T3) and **used to restart the tally from zero** (Q-TOK-13); both are carried now.
+**The file rotates with `ckpt.pt<suffix>.prev`** (2026-09-26, register LOW-Q-TOK-13-PREV):
+`save_vocabulary` moves `<base><suffix>.dyntok.json` to `<base><suffix>.prev.dyntok.json` — the path
+`derive.checkpoint_base` resolves for `CKPT_RESUME=<dir>/ckpt.pt<suffix>.prev` — before the new file
+lands, by CKPT's own rule (rotate iff the current file exists). A failed rotation still writes the
+new generation. It never rotates onto `d_vocab_read_path` (a run resumed from `<dir>/ckpt.pt.prev`
+that saves into `<dir>`). See Q-TOK-13's closing note.
 **Counters:** `tok.build_pass/build_mint/v0`, `load_reconciled`, `bpt_adopted`/`bpt_mismatch`,
 `tally_restored`, `mint` + eight mint-outcome counters, `retok`/`retok_noop`, `dropout_skip`,
-`mint_frozen_at`, `probation_*`, `cap_lift`, `vocab_saved`, `state_*`, and Gates `mint_pmin` and
-`probation_embed`.
+`mint_frozen_at`, `probation_*`, `cap_lift`, `vocab_saved`,
+`vocab_rotated`/`vocab_rotate_failed`/`vocab_rotate_refused` (per process; `vocab_rotate_refused`
+is present only on the in-place arm), `state_*`, and Gates `mint_pmin` and `probation_embed`.
 
 ### LM — `src/lm/api.py` (12 levers)
 
@@ -781,6 +788,10 @@ records the packages produced, and **the rules are the owner package's** because
 differs per field. **A missing field is a refusal, not a skip** — the comparison is driven off the
 manifest's key set, so `if recorded and recorded != live` is not writable here.
 **The suffix applies to the whole snapshot**, tokenizer bytes included (M46).
+**So does the one kept generation** (2026-09-26): `ckpt.pt<suffix>.prev`'s vocabulary is
+`<base><suffix>.prev.dyntok.json`, rotated by TOK, which owns the file, inside `save_vocabulary`.
+The root calls that only when `save` returned True, so the two rotations happen in one save or not
+at all. CKPT's own failed rotation is still uncounted (`_SAVES` has no reader in the report).
 **`best_state` is checkpoint state** (M45), and the blow-up alarm **moves out** to EVAL: gating an
 instrument on a checkpoint flag is what this rebuild exists to end.
 **Where they are called (§3):** `resume_source` → `load` → `check_geometry` are `ASSEMBLY_ORDER`
@@ -1161,7 +1172,7 @@ with a table of its own that no check can see is still an orphan.*
 | `E` | before the first window of an epoch, and again whenever `RunClock.advance` returns `Tick.rolled` | `DATA.draw_stream` → `TOK.tokenize` → `RunClock.begin_epoch`. The root also stamps `clock.opt_steps` here as the `shift_at` `OPT.maybe_step` consumes — a resample is a **self-inflicted** shift, and the old tree carried that fact in a closure variable (`:6518-6521`). **At the shipped default these rows never run — see below.** |
 | `A` | per WINDOW, above the accumulator | `Retention.consider`, `MEM.census` (before `DOM.manage`, whose `memory_counts`/`mem_floor_entries` had **no producer**), `DOM.manage`, `DOM.census` (supplying `live_sources` and `live_domains`), `FAB.manage`, `SIG.cadence_due` → `SIG.train_step` (before `encode`), `SIG.encode`, `DOM.observe`, `DOM.rekey` (after `observe`), `TOK.on_window`, `RunClock.advance`. `MEM.judge` and `WORLD.manage` **were here and are now deferred** (§3.6). |
 | `B` | per FLUSH | the flush body, plus `TOK.judge_probation`, event-driven on the `Due.probation` `TOK.on_window` already asked at `A`. `CAP.observe` and `FAB.contribution` **were here and are now deferred**. |
-| `C` | the CHECKPOINT FAN-OUT — an **event**, entered from `B` (periodic/SIGUSR1), `A` (a `BestAction`) and `R` (final) | the twelve `state_dict`/`state`/`vocab_state`/`stream_state`/`Retention.state`/`WORLD.geometry` calls that build the payload and the recorded manifest, then `TOK.save_vocabulary`, then `CKPT.save`. |
+| `C` | the CHECKPOINT FAN-OUT — an **event**, entered from `B` (periodic/SIGUSR1), `A` (a `BestAction`) and `R` (final) | the twelve `state_dict`/`state`/`vocab_state`/`stream_state`/`Retention.state`/`WORLD.geometry` calls that build the payload and the recorded manifest, then `TOK.save_vocabulary`, then `CKPT.save`. *(2026-09-26: the driver, `spine/loop.py::_save`, calls `CKPT.save` first and `TOK.save_vocabulary` only when it wrote, and since this date that order is load-bearing: the vocabulary's rotation with `ckpt.pt.prev` must not run for a checkpoint CKPT refused. The rows list the reverse order and are unchanged, since K6 checks reach, not order.)* |
 | `R` | once, after `Tick.finished` | `DOM.prior`, both censuses, every `counters()`, `Cadences.ledger()`, `RUN.bench_summary`, and the `reason="final"` save. `MEM.read` and `MEM.blend` **were here and are now deferred**. |
 
 **`Tick.rolled` and `Tick.finished`: the precedence, and the E stage on a one-epoch run.**
@@ -4465,6 +4476,45 @@ are dropped and this process's are kept.
 (`save_vocabulary` does not rotate, and `CKPT_RESUME=<dir>/ckpt.pt.prev` resolves a
 `d_vocab_read_path` nothing writes, so `build_vocabulary` refuses it by name). That is a property of
 the `CKPT.resume -> TOK.d_vocab_read_path` coupling, not of this package's state, and is left open.
+**CLOSED 2026-09-26 (register LOW-Q-TOK-13-PREV; Proposal 05 §8 1.1).** The coupling was never the
+problem: `derive.checkpoint_base` already resolved `CKPT_RESUME=<dir>/ckpt.pt<suffix>.prev` to
+`<dir><suffix>.prev.dyntok.json`, and nothing wrote that file. **Ruling: `save_vocabulary` rotates
+its own file with `ckpt.pt<suffix>.prev`.** It moves `<base><suffix>.dyntok.json` to exactly that
+path — the file a save under the suffix `<suffix>.prev` would write — in CKPT's order (the new file
+is written to a `.tmp`, the current one is rotated iff it exists, the `.tmp` then replaces it) and
+by CKPT's failure rule (a failed rotation is counted and the new generation is written anyway). No
+lever, no signature change and no new entry point: it is a persistence invariant, and TOK renames
+only the file it owns. TOK does not ask whether CKPT rotated; the root (`spine/loop.py::_save`)
+calls `save_vocabulary` only when `CKPT.save` returned True, and every CKPT refusal returns before
+CKPT touches a file, so the two rotations happen in one save or not at all (§3 stage `C`). **DID IT
+FIRE:** `tok.vocab_rotated` and `tok.vocab_rotate_failed` are seeded at 0 on every save with saving
+on and are ABSENT with saving off; `tok.vocab_rotate_failed_detail` names the paths and the error of
+the last failure; `tok.vocab_rotate_refused` is seeded only on the in-place arm below. All four are
+per process (`restore_vocab` drops a parent's copies, as it does the replay rows), while
+`tok.vocab_saved` stays lineage-cumulative — §8 1.6 (LOW-RESUME-SAVED-COUNTERS) rules on `saved`
+counters and does not cover these. **Never onto the parent's file:** a run resumed from
+`<dir>/ckpt.pt.prev` that saves into `<dir>` would rotate onto `d_vocab_read_path`, which the C row
+and `save_vocabulary` both say is never written. The rotation is skipped there, counted and warned;
+the new file lands as usual. Skipping never destroys a consistent parent pair (a rollback that
+deleted `ckpt.pt` keeps `ckpt.pt.prev` and its vocabulary), where rotating could; the cost is that
+CKPT's own rotation of an existing `ckpt.pt` leaves that `.prev` pair mismatched, and
+`restore_vocab`'s merge-count check refuses it by name whenever a mint separates the two. In-place
+rollback policy is §8 4.4 (C09). **The root warns** after the final save whenever a rotation failed
+or was skipped, because the report's `TOK(vocab.counters)` is snapshotted before that save.
+**Driven:** `tests/test_continuation.py` S7 — a parent saved twice (a periodic save at step 101, the
+final at 135, with 256 and 259 merges), resumed from `ckpt.pt.prev`, continues for 34 windows equal
+to the uninterrupted run's losses exactly, minting three tokens on the way; either checkpoint beside
+the other generation's vocabulary is refused by the merge count (256 against 259, both directions);
+the older checkpoint with no vocabulary is still refused by name; a failed rotation keeps the new
+generation; and an in-place resume leaves the parent's file byte-unchanged.
+`tests/test_tok_persist.py` P5 drives the same through the entry points alone (byte-equal rotation,
+which proves the order; the suffixed form; the failure; the in-place skip; saving off; the rows
+staying per process), and `tests/test_couplings.py` C5 pins the two read-side spellings. **Residual,
+stated and not closed:** a pairing that slips (either side's rotation failing, a crash between the
+two calls) is caught only when a mint separates the two generations. On one lineage the merge list
+is append-only, so equal counts there mean equal files; across two lineages (a reused `CKPT_DIR`)
+equal merge counts are not proof of equal vocabularies. CKPT's own failed rotation is still
+uncounted.
 
 **Not in this ruling, and OPEN — the tally round-trips exactly, the mint bursts after a mid-epoch
 resume still do not match the uninterrupted run.** (2) makes the pair tally the parent's to the count,
@@ -4480,6 +4530,9 @@ closes when DATA and the loop restore the stream position (the byte-cursor remap
 (a)). Until then a goal-B resume is the same run in its state and **not** in the text it trains on
 next, and any comparison of post-resume vocabulary growth against an uninterrupted run is comparing
 two different streams.
+**CLOSED 2026-09-26 by Q-RUN-16 (03b S0b, c8d8e33):** a mid-epoch resume rebuilds the parent's exact
+stream, so `on_window` is fed the uninterrupted run's ids; `tests/test_continuation.py` S5, "a save
+between a mint and the next act continues exactly". Register LOW-Q-TOK-13-PREV (1).
 
 ### Q-FAB-7 — the fabric's routing saw the window's own targets — **RESOLVED 2026-09-24: THE SIGNATURE ENDS AT THE WINDOW'S FIRST BYTE, THE ROUTE STATE IS h[:, 0], AND A FLUSH ROUTES ON ITS FIRST WINDOW'S DOMAIN. ⚠ EVERY LOSS NUMBER TAKEN BEFORE THIS DATE WAS MEASURED ON A NON-CAUSAL FORWARD AND IS NOT COMPARABLE WITH ONE TAKEN AFTER IT**
 Routing is **one decision per window**, applied at every position, so whatever the decision reads,
