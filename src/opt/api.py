@@ -201,6 +201,12 @@ class OptState:
     counters: dict
     shift_at: object = None
     grad_norms: list = dataclasses.field(default_factory=list)
+    # THE HORIZON'S MID-RUN REVISIONS (revise_horizon, Q-OPT-10): an append-only log of
+    # (opt_step, run_steps) pairs, checkpointed. The build-time Horizon above is never rewritten;
+    # the schedule prices a real step s at an EFFECTIVE step on that horizon through the
+    # piecewise-linear map _effective_step builds from this log, so lr is continuous at every
+    # revision and the cosine still ends at the floor at the revised end.
+    horizon_revisions: list = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -379,7 +385,7 @@ def _cycle_index(horizon, step, restarts):
 
 
 def _schedule(*, lr, sched, min_frac, restarts, decay, shift_warm, restart_amp, shift_at,
-              horizon, step):
+              horizon, step, eff_step=None):
     """The rate at `step`, plus the five gate observations. PURE: every input is an argument.
 
     Returns (rate, flags) where flags is
@@ -429,6 +435,10 @@ def _schedule(*, lr, sched, min_frac, restarts, decay, shift_warm, restart_amp, 
     wave = max(1, int(horizon.wavelength))
     span = max(1, wave - w)
     n = max(1, int(horizon.n_cycles))
+    # THE COSINE'S POSITION, on the build-time horizon. A revised horizon (revise_horizon) prices
+    # the cosine at the effective step its log maps `step` to; the warmup above, the re-warm and
+    # the cycle count below keep the real step.
+    pos = step if eff_step is None else eff_step
 
     if restarts:
         # WHOLE CYCLES ONLY, FITTED AT build(). Truncating instead left a 30-epoch run with 2
@@ -438,14 +448,14 @@ def _schedule(*, lr, sched, min_frac, restarts, decay, shift_warm, restart_amp, 
         # over `max(1, wave - w)` and this one over `(run_end - w) / n`, so a bare wavelength makes
         # them differ on 899 of 1000 steps. See lr_at's docstring for the measured table.
         per_c = _cycle_steps(horizon)
-        if step < run_end:
-            p = ((step - w) / per_c) % 1.0
-            ci = max(0, int((step - w) / per_c))
+        if pos < run_end:
+            p = ((pos - w) / per_c) % 1.0
+            ci = max(0, int((pos - w) / per_c))
         else:
             p = 1.0
             ci = n - 1
     else:
-        p = min(1.0, (step - w) / span)
+        p = min(1.0, (pos - w) / span)
         ci = 0
 
     cyc = min_frac + (1.0 - min_frac) * 0.5 * (1.0 + math.cos(math.pi * p))
@@ -629,6 +639,37 @@ def _encoder_step_signature(optimizer):
     return (len(getattr(optimizer, "state", {})), total)
 
 
+def _effective_step(horizon, revisions, step):
+    """The step on the BUILD-TIME horizon at which real optimizer step `step` is priced.
+
+    With no revision this is `step`. Each revision (s0, R') re-maps the rest of the schedule so the
+    rate at s0 is unchanged and the remaining cosine reaches the horizon's end exactly at R':
+    from anchor a = max(s0, warmup), whose effective step e0 the previous map gives, the map is
+    e0 + (s - a) * (R - e0) / (R' - a), where R is the build-time run_steps. A revised end at or
+    before the anchor prices every later step at R (the floor). Steps before the first anchor --
+    the warmup included -- are untouched. PURE.
+    """
+    w = int(horizon.warmup)
+    run_end = int(horizon.run_steps)
+    segs = []
+    for s0, new_end in revisions:
+        a = max(int(s0), w)
+        e0 = _map_step(segs, a)
+        if int(new_end) > a:
+            k = (run_end - e0) / (int(new_end) - a)
+        else:
+            k = None
+        segs.append((a, e0, k))
+    return _map_step(segs, step)
+
+
+def _map_step(segs, step):
+    for a, e0, k in reversed(segs):
+        if step >= a:
+            return e0 + (step - a) * k if k is not None else float("inf")
+    return step
+
+
 def _priced(opt, st, opt_step):
     """The rate at `opt_step` AND the five gate observations, unpacked from the Config in ONE place.
 
@@ -670,7 +711,9 @@ def _priced(opt, st, opt_step):
         lr=float(opt.lr), sched=str(opt.lr_sched), min_frac=float(opt.lr_min_frac),
         restarts=bool(opt.lr_restarts), decay=float(opt.lr_decay), shift_warm=shift_warm,
         restart_amp=float(st.restart_amp), shift_at=st.shift_at,
-        horizon=st.horizon, step=int(opt_step))
+        horizon=st.horizon, step=int(opt_step),
+        eff_step=(_effective_step(st.horizon, st.horizon_revisions, int(opt_step))
+                  if st.horizon_revisions else None))
 
 
 # ==================================================================================================
@@ -1259,6 +1302,56 @@ def scaled_backward(opt: Config, st, total):
     st.n_backward = st.n_backward + U.Backwards(1)
     st.counters["opt.backward"] = int(st.n_backward)
     return st.n_backward
+
+
+def revise_horizon(opt: Config, st, *, run_windows):
+    """Revise the schedule's horizon mid-run to a RE-MEASURED run length (Q-OPT-10). Returns the
+    revised run_steps (units.Steps), or None when the revision is inert.
+
+    Called by the mid-epoch act (spine/loop.py) after it re-segments the unconsumed stream: the
+    run's window count changed, and the horizon build() resolved from the pre-act segmentation now
+    overshoots (minting merges bytes, so the act SHORTENS the run) -- the under-anneal Q-OPT-5
+    names, now happening inside every run instead of only across epochs.
+
+    LR-CONTINUOUS BY CONSTRUCTION, and that is the answer to Q-OPT-5's history ground: the old
+    `_project` re-projected the total from an estimate every epoch and re-indexed the schedule, so
+    the rate JUMPED. This appends (opt_step, run_steps) to st.horizon_revisions and never rewrites
+    st.horizon; the schedule prices step s at an effective step on the build-time horizon
+    (_effective_step), linear from the current step, so lr(now) is unchanged and the cosine reaches
+    the floor at the revised end. The log is checkpointed, so a resume rebuilds the same map from
+    the same base -- Q-OPT-5's moving-target ground.
+
+    INERT, NOT REFUSED, WHERE "THE REMAINING COSINE" IS UNDEFINED: more than one restart cycle
+    fitted (opt.build.cycles_fitted > 1), or lr_sched == 'none'. Then the horizon stays as built and
+    opt.horizon.revisions stays ABSENT, with the reason in opt.horizon.revise_inert.
+
+    LEVERS READ: lr_sched
+    WIRES READ: d_effective_batch_windows
+    DID IT FIRE: opt.horizon.revisions (ABSENT until a revision), opt.horizon.revised_run_steps,
+                 opt.horizon.revise_inert (1 when asked and inert; ABSENT otherwise)
+    """
+    opt = opt.owned_by("OPT")
+    if isinstance(run_windows, U.Clock) and type(run_windows) is not U.Windows:
+        raise U.UnitError(f"OPT.revise_horizon: run_windows must be units.Windows, got "
+                          f"{type(run_windows).__name__}.")
+    run_windows = run_windows if isinstance(run_windows, U.Windows) else U.Windows(int(run_windows))
+    if str(opt.lr_sched) == "none":
+        # 1 = asked and inert (lr_sched 'none': no horizon to revise); ABSENT = never asked.
+        st.counters["opt.horizon.revise_inert"] = 1
+        return None
+    if int(st.horizon.n_cycles) > 1:
+        # 1 = asked and inert: more than one restart cycle was fitted, so "the remaining cosine" is
+        # undefined and the horizon stays as built. counters() prints the reason beside it.
+        st.counters["opt.horizon.revise_inert"] = 1
+        return None
+    new_steps = derive.opt_steps_from_windows(run_windows, opt.d_effective_batch_windows)
+    last = int(st.horizon_revisions[-1][1]) if st.horizon_revisions else int(st.horizon.run_steps)
+    if int(new_steps) == last:
+        return new_steps
+    st.horizon_revisions.append((int(st.opt_step), int(new_steps)))
+    st.counters["opt.horizon.revisions"] = st.counters.get("opt.horizon.revisions", 0) + 1
+    st.counters["opt.horizon.revised_run_steps"] = int(new_steps)
+    return new_steps
 
 
 def maybe_step(opt: Config, st, *, best_bpb=None, shift_at=None):
@@ -2591,6 +2684,9 @@ def state_dict(opt: Config, st):
         "param_group_shape": st.param_group_shape,
         "counters": dict(st.counters),
         "grad_norms": list(st.grad_norms),
+        # THE HORIZON'S MID-RUN REVISIONS (revise_horizon): the log crosses the save, so a resume
+        # prices every later step on the same map the uninterrupted run would.
+        "horizon_revisions": [list(r) for r in st.horizon_revisions],
         # THE ACCUMULATION RATE THIS RUN STEPPED AT (2026-09-24). load_state needs it to count the
         # passes this run leaves un-stepped: the pending partial group is n_backward % THIS accum,
         # and OPT_ACCUM may legitimately change at the boundary, so the child's live value is not it.
@@ -2708,6 +2804,7 @@ def load_state(opt: Config, st, saved):
     st.cycle_index = int(saved.get("cycle_index", 0))
     st.shift_at = saved.get("shift_at")
     st.grad_norms = list(saved.get("grad_norms", ()))
+    st.horizon_revisions = [tuple(int(v) for v in r) for r in saved.get("horizon_revisions", ())]
 
     # THE COUNTERS COME BACK, EXCEPT THE ONES THAT DESCRIBE THIS PROCESS'S CONSTRUCTION. A mechanism
     # that fired 4,000 times before the boundary must not read "armed but 0" after it; but

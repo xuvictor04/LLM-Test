@@ -278,8 +278,16 @@ class TOKLevers(LeverSet):
     # derivation inside this package that names the frozen state once.
 
     retok_every = Lever(3000, "How often the retok cadence asks for the stream to be re-segmented with the "
-                              "vocabulary as it now stands; 0 disarms the ask. The ask waits for the next "
-                              "epoch roll, which re-segments whatever this is set to.", U.Windows)
+                              "vocabulary as it now stands; 0 disarms the ask. The mid-epoch act performs it "
+                              "right after the next flush (the unconsumed tail is re-segmented, the consumed "
+                              "prefix kept); an ask whose match table has not moved is refused as a no-op.",
+                        U.Windows)
+    # SINCE 03b S0b (2026-09-26) THIS LEVER DECIDES SOMETHING: the ask is performed mid-epoch by the
+    # act (spine/loop.py stage X, TOK.splice), so minted ids reach the run's own training data at
+    # RUN_EPOCHS=1. The paragraph below is the history of when it decided nothing. WHICH VALUE SHIPS
+    # IS A MEASUREMENT OWED (03b §13 S0b: prequential bits/byte, TOK_RETOK_EVERY {0, 3000, 1000}, 3
+    # paired seeds, non-inferiority against a nuisance-seed control); the archive's 2.189 b/B loss
+    # below came with 22 of 23 retoks adding zero tokens, which the act now refuses.
     # THE HELP SAID "0 leaves already-emitted ids alone forever" UNTIL 2026-09-24, AND NOTHING IN THE
     # TREE DOES THAT. A retok is deferred to the epoch roll (docs/04_CONTRACT.md Q-RUN-8) and the roll
     # re-segments at the current vocabulary on every roll, pending or not, so today this value moves

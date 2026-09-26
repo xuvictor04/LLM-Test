@@ -7,12 +7,16 @@ WHY IT EXISTS (docs/04_CONTRACT.md Q-DOM-2, Q-DOM-3, Q-TOK-14, Q-CAP-4, 2026-09-
 measured wrong, or not delivered at all, and nothing in tests/ could see it:
 
   D1  DOM.on_retokenize HAD NO CALL SITE. An epoch roll re-segmented at a grown vocabulary and
-      part.n_retok_events stayed ABSENT; it is now an E row, called when the match table moved.
+      part.n_retok_events stayed ABSENT; it is now an E row, called when the match table moved --
+      and, since 03b S0b (2026-09-26), an X row: the mid-epoch act delivers it too, once per
+      re-segmentation at a moved table.
   D2  DOM.rekey RAN BEFORE observe AND ON THE BIGRAM ARM. It must follow DOM.observe in the same
       window and never run at SIG_MODE=bigram.
   D3  THE R STAGE ASKED DOM.prior FOR did=0 ALONE. It is asked for every live domain.
   T1  A PENDING RETOK WAS A FLAG, so four fires read as one in tok.due_dropped and one per roll in
-      tok.retok_satisfied_by_roll. The two now sum to tok.retok_deferred.
+      tok.retok_satisfied_by_roll. SINCE 03b S0b NOTHING IS DEFERRED: every retok request is either
+      performed by the mid-epoch act (tok.retok_mid_epoch) or refused as a no-op because the table
+      had not moved (loop.acts_noop), and none is dropped (tok.due_dropped ABSENT or 0).
   T2  TOK SEEDED ITS CADENCE COUNTERS ON ARMS THAT CANNOT MINT (fixed, bytes), and tok.due_merged at
       batch_windows=1. Both are ABSENT there now.
   T3  THE GATED REPORT COUNTED DUES, NOT CALLS, and printed a static "(TOK_PROBATION_USES=0 ...)".
@@ -88,18 +92,25 @@ sysm = build(DATA_STREAM_BYTES="40000", RUN_EPOCHS="2", DATA_RESAMPLE="1", TOK_R
 with _Log((dom_api, "on_retokenize")) as spy:
     res = loop.run(sysm, progress=False)
 pc, tc = sysm.partition.counters, sysm.vocab.counters
-check("D1 the roll that re-segmented at a moved table delivered DOM.on_retokenize once",
-      spy.log.count("on_retokenize") == 1 and pc.get("part.n_retok_events") == 1,
-      f"calls {spy.log.count('on_retokenize')}, part.n_retok_events {pc.get('part.n_retok_events')}")
-check("D1 and DOM_TOKC_DECAY was applied (part.n_retok_decays 1)",
-      pc.get("part.n_retok_decays") == 1, str(pc.get("part.n_retok_decays")))
-check("D1 DOM.on_retokenize is a LOOP_ORDER E row and in _CALLS['E']",
+_books = res.report.get("LOOP(flush books)") or {}
+_acts = int(_books.get("loop.acts", 0)) if isinstance(_books, dict) else 0
+_calls = spy.log.count("on_retokenize")
+check("D1 every re-segmentation at a moved table (acts and the roll) delivered DOM.on_retokenize "
+      "exactly once",
+      _calls >= 2 and _acts >= 1 and pc.get("part.n_retok_events") == _calls,
+      f"calls {_calls}, acts {_acts}, part.n_retok_events {pc.get('part.n_retok_events')}")
+check("D1 and DOM_TOKC_DECAY was applied at each of them",
+      pc.get("part.n_retok_decays") == _calls, f"{pc.get('part.n_retok_decays')} vs {_calls}")
+check("D1 DOM.on_retokenize is a LOOP_ORDER E row and X row, and in _CALLS['E'] and ['X']",
       any(r[:3] == ("E", "DOM", "on_retokenize") for r in _compose.LOOP_ORDER)
-      and "DOM.on_retokenize" in loop._CALLS["E"])
-_def, _sat, _drop = (int(tc.get(k, 0)) for k in
-                     ("tok.retok_deferred", "tok.retok_satisfied_by_roll", "tok.due_dropped"))
-check("T1 every deferred retok is satisfied by the roll or dropped at the end, one each",
-      _def > 2 and _sat > 1 and _sat + _drop == _def, f"deferred {_def} = {_sat} + {_drop}?")
+      and any(r[:3] == ("X", "DOM", "on_retokenize") for r in _compose.LOOP_ORDER)
+      and "DOM.on_retokenize" in loop._CALLS["E"] and "DOM.on_retokenize" in loop._CALLS["X"])
+_mid, _noop, _drop = (int(tc.get(k, 0)) for k in
+                      ("tok.retok_mid_epoch", "tok.retok_noop", "tok.due_dropped"))
+check("T1 retoks are performed mid-epoch or refused as no-ops; none deferred, none dropped",
+      _mid >= 1 and _mid == _acts and _drop == 0 and "tok.retok_deferred" not in tc,
+      f"mid_epoch {_mid}, acts {_acts}, noop {_noop}, dropped {_drop}, "
+      f"deferred {tc.get('tok.retok_deferred', 'ABSENT')}")
 check("D3 the R stage summarises DOM.prior over every live domain",
       "DOM.prior(live)" in res.report and "DOM.prior(0)" not in res.report
       and res.report["DOM.prior(live)"]["n_live"] == len(res.report["DOM.census"]["live"]),

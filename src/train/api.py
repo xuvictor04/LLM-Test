@@ -564,7 +564,7 @@ class RunClock:
 
     __slots__ = ("step", "flushes", "backwards", "opt_steps", "epoch", "batch_len",
                  "epochs", "batch_windows", "accum", "windows_in_epoch", "_in_epoch",
-                 "dropped_windows", "_resumed_at")
+                 "dropped_windows", "_resumed_at", "epoch_revisions", "_roll_pending")
 
     def __init__(self, *, epochs, batch_windows, accum, resume_step=0, resume_epoch=0,
                  resume_backwards=0, resume_opt_steps=0):
@@ -596,6 +596,11 @@ class RunClock:
         # nothing in the report says so. A plain int, because these are windows that were counted in
         # `step` and then not used -- not a clock of their own.
         self.dropped_windows = 0
+        # HOW MANY TIMES THIS EPOCH'S LENGTH WAS RE-MEASURED MID-EPOCH (revise_epoch_length), and
+        # whether the last revision left the epoch with no window to read, so the next advance rolls
+        # without counting one.
+        self.epoch_revisions = 0
+        self._roll_pending = False
 
     @property
     def _finished(self):
@@ -662,6 +667,44 @@ class RunClock:
         # roll may zero.
         self._in_epoch = 0
 
+    def revise_epoch_length(self, windows_in_epoch):
+        """Re-measure THIS epoch's length mid-epoch, KEEPING the position in it (Q-RUN-8 option (a)).
+
+        begin_epoch declares a new epoch and zeroes the cursor; this does neither. It exists for the
+        mid-epoch act (spine/loop.py): the unconsumed tail of the stream is re-segmented at the
+        vocabulary as it now stands, the tail's window count changes, and the clock must be told the
+        new length without restarting the epoch -- which is what begin_epoch would do, re-training
+        material already consumed. The windows already read stay read.
+
+        THE NEW LENGTH MAY NOT BE SHORTER THAN WHAT HAS BEEN READ: the act splices after the unit
+        under the cursor, so everything consumed is kept and n >= in_epoch by construction; a
+        smaller n is a caller defect and is refused. n == in_epoch is legal (the re-segmented tail
+        holds no whole window): the next advance then rolls WITHOUT counting a window, because there
+        is no material for one; its Tick carries the same `step` as the last, which is how the
+        driver tells "rolled with no window" from "read a window and rolled".
+
+        LEVERS READ: none
+        WIRES READ: none
+        DID IT FIRE: RunClock.counters()['epoch_revisions'] (0 on a run with no act)
+        """
+        if isinstance(windows_in_epoch, U.Clock):
+            raise U.UnitError(
+                f"RUN.RunClock.revise_epoch_length: windows_in_epoch={windows_in_epoch!r} is a Clock. "
+                f"It is the same plain count begin_epoch takes, from the same division.")
+        if self.windows_in_epoch is None:
+            raise RuntimeError(
+                "RUN.RunClock.revise_epoch_length between a roll and begin_epoch: there is no epoch "
+                "whose length could be revised.")
+        n = int(windows_in_epoch)
+        if n < self._in_epoch:
+            raise ValueError(
+                f"RUN.RunClock.revise_epoch_length: {n} windows is fewer than the {self._in_epoch} "
+                f"already read this epoch. A mid-epoch act keeps everything consumed, so the "
+                f"re-measured length cannot fall below the cursor.")
+        self.windows_in_epoch = n
+        self._roll_pending = n == self._in_epoch
+        self.epoch_revisions += 1
+
     def advance(self):
         """Advance one window. Returns Tick(step, epoch, flush_due, rolled, finished).
 
@@ -680,18 +723,24 @@ class RunClock:
                 "epoch is, so it cannot say whether this window rolled it. compose.py calls "
                 "begin_epoch at the `epoch0` stage for exactly this reason; a loop driver that "
                 "reaches here first has skipped it.")
+        # A REVISION LEFT THE EPOCH WITH NO WINDOW TO READ (revise_epoch_length at n == in_epoch):
+        # roll now, counting nothing -- there is no material for a window. `step` is unchanged on
+        # the returned Tick, which is how the driver knows no window was cut.
+        no_window = self._roll_pending
+        self._roll_pending = False
         # ONE ADVANCE, NOT TWO. The old tree wrote `i += WIN; step += 1` at :6796 and :7708, 900
         # lines apart, and every argument about which clock a gate compares against is downstream
         # of that duplication. Rebinding, never `.n +=` -- see the class docstring.
-        self.step = self.step + U.Windows(1)
-        self._in_epoch += 1
-        self.batch_len += 1
+        if not no_window:
+            self.step = self.step + U.Windows(1)
+            self._in_epoch += 1
+            self.batch_len += 1
 
         # THE FLUSH IS DECIDED BEFORE THE ROLL, so a batch that fills exactly on an epoch's last
         # window is FLUSHED rather than dropped. The drop below is for a PARTIAL batch, which is
         # what :6533 dropped; a full one has all its windows from the stream it was cut from and
         # discarding it would silently shorten the run by one optimizer step per epoch.
-        flush_due = self.batch_len >= self.batch_windows
+        flush_due = (not no_window) and self.batch_len >= self.batch_windows
         if flush_due:
             # COUNTED WHERE THE BATCH FILLS, NOT WHERE THE BACKWARD HAPPENS, and that is the whole
             # reason Flushes and Backwards are two kinds. Incrementing this in note_backward would
@@ -810,6 +859,9 @@ class RunClock:
             # THE STEP THIS PROCESS RESUMED AT (0 on a fresh run), so `step` minus this is the
             # windows THIS process advanced -- what a throughput is a rate of (bench_summary).
             "resumed_at": self._resumed_at,
+            # MID-EPOCH RE-MEASUREMENTS of the epoch's length (revise_epoch_length): one per act
+            # that changed the stream's window count. 0 on a run with no act.
+            "epoch_revisions": self.epoch_revisions,
         }
 
 

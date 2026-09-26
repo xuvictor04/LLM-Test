@@ -10,6 +10,8 @@ WHAT IS STORED. `python3 run.py --max-windows 80` at RUN_DEVICE=cpu, DATA_STREAM
 thread, the shipped defaults otherwise:
   - the per-flush loss curve, as exact float reprs (a trace, compared exactly: same machine, same build);
   - every integer counter line the run prints (the INTEGER channel of test_determinism's vocabulary).
+    Each fixture counter must be reproduced exactly; a counter added since is a new instrument and
+    is listed, not compared.
 The float curve is compared exactly because the reference is this machine's own earlier run of the
 same workload; test_determinism records that this workload is bit-reproducible here.
 
@@ -100,16 +102,21 @@ def main():
                      min(len(curve), len(fx["loss_curve"])))
         findings.append(f"loss curve differs from flush {first} "
                         f"({len(curve)} vs {len(fx['loss_curve'])} points)")
-    for name in sorted(set(counters) | set(fx["counters"])):
-        got, want = counters.get(name), fx["counters"].get(name)
+    for name in sorted(fx["counters"]):
+        got, want = counters.get(name), fx["counters"][name]
         if got != want:
             findings.append(f"{name}: {got} (fixture {want})")
+    # A COUNTER THE FIXTURE NEVER HAD IS A NEW INSTRUMENT, NOT A CHANGED RUN: listed, not failed. A
+    # fixture counter that moved or vanished is a difference and fails above.
+    added = sorted(set(counters) - set(fx["counters"]))
     ok = not findings
     print(f"{'PASS' if ok else 'FAIL'}  B1  run.py --max-windows {WINDOWS} reproduces the fixture recorded "
           f"at {fx['commit']}")
     print(f"      {len(curve)} losses, {len(counters)} integer counters compared")
     for f in findings[:20]:
         print(f"      - {f}")
+    if added:
+        print(f"      new counters since the fixture (not compared): {', '.join(added)}")
     return 0 if ok else 1
 
 

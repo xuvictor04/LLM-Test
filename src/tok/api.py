@@ -1604,6 +1604,70 @@ def tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False
     return seg
 
 
+def splice(tok: Config, vocab, seg, data, labels=None, *, at, regularize=False):
+    """Re-segment the UNCONSUMED TAIL of an existing Segmentation at the vocabulary as it now stands,
+    keeping everything up to and including the unit under the cursor. Returns a new Segmentation.
+
+    THE MID-EPOCH ACT'S TOKENIZER HALF (Q-RUN-8 option (a), 03b S0b). `at` is the index of the unit
+    under the cursor: the loop's next window starts there, and it is also the last target the
+    previous window read. ids[:at+1] are kept verbatim -- the prefix the run has consumed never
+    changes meaning -- and the text from the NEXT unit's first byte is segmented afresh, so the ids
+    the run has minted since the last segmentation start appearing in its own training data. That
+    is the one route by which they can; at RUN_EPOCHS=1 the epoch roll never comes.
+
+    IT IS NOT `tokenize(start=...)`, and the difference is why this is a second segmentation surface
+    rather than a duplicate of the first: tokenize segments a whole stream (or a tail of one) and
+    returns only what it segmented; this re-segments the tail OF AN EXISTING RECORD and returns the
+    whole spliced record, owning its bytes_per_token (measured over the spliced record, the live
+    value a throughput reading needs). It leaves tokenize's one-slot `_retok_cache` alone: that
+    cache is keyed on (data, start) for the roll's no-op refusal, and the act's no-op test is the
+    caller's (the match table has not moved since the last segmentation, Vocabulary.rev).
+
+    regularize=True applies tok.dropout from the ONE dropout stream, continuing it, as tokenize
+    does for the training stream.
+
+    LEVERS READ: dropout
+    WIRES READ: none
+    DID IT FIRE: tok.retok_mid_epoch, tok.retok (the act is a re-segmentation, counted with the
+                 roll's), tok.byte_fallback, tok.dropout_skip (ABSENT at dropout 0.0),
+                 tok.retok_empty_tail (the cursor was on the last unit, nothing to splice)
+    """
+    tok = tok.owned_by("TOK")
+    at = int(at)
+    if at < 0 or at >= len(seg.ids):
+        raise ValueError(
+            f"TOK.splice: the cursor at={at} is outside the Segmentation's {len(seg.ids)} units.")
+    drop = float(tok.dropout) if regularize else 0.0
+    stream = vocab.dropout_rng if drop > 0 else None
+    if drop > 0 and stream is None:
+        raise ValueError(
+            "TOK.splice was asked to regularize with TOK_DROPOUT>0 against a Vocabulary carrying no "
+            "dropout stream; build_vocabulary mints it.")
+    p = at + 1
+    if p >= len(seg.ids):
+        vocab.counters["tok.retok_empty_tail"] = vocab.counters.get("tok.retok_empty_tail", 0) + 1
+        return seg
+    b = int(seg.byte_pos[p])
+    counts = {"skip": 0, "byte": 0}
+    tail_ids, tail_pos = _segment(vocab, data, dropout=drop, stream=stream, start=b, counts=counts)
+    vocab.counters["tok.retok"] = vocab.counters.get("tok.retok", 0) + 1
+    vocab.counters["tok.retok_mid_epoch"] = vocab.counters.get("tok.retok_mid_epoch", 0) + 1
+    vocab.counters["tok.byte_fallback"] = (vocab.counters.get("tok.byte_fallback", 0)
+                                           + counts["byte"])
+    if drop > 0.0:
+        vocab.counters["tok.dropout_skip"] = (vocab.counters.get("tok.dropout_skip", 0)
+                                              + counts["skip"])
+    ids = list(seg.ids[:p]) + tail_ids
+    byte_pos = list(seg.byte_pos[:p]) + tail_pos
+    out_labels = None
+    if labels is not None:
+        out_labels = (list(seg.labels[:p]) if seg.labels is not None
+                      else [labels[q] for q in seg.byte_pos[:p]]) + [labels[q] for q in tail_pos]
+    start0 = int(seg.byte_pos[0]) if seg.byte_pos else 0
+    return Segmentation(ids=ids, byte_pos=byte_pos, labels=out_labels,
+                        bytes_per_token=_derive.bytes_per_token(len(data) - start0, len(ids)))
+
+
 def on_window(tok: Config, vocab, ids, *, step):
     """One window of the training loop, and THE ONLY PLACE THIS PACKAGE'S CLOCKS ARE COMPARED.
 

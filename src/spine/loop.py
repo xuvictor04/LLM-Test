@@ -139,6 +139,9 @@ _CALLS = {
         "OPT.maybe_step", "FAB.own_lr_scale", "CAP.caps", "FAB.observe", "FAB.grow_check",
         "MEM.write", "MEM.maintain", "TOK.mint_burst", "LM.residual_ratios", "TOK.judge_probation",
         "DOM.note_competence", "CKPT.save"}),
+    # ---- stage X, the mid-epoch act, after a flush with the batch empty (03b S0b)
+    "X": frozenset({"TOK.splice", "RUN.RunClock.revise_epoch_length", "OPT.revise_horizon",
+                    "DOM.on_retokenize"}),
     # ---- stage C, the checkpoint fan-out, through _payload and _save
     "C": frozenset({
         "DATA.stream_state", "TOK.vocab_state", "LM.state_dict", "SIG.state_dict", "FAB.state_dict",
@@ -744,6 +747,11 @@ def run(sysm, *, max_windows=None, progress=True):
         books["loop.flush_mixed_domain"] = 0
     if (not bool(fab_cfg.on)) or bool(fab_cfg.norm_only):
         books["loop.owners_from_domain"] = 0
+    # THE MID-EPOCH ACT'S DID-IT-FIRE (03b S0b). Armed when TOK's retok cadence is: PRESENT-and-0 is
+    # "armed, no act ran"; ABSENT at TOK_RETOK_EVERY=0, where no act can be asked for.
+    if int(tok_cfg.retok_every) > 0:
+        books["loop.acts"] = 0
+        books["loop.acts_noop"] = 0
     # THE PENDING RESEGMENTATION EVENT, set by the epoch roll and consumed by the next flush. None
     # on every other flush, which is what makes store.n_resegment_events a count of ROLLS.
     resegment = None
@@ -775,6 +783,7 @@ def run(sysm, *, max_windows=None, progress=True):
     # RUN_PROFILE on. Off, each span is contextlib.nullcontext and the run is bit-identical.
     _timing = sysm.mode.timing
 
+    _last_step = int(clock.counters()["step"])
     while True:
         tick = clock.advance()
         # THE CUT'S INDEX IS EPOCH-LOCAL AND `tick.step` IS NOT, AND THIS LINE READ `tick.step - 1`
@@ -791,10 +800,18 @@ def run(sysm, *, max_windows=None, progress=True):
         # and the cut needs an offset into the CURRENT segmentation. The clock's `_in_epoch` is a
         # different question (has this window rolled the epoch) answered for a different consumer.
         # They agree by construction because both advance once per window and both zero at a roll.
+        # A TICK THAT READ NO WINDOW: a mid-epoch act left this epoch with no whole window to read
+        # (RunClock.revise_epoch_length at n == in_epoch), so the clock rolled without counting one
+        # and `step` did not move. Nothing is cut; the roll or finish below proceeds.
+        _no_window = int(tick.step) == _last_step
+        _last_step = int(tick.step)
         i = win_in_epoch
-        win_in_epoch += 1
-        bounds = _window_bounds(ids, i, ctx)
-        if bounds is None:
+        if not _no_window:
+            win_in_epoch += 1
+        bounds = None if _no_window else _window_bounds(ids, i, ctx)
+        if _no_window:
+            pass
+        elif bounds is None:
             # THE WINDOW HAS NO MATERIAL, AND SINCE 2026-09-24 THAT IS ALWAYS A DEFECT (Q-RUN-12).
             # This branch used to name TWO causes and call the first arithmetic: the ONE-TOKEN TAIL,
             # when len(ids) was an exact multiple of ctx and `_windows_in_epoch` (then len // ctx)
@@ -1102,6 +1119,61 @@ def run(sysm, *, max_windows=None, progress=True):
                     curve.append(loss)
                     if loss == loss:
                         manage_losses.append(float(loss))
+                # ---- STAGE X: THE MID-EPOCH ACT (Q-RUN-8 option (a), 03b S0b). After the flush, with
+                # the batch empty, so no queued window indexes the segmentation it replaces. TOK's
+                # retok Due (raised by TOK.on_window, OR'd per Q-TOK-12, counted in retok_pending by
+                # _flush) asks for the stream to be re-segmented at the vocabulary as it now stands;
+                # until this act existed that waited for an epoch roll, which at RUN_EPOCHS=1 never
+                # comes, so every id the run minted was stranded outside its own training data.
+                if int(sysm.retok_pending or 0) > 0:
+                    sysm.retok_pending = 0
+                    if (int(vocab.rev) == int(_rev_at_last_seg)
+                            and float(tok_cfg.dropout) <= 0.0):
+                        # THE MATCH TABLE HAS NOT MOVED since the last segmentation: re-segmenting
+                        # would rebuild the identical stream with every side effect (the archive's
+                        # 2.189 bits/byte case). Refused and counted, as tokenize refuses the roll's.
+                        vocab.counters["tok.retok_noop"] = vocab.counters.get("tok.retok_noop", 0) + 1
+                        if "loop.acts_noop" in books:
+                            books["loop.acts_noop"] += 1
+                    else:
+                        k0 = win_in_epoch * ctx
+                        prev_n = len(ids)
+                        sysm.segmentation = tok_api.splice(
+                            tok_cfg, vocab, sysm.segmentation, sysm.stream.bytes,
+                            sysm.stream.labels, at=k0, regularize=True)
+                        ids = sysm.segmentation.ids
+                        sig_stream = _c_signature_stream(sysm, st)
+                        _cc = clock.counters()
+                        n_new = _windows_in_epoch_of(sysm)
+                        if n_new != _cc["windows_in_epoch"]:
+                            clock.revise_epoch_length(n_new)
+                            # THE LR HORIZON FOLLOWS THE RE-MEASURED RUN: the windows already read,
+                            # the rest of this epoch at its new length, and every later epoch at
+                            # that length (the same projection OPT.build made from epoch 0).
+                            _later = max(0, int(_cc["epochs_target"]) - int(_cc["epoch"]) - 1)
+                            opt_api.revise_horizon(
+                                opt_cfg, sysm.optimizer,
+                                run_windows=U.Windows(int(_cc["step"]) + (n_new - int(_cc["in_epoch"]))
+                                                      + _later * n_new))
+                        # MEM hears of the event on the next flush, as it does after a roll.
+                        resegment = sysm.segmentation
+                        sysm.partition.counters.setdefault("part.n_retok_events", 0)
+                        if int(vocab.rev) != int(_rev_at_last_seg):
+                            dom_api.on_retokenize(dom_cfg, sysm.partition)
+                        _rev_at_last_seg = int(vocab.rev)
+                        sysm.rev_at_last_seg = _rev_at_last_seg
+                        # A SELF-INFLICTED SHIFT: the token stream changed under the model, so FAB's
+                        # growth test and OPT's re-warm read it as one, as they read a roll.
+                        sysm.shift_at_windows = U.Windows(int(clock.step))
+                        sysm.shift_at_steps = U.Steps(int(clock.opt_steps) + 1)
+                        _mint_at_last_roll = int(vocab.counters.get("tok.mint", 0))
+                        if "loop.acts" in books:
+                            books["loop.acts"] += 1
+                        warnings.append(
+                            f"loop: mid-epoch act at window {int(tick.step)}: re-segmented the "
+                            f"unconsumed tail at vocabulary size {int(vocab.size())} "
+                            f"({prev_n} -> {len(ids)} ids; this epoch now holds {n_new} windows, "
+                            f"{int(clock.counters()['in_epoch'])} read).")
 
             # THE PERIODIC CHECKPOINT, THROUGH THE SAME Cadences EVERY OTHER GATE USES. A 53-minute
             # run finished with `ckpt checks=0` -- the gate was never EVALUATED, so nothing was written
@@ -2225,9 +2297,9 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
             # begin_epoch -- and it is the owner's, so it is recorded rather than invented.
             # A COUNT OF FIRES, NOT A FLAG: every fire is satisfied by the next roll or counted in
             # tok.due_dropped at the end, one each, and a bool made four fires read as one.
+            # SINCE 03b S0b THE ACT IS NOT DEFERRED: run() performs it right after this flush
+            # returns, with the batch empty (stage X). This counts the request; the act consumes it.
             sysm.retok_pending = int(sysm.retok_pending or 0) + 1
-            vocab.counters["tok.retok_deferred"] = \
-                vocab.counters.get("tok.retok_deferred", 0) + 1
 
         if due.probation:
             # THE RESIDUAL READ AND THE JUDGEMENT, IN THAT ORDER AND UNDER THE SAME GATE. The row

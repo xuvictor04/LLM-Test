@@ -1312,6 +1312,33 @@ LOOP_ORDER = (
                                       "second copy of the signature is what these tables exist to "
                                       "avoid"),
 
+    # -- X: THE MID-EPOCH ACT (Q-RUN-8 option (a), 03b S0b). An EVENT, not a clock: entered right
+    # after a flush, with the batch empty, when TOK's retok Due (TOK.on_window's own `_due`, OR'd
+    # per Q-TOK-12 and counted by the flush) asks for the stream to be re-segmented at the
+    # vocabulary as it now stands. Until it existed the request waited for an epoch roll, which at
+    # RUN_EPOCHS=1 never comes. One row per package call, because _rows_by_stage credits a name only
+    # from its own row. A request whose match table has not moved since the last segmentation
+    # (Vocabulary.rev) is refused and counted (tok.retok_noop, loop.acts_noop).
+    ("X", "TOK",   "splice",          "(vocab, seg=System.segmentation, data=Stream.bytes, "
+                                      "labels=Stream.labels, at=win_in_epoch*LM.ctx, "
+                                      "regularize=True) -- keeps every unit up to and including "
+                                      "the one under the cursor and re-segments the rest, so the "
+                                      "ids minted since the last segmentation reach the stream",
+                                      "System.segmentation; the loop's ids; the signature stream "
+                                      "re-resolved; MEM hears resegment= on the next flush"),
+    ("X", "RUN",   "RunClock.revise_epoch_length", "(windows_in_epoch=(len(Segmentation.ids)-1)"
+                                      "//LM.ctx) -- only if the re-measured length changed; the "
+                                      "cursor is kept, so no window is replayed or skipped",
+                                      "the clock's epoch length"),
+    ("X", "OPT",   "revise_horizon",  "(st, run_windows=clock.step + the rest of this epoch at "
+                                      "its new length + later epochs at that length) -- only if "
+                                      "the length changed; LR-continuous (Q-OPT-10)",
+                                      "st.horizon_revisions"),
+    ("X", "DOM",   "on_retokenize",   "(dom, part) -- when the match table moved since the last "
+                                      "segmentation, as at the roll; the act also stamps "
+                                      "System.shift_at_windows/shift_at_steps, a self-inflicted "
+                                      "shift", "DOM_TOKC_DECAY applied to the token histograms"),
+
     # -- C: the checkpoint fan-out. The payload rows are in EXACTLY the order ASSEMBLY_ORDER built
     # the objects -- DATA, TOK, LM, SIG, FAB, WORLD, MEM, DOM, CAP, OPT -- so a reader comparing the
     # save against the build reads one sequence and not two, and a package that has been added to
@@ -1861,6 +1888,18 @@ DEFERRED_ENTRY_POINTS = {
 # Everything else here is one of those two shapes: a value the ROOT computes from two packages'
 # frozen Configs, or a tensor the LOOP slices and no entry point returns.
 ROW_ARGUMENTS_ELSEWHERE = {
+    "TOK.splice":
+        "seg is System.segmentation -- the Segmentation in force, which the 'segment' ASSEMBLY row "
+        "(TOK.tokenize) produced for epoch 0 and every later roll or act replaced; at is the loop's "
+        "cursor win_in_epoch * LM.ctx, the index of the unit the next window starts on. Both are "
+        "the driver's own state (spine/loop.py::run), not any package's return value (03b S0b).",
+    "RUN.RunClock.revise_epoch_length":
+        "windows_in_epoch is _windows_in_epoch(sysm) re-taken over the SPLICED Segmentation -- the "
+        "same division begin_epoch is handed, named once at compose.py::_windows_in_epoch.",
+    "OPT.revise_horizon":
+        "run_windows is the root's re-measured run length after an act: RunClock.counters()' step, "
+        "plus (the spliced epoch's length - in_epoch), plus the later epochs at that length -- the "
+        "projection OPT.build's run_windows made from epoch 0, re-taken at the act.",
     "CKPT.check_geometry":
         "geometry is the LIVE manifest, produced by _geometry_manifest(sysm), which assembles it "
         "from LM.resolve's LMGeometry and the frozen Configs before the first allocation. THE FIELD "

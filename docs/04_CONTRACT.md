@@ -519,6 +519,7 @@ re-segmentation fired scored **4.364 against 2.175** held-out b/B.
 |---|---|---|
 | `build_vocabulary(tok, *, area_heads, seed, soft_cap=None)` | DATA, RUN, CAP | `Vocabulary` |
 | `tokenize(tok, vocab, data, labels=None, *, start=0, regularize=False, seed=0)` | DATA | `Segmentation` |
+| `splice(tok, vocab, seg, data, labels=None, *, at, regularize=False)` | the loop's mid-epoch act (stage X) | `Segmentation` — the unconsumed tail re-segmented, the consumed prefix kept (03b S0b) |
 | `on_window(tok, vocab, ids, *, step)` | RUN (`Windows`) | `Due` |
 | `mint_burst(tok, vocab, *, step)` | RUN | `list[Mint]` |
 | `judge_probation(tok, vocab, *, step, appearances, residual_ratio=None)` | the loop, LM | `Judgement` |
@@ -588,7 +589,9 @@ was written and stopped being true when the inline `run_windows // d_effective_b
 `build`'s horizon block was named; corrected under Q-OPT-2, which is otherwise RESOLVED-as-already-
 adopted.)*
 
-`build` · `lr_at` · `scaled_backward` · `maybe_step` · `counters` · `state_dict` · `load_state`.
+`build` · `lr_at` · `scaled_backward` · `maybe_step` · `revise_horizon` · `counters` · `state_dict` ·
+`load_state`. `revise_horizon` (03b S0b, Q-OPT-10) re-maps the rest of the schedule when the
+mid-epoch act re-measures the run: LR-continuous, logged in `st.horizon_revisions`, checkpointed.
 
 **`OptState` names its two optimizers `base` and `encoder`** (Q-OPT-7) — the same words as `build`'s
 `param_groups` keys. `maybe_step` writes `lr` into **both** and steps **`base` only**; the encoder is
@@ -743,8 +746,8 @@ both arms.
 Owns the shape of the run. **Declares no cadence and no threshold** — a claim a reader can test by
 grepping the package for `%` and for a threshold literal.
 
-`process_setup` · `mode` · `streams` · `new_clock` + `RunClock.{begin_epoch,advance,note_backward,
-counters}` · `new_cadences` + `Cadences.{due,ledger,state,restore}` · `bench_summary` ·
+`process_setup` · `mode` · `streams` · `new_clock` + `RunClock.{begin_epoch,revise_epoch_length,
+advance,note_backward,counters}` · `new_cadences` + `Cadences.{due,ledger,state,restore}` · `bench_summary` ·
 `startup_refusals`.
 
 **`Cadences.due` is elapsed-since-last-fire, not modulo** — this is the load-bearing repair. Over
@@ -4366,10 +4369,10 @@ row and one deleted exemption. After P4 it is a coordinated edit across ten inde
 **THE COUNT WAS RE-VERIFIED BY SCRIPT ON 2026-09-03, NOT COPIED FROM THIS DOCUMENT**, because
 `Q-TOK-11` and this question collided on it once already and a fifth stale count would be the sixth
 time. Running `test_contract.api_signatures()` — K1's own AST walk, the same oracle the check uses —
-over `src/` returns **137 entry points**, against **137 declared** in §7's ```contract block, all
+over `src/` returned exactly the count declared in §7's ```contract block (the count lives in §7), all
 distinct. Per package: CAP 7, CKPT 11, DATA 5, DOM 10, EVAL 9, FAB 11, **LM 12**, MEM 10, OPT 8,
 RUN 16, SIG 10, TOK 9, **WORLD 9** (RUN's two since 2026-09-24 are `Cadences.state` and
-`Cadences.restore`, Q-RUN-9; OPT's eighth, the same day, is `remap_rows`, Q-FAB-13). LM's twelve are `anchor_term`, `build_model`, `counters`, `decode`,
+`Cadences.restore`, Q-RUN-9; OPT's eighth, the same day, is `remap_rows`, Q-FAB-13); on 2026-09-26 03b S0b made it OPT 9, RUN 17 and TOK 10 with `revise_horizon`, `RunClock.revise_epoch_length` and `splice`). LM's twelve are `anchor_term`, `build_model`, `counters`, `decode`,
 **`embed`**, `encode`, `lm_loss`, `load_state`, `on_mint`, **`residual_ratios`**, `resolve`,
 `state_dict` — the two additions are both present and both in §7, so 121 + 2 = 123 is the arithmetic
 and the tree agrees with it in both directions.
@@ -5352,7 +5355,7 @@ nobody has watched fail is indistinguishable from a check that cannot fail.
 
 ## 7. THE FROZEN SIGNATURE SET
 
-Everything above is prose about these 137 entry points — 121 until 2026-09-02, when Q-TOK-11 added
+Everything above is prose about these 140 entry points — 121 until 2026-09-02, when Q-TOK-11 added
 `LM.residual_ratios` (122) and Q-LM-12 added `LM.embed` (123); 133 from 2026-09-15, when P4 wrote
 `CAP.caps` and the `Caps` record it returns brought `Caps.headroom(n)` with it; **134 since
 2026-09-22, when `World.parameters(self)` closed the hole `spine/compose.py::_base_parameters` had
@@ -5363,7 +5366,9 @@ objective and were never STEPPED, because that helper harvests by
 2026-09-24**, when RUN's `Cadences.state(self)` and `Cadences.restore(self, state)` carried every
 cadenced gate's schedule across a resume (Q-RUN-9); **137 since later that day**, when
 `OPT.remap_rows(opt, st, row_events)` gave AdamW's per-row moments a way to follow the expert rows
-FAB moves (Q-FAB-13). Neither of the two before them
+FAB moves (Q-FAB-13); **140 since 2026-09-26**, when 03b's stage S0b added the mid-epoch act's
+three: `TOK.splice`, `RunClock.revise_epoch_length` and `OPT.revise_horizon` (Q-RUN-8 option (a),
+Q-OPT-10). Neither of the two before them
 is a new ruling: this document has said since the record was specified that "`Caps.headroom(n)`
 exists so the negative clamp (C30) **cannot be written** at a call site", and it became an ENTRY
 POINT the moment a body existed to carry it. A record's public method is public surface, which K1
@@ -5468,6 +5473,7 @@ OPT: build(opt: Config, *, param_groups, run_windows)
 OPT: lr_at(opt: Config, st, opt_step)
 OPT: scaled_backward(opt: Config, st, total)
 OPT: maybe_step(opt: Config, st, *, best_bpb=None, shift_at=None)
+OPT: revise_horizon(opt: Config, st, *, run_windows)
 OPT: remap_rows(opt: Config, st, row_events)
 OPT: counters(opt: Config, st)
 OPT: state_dict(opt: Config, st)
@@ -5479,6 +5485,7 @@ RUN: Timing.spans(self)
 RUN: streams(run: Config, subsystems)
 RUN: new_clock(run: Config, *, batch_windows, accum, resume_step=0, resume_epoch=0, resume_backwards=0, resume_opt_steps=0)
 RUN: RunClock.begin_epoch(self, windows_in_epoch)
+RUN: RunClock.revise_epoch_length(self, windows_in_epoch)
 RUN: RunClock.advance(self)
 RUN: RunClock.note_backward(self)
 RUN: RunClock.counters(self)
@@ -5507,6 +5514,7 @@ TOK: Vocabulary.blen(self, i)
 TOK: Vocabulary.size(self)
 TOK: Vocabulary.live_size(self)
 TOK: Vocabulary.at_cap(self)
+TOK: splice(tok: Config, vocab, seg, data, labels=None, *, at, regularize=False)
 TOK: on_window(tok: Config, vocab, ids, *, step)
 TOK: mint_burst(tok: Config, vocab, *, step)
 TOK: judge_probation(tok: Config, vocab, *, step, appearances, residual_ratio=None)
