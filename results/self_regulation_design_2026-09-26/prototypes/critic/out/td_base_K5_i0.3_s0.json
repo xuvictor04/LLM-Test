@@ -1,0 +1,138 @@
+{
+ "scen": "base",
+ "K": 5,
+ "seed": 0,
+ "imp": 0.3,
+ "wall": 9.7,
+ "n_claim_ctx": 40760,
+ "snaps": [
+  {
+   "step": 100,
+   "n_conflicted": 42,
+   "r": {
+    "false": 0.023,
+    "cred": 0.977,
+    "corrob": 0.962
+   },
+   "n_ev": {
+    "false": 42,
+    "cred": 42,
+    "corrob": 24
+   },
+   "trust": {
+    "false": 0.3,
+    "corrob": 0.984
+   }
+  },
+  {
+   "step": 500,
+   "n_conflicted": 48,
+   "r": {
+    "false": 0.02,
+    "cred": 0.98,
+    "corrob": 0.962
+   },
+   "n_ev": {
+    "false": 48,
+    "cred": 48,
+    "corrob": 24
+   },
+   "trust": {
+    "false": 0.3,
+    "corrob": 0.981
+   }
+  },
+  {
+   "step": 1000,
+   "n_conflicted": 60,
+   "r": {
+    "false": 0.017,
+    "cred": 0.982,
+    "corrob": 0.933,
+    "easy": 0.5,
+    "hard": 0.5
+   },
+   "n_ev": {
+    "false": 57,
+    "cred": 55,
+    "corrob": 28,
+    "easy": 2,
+    "hard": 0
+   },
+   "trust": {
+    "false": 0.3,
+    "corrob": 0.95
+   }
+  },
+  {
+   "step": 1460,
+   "n_conflicted": 55,
+   "r": {
+    "false": 0.037,
+    "cred": 0.981,
+    "corrob": 0.893,
+    "easy": 0.833,
+    "hard": 0.25
+   },
+   "n_ev": {
+    "false": 52,
+    "cred": 51,
+    "corrob": 26,
+    "easy": 4,
+    "hard": 2
+   },
+   "trust": {
+    "false": 0.3,
+    "corrob": 0.91
+   }
+  },
+  {
+   "step": 1700,
+   "n_conflicted": 64,
+   "r": {
+    "false": 0.017,
+    "cred": 0.983,
+    "corrob": 0.903,
+    "easy": 0.75,
+    "hard": 0.25,
+    "late": 0.333
+   },
+   "n_ev": {
+    "false": 58,
+    "cred": 56,
+    "corrob": 29,
+    "easy": 6,
+    "hard": 2,
+    "late": 1
+   },
+   "trust": {
+    "false": 0.3,
+    "corrob": 0.919
+   }
+  },
+  {
+   "step": 1953,
+   "n_conflicted": 69,
+   "r": {
+    "false": 0.016,
+    "cred": 0.983,
+    "corrob": 0.886,
+    "easy": 0.75,
+    "hard": 0.25,
+    "late": 0.333
+   },
+   "n_ev": {
+    "false": 62,
+    "cred": 58,
+    "corrob": 33,
+    "easy": 6,
+    "hard": 2,
+    "late": 1
+   },
+   "trust": {
+    "false": 0.3,
+    "corrob": 0.901
+   }
+  }
+ ]
+}

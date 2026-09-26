@@ -1,0 +1,64 @@
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+{"arm": "base", "seed": 0, "wall": 125.74658417701721, "gap_end": {"hard": 2.022621904068237, "easy": 2.4815598901992737, "noise": 0.18939968887232794, "cred": 1.352205562739898, "false": 1.234098781590518, "corrob": 1.485580330166444, "late": 1.9280905984794194}, "forget_hard": 0.4488623360010684}
+{"arm": "tags", "seed": 0, "wall": 127.44197607040405, "gap_end": {"hard": 2.0146522280272543, "easy": 2.209407664167931, "noise": 0.2968530732702046, "cred": 1.3228692781036724, "false": 1.3704213457448757, "corrob": 1.47797112976167, "late": 2.0213760520992174}, "forget_hard": 0.48980108621245133}
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+{"arm": "sel", "seed": 0, "wall": 164.13690447807312, "gap_end": {"hard": 2.172839118568452, "easy": 1.379076285715545, "noise": 0.32315781971967095, "cred": 1.6283415948958266, "false": 1.6942639893889408, "corrob": 1.7670189314137752, "late": 2.249028799115714}, "forget_hard": 0.22049414115698296}
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+{"arm": "tags_sel", "seed": 0, "wall": 164.80692100524902, "gap_end": {"hard": 2.176034212256181, "easy": 1.64659254741023, "noise": 0.2995879413842246, "cred": 1.6429608081497689, "false": 1.7659415427543355, "corrob": 1.76963306770689, "late": 2.344219820507071}, "forget_hard": 0.16160487374444488}
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+{"arm": "loss", "seed": 0, "wall": 110.22817611694336, "gap_end": {"hard": 2.003057157706084, "easy": 2.2487032921329706, "noise": 0.14342563060898428, "cred": 1.3076142449894905, "false": 1.3077773530987011, "corrob": 1.4794536202121074, "late": 1.9468886461840262}, "forget_hard": 0.42846140999042026}
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+{"arm": "sel_pos", "seed": 0, "wall": 154.44823026657104, "gap_end": {"hard": 2.1200005447785695, "easy": 2.0743579436126085, "noise": 0.0720431994724704, "cred": 1.8538899621963658, "false": 2.0573953816920114, "corrob": 1.9445139702020389, "late": 2.274363219449012}, "forget_hard": 0.006869675006063947}
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+{"arm": "tags_nodrop", "seed": 0, "wall": 140.83497309684753, "gap_end": {"hard": 2.044077083728674, "easy": 3.0289493670531367, "noise": 0.42507164293325594, "cred": 1.971655082374674, "false": 2.2246227122584634, "corrob": 2.030123838113829, "late": 2.176747586645791}, "forget_hard": 0.2793868482225377}
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+{"arm": "base", "seed": 1, "wall": 135.75923585891724, "gap_end": {"hard": 2.0129268995772223, "easy": 2.30971986017133, "noise": 0.28616779117209834, "cred": 1.2699935611082815, "false": 1.3043624375195173, "corrob": 1.2537114786197128, "late": 1.8391324259607482}, "forget_hard": 0.5935258867396214}
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+{"arm": "tags", "seed": 1, "wall": 173.13480067253113, "gap_end": {"hard": 2.1796104210016463, "easy": 2.380537844247712, "noise": 0.38101587915763524, "cred": 1.32577544598503, "false": 1.4299326463419324, "corrob": 1.2881257230053134, "late": 1.9380245139986734}, "forget_hard": 0.38772250361934013}
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+{"arm": "sel", "seed": 1, "wall": 207.2278265953064, "gap_end": {"hard": 2.0546564260172726, "easy": 1.3529703984277757, "noise": 0.2777984274505103, "cred": 1.5103618454163197, "false": 1.6584604410860186, "corrob": 1.5134212758090841, "late": 2.1889558007400542}, "forget_hard": 0.23850382039003426}
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+{"arm": "tags_sel", "seed": 1, "wall": 213.23685503005981, "gap_end": {"hard": 2.1818651135544576, "easy": 1.5989224434613765, "noise": 0.37920215012163627, "cred": 1.6538249572518504, "false": 1.7796543793745787, "corrob": 1.6253781979024535, "late": 2.1592918891539354}, "forget_hard": 0.06314377422958195}
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+{"arm": "loss", "seed": 1, "wall": 176.88175868988037, "gap_end": {"hard": 1.980570771574497, "easy": 2.110356883360559, "noise": 0.20878660517348901, "cred": 1.311253918876778, "false": 1.3983714221514947, "corrob": 1.313986582232903, "late": 1.8502927241405374}, "forget_hard": 0.5118767792772014}
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+{"arm": "sel_pos", "seed": 1, "wall": 224.00949692726135, "gap_end": {"hard": 2.080504730511349, "easy": 2.027606570984664, "noise": 0.06613834713774658, "cred": 1.7819317381918411, "false": 2.107064631128142, "corrob": 1.8554816976937452, "late": 2.2722662606098094}, "forget_hard": 0.0065673295058470416}
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+{"arm": "tags_nodrop", "seed": 1, "wall": 195.6064965724945, "gap_end": {"hard": 2.2556401673297746, "easy": 2.846589158271915, "noise": 0.563032341837082, "cred": 1.9499752984192877, "false": 2.1560432263020597, "corrob": 1.905598130085771, "late": 2.172401438698604}, "forget_hard": 0.08070320288267441}
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+{"arm": "base", "seed": 2, "wall": 199.62738466262817, "gap_end": {"hard": 1.9123410956995488, "easy": 1.7533591117960592, "noise": 0.1839261690259688, "cred": 1.237146154986501, "false": 1.6467609450775087, "corrob": 1.1937387954579894, "late": 1.9849638208285754}, "forget_hard": 0.4343476881988506}
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+{"arm": "tags", "seed": 2, "wall": 204.50461745262146, "gap_end": {"hard": 1.9869502653315507, "easy": 1.8325425039930594, "noise": 0.3774881710231375, "cred": 1.2880929196168927, "false": 1.6806798794286246, "corrob": 1.23609829434815, "late": 1.9979258092588035}, "forget_hard": 0.42035380386344556}
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+{"arm": "sel", "seed": 2, "wall": 245.03415298461914, "gap_end": {"hard": 1.9858506082619343, "easy": 1.5414549881017212, "noise": 0.2326223686871698, "cred": 1.4466867211100318, "false": 1.6658506753579791, "corrob": 1.4037593651600777, "late": 2.1396649670020857}, "forget_hard": 0.17893281374947678}
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+{"arm": "tags_sel", "seed": 2, "wall": 248.1855113506317, "gap_end": {"hard": 2.0299865159528565, "easy": 1.562588388222394, "noise": 0.285952124927916, "cred": 1.6099027283277594, "false": 1.6765197910869043, "corrob": 1.5028480293679394, "late": 2.18288627095572}, "forget_hard": 0.19213523392561083}
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+{"arm": "loss", "seed": 2, "wall": 185.58224034309387, "gap_end": {"hard": 1.9592737852588025, "easy": 2.077437027706505, "noise": 0.17052218518302276, "cred": 1.3281507746905565, "false": 1.6070243535956568, "corrob": 1.2791720371873438, "late": 2.000127875120451}, "forget_hard": 0.377325120478778}
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+{"arm": "sel_pos", "seed": 2, "wall": 233.778733253479, "gap_end": {"hard": 2.0362435887565473, "easy": 1.8294182671574855, "noise": 0.08351788193803689, "cred": 1.8141314382967413, "false": 1.7011318842865788, "corrob": 1.783749356813975, "late": 2.2250278678272375}, "forget_hard": 0.0030182955226423225}
+{"arm": "tags_nodrop", "seed": 2, "wall": 147.8300302028656, "gap_end": {"hard": 1.8935991143391235, "easy": 2.766648901906667, "noise": 0.45753577604072326, "cred": 1.5945673793156248, "false": 2.4705315293647803, "corrob": 1.634557846843506, "late": 2.026503822387375}, "forget_hard": 0.18962738291072956}
+DONE

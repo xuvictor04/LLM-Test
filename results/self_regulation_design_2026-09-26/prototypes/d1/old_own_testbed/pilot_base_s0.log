@@ -1,0 +1,14 @@
+[planned s0] step 250 ph0 easy=0.03 mid=2.08 hard=5.10 noise=5.09 factT=1.33 factT2=13.96 factF=1.14 late=4.94  9s
+[planned s0] step 500 ph0 easy=0.03 mid=1.41 hard=5.06 noise=5.07 factT=1.20 factT2=15.29 factF=0.36 late=5.91  17s
+[planned s0] step 750 ph0 easy=0.09 mid=1.24 hard=5.13 noise=5.09 factT=1.12 factT2=16.14 factF=0.20 late=6.38  25s
+[planned s0] step 1000 ph1 easy=3.46 mid=1.27 hard=4.20 noise=5.09 factT=1.55 factT2=1.11 factF=0.12 late=6.45  32s
+[planned s0] step 1250 ph1 easy=4.11 mid=1.16 hard=3.95 noise=5.12 factT=1.73 factT2=1.08 factF=0.11 late=6.64  40s
+[planned s0] step 1500 ph1 easy=5.47 mid=1.16 hard=3.59 noise=5.12 factT=1.85 factT2=1.06 factF=0.10 late=6.90  48s
+[planned s0] step 1750 ph2 easy=6.14 mid=4.57 hard=3.36 noise=5.12 factT=1.08 factT2=1.08 factF=1.78 late=1.53  56s
+[planned s0] step 2000 ph2 easy=6.67 mid=5.12 hard=3.09 noise=5.12 factT=1.08 factT2=1.08 factF=1.84 late=1.33  64s
+[planned s0] step 2250 ph2 easy=7.31 mid=5.46 hard=2.88 noise=5.12 factT=1.19 factT2=1.08 factF=1.93 late=1.25  72s
+[planned s0] step 2500 ph3 easy=7.59 mid=5.66 hard=2.73 noise=5.13 factT=2.30 factT2=1.10 factF=0.13 late=1.21  80s
+[planned s0] step 2750 ph3 easy=7.67 mid=6.01 hard=2.60 noise=5.13 factT=2.62 factT2=1.11 factF=0.12 late=1.17  89s
+[planned s0] step 3000 ph3 easy=7.88 mid=6.19 hard=2.46 noise=5.11 factT=2.98 factT2=1.14 factF=0.13 late=1.17  96s
+{"bare.contra.acc": 0.0, "bare.contra.true_share": 0.027810035889391092, "bare.contra.false_acc": 1.0, "bare.agreed.acc": 1.0, "t2fmt.contra.acc": 1.0, "t2fmt.contra.true_share": 0.9969416577201757, "t2fmt.contra.false_acc": 0.0, "t2fmt.agreed.acc": 1.0, "primed.contra.acc": 0.09375, "primed.contra.true_share": 0.14899243838439807, "primed.contra.false_acc": 0.84375, "primed.agreed.acc": 0.96875}
+2.7042050758250564 {'easy': 7.846656990556289, 'mid': 5.031065841903804, 'hard': 0.0, 'noise': 0.042950947226477965, 'factT': 1.9047557554738708, 'factT2': 0.07903153151628817, 'factF': 0.021716604038664253, 'late': 0.0} 96.47551083564758

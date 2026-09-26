@@ -1,0 +1,59 @@
+{
+ "scen": "delim",
+ "K": 5,
+ "seed": 0,
+ "imp": 0.3,
+ "wall": 3.3,
+ "n_claim_ctx": 21779,
+ "snaps": [
+  {
+   "step": 100,
+   "n_conflicted": 0,
+   "r": {},
+   "n_ev": {},
+   "trust": {}
+  },
+  {
+   "step": 500,
+   "n_conflicted": 89,
+   "r": {
+    "false": 0.011,
+    "cred": 0.98,
+    "corrob": 0.988,
+    "easy": 0.333
+   },
+   "n_ev": {
+    "false": 88,
+    "cred": 47,
+    "corrob": 80,
+    "easy": 1
+   },
+   "trust": {
+    "cred": 0.992,
+    "false": 0.3
+   }
+  },
+  {
+   "step": 976,
+   "n_conflicted": 990,
+   "r": {
+    "false": 0.001,
+    "cred": 0.999,
+    "easy": 0.75,
+    "corrob": 0.999,
+    "hard": 0.333
+   },
+   "n_ev": {
+    "false": 989,
+    "cred": 935,
+    "easy": 2,
+    "corrob": 742,
+    "hard": 1
+   },
+   "trust": {
+    "false": 0.3,
+    "corrob": 1.0
+   }
+  }
+ ]
+}

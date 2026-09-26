@@ -1,0 +1,18 @@
+d3 run.py 0 --arm mf_base
+d3 run.py 0 --arm mf_trust_td
+d3 run.py 3 --arm mf_base
+d3 run.py 3 --arm mf_trust_td
+d3 run_tags.py 0 --arm fulltd --tags 1 --tag _tags
+d3 run_act.py 0 --arm fulltd --act_every 6 --tag _act6
+d3 run_tags.py 3 --arm fulltd --tags 1 --tag _tags
+d3 run_act.py 3 --arm fulltd --act_every 6 --tag _act6
+d1 run.py 0 --arm full --tag _judge
+d1 run.py 0 --arm base --tag _judge
+d1 run.py 3 --arm replay
+d3 run.py 3 --arm replay_fixed
+d3 run_tags.py 4 --arm fulltd --tags 1 --tag _tags
+d3 run_act.py 4 --arm fulltd --act_every 6 --tag _act6
+d1 run.py 4 --arm replay
+d3 run.py 4 --arm replay_fixed
+d3 run.py 4 --arm mf_base
+d3 run.py 4 --arm mf_trust_td

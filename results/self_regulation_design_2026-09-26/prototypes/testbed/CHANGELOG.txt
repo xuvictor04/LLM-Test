@@ -1,0 +1,5 @@
+2026-09-26 ~12:20 (d2): FIXED a determinism bug in World.__init__: entity order came from iterating a
+Python set of bytes, whose order depends on PYTHONHASHSEED, so each PROCESS got a different W/Q split,
+true values and flipped set for the same seed (arms were not paired). Line now sorts the set first.
+Any result produced before this fix is not reproducible and not paired across processes; rerun it.
+Check: two runs of the same arm+seed must now print identical held-out numbers.

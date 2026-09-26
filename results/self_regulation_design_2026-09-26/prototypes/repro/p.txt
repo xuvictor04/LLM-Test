@@ -1,0 +1,2 @@
+judge/w/d1 full_judge_s0
+judge/w/d1 base_judge_s0

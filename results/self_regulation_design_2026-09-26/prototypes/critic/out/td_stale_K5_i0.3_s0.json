@@ -1,0 +1,140 @@
+{
+ "scen": "stale",
+ "K": 5,
+ "seed": 0,
+ "imp": 0.3,
+ "wall": 10.2,
+ "n_claim_ctx": 37924,
+ "snaps": [
+  {
+   "step": 100,
+   "n_conflicted": 42,
+   "r": {
+    "false": 0.023,
+    "cred": 0.977,
+    "corrob": 0.962
+   },
+   "n_ev": {
+    "false": 42,
+    "cred": 42,
+    "corrob": 24
+   },
+   "trust": {
+    "false": 0.3,
+    "corrob": 0.984
+   }
+  },
+  {
+   "step": 500,
+   "n_conflicted": 48,
+   "r": {
+    "false": 0.02,
+    "cred": 0.98,
+    "corrob": 0.962
+   },
+   "n_ev": {
+    "false": 48,
+    "cred": 48,
+    "corrob": 24
+   },
+   "trust": {
+    "false": 0.3,
+    "corrob": 0.981
+   }
+  },
+  {
+   "step": 1000,
+   "n_conflicted": 60,
+   "r": {
+    "false": 0.017,
+    "cred": 0.982,
+    "corrob": 0.933,
+    "easy": 0.5,
+    "hard": 0.5
+   },
+   "n_ev": {
+    "false": 57,
+    "cred": 55,
+    "corrob": 28,
+    "easy": 2,
+    "hard": 0
+   },
+   "trust": {
+    "false": 0.3,
+    "corrob": 0.95
+   }
+  },
+  {
+   "step": 1460,
+   "n_conflicted": 55,
+   "r": {
+    "false": 0.037,
+    "cred": 0.981,
+    "corrob": 0.893,
+    "easy": 0.833,
+    "hard": 0.25
+   },
+   "n_ev": {
+    "false": 52,
+    "cred": 51,
+    "corrob": 26,
+    "easy": 4,
+    "hard": 2
+   },
+   "trust": {
+    "false": 0.3,
+    "corrob": 0.91
+   }
+  },
+  {
+   "step": 1700,
+   "n_conflicted": 79,
+   "r": {
+    "cred": 0.986,
+    "false": 0.149,
+    "corrob": 0.929,
+    "late": 0.591,
+    "easy": 0.714,
+    "hard": 0.25
+   },
+   "n_ev": {
+    "cred": 67,
+    "false": 72,
+    "corrob": 40,
+    "late": 64,
+    "easy": 5,
+    "hard": 2
+   },
+   "trust": {
+    "false": 0.3,
+    "corrob": 0.942,
+    "late": 0.6
+   }
+  },
+  {
+   "step": 1953,
+   "n_conflicted": 86,
+   "r": {
+    "cred": 0.986,
+    "false": 0.141,
+    "corrob": 0.915,
+    "late": 0.574,
+    "easy": 0.714,
+    "hard": 0.25
+   },
+   "n_ev": {
+    "cred": 70,
+    "false": 76,
+    "corrob": 45,
+    "late": 66,
+    "easy": 5,
+    "hard": 2
+   },
+   "trust": {
+    "false": 0.3,
+    "corrob": 0.928,
+    "late": 0.582
+   }
+  }
+ ]
+}

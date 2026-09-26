@@ -1,0 +1,197 @@
+
+== mean gap, 6 learnable areas incl. false (bits/byte, null read) ==   per seed s0/s1/s2  | paired diff vs base
+  base (planned, tree today)            1.751  1.665  1.621  | +0.000 +0.000 +0.000
+  d1 lp (LP bandit, probe)              1.455  1.428  1.430  | -0.296 -0.237 -0.191
+  d1 full (lp + grad trust)             1.442  1.444  1.418  | -0.308 -0.221 -0.203
+  d1 lp_train (stream signal)           1.634  1.700      -  | -0.116 +0.035    -  
+  d1 loss-seeking                       1.746  1.685      -  | -0.004 +0.020    -  
+  d1 replay 20% (d1 impl)               1.498  1.443  1.449  | -0.253 -0.222 -0.172
+  d3 replay 20% (d3 impl)               1.439  1.403      -  | -0.312 -0.261    -  
+  d3 replay 27% (matched)               1.434  1.400  1.374  | -0.317 -0.265 -0.248
+  d3 focus (LP+rehearse+MIR)            1.467  1.326  1.357  | -0.284 -0.338 -0.264
+  d3 focus_nomir                        1.462  1.324      -  | -0.289 -0.341    -  
+  d3 fulltd (focus+claimTD)             1.536  1.452  1.374  | -0.215 -0.213 -0.247
+  d3 trust_td (planned+claimTD)         1.712  1.709      -  | -0.038 +0.044    -  
+  judge fulltd act6 (tree acts)         1.500  1.449      -  | -0.250 -0.215    -  
+  d2 tags (untagged read)               1.736  1.757  1.670  | -0.015 +0.092 +0.049
+  judge graft fulltd+tags (untagged)    1.622  1.500  1.491  | -0.129 -0.165 -0.130
+
+== mean gap, 5 areas excl. false ==   per seed s0/s1/s2  | paired diff vs base
+  base (planned, tree today)            1.854  1.737  1.616  | +0.000 +0.000 +0.000
+  d1 lp (LP bandit, probe)              1.471  1.374  1.378  | -0.383 -0.363 -0.238
+  d1 full (lp + grad trust)             1.415  1.352  1.361  | -0.439 -0.385 -0.256
+  d1 lp_train (stream signal)           1.718  1.750      -  | -0.136 +0.013    -  
+  d1 loss-seeking                       1.822  1.739      -  | -0.032 +0.002    -  
+  d1 replay 20% (d1 impl)               1.536  1.454  1.412  | -0.318 -0.283 -0.205
+  d3 replay 20% (d3 impl)               1.465  1.403      -  | -0.389 -0.334    -  
+  d3 replay 27% (matched)               1.457  1.399  1.320  | -0.397 -0.338 -0.297
+  d3 focus (LP+rehearse+MIR)            1.478  1.338  1.285  | -0.376 -0.400 -0.331
+  d3 focus_nomir                        1.493  1.334      -  | -0.361 -0.403    -  
+  d3 fulltd (focus+claimTD)             1.422  1.319  1.285  | -0.432 -0.418 -0.331
+  d3 trust_td (planned+claimTD)         1.739  1.720      -  | -0.115 -0.017    -  
+  judge fulltd act6 (tree acts)         1.383  1.317      -  | -0.471 -0.420    -  
+  d2 tags (untagged read)               1.809  1.822  1.668  | -0.045 +0.085 +0.052
+  judge graft fulltd+tags (untagged)    1.521  1.376  1.442  | -0.333 -0.361 -0.175
+
+== gap late (plasticity) ==   per seed s0/s1/s2  | paired diff vs base
+  base (planned, tree today)            1.928  1.839  1.985  | +0.000 +0.000 +0.000
+  d1 lp (LP bandit, probe)              1.669  1.541  1.550  | -0.259 -0.298 -0.435
+  d1 full (lp + grad trust)             1.485  1.403  1.633  | -0.443 -0.436 -0.352
+  d1 lp_train (stream signal)           1.789  1.820      -  | -0.139 -0.019    -  
+  d1 loss-seeking                       1.888  1.817      -  | -0.040 -0.022    -  
+  d1 replay 20% (d1 impl)               2.000  1.956  2.031  | +0.072 +0.117 +0.046
+  d3 replay 20% (d3 impl)               2.160  2.033      -  | +0.232 +0.194    -  
+  d3 replay 27% (matched)               2.221  2.090  2.061  | +0.293 +0.251 +0.076
+  d3 focus (LP+rehearse+MIR)            1.839  1.727  1.702  | -0.089 -0.112 -0.283
+  d3 focus_nomir                        1.845  1.730      -  | -0.083 -0.109    -  
+  d3 fulltd (focus+claimTD)             1.893  1.736  1.771  | -0.035 -0.103 -0.214
+  d3 trust_td (planned+claimTD)         1.976  1.831      -  | +0.048 -0.008    -  
+  judge fulltd act6 (tree acts)         1.868  1.768      -  | -0.060 -0.071    -  
+  d2 tags (untagged read)               2.021  1.938  1.998  | +0.093 +0.099 +0.013
+  judge graft fulltd+tags (untagged)    1.907  1.788  1.843  | -0.021 -0.052 -0.142
+
+== forget hard ==   per seed s0/s1/s2  | paired diff vs base
+  base (planned, tree today)            0.449  0.594  0.434  | +0.000 +0.000 +0.000
+  d1 lp (LP bandit, probe)              0.286  0.332  0.451  | -0.163 -0.262 +0.017
+  d1 full (lp + grad trust)             0.233  0.364  0.393  | -0.216 -0.230 -0.041
+  d1 lp_train (stream signal)           0.535  0.566      -  | +0.087 -0.028    -  
+  d1 loss-seeking                       0.527  0.591      -  | +0.078 -0.002    -  
+  d1 replay 20% (d1 impl)               0.238  0.336  0.253  | -0.211 -0.258 -0.182
+  d3 replay 20% (d3 impl)               0.121  0.120      -  | -0.328 -0.473    -  
+  d3 replay 27% (matched)               0.051  0.054  0.036  | -0.398 -0.540 -0.399
+  d3 focus (LP+rehearse+MIR)            0.251  0.212  0.269  | -0.198 -0.382 -0.165
+  d3 focus_nomir                        0.230  0.213      -  | -0.218 -0.380    -  
+  d3 fulltd (focus+claimTD)             0.229  0.326  0.245  | -0.220 -0.268 -0.190
+  d3 trust_td (planned+claimTD)         0.474  0.627      -  | +0.025 +0.033    -  
+  judge fulltd act6 (tree acts)         0.257  0.261      -  | -0.192 -0.333    -  
+  d2 tags (untagged read)               0.490  0.388  0.420  | +0.041 -0.206 -0.014
+  judge graft fulltd+tags (untagged)    0.277  0.350  0.302  | -0.172 -0.244 -0.133
+
+== forget easy ==   per seed s0/s1/s2  | paired diff vs base
+  base (planned, tree today)            1.871  1.650  1.231  | +0.000 +0.000 +0.000
+  d1 lp (LP bandit, probe)              0.297  0.275  0.184  | -1.573 -1.375 -1.048
+  d1 full (lp + grad trust)             0.243  0.280  0.240  | -1.628 -1.370 -0.992
+  d1 lp_train (stream signal)           1.685  1.850      -  | -0.186 +0.200    -  
+  d1 loss-seeking                       1.565  1.406      -  | -0.306 -0.244    -  
+  d1 replay 20% (d1 impl)               0.398  0.371  0.287  | -1.472 -1.279 -0.945
+  d3 replay 20% (d3 impl)               0.050  0.030      -  | -1.821 -1.620    -  
+  d3 replay 27% (matched)               0.003 -0.002 -0.003  | -1.868 -1.651 -1.234
+  d3 focus (LP+rehearse+MIR)            0.010 -0.001  0.046  | -1.861 -1.650 -1.186
+  d3 focus_nomir                       -0.015 -0.009      -  | -1.886 -1.659    -  
+  d3 fulltd (focus+claimTD)             0.003  0.011  0.059  | -1.868 -1.639 -1.173
+  d3 trust_td (planned+claimTD)         1.443  1.596      -  | -0.428 -0.054    -  
+  judge fulltd act6 (tree acts)         0.004 -0.005      -  | -1.867 -1.654    -  
+  d2 tags (untagged read)               1.585  1.656  1.317  | -0.286 +0.006 +0.086
+  judge graft fulltd+tags (untagged)    0.053 -0.026  0.389  | -1.817 -1.675 -0.843
+
+== gap noise (calibration) ==   per seed s0/s1/s2  | paired diff vs base
+  base (planned, tree today)            0.189  0.286  0.184  | +0.000 +0.000 +0.000
+  d1 lp (LP bandit, probe)              0.421  0.459  0.394  | +0.231 +0.173 +0.210
+  d1 full (lp + grad trust)             0.428  0.491  0.370  | +0.238 +0.205 +0.186
+  d1 lp_train (stream signal)           0.285  0.275      -  | +0.095 -0.012    -  
+  d1 loss-seeking                       0.178  0.210      -  | -0.011 -0.077    -  
+  d1 replay 20% (d1 impl)               0.221  0.323  0.193  | +0.032 +0.037 +0.009
+  d3 replay 20% (d3 impl)               0.251  0.237      -  | +0.062 -0.049    -  
+  d3 replay 27% (matched)               0.266  0.255  0.259  | +0.077 -0.032 +0.075
+  d3 focus (LP+rehearse+MIR)            0.361  0.473  0.419  | +0.171 +0.186 +0.235
+  d3 focus_nomir                        0.365  0.449      -  | +0.176 +0.163    -  
+  d3 fulltd (focus+claimTD)             0.300  0.408  0.405  | +0.110 +0.122 +0.221
+  d3 trust_td (planned+claimTD)         0.174  0.248      -  | -0.016 -0.038    -  
+  judge fulltd act6 (tree acts)         0.336  0.369      -  | +0.147 +0.083    -  
+  d2 tags (untagged read)               0.297  0.381  0.377  | +0.107 +0.095 +0.194
+  judge graft fulltd+tags (untagged)    0.312  0.487  0.430  | +0.122 +0.201 +0.246
+
+== noise drawn share ==   per seed s0/s1/s2  | paired diff vs base
+  base (planned, tree today)            0.175  0.175  0.175  | +0.000 +0.000 +0.000
+  d1 lp (LP bandit, probe)              0.090  0.094  0.109  | -0.085 -0.081 -0.066
+  d1 full (lp + grad trust)             0.089  0.088  0.111  | -0.086 -0.087 -0.064
+  d1 lp_train (stream signal)           0.154  0.152      -  | -0.021 -0.023    -  
+  d1 loss-seeking                       0.218  0.217      -  | +0.043 +0.042    -  
+  d1 replay 20% (d1 impl)               0.165  0.165  0.165  | -0.010 -0.010 -0.010
+  d3 replay 20% (d3 impl)               0.165  0.165      -  | -0.010 -0.010    -  
+  d3 replay 27% (matched)               0.162  0.162  0.162  | -0.013 -0.013 -0.013
+  d3 focus (LP+rehearse+MIR)            0.104  0.104  0.113  | -0.071 -0.071 -0.062
+  d3 focus_nomir                        0.101  0.104      -  | -0.074 -0.071    -  
+  d3 fulltd (focus+claimTD)             0.106  0.114  0.111  | -0.069 -0.061 -0.064
+  d3 trust_td (planned+claimTD)         0.175  0.175      -  | +0.000 +0.000    -  
+  judge fulltd act6 (tree acts)         0.113  0.117      -  | -0.062 -0.058    -  
+  d2 tags (untagged read)               0.175  0.175  0.175  | +0.000 +0.000 +0.000
+  judge graft fulltd+tags (untagged)    0.103  0.096  0.099  | -0.072 -0.079 -0.076
+
+== gap cred ==   per seed s0/s1/s2  | paired diff vs base
+  base (planned, tree today)            1.352  1.270  1.237  | +0.000 +0.000 +0.000
+  d1 lp (LP bandit, probe)              1.593  1.397  1.503  | +0.241 +0.127 +0.266
+  d1 full (lp + grad trust)             1.628  1.316  1.419  | +0.276 +0.046 +0.181
+  d1 lp_train (stream signal)           1.296  1.320      -  | -0.056 +0.050    -  
+  d1 loss-seeking                       1.398  1.319      -  | +0.046 +0.049    -  
+  d1 replay 20% (d1 impl)               1.388  1.277  1.275  | +0.035 +0.007 +0.038
+  d3 replay 20% (d3 impl)               1.378  1.336      -  | +0.025 +0.066    -  
+  d3 replay 27% (matched)               1.387  1.346  1.304  | +0.035 +0.076 +0.067
+  d3 focus (LP+rehearse+MIR)            1.596  1.434  1.370  | +0.244 +0.164 +0.133
+  d3 focus_nomir                        1.629  1.414      -  | +0.277 +0.144    -  
+  d3 fulltd (focus+claimTD)             1.418  1.414  1.284  | +0.066 +0.144 +0.047
+  d3 trust_td (planned+claimTD)         1.294  1.258      -  | -0.058 -0.012    -  
+  judge fulltd act6 (tree acts)         1.340  1.429      -  | -0.012 +0.159    -  
+  d2 tags (untagged read)               1.323  1.326  1.288  | -0.029 +0.056 +0.051
+  judge graft fulltd+tags (untagged)    1.456  1.421  1.388  | +0.104 +0.151 +0.151
+
+== Qc acc (null_c) ==   per seed s0/s1/s2  | paired diff vs base
+  base (planned, tree today)            0.417  0.583  0.917  | +0.000 +0.000 +0.000
+  d1 lp (LP bandit, probe)              0.250  0.542  0.708  | -0.167 -0.042 -0.208
+  d1 full (lp + grad trust)             0.292  0.875  0.917  | -0.125 +0.292 +0.000
+  d1 lp_train (stream signal)           0.250  0.458      -  | -0.167 -0.125    -  
+  d1 loss-seeking                       0.500  0.625      -  | +0.083 +0.042    -  
+  d1 replay 20% (d1 impl)               0.417  0.583  0.917  | +0.000 +0.000 +0.000
+  d3 replay 20% (d3 impl)               0.417  0.583      -  | +0.000 +0.000    -  
+  d3 replay 27% (matched)               0.417  0.583  1.000  | +0.000 +0.000 +0.083
+  d3 focus (LP+rehearse+MIR)            0.250  0.333  0.833  | -0.167 -0.250 -0.083
+  d3 focus_nomir                        0.167  0.417      -  | -0.250 -0.167    -  
+  d3 fulltd (focus+claimTD)             0.708  0.708  0.958  | +0.292 +0.125 +0.042
+  d3 trust_td (planned+claimTD)         0.625  0.708      -  | +0.208 +0.125    -  
+  judge fulltd act6 (tree acts)         0.792  0.750      -  | +0.375 +0.167    -  
+  d2 tags (untagged read)               0.750  0.583  0.917  | +0.333 +0.000 +0.000
+  judge graft fulltd+tags (untagged)    0.750  0.708  0.667  | +0.333 +0.125 -0.250
+
+== Qc share_true ==   per seed s0/s1/s2  | paired diff vs base
+  base (planned, tree today)            0.450  0.536  0.870  | +0.000 +0.000 +0.000
+  d1 lp (LP bandit, probe)              0.392  0.676  0.781  | -0.059 +0.140 -0.089
+  d1 full (lp + grad trust)             0.383  0.809  0.883  | -0.067 +0.273 +0.013
+  d1 lp_train (stream signal)           0.383  0.564      -  | -0.067 +0.028    -  
+  d1 loss-seeking                       0.458  0.611      -  | +0.007 +0.075    -  
+  d1 replay 20% (d1 impl)               0.498  0.585  0.856  | +0.048 +0.049 -0.013
+  d3 replay 20% (d3 impl)               0.415  0.599      -  | -0.035 +0.063    -  
+  d3 replay 27% (matched)               0.411  0.620  0.893  | -0.040 +0.084 +0.023
+  d3 focus (LP+rehearse+MIR)            0.346  0.396  0.858  | -0.104 -0.140 -0.012
+  d3 focus_nomir                        0.293  0.471      -  | -0.157 -0.065    -  
+  d3 fulltd (focus+claimTD)             0.739  0.802  0.956  | +0.288 +0.266 +0.086
+  d3 trust_td (planned+claimTD)         0.628  0.669      -  | +0.178 +0.133    -  
+  judge fulltd act6 (tree acts)         0.803  0.830      -  | +0.353 +0.294    -  
+  d2 tags (untagged read)               0.623  0.586  0.814  | +0.173 +0.050 -0.056
+  judge graft fulltd+tags (untagged)    0.800  0.844  0.802  | +0.350 +0.308 -0.068
+
+== Qa acc (agreed) ==   per seed s0/s1/s2  | paired diff vs base
+  base (planned, tree today)            1.000  1.000  1.000  | +0.000 +0.000 +0.000
+  d1 lp (LP bandit, probe)              0.917  0.917  0.958  | -0.083 -0.083 -0.042
+  d1 full (lp + grad trust)             0.625  1.000  1.000  | -0.375 +0.000 +0.000
+  d1 lp_train (stream signal)           1.000  1.000      -  | +0.000 +0.000    -  
+  d1 loss-seeking                       0.917  0.958      -  | -0.083 -0.042    -  
+  d1 replay 20% (d1 impl)               1.000  0.958  0.958  | +0.000 -0.042 -0.042
+  d3 replay 20% (d3 impl)               1.000  0.958      -  | +0.000 -0.042    -  
+  d3 replay 27% (matched)               1.000  0.917  1.000  | +0.000 -0.083 +0.000
+  d3 focus (LP+rehearse+MIR)            0.875  0.958  0.958  | -0.125 -0.042 -0.042
+  d3 focus_nomir                        0.958  0.958      -  | -0.042 -0.042    -  
+  d3 fulltd (focus+claimTD)             0.917  0.875  1.000  | -0.083 -0.125 +0.000
+  d3 trust_td (planned+claimTD)         1.000  0.917      -  | +0.000 -0.083    -  
+  judge fulltd act6 (tree acts)         1.000  0.792      -  | +0.000 -0.208    -  
+  d2 tags (untagged read)               0.917  1.000  1.000  | -0.083 +0.000 +0.000
+  judge graft fulltd+tags (untagged)    0.792  0.917  0.875  | -0.208 -0.083 -0.125
+
+== tagged inference (true tag) ==
+  d2 tags                      mean6_tag   1.352  1.337  1.425
+  d2 tags                      mean5_tag   1.416  1.362  1.352
+  d2 tags                      noise_tag   0.030  0.033  0.011
+  d2 tags                      trustQc     0.958  0.917  1.000
+  judge graft fulltd+tags      mean6_tag   1.449  1.333  1.309
+  judge graft fulltd+tags      mean5_tag   1.335  1.197  1.209
+  judge graft fulltd+tags      noise_tag   0.047  0.063  0.046
+  judge graft fulltd+tags      trustQc     0.917  0.875  0.917

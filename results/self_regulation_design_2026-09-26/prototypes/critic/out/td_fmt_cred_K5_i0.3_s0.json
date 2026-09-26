@@ -1,0 +1,133 @@
+{
+ "scen": "fmt_cred",
+ "K": 5,
+ "seed": 0,
+ "imp": 0.3,
+ "wall": 9.8,
+ "n_claim_ctx": 42053,
+ "snaps": [
+  {
+   "step": 100,
+   "n_conflicted": 24,
+   "r": {
+    "corrob": 0.5,
+    "false": 0.5
+   },
+   "n_ev": {
+    "corrob": 0,
+    "false": 0
+   },
+   "trust": {}
+  },
+  {
+   "step": 500,
+   "n_conflicted": 111,
+   "r": {
+    "corrob": 0.99,
+    "false": 0.695,
+    "cred": 0.011
+   },
+   "n_ev": {
+    "corrob": 97,
+    "false": 80,
+    "cred": 87
+   },
+   "trust": {
+    "cred": 0.3,
+    "false": 0.702
+   }
+  },
+  {
+   "step": 1000,
+   "n_conflicted": 970,
+   "r": {
+    "corrob": 0.962,
+    "false": 0.999,
+    "easy": 0.5,
+    "cred": 0.001,
+    "hard": 0.5
+   },
+   "n_ev": {
+    "corrob": 759,
+    "false": 909,
+    "easy": 2,
+    "cred": 940,
+    "hard": 0
+   },
+   "trust": {
+    "cred": 0.3,
+    "corrob": 0.963
+   }
+  },
+  {
+   "step": 1460,
+   "n_conflicted": 1486,
+   "r": {
+    "corrob": 0.969,
+    "false": 0.999,
+    "easy": 0.167,
+    "cred": 0.001,
+    "hard": 0.75
+   },
+   "n_ev": {
+    "corrob": 838,
+    "false": 1479,
+    "easy": 4,
+    "cred": 1457,
+    "hard": 2
+   },
+   "trust": {
+    "cred": 0.3,
+    "corrob": 0.97
+   }
+  },
+  {
+   "step": 1700,
+   "n_conflicted": 1610,
+   "r": {
+    "corrob": 0.965,
+    "false": 0.999,
+    "easy": 0.25,
+    "cred": 0.001,
+    "hard": 0.75,
+    "late": 0.667
+   },
+   "n_ev": {
+    "corrob": 847,
+    "false": 1602,
+    "easy": 6,
+    "cred": 1576,
+    "hard": 2,
+    "late": 1
+   },
+   "trust": {
+    "cred": 0.3,
+    "corrob": 0.965
+   }
+  },
+  {
+   "step": 1953,
+   "n_conflicted": 1658,
+   "r": {
+    "corrob": 0.962,
+    "false": 0.999,
+    "easy": 0.25,
+    "cred": 0.001,
+    "hard": 0.75,
+    "late": 0.667
+   },
+   "n_ev": {
+    "corrob": 849,
+    "false": 1652,
+    "easy": 6,
+    "cred": 1622,
+    "hard": 2,
+    "late": 1
+   },
+   "trust": {
+    "cred": 0.3,
+    "corrob": 0.963
+   }
+  }
+ ]
+}

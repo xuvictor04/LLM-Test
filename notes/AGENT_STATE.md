@@ -59,7 +59,15 @@ Updated 2026-09-25 at `ac94811` on `rm-predict-DC` (the only branch pushed to; n
   - the CPU regression check in scratch/s0b (4000 windows, seeds 0-1, k0 vs k1000).
   Seed 0 retok-every-1000 measured 2.6995 prequential bpb; the k0 controls are being rerun after a
   script crash.
-  IN FLIGHT: self-regulation design workflow wf_3b1b5d92-dc4 (scratch mm3/). It produces
+  DONE: self-regulation design workflow wf_3b1b5d92-dc4. Evidence is in
+  results/self_regulation_design_2026-09-26/. The judge picked d3 (retention-paced focus plus
+  claim-level truth discovery) with d2's source tags grafted on. The critic returned
+  sound-with-fixes: 1 blocking (at the default of 2 live areas the allocation cannot move) and
+  9 major. The honest headline is that self-regulated focus ties a hand-set 27% replay at toy
+  scale.
+  IN FLIGHT: a reviser agent writes scratch/mm3/rev/04_SELF_REGULATION.md under decisions R-1..R-10.
+  Then verify it and commit it as docs/proposals/04_SELF_REGULATION.md.
+  (history) was IN FLIGHT: self-regulation design workflow wf_3b1b5d92-dc4 (scratch mm3/). It produces
   docs/proposals/04_SELF_REGULATION.md text; commit its evidence under
   results/self_regulation_design_2026-09-26/.
   AWAITING the owner's rulings on the rest of 03b §16. The next build is S0b, the mid-epoch act (Q-RUN-8

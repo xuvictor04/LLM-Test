@@ -1,0 +1,39 @@
+14:02:12 done rc=0 100s d2 run.py --arm base seed=0
+14:02:39 done rc=0 127s d3 run.py --arm focus seed=0
+14:03:47 done rc=0 95s d3 run.py --arm replay_fixed --replay 0.27 --tag _m27 seed=0
+14:04:52 done rc=0 133s d3 run.py --arm fulltd seed=0
+14:05:24 done rc=0 97s d2 run.py --arm tags seed=0
+14:06:36 done rc=0 104s d1 run.py --arm lp seed=0
+14:07:02 done rc=0 98s d1 run.py --arm lp_train seed=0
+14:08:17 done rc=0 101s d2 run.py --arm base seed=3
+14:09:08 done rc=0 126s d3 run.py --arm focus seed=3
+14:09:56 done rc=0 99s d2 run.py --arm base seed=4
+14:11:10 done rc=0 122s d3 run.py --arm focus seed=4
+14:11:29 done rc=0 93s d3 run.py --arm replay_fixed --replay 0.27 --tag _m27 seed=3
+14:12:42 done rc=0 92s d3 run.py --arm replay_fixed --replay 0.27 --tag _m27 seed=4
+14:13:39 done rc=0 130s d3 run.py --arm fulltd seed=3
+14:14:50 done rc=0 128s d3 run.py --arm fulltd seed=4
+14:15:15 done rc=0 96s d2 run.py --arm tags seed=3
+14:16:27 done rc=0 97s d2 run.py --arm tags seed=4
+14:16:58 done rc=0 103s d1 run.py --arm lp seed=3
+14:18:09 done rc=0 102s d1 run.py --arm lp seed=4
+14:18:33 done rc=0 95s d1 run.py --arm lp_train seed=3
+14:19:46 done rc=0 97s d1 run.py --arm lp_train seed=4
+14:21:23 done rc=0 96s d3 run.py --arm mf_base seed=0
+14:21:32 done rc=0 105s d3 run.py --arm mf_trust_td seed=0
+14:23:01 done rc=0 98s d3 run.py --arm mf_base seed=3
+14:23:20 done rc=0 108s d3 run.py --arm mf_trust_td seed=3
+14:25:19 done rc=0 138s d3 run_tags.py --arm fulltd --tags 1 --tag _tags seed=0
+14:25:34 done rc=0 134s d3 run_act.py --arm fulltd --act_every 6 --tag _act6 seed=0
+14:27:35 done rc=0 136s d3 run_tags.py --arm fulltd --tags 1 --tag _tags seed=3
+14:27:51 done rc=0 137s d3 run_act.py --arm fulltd --act_every 6 --tag _act6 seed=3
+14:29:24 done rc=0 93s d1 run.py --arm base --tag _judge seed=0
+14:29:44 done rc=0 129s d1 run.py --arm full --tag _judge seed=0
+14:31:01 done rc=0 97s d1 run.py --arm replay seed=3
+14:31:20 done rc=0 96s d3 run.py --arm replay_fixed seed=3
+14:33:15 done rc=0 134s d3 run_tags.py --arm fulltd --tags 1 --tag _tags seed=4
+14:33:29 done rc=0 129s d3 run_act.py --arm fulltd --act_every 6 --tag _act6 seed=4
+14:34:49 done rc=0 94s d1 run.py --arm replay seed=4
+14:35:02 done rc=0 93s d3 run.py --arm replay_fixed seed=4
+14:36:24 done rc=0 95s d3 run.py --arm mf_base seed=4
+14:36:46 done rc=0 104s d3 run.py --arm mf_trust_td seed=4

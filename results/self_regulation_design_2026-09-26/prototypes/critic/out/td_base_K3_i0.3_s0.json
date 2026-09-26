@@ -1,0 +1,150 @@
+{
+ "scen": "base",
+ "K": 3,
+ "seed": 0,
+ "imp": 0.3,
+ "wall": 7.1,
+ "n_claim_ctx": 5286,
+ "snaps": [
+  {
+   "step": 100,
+   "n_conflicted": 54,
+   "r": {
+    "false": 0.333,
+    "easy": 0.043,
+    "cred": 0.979,
+    "corrob": 0.96,
+    "hard": 0.75
+   },
+   "n_ev": {
+    "false": 49,
+    "easy": 21,
+    "cred": 45,
+    "corrob": 23,
+    "hard": 2
+   },
+   "trust": {
+    "easy": 0.3,
+    "false": 0.341,
+    "corrob": 0.981
+   }
+  },
+  {
+   "step": 500,
+   "n_conflicted": 92,
+   "r": {
+    "false": 0.482,
+    "easy": 0.023,
+    "cred": 0.987,
+    "corrob": 0.786,
+    "hard": 0.75
+   },
+   "n_ev": {
+    "false": 81,
+    "easy": 42,
+    "cred": 75,
+    "corrob": 40,
+    "hard": 2
+   },
+   "trust": {
+    "easy": 0.3,
+    "false": 0.488,
+    "corrob": 0.796
+   }
+  },
+  {
+   "step": 1000,
+   "n_conflicted": 90,
+   "r": {
+    "false": 0.558,
+    "easy": 0.019,
+    "cred": 0.986,
+    "corrob": 0.943,
+    "hard": 0.75
+   },
+   "n_ev": {
+    "false": 84,
+    "easy": 52,
+    "cred": 72,
+    "corrob": 33,
+    "hard": 2
+   },
+   "trust": {
+    "easy": 0.3,
+    "false": 0.566,
+    "corrob": 0.956
+   }
+  },
+  {
+   "step": 1460,
+   "n_conflicted": 98,
+   "r": {
+    "false": 0.604,
+    "easy": 0.016,
+    "cred": 0.988,
+    "corrob": 0.974,
+    "hard": 0.75
+   },
+   "n_ev": {
+    "false": 94,
+    "easy": 61,
+    "cred": 80,
+    "corrob": 37,
+    "hard": 2
+   },
+   "trust": {
+    "easy": 0.3,
+    "false": 0.612,
+    "corrob": 0.986
+   }
+  },
+  {
+   "step": 1700,
+   "n_conflicted": 100,
+   "r": {
+    "false": 0.598,
+    "easy": 0.016,
+    "cred": 0.988,
+    "corrob": 0.975,
+    "hard": 0.75
+   },
+   "n_ev": {
+    "false": 95,
+    "easy": 62,
+    "cred": 81,
+    "corrob": 38,
+    "hard": 2
+   },
+   "trust": {
+    "easy": 0.3,
+    "false": 0.605,
+    "corrob": 0.987,
+    "late": 0.795
+   }
+  },
+  {
+   "step": 1953,
+   "n_conflicted": 99,
+   "r": {
+    "false": 0.604,
+    "easy": 0.016,
+    "cred": 0.988,
+    "corrob": 0.974,
+    "hard": 0.75
+   },
+   "n_ev": {
+    "false": 94,
+    "easy": 62,
+    "cred": 81,
+    "corrob": 37,
+    "hard": 2
+   },
+   "trust": {
+    "easy": 0.3,
+    "false": 0.612,
+    "corrob": 0.986,
+    "late": 0.795
+   }
+  }
+ ]
+}

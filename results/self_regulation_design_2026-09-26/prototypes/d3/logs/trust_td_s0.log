@@ -1,0 +1,8 @@
+[0] step 244/1953 18s hard:3.99 easy:2.52 noise:4.16 cred:3.56 false:3.58 corrob:3.63 late:4.16 | trust [1.0, 1.0, 1.0, 1.0, 0.3, 0.98, 1.0]
+[0] step 488/1953 36s hard:3.66 easy:1.91 noise:4.31 cred:3.36 false:3.37 corrob:3.62 late:4.34 | trust [1.0, 1.0, 1.0, 1.0, 0.3, 0.98, 1.0]
+[0] step 732/1953 55s hard:3.53 easy:1.68 noise:4.24 cred:3.16 false:3.14 corrob:3.29 late:4.28 | trust [1.0, 1.0, 1.0, 1.0, 0.3, 0.91, 1.0]
+[0] step 976/1953 75s hard:3.51 easy:1.39 noise:4.42 cred:3.17 false:3.16 corrob:3.11 late:4.49 | trust [1.0, 1.0, 1.0, 1.0, 0.3, 0.95, 1.0]
+[0] step 1221/1953 93s hard:3.37 easy:1.32 noise:4.35 cred:2.95 false:2.91 corrob:3.06 late:4.42 | trust [1.0, 1.0, 1.0, 1.0, 0.3, 0.93, 1.0]
+[0] step 1465/1953 112s hard:3.27 easy:1.31 noise:4.35 cred:2.94 false:2.91 corrob:2.98 late:4.41 | trust [1.0, 1.0, 1.0, 1.0, 0.3, 0.91, 1.0]
+[0] step 1709/1953 127s hard:3.68 easy:2.26 noise:4.21 cred:2.88 false:2.83 corrob:2.99 late:3.82 | trust [1.0, 1.0, 1.0, 1.0, 0.3, 0.92, 1.0]
+[0] step 1953/1953 142s hard:3.75 easy:2.76 noise:4.17 cred:2.84 false:2.78 corrob:2.99 late:3.76 | trust [1.0, 1.0, 1.0, 1.0, 0.3, 0.9, 1.0]

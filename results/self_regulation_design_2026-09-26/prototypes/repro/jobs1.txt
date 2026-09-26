@@ -1,0 +1,21 @@
+d3 run.py 0 --arm focus
+d2 run.py 0 --arm base
+d3 run.py 0 --arm replay_fixed --replay 0.27 --tag _m27
+d3 run.py 0 --arm fulltd
+d2 run.py 0 --arm tags
+d1 run.py 0 --arm lp
+d1 run.py 0 --arm lp_train
+d2 run.py 3 --arm base
+d3 run.py 3 --arm focus
+d2 run.py 4 --arm base
+d3 run.py 4 --arm focus
+d3 run.py 3 --arm replay_fixed --replay 0.27 --tag _m27
+d3 run.py 4 --arm replay_fixed --replay 0.27 --tag _m27
+d3 run.py 3 --arm fulltd
+d3 run.py 4 --arm fulltd
+d2 run.py 3 --arm tags
+d2 run.py 4 --arm tags
+d1 run.py 3 --arm lp
+d1 run.py 4 --arm lp
+d1 run.py 3 --arm lp_train
+d1 run.py 4 --arm lp_train
