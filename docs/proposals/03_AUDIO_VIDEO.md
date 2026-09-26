@@ -34,7 +34,9 @@ window 0 ............ AUD_FREEZE_AT (3000) .....................................
 **R2 — FRESH CLIPS WITHOUT AN EPOCH ROLL, AND SEEDS THAT VARY THE DATA.** Clip i of area a renders
 from `derive_seed('data.synth.<key>', RUN_SEED, i)`, so every clip in one epoch is distinct — which
 is what the measured *fresh beats a fixed 2.4k set* result needs — and the clips change with the
-seed, so media arms do not inherit DEFECT D-A13 (text seeds varied initialisation only).
+seed, so media arms do not inherit DEFECT D-A13 (text seeds varied initialisation only). *(Corrected
+2026-09-26: D-A13 was already closed for text before the 2026-09-24 fleet -- text seeds varied the
+data too; see `docs/04_CONTRACT.md` Q-WORLD-10's correction. The requirement on media stands.)*
 
 **R3 — AUD_FREEZE_AT IS AN int WITH UNIT U.Windows, DEFAULT 3000**, read through an
 `AUD.freeze_at(aud) -> Windows` accessor (K9 refuses a bare lever read as a cadence), plus an AUD

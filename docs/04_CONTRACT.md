@@ -3576,6 +3576,20 @@ the question is re-asked once the synthetic corpus varies with the seed (DEFECT 
 seeds trained on the same text, so this result spans initialisations, not data). The call site, the
 zero-born `world_proj` and the gauges all stay; `WORLD_FEEDBACK=1` restores the wired arm exactly.
 Results: `results/gpu_world_2026-09-24/ANALYSIS.txt`.
+**CORRECTION 2026-09-26 (the decision register's verification, `docs/proposals/05_DECISIONS.md` note
+WORLD; scripts under `results/decisions_2026-09-26/verify/`).** The numbers above stand; two readings
+of them change. (1) *D-A13 did not apply to this fleet.* At d97779d, as at HEAD, `RUN_SEED` already
+chose the synthetic text: seeds 0, 1 and 2 give three different stream hashes and twelve different
+area bodies, identical between the two trees (`verify/emp2/seedvar.out`, `verify/emp3/seeds_d977.out`),
+because the `make_proc` repair (`.rework/ISSUES.md`, "WHAT IT ALSO CLOSED") predates the fleet. The
+five seeds trained on five texts, so the spread spans data as well as initialisation. (2) *The fleet
+read phase 1 only.* At `DATA_STREAM_BYTES=20000000` an epoch is about 102,000-106,000 windows and the
+first phase bound (5 MB) falls near window 26,000; 20,000 windows at about 190 bytes each read
+3.75-3.84 MB of eng + py (`verify/emp/pc_d977_s0.txt`, `verify/emp2/pp_*.txt`). Every arm therefore
+trained on one stationary two-area mixture, with no phase change to forget across, and the cosine LR
+at the stop was still about 0.92 of peak. The result is about WORLD's forecast on a stationary
+mixture; it says nothing about retention. The re-ask is the whole-epoch, post-SR0 WORLD re-run the
+register pre-registers (note WORLD), not a re-run at this shape.
 **THE FLEET RAN ~15x SLOWER THAN ITS OWN CALIBRATION, AND THE CAUSE WAS THE MERGE SCAN (repaired
 2026-09-25).** Calibration measured 461.6 windows/s over 12 runs in the first 150 windows; the fleet
 then averaged ~25 windows/s over 21 runs x 20,000 windows (4.6 h against a 0.3 h estimate).
