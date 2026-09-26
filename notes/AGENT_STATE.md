@@ -83,6 +83,21 @@ Updated 2026-09-25 at `ac94811` on `rm-predict-DC` (the only branch pushed to; n
   .../scratchpad/mm2/rev/03_live_codec.md and checks them. Next: fold that into
   docs/proposals/03_AUDIO_VIDEO.md, then report to the owner.
 
+## THE OWNER'S FUNDAMENTALS, 2026-09-26 (the frame for every decision)
+> "A. To build a universal, or universal capable model. That B. Can continually learn, even after
+> training, without risking too much. These are the fundamentals. B is a bigger priority than A,
+> since the belief is that with B, we can add A later. From there, the architecture is my belief /
+> test to get there. Document the decisions, especially if any have conflicts. Ultimately, the
+> biggest determiner is going to be actual testing, to see what works. Flexibility is what I'm
+> looking for to enhance continual learning, and the challenges of an unreliable system will force
+> it to generalize, at least by how I believe it"
+
+- B (keeps learning after training, with bounded risk) ranks above A (universal-capable).
+- "The unreliability forces generalization" belief is a hypothesis to honour AND test.
+- IN FLIGHT: decision-register workflow wf_2f1a0a9c-86c (scratch/dec/). Its output is
+  docs/proposals/05_DECISIONS.md: every open decision ruled under this frame, the conflicts, and
+  new decisions the frame requires (e.g. no post-training learning mode exists yet).
+
 ## Next
 1. The owner rules on 03 §16, or accepts the recommendations.
 2. S1 per 03 Appendix A as amended by §0. **Step 0 is the baseline fixture (R7), before any tree edit.**
