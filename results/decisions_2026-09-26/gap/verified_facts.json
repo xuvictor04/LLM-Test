@@ -1,0 +1,19 @@
+{
+ "role": "gap finder, 2026-09-26; verification log of tree facts the NEW-* decisions rest on (not a report)",
+ "facts": [
+  {"fact": "continuation LR with a horizon-revision log prices every child step at the parent's end (floor 0.05 of peak); without a log the child jumps to ~0.54-0.61 of peak", "where": "src/opt/api.py:642-672 _effective_step, :2864-2872 load_state; contract comment in load_state (60.7% of peak, 12.1x jump, measured); ran ../rule_tree_and_training/horizon_probe.py from scratch cwd: WITH log 0.0500 at 19001/25000/39999; WITHOUT log 0.5441/0.3566/0.0500"},
+  {"fact": "a revision is appended only when an S0b act fires; TOK_RETOK_EVERY=3000 and a shipped-default run is ~506-937 windows, so shipped-default parents carry no log and 20k-window parents do", "where": "docs/proposals/04_SELF_REGULATION.md:583-587; src/spine/compose.py:1339"},
+  {"fact": "OPT_LR_SCHED choices are only cosine|none; OPT_LR_RESTARTS True; OPT_WEIGHT_DECAY 0.0; OPT_GRAD_CLIP 0.0", "where": "src/opt/levers.py:446-448; docs/05_DEFAULTS.md:331-341"},
+  {"fact": "CKPT_DIR '' (saving off), CKPT_EVERY 0, CKPT_BEST_KEEP 0; CKPT.Retention.consider deferred, so no .best ever saved", "where": "src/ckpt/levers.py:143,206,256; src/spine/compose.py DEFERRED_ENTRY_POINTS['CKPT.Retention.consider']"},
+  {"fact": "EVAL.curve_probe/holdout_probe/null_excess/generate/coherence/verdicts/wrongness_probe/verification_fit raise NotImplementedError; MEM.blend, MEM.judge, FAB.contribution deferred for the missing logits_fn; memory retrievals never reach a prediction", "where": "src/eval/api.py:266-504; src/spine/compose.py:1744-1830"},
+  {"fact": "04 SR0 builds only the memory-off closure _eval_logits_fn(sysm)", "where": "docs/proposals/04_SELF_REGULATION.md:560-570"},
+  {"fact": "a finished resume is refused unless RUN_EPOCHS is raised, and RUN_EPOCHS>1 needs DATA_RESAMPLE=1; so the only post-training learning path is 'one more epoch over a redrawn stream'", "where": "src/spine/compose.py:2726-2748"},
+  {"fact": "an area recorded by the parent and absent from the child is refused (data.area_vanished)", "where": "src/data/api.py:1728-1737"},
+  {"fact": "D2 rules PURE_ADD the default add-an-area protocol", "where": "src/data/levers.py:19-23"},
+  {"fact": "MEM 'source' is the DOM domain id per window, not an origin; src_share floors only LIVE sources; DOM cull_stale 500 windows; cull deletes a domain's memory once eviction has drained it below the floor ('self-releases')", "where": "src/spine/loop.py:2261; src/memory/levers.py:294; src/domains/levers.py:543-600"},
+  {"fact": "geometry manifest: lm.width/layers/heads/ctx, sig.d, fab.rank/dk/emb_hid, world.* EXACT; only lm.vocab_slots and fab.slots MAY_WIDEN; transformer uses a learned absolute positional table", "where": "src/spine/compose.py:3238-3300; src/lm/api.py:144"},
+  {"fact": "17 old-tree pilots at constant lr 2e-3, no warmup, 48k steps: bottomed ~2.4 b/B at step 6000, rose to 3.8-4.1 (INV-28); '8 epochs beat 18' was 'a low LR beat a high one' (E8.4)", "where": "notes/05_ERRORS.md:1283-1320"},
+  {"fact": "the one real continual run (a9d7258, n=1, old tree, weights-only metric): eng +0.052+-0.075 held, py 2.276 new, fabric +0.373 with six experts, memory -0.111 with every English entry evicted", "where": "notes/06_CONTINUAL_LEARNING.md:274-320,652-700"},
+  {"fact": "no proposal or contract section mentions rollback, poisoning, canaries, post-training/deployment, or LM plasticity loss", "where": "grep over docs/proposals/*.md docs/04_CONTRACT.md"}
+ ]
+}

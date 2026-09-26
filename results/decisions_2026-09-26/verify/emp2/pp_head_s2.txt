@@ -1,0 +1,11 @@
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+src=LLM-Test seed=2 ctx=128 phases=4 phase_live=0 phase_sched='' draw=planned
+ schedule ((0, 1), (1, 2), (1, 2), (2, 3)) names ('eng', 'py', 'num', 'c') bounds ((0, 5000000), (5000000, 10000000), (10000000, 15000000), (15000000, 20000000))
+ stream=20000000 tokens=13297803 windows/epoch=103889 bytes/window=192.5 bpt=1.5162
+ byte at window 20000 = 3835012 (3.835 MB); bytes/window over first 20000 = 191.8
+  phase bound 5000000 first reached at window 26076
+  phase bound 10000000 first reached at window 52245
+  phase bound 15000000 first reached at window 78417
+ areas in first 20000 windows (bytes): {'py': 1949269, 'eng': 1885743}
+ bytes/window needed to reach 5e6 by window 20000: 250; t=41s

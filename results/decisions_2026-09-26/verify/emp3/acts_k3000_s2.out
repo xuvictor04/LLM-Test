@@ -1,0 +1,4 @@
+seed 2 every 3000 ctx 128: acts [(3001, 602, 12262446), (6001, 692, 11781057), (9001, 782, 11478758), (12001, 872, 11253939), (15001, 962, 11108037), (18001, 1052, 10989762)]
+  bytes by window 20000: 5227577 = 5.228 MB (261.4 B/window avg); final vocab 1106
+  phase-1 bound 5000000 crossed at token 2440108 = window 19063; windows past it by 20000: 937
+  labels of bytes read after the phase-1 bound: {'py': 114620, 'num': 112957}

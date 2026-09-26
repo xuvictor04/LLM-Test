@@ -1,0 +1,15 @@
+seed=0 retok_every=3000 probation_uses=0 grow_every=200 burst=6 start vocab=512 ids=13443285 compose 39s
+  act at window 3001: vocab 602 ids 13443285 -> 12384184; tail bytes/window 224.7 (next 3000 windows) t=50s
+  act at window 6001: vocab 692 ids 12384184 -> 11891502; tail bytes/window 251.3 (next 3000 windows) t=59s
+  act at window 9001: vocab 782 ids 11891502 -> 11615621; tail bytes/window 273.7 (next 3000 windows) t=65s
+  act at window 12001: vocab 872 ids 11615621 -> 11438885; tail bytes/window 290.1 (next 3000 windows) t=70s
+  act at window 15001: vocab 962 ids 11438885 -> 11283485; tail bytes/window 306.9 (next 3000 windows) t=76s
+  act at window 18001: vocab 1052 ids 11283485 -> 11133390; tail bytes/window 271.2 (next 3000 windows) t=81s
+  bytes read by window 1300: 247045 (0.247 MB, 190.0 bytes/window)
+  bytes read by window 3000: 570040 (0.570 MB, 190.0 bytes/window)
+  bytes read by window 5000: 1019451 (1.019 MB, 203.9 bytes/window)
+  bytes read by window 10000: 2270905 (2.271 MB, 227.1 bytes/window)
+  bytes read by window 15000: 3689415 (3.689 MB, 246.0 bytes/window)
+  bytes read by window 20000: 5188394 (5.188 MB, 259.4 bytes/window)
+  scored bytes windows [0,1300): 247044
+  final vocab 1106; phase-1 bound 5,000,000 CROSSED by window 20000; t=81s

@@ -1,0 +1,11 @@
+{
+  "date": "2026-09-26",
+  "egress": {
+    "WebFetch_blocked": ["arxiv.org", "export.arxiv.org", "openreview.net", "huggingface.co", "semanticscholar.org", "aclanthology.org", "proceedings.mlr.press", "proceedings.neurips.cc", "jmlr.org", "openaccess.thecvf.com", "nature.com", "pmc.ncbi.nlm.nih.gov", "ui.adsabs.harvard.edu", "alphaxiv.org", "researchgate.net", "scholar.archive.org", "lilianweng.github.io", "web.archive.org"],
+    "WebFetch_ok": ["github.com", "raw.githubusercontent.com"],
+    "WebSearch": "works; returns excerpts drawn from arXiv/proceedings abstract pages"
+  },
+  "verified_rule": "verified=true when the claim (and its numbers) appeared in a search excerpt attributed to the primary abstract page (arXiv/proceedings/journal) or in the official GitHub repo, this session; or when read in the tree's own docs this session. Full PDFs were not opened. verified=false when the only source this session was a secondary summary.",
+  "github_reads": ["epfml/schedules-and-scaling (cooldown 20% via --wsd-fract-decay 0.2; SWA every 500 steps)", "facebookresearch/schedule_free (no stopping time; needs tuning; beta 0.95-0.98 long runs; warmup recommended; AdamW lr 1-10x)", "socialfoundations/tttlm (no statement on per-instance reset)"],
+  "tree_reads": ["docs/05_DEFAULTS.md (OPT_LR_SCHED cosine, OPT_LR_RESTARTS True, OPT_WEIGHT_DECAY 0.0, LM_DROPOUT 0.0, TOK_DROPOUT 0.0, CKPT_BEST_KEEP 0, MEM_SRC_SHARE 0.5, LM_ANCHOR_W 0.05)", "docs/proposals/04_SELF_REGULATION.md s9 (DATA_TAG_DROP evidence)", "docs/proposals/03_AUDIO_VIDEO.md s9 (replay on modality add)", "docs/proposals/03b_LIVE_CODEC.md rows 1,4,5,15 (live codec)", "notes/01_TIMELINE.md 08-14 a9d7258 (one real CL run; memory evicted, -0.111)", "docs/04_CONTRACT.md ~2900-2916 (continual backprop / ReDo cited)"]
+}

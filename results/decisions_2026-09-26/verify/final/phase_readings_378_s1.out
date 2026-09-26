@@ -1,0 +1,5 @@
+seed 1 every 3000: epoch consumed in 16573 windows; phase bounds [(0, 945000), (945000, 1890000), (1890000, 2835000), (2835000, 3780000)]
+  phase bytes [0,945000): windows [0,4680) = 4680; readings at 1000: 4; with a phase-start reading: 5
+  phase bytes [945000,1890000): windows [4680,8898) = 4218; readings at 1000: 4; with a phase-start reading: 5
+  phase bytes [1890000,2835000): windows [8898,12515) = 3617; readings at 1000: 4; with a phase-start reading: 5
+  phase bytes [2835000,3780000): windows [12515,16573) = 4058; readings at 1000: 4; with a phase-start reading: 5

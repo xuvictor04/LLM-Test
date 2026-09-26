@@ -1,0 +1,11 @@
+tree=/tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/dec/verify/emp2/d977/src seed=0 run.seed=0 source=synthetic areas=('eng', 'py', 'num', 'c') stream_bytes=20000000 ctx=128 t_compose=38.7s
+  stream sha 6fbf1de2c9068998 len 20000000
+  bodies {'eng': 'eb898ecb278afd3e', 'py': '1f394e5c43bb8803', 'num': '2f016bc49382c61f', 'c': '142d564a8a149340'}
+  plan protocol generated schedule ((0, 1), (1, 2), (1, 2), (2, 3)) bounds ((0, 5000000), (5000000, 10000000), (10000000, 15000000), (15000000, 20000000))
+  vocab 512 bpt(measured) 1.5036
+  windows in epoch (frozen seg) 105025
+  bytes read by window 1000: 190089 (190.09 B/window)
+  bytes read by window 10000: 1902459 (190.25 B/window)
+  bytes read by window 20000: 3804838 (190.24 B/window)
+  area bytes read by window 20000: {'py': 1943483, 'eng': 1861355}
+  phase-1 upper bound reached at window 26270

@@ -1,0 +1,4 @@
+windows 15300, probes 95.6, mean tail 1.89 MB, 0.96 s per act, wall 403 s at 38 w/s
+  DATA_FOCUS_ACT_EVERY  3: 31 focus + 5 retok + 3 phase = 39 acts, 37 s splice, 9.3% of wall
+  DATA_FOCUS_ACT_EVERY  6: 15 focus + 5 retok + 3 phase = 23 acts, 22 s splice, 5.5% of wall
+  DATA_FOCUS_ACT_EVERY 25: 3 focus + 5 retok + 3 phase = 11 acts, 11 s splice, 2.6% of wall

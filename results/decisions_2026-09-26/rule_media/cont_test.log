@@ -1,0 +1,21 @@
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+PASS S1 revise keeps the cursor and takes the new length -- {'step': Windows(4), 'flushes': Flushes(4), 'backwards': Backwards(0), 'opt_steps': Steps(0), 'epoch': Epochs(0), 'dropped_windows': 0, 'batch_len': 0, 'epochs_target': 1, 'in_epoch': 4, 'windows_in_epoch': 7, 'resumed_at': 0, 'epoch_revisions': 1}
+PASS S1 a length below the cursor is refused
+PASS S1 revise(n == in_epoch) rolls on the next advance without counting a window -- Tick(step=Windows(4), epoch=Epochs(1), flush_due=False, rolled=True, finished=True)
+PASS S2 a revision leaves lr(now) unchanged -- 0.7625 vs 0.7625
+PASS S2 the revised schedule reaches the floor at the revised end -- 0.050004167160209625
+PASS S2 a second revision is continuous too and ends at the floor
+PASS S2 the warmup is untouched
+PASS S3 segmenting at a recorded view rebuilds the cut taken then, after a mint and a retirement -- [257, 256, 32, 257, 32, 120, 257, 120, 32, 257, 257, 32, 256] vs [257, 256, 32, 257, 32, 120, 257, 120, 32, 257, 257, 32, 256]
+PASS S3 splice keeps every unit up to and including the one under the cursor -- [257, 256, 32, 256, 99, 32, 120, 256, 99, 258, 256, 99, 256, 99, 32, 256] from [257, 256, 32, 257, 32, 120, 257, 120, 32, 257, 257, 32, 256]
+PASS S6 a re-cut context decodes to the bytes it held and uses the newer token -- [256, 99, 256, 32, 256, 99, 256, 99] -> [257, 256, 32, 257, 257] (new id 257)
+PASS S4 the act fires after a mint and splices the stream -- {'loop.acts': 1, 'loop.acts_noop': 2, 'loop.bytes_scored': 24539}
+PASS S4 TOK_RETOK_EVERY=0 arms no act (loop.acts ABSENT) -- {'loop.bytes_scored': 24518}
+PASS S6 an act in a run remaps MEM's stored contexts -- events 1, entries 448
+PASS S5 no act: the resumed run continues the uninterrupted run's losses exactly -- first differing window None
+PASS S5 a save between a mint and the next act continues exactly, the act inside the child -- first differing None; acts parent 0 child 1
+PASS S5 a save after an act continues exactly (the log replays the splice) -- first differing None; acts parent 1
+PASS S5 at TOK_DROPOUT > 0 the continuation is exact (the dropout stream crosses the save) -- first differing None
+
+=== 0 failing ===

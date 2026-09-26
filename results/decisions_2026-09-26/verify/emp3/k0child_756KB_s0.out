@@ -1,0 +1,5 @@
+seed 0 bytes 756000: parent epoch 3988 windows, vocab 512 (compose 7s)
+  parent end: vocab 626 t=7s
+  child epoch re-tokenized with the parent's final vocab: 3441 windows (0.863 of the parent's); t=7s
+  equal-length child 2E    horizon 7976: child first step at 0.6072 of peak
+  actual child 2*W1        horizon 6882: child first step at 0.4759 of peak

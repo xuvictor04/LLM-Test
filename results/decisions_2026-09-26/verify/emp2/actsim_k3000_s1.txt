@@ -1,0 +1,17 @@
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+seed=1 retok_every=3000 probation_uses=0 grow_every=200 burst=6 start vocab=512 ids=13104986 compose 39s
+  act at window 3001: vocab 602 ids 13104986 -> 12015911; tail bytes/window 224.6 (next 3000 windows) t=50s
+  act at window 6001: vocab 692 ids 12015911 -> 11534869; tail bytes/window 250.1 (next 3000 windows) t=59s
+  act at window 9001: vocab 782 ids 11534869 -> 11223964; tail bytes/window 271.7 (next 3000 windows) t=65s
+  act at window 12001: vocab 872 ids 11223964 -> 11016041; tail bytes/window 291.5 (next 3000 windows) t=70s
+  act at window 15001: vocab 962 ids 11016041 -> 10883476; tail bytes/window 308.2 (next 3000 windows) t=75s
+  act at window 18001: vocab 1052 ids 10883476 -> 10740954; tail bytes/window 280.2 (next 3000 windows) t=80s
+  bytes read by window 1300: 245708 (0.246 MB, 189.0 bytes/window)
+  bytes read by window 3000: 566307 (0.566 MB, 188.8 bytes/window)
+  bytes read by window 5000: 1015282 (1.015 MB, 203.1 bytes/window)
+  bytes read by window 10000: 2261505 (2.262 MB, 226.2 bytes/window)
+  bytes read by window 15000: 3680138 (3.680 MB, 245.3 bytes/window)
+  bytes read by window 20000: 5192282 (5.192 MB, 259.6 bytes/window)
+  scored bytes windows [0,1300): 245708
+  final vocab 1106; phase-1 bound 5,000,000 CROSSED by window 20000; t=81s

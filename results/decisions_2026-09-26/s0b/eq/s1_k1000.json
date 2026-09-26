@@ -1,0 +1,1 @@
+{"env": {"RUN_SEED": "1", "TOK_RETOK_EVERY": "1000", "DATA_STREAM_BYTES": "760000", "RUN_DEVICE": "cpu"}, "windows": 3721, "bytes_scored": 759913, "preq_bpb": 2.7957835635342083, "acts": 3, "vocab": 620, "secs": 998}

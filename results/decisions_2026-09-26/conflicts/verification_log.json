@@ -1,0 +1,18 @@
+{
+ "tag_drop_like_for_like": {"source": "results/self_regulation_design_2026-09-26/prototypes/d2/out/{tags,tags_nodrop,base}_s{0,1,2}.json, mean of gap_end over hard,easy,cred,false,corrob,late",
+   "drop_0.25_untagged_mean6": [1.736, 1.757, 1.670], "drop_0_untagged_mean6": [2.246, 2.214, 2.064], "never_tagged_mean6": [1.751, 1.665, 1.621],
+   "digest_quote_1.585/1.656/1.317_is": "forget_easy (null read) of drop 0.25, not mean6"},
+ "tag_retention_forget_tag_py": {"easy_forget_P2end_to_end": {"base_null": [1.87, 1.65, 1.23], "tags_drop0.25_tagread": [0.31, 0.29, 0.28], "tags_drop0_tagread": [0.15, 0.25, 0.19]},
+   "hard_forget": {"base_null": [0.45, 0.59, 0.43], "tags_drop0.25_tagread": [0.50, 0.53, 0.39], "tags_drop0_tagread": [0.46, 0.49, 0.43]}},
+ "gate_false_alarm": {"per_area_k2": {"normal": 0.023, "t4": 0.058}, "familywise_k2_normal": {"4": 0.088, "8": 0.168, "20": 0.369}, "familywise_k2_t4": {"4": 0.213, "8": 0.380, "20": 0.698},
+   "sidak_k_5pct_normal": {"4": 2.23, "8": 2.49, "20": 2.80}, "best_ever_noise_bias_SE": {"4": -1.02, "8": -1.42, "16": -1.77}},
+ "tree_facts": {
+   "fab_blackout": "src/fabric/api.py:4348-4357 growth blocked for FAB_COOLDOWN windows after each new stamp",
+   "continuation_floor": "src/opt/api.py:642-663 _effective_step and 2864-2872 load_state: resume from the end with a log prices later steps at run_end (floor)",
+   "restarts_single_cycle": "src/opt/levers.py:605-630 wavelength 0 sentinel = one cycle over the run; restarts never fired in recorded results",
+   "fab_lr_own": "src/fabric/levers.py:930-961 global flag, triangular2 envelope from PEAK, lr_amin 0.15, lr_maxr 4.0 x applied rate; api.py own_lr_scale docstring says P1-H15 now unspellable while levers.py:933 still says unfixed",
+   "mem_src_share": "src/memory/levers.py:294-297 floor AND ceiling per LIVE source (src_share*cap/live)",
+   "r7_rebase": "docs/proposals/04_SELF_REGULATION.md:603-616 focus books drop the interval spanning an act and reset best/Lf/Ls",
+   "instrument_line": "src/eval/levers.py:146-148",
+   "L1_defect": "docs/04_CONTRACT.md:2557 a computed value of other levers is the L1 defect"}
+}

@@ -1,0 +1,11 @@
+tree=/home/user/LLM-Test/src seed=1 run.seed=1 source=synthetic areas=('eng', 'py', 'num', 'c') stream_bytes=20000000 ctx=128 t_compose=38.9s
+  stream sha 6944ce4e5b0fbe0e len 20000000
+  bodies {'eng': '4562fccaf64a3494', 'py': 'df9f20508d4ca045', 'num': 'c9d6bececf40fe4a', 'c': '2acae9175fd8c9d3'}
+  plan protocol generated schedule ((0, 1), (1, 2), (1, 2), (2, 3)) bounds ((0, 5000000), (5000000, 10000000), (10000000, 15000000), (15000000, 20000000))
+  vocab 512 bpt(measured) 1.5165
+  windows in epoch (frozen seg) 102382
+  bytes read by window 1000: 188977 (188.98 B/window)
+  bytes read by window 10000: 1887806 (188.78 B/window)
+  bytes read by window 20000: 3777253 (188.86 B/window)
+  area bytes read by window 20000: {'py': 1837256, 'eng': 1939997}
+  phase-1 upper bound reached at window 26469

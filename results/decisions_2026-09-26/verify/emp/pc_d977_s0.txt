@@ -1,0 +1,11 @@
+/usr/local/lib/python3.11/dist-packages/torch/_subclasses/functional_tensor.py:368: UserWarning: Failed to initialize NumPy: No module named 'numpy' (Triggered internally at /__w/pytorch/pytorch/torch/csrc/utils/tensor_numpy.cpp:84.)
+  cpu = _conversion_method_template(device=torch.device("cpu"))
+src /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/dec/verify/emp/d977/src seed 0 ctx 128 stream bytes 20000000 tokens 13443285 windows_in_epoch 105025 bytes/token 1.4877 bytes/window(avg) 190.4
+phase_bounds ((0, 5000000), (5000000, 10000000), (10000000, 15000000), (15000000, 20000000)) schedule ((0, 1), (1, 2), (1, 2), (2, 3)) names ('eng', 'py', 'num', 'c')
+  bound 5000000: reached at token 3362627, window 26270
+  bound 10000000: reached at token 6758230, window 52798
+  bound 15000000: reached at token 10153470, window 79323
+byte position at window 20000: 3804838
+bytes in first 300 windows: 56976
+area label counts over the first 20000 windows: {'py': 1943483, 'eng': 1861355}
+stream hash 6fbf1de2c906

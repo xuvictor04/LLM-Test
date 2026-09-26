@@ -1,0 +1,4 @@
+parent build 19853, stopped/ended at 15300 (no log): parent rate 0.1803; child first step 0.4516 of peak (horizon 27032)
+parent build 19853, stopped/ended at 16780 (no log): parent rate 0.1109; child first step 0.3694 of peak (horizon 27032)
+parent build 19853, stopped/ended at 16780 (no log): parent rate 0.1109; child first step 0.4004 of peak (horizon 28000)
+parent build 19853, stopped/ended at 19853 (no log): parent rate 0.0500; child first step 0.2173 of peak (horizon 27032)

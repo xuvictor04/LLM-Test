@@ -1,0 +1,44 @@
+retention(focus) minus replay 0.27 (m27), seeds 0-4:
+  end mean6                        per-seed [0.033, -0.074, -0.016, -0.009, -0.004] mean -0.0141 sd 0.0384 t -0.82
+  TIG6                             per-seed [-0.026, -0.105, -0.05, -0.038, -0.055] mean -0.0544 sd 0.0302 t -4.02
+  easy end                         per-seed [0.103, 0.048, 0.117, -0.003, 0.117] mean +0.0764 sd 0.0529 t +3.23
+  cred end                         per-seed [0.209, 0.088, 0.066, 0.13, 0.191] mean +0.1368 sd 0.0621 t +4.92
+forget_easy per seed:
+  base   [1.871, 1.65, 1.231, 0.895, 1.31]
+  focus  [0.01, -0.001, 0.046, -0.027, 0.041]
+  m27    [0.003, -0.002, -0.003, 0.003, 0.01]
+  MDE end mean6 (2.132+0.941)*sd/sqrt5 = 0.0527
+  MDE TIG6 = 0.0415
+
+rho_cap_binds / replans in last phase, and rho_by_phase, by arm file:
+  d3/out/focus_nomir_s0.json                    rho_cap_binds  41 replans 195 rehearse_fired 49
+  d3/out/focus_nomir_s1.json                    rho_cap_binds  26 replans 195 rehearse_fired 49
+  d3/out/focus_s0.json                          rho_cap_binds  37 replans 195 rehearse_fired 49
+  d3/out/focus_s1.json                          rho_cap_binds  28 replans 195 rehearse_fired 49
+  d3/out/full_c08_s0.json                       rho_cap_binds  37 replans 195 rehearse_fired 49
+  d3/out/full_c08_s1.json                       rho_cap_binds  28 replans 195 rehearse_fired 49
+  d3/out/full_s1.json                           rho_cap_binds   3 replans 195 rehearse_fired 49
+  d3/out/fulltd_s0.json                         rho_cap_binds  36 replans 195 rehearse_fired 49
+  d3/out/fulltd_s1.json                         rho_cap_binds  47 replans 195 rehearse_fired 49
+  d3/out/rehearse_s0.json                       rho_cap_binds   1 replans 195 rehearse_fired 46
+  d3/out/rehearse_s1.json                       rho_cap_binds   1 replans 195 rehearse_fired 47
+  judge/w/d3/out/focus_judge_s0.json            rho_cap_binds  37 replans 195 rehearse_fired 49
+  judge/w/d3/out/focus_s2.json                  rho_cap_binds  46 replans 195 rehearse_fired 48
+  judge/w/d3/out/fulltd_act6_s0.json            rho_cap_binds  40 replans 195 rehearse_fired 49
+  judge/w/d3/out/fulltd_act6_s1.json            rho_cap_binds  43 replans 195 rehearse_fired 48
+  judge/w/d3/out/fulltd_judge_s0.json           rho_cap_binds  36 replans 195 rehearse_fired 49
+  judge/w/d3/out/fulltd_s2.json                 rho_cap_binds  39 replans 195 rehearse_fired 48
+  judge/w/d3/out/fulltd_tags_s0.json            rho_cap_binds   2 replans 195 rehearse_fired 49
+  judge/w/d3/out/fulltd_tags_s1.json            rho_cap_binds   1 replans 195 rehearse_fired 49
+  judge/w/d3/out/fulltd_tags_s2.json            rho_cap_binds   4 replans 195 rehearse_fired 49
+  repro/d3/out/focus_s0.json                    rho_cap_binds  37 replans 195 rehearse_fired 49
+  repro/d3/out/focus_s3.json                    rho_cap_binds  26 replans 195 rehearse_fired 49
+  repro/d3/out/focus_s4.json                    rho_cap_binds  42 replans 195 rehearse_fired 49
+  repro/d3/out/fulltd_act6_s0.json              rho_cap_binds  40 replans 195 rehearse_fired 49
+  repro/d3/out/fulltd_act6_s3.json              rho_cap_binds  42 replans 195 rehearse_fired 49
+  repro/d3/out/fulltd_act6_s4.json              rho_cap_binds  39 replans 195 rehearse_fired 49
+  repro/d3/out/fulltd_s0.json                   rho_cap_binds  36 replans 195 rehearse_fired 49
+  repro/d3/out/fulltd_s3.json                   rho_cap_binds  38 replans 195 rehearse_fired 48
+  repro/d3/out/fulltd_s4.json                   rho_cap_binds  43 replans 195 rehearse_fired 49
+  repro/d3/out/fulltd_tags_s0.json              rho_cap_binds   2 replans 195 rehearse_fired 49
+  repro/d3/out/fulltd_tags_s4.json              rho_cap_binds   2 replans 195 rehearse_fired 49

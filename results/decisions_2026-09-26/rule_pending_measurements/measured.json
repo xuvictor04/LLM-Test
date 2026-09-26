@@ -1,0 +1,9 @@
+{"splice_timing_cpu_one_thread_real_text_vocab512_dropout0": {
+   "1MB": {"splice_full_tail_s": 0.53, "splice_half_tail_s": 0.29, "tokenize_view_s": 0.52},
+   "17MB": {"splice_full_tail_s": 8.63, "splice_half_tail_s": 4.26, "tokenize_view_s": 7.36, "compose_s": 18.3, "ids": 10059758, "bpt": 1.690}},
+ "phase_bounds_default_generated_schedule": {
+   "3780000": [[0,945000],[945000,1890000],[1890000,2835000],[2835000,3780000]],
+   "20000000": [[0,5000000],[5000000,10000000],[10000000,15000000],[15000000,20000000]],
+   "schedule": [[0,1],[1,2],[1,2],[2,3]]},
+ "synthetic_body_hash_by_seed_HEAD": "seeds 0,1,2 give distinct sha1 for every area (eng, py, num, c)",
+ "cpu_eq_seed0_bytes_per_window": {"k0": 189.62, "k1000": 199.16, "run_avg_ratio": 1.0503, "post_first_act_ratio_est": 1.068}}

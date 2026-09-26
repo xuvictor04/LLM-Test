@@ -1,0 +1,5 @@
+  scored bytes windows [0,1300): 247044
+  final vocab 1106; phase-1 bound 5,000,000 CROSSED by window 20000; t=73s
+  phase-1 bound 5,000,000 reached at window 19208; windows in phase 2 by window 20000: 792
+  areas read in bytes [5e6, end): {'num': 92282, 'py': 96112} ; areas in [0,5e6): {'py': 2500000, 'eng': 2500000}
+  plan schedule ((0, 1), (1, 2), (1, 2), (2, 3)) names ('eng', 'py', 'num', 'c')

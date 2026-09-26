@@ -1,6 +1,6 @@
 # Agent state — read this first after a session reset
 
-Updated 2026-09-25 at `ac94811` on `rm-predict-DC` (the only branch pushed to; no PRs unless asked).
+Updated 2026-09-26 (the decision register, Proposal 05) on `rm-predict-DC` (the only branch pushed to; no PRs unless asked).
 
 ## Where things stand
 - **WORLD_FEEDBACK ships False** (d97779d) on the 20k-window GPU fleet: the forecast was within
@@ -57,8 +57,10 @@ Updated 2026-09-25 at `ac94811` on `rm-predict-DC` (the only branch pushed to; n
   Owed:
   - the owner's GPU ship-rule fleet (EXP=retok bash gpu_world.sh);
   - the CPU regression check in scratch/s0b (4000 windows, seeds 0-1, k0 vs k1000).
-  Seed 0 retok-every-1000 measured 2.6995 prequential bpb; the k0 controls are being rerun after a
-  script crash.
+  DONE (superseded the 4000-window check, which compared unequal bytes): the CPU equal-bytes pre-read,
+  one whole 760,000-byte epoch per run: k1000 - k0 = +0.0003 (seed 0), +0.0078 (seed 1) prequential
+  bits/byte; k1000 used 4.5-4.8% fewer windows. Owed: the two k0_nuis runs for a margin (05 §8 0.3).
+  Evidence: results/decisions_2026-09-26/s0b/.
   DONE: self-regulation design workflow wf_3b1b5d92-dc4. Evidence is in
   results/self_regulation_design_2026-09-26/. The judge picked d3 (retention-paced focus plus
   claim-level truth discovery) with d2's source tags grafted on. The critic returned
@@ -94,11 +96,24 @@ Updated 2026-09-25 at `ac94811` on `rm-predict-DC` (the only branch pushed to; n
 
 - B (keeps learning after training, with bounded risk) ranks above A (universal-capable).
 - "The unreliability forces generalization" belief is a hypothesis to honour AND test.
-- IN FLIGHT: decision-register workflow wf_2f1a0a9c-86c (scratch/dec/). Its output is
-  docs/proposals/05_DECISIONS.md: every open decision ruled under this frame, the conflicts, and
-  new decisions the frame requires (e.g. no post-training learning mode exists yet).
+- DONE: docs/proposals/05_DECISIONS.md, the decision register (workflow wf_2f1a0a9c-86c, then the
+  verify loop wf_8696bab5-0f5, a round-3 fixer, a round-4 adversarial check fixed by hand). Evidence
+  and the fix log: results/decisions_2026-09-26/. It rules 103 inventory items, 45 conflicts and
+  NEW-01..19 under the priority order R0 evidence > R1 B-safety (a budget eps) > R2 B-plasticity >
+  R3 flexibility serving B > R4 A-openness > R5 current-run performance > R6 cost.
+  AWAITING the owner's rulings O1-O20 (§3.3; above all O2, eps and the creep budget) and the
+  D-1..D-10 confirmation (§8 0.2).
+- Empirical corrections found by the register's checkers (the contract now carries them):
+  the 2026-09-24 WORLD fleet read ~3.8 MB of a 20 MB stream, phase 1 (eng + py) only, LR ~0.92 of peak
+  at the stop; its seeds did vary the data (D-A13 was already closed); a finished continuation's LR is
+  shape-dependent (revision-log parent: floor for good; k0 parent: ~0.48 of peak at 756 KB, ~0.22 at
+  3.78 MB, the floor only for a full 20 MB epoch).
 
 ## Next
+0. Proposal 05 §8 orders everything: Stage 0 (owner rulings O1-O20; the fleet-archive reads; the
+   k0_nuis pair; phase-traversal resizing), then Stage 1's small builds (vocab `.prev` rotation, DOM
+   Levels, counters, OPT_LR_CONTINUE 'as_logged', gpu_world.sh kept checkpoints) before the owner's
+   retok fleet (Stage 2), then SR0 (Stage 3).
 1. The owner rules on 03 §16, or accepts the recommendations.
 2. S1 per 03 Appendix A as amended by §0. **Step 0 is the baseline fixture (R7), before any tree edit.**
    Then derive ids/frames, Areas.media, the aud/tones generator plus DATA.recover, and media_batch.

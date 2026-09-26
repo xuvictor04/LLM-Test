@@ -1,0 +1,15 @@
+tree=/tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/dec/verify/emp2/d977/src seed=0 run.seed=0 source=synthetic areas=('eng', 'py', 'num', 'c') stream_bytes=300000 ctx=128 t_compose=5.6s
+  stream sha 4dca7ba476c6d93b len 300000
+  bodies {'eng': 'fa94eb9c76d94a68', 'py': '0ab84a85c092f91b', 'num': '46e66e3982a5aac1', 'c': '2bc8022c4f63bb5e'}
+  plan protocol generated schedule ((0, 1), (1, 2), (1, 2), (2, 3)) bounds ((0, 75000), (75000, 150000), (150000, 225000), (225000, 300000))
+  vocab 512 bpt(measured) 1.5035
+tree=/tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/dec/verify/emp2/d977/src seed=1 run.seed=1 source=synthetic areas=('eng', 'py', 'num', 'c') stream_bytes=300000 ctx=128 t_compose=5.3s
+  stream sha 10c0e0e7adca1808 len 300000
+  bodies {'eng': 'c4622049ad1d47af', 'py': 'e184a86650dafd18', 'num': 'faf33bceeffda482', 'c': 'cd8ff4d4bc026d47'}
+  plan protocol generated schedule ((0, 1), (1, 2), (1, 2), (2, 3)) bounds ((0, 75000), (75000, 150000), (150000, 225000), (225000, 300000))
+  vocab 512 bpt(measured) 1.518
+tree=/tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/dec/verify/emp2/d977/src seed=2 run.seed=2 source=synthetic areas=('eng', 'py', 'num', 'c') stream_bytes=300000 ctx=128 t_compose=5.1s
+  stream sha 1c0ce8891947a739 len 300000
+  bodies {'eng': '9aad59c423894cd0', 'py': 'c357b7368b133d41', 'num': '2a42f4209078916d', 'c': 'cc0a350f7dd9377b'}
+  plan protocol generated schedule ((0, 1), (1, 2), (1, 2), (2, 3)) bounds ((0, 75000), (75000, 150000), (150000, 225000), (225000, 300000))
+  vocab 512 bpt(measured) 1.5164

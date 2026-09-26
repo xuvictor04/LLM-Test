@@ -1,0 +1,18 @@
+OPT defaults: lr 0.002 warmup 1000 min_frac 0.05 restarts True wavelength 0 decay 1.0 sched cosine
+
+A. parent WITHOUT an act (no revision log), finished, resumed for one more equal epoch:
+  N=  1000: parent end 0.0500 of peak; child first step 0.6067, +100 0.5250, +1000 0.0500  horizon_changed=1 restored=True
+  N=  3000: parent end 0.0500 of peak; child first step 0.6072, +100 0.5801, +1000 0.3369  horizon_changed=1 restored=True
+  N=  5000: parent end 0.0500 of peak; child first step 0.6073, +100 0.5911, +1000 0.4425  horizon_changed=1 restored=True
+  N= 20000: parent end 0.0500 of peak; child first step 0.5441, +100 0.5403, +1000 0.5059  horizon_changed=1 restored=True
+  N= 50000: parent end 0.0500 of peak; child first step 0.5325, +100 0.5310, +1000 0.5175  horizon_changed=1 restored=True
+  N=105000: parent end 0.0500 of peak; child first step 0.5286, +100 0.5279, +1000 0.5214  horizon_changed=1 restored=True
+  child 3x length instead (N=20000): [0.7769, 0.7748, 0.7552]
+
+B. parent WITH an act (revision log), finished, resumed for one more equal epoch:
+  build 105000, acts [(3000, 100000)]: parent end 0.0500; child steps +1,+1000,+10000,+N-1 -> [0.05, 0.05, 0.05, 0.05]; last revisions [(3000, 100000), (100000, 200000)]; horizon_changed=0
+  build 105000, acts [(3000, 100000), (6000, 98000), (9000, 97000)]: parent end 0.0500; child steps +1,+1000,+10000,+N-1 -> [0.05, 0.05, 0.05, 0.05]; last revisions [(9000, 97000), (97000, 194000)]; horizon_changed=0
+  build 20000, acts [(3000, 19000)]: parent end 0.0500; child steps +1,+1000,+10000,+N-1 -> [0.05, 0.05, 0.05, 0.05]; last revisions [(3000, 19000), (19000, 38000)]; horizon_changed=0
+  B with child 3x length: [0.05, 0.05, 0.05, 0.05]
+
+C. act-parent stopped early at 20000 of 100000, child horizon 200000: parent 0.9169 child [0.9169, 0.6492, 0.092]

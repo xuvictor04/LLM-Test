@@ -1,0 +1,19 @@
+per-area FA at k=2: normal 0.0228 t4 0.0581
+4 FWER at k=2 normal 0.088 t4 0.213
+   k for FWER5%: normal 2.234  t4 3.474   split-half multiplier sqrt2 -> 3.16 / 4.91 full-probe SE
+     true single-area regression 2 full-SE: detect prob (normal k, split half) 0.21
+     true single-area regression 3 full-SE: detect prob (normal k, split half) 0.46
+     true single-area regression 4 full-SE: detect prob (normal k, split half) 0.72
+8 FWER at k=2 normal 0.168 t4 0.380
+   k for FWER5%: normal 2.490  t4 4.286   split-half multiplier sqrt2 -> 3.52 / 6.06 full-probe SE
+     true single-area regression 2 full-SE: detect prob (normal k, split half) 0.14
+     true single-area regression 3 full-SE: detect prob (normal k, split half) 0.36
+     true single-area regression 4 full-SE: detect prob (normal k, split half) 0.63
+20 FWER at k=2 normal 0.369 t4 0.698
+   k for FWER5%: normal 2.799  t4 5.560   split-half multiplier sqrt2 -> 3.96 / 7.86 full-probe SE
+     true single-area regression 2 full-SE: detect prob (normal k, split half) 0.08
+     true single-area regression 3 full-SE: detect prob (normal k, split half) 0.25
+     true single-area regression 4 full-SE: detect prob (normal k, split half) 0.51
+E[max of 4] 1.031
+E[max of 8] 1.431
+E[max of 16] 1.763

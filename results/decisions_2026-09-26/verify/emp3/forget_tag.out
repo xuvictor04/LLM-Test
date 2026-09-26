@@ -1,0 +1,14 @@
+base         hard cond=null P2end/end/forget per seed: 3.35/3.80/+0.45  3.22/3.81/+0.59  3.33/3.76/+0.43 | mean end 3.79 mean forget +0.49
+base         easy cond=null P2end/end/forget per seed: 1.39/3.26/+1.87  1.51/3.16/+1.65  1.42/2.66/+1.23 | mean end 3.03 mean forget +1.58
+tags         hard cond=tag  P2end/end/forget per seed: 3.20/3.70/+0.50  3.16/3.70/+0.53  3.25/3.65/+0.39 | mean end 3.68 mean forget +0.48
+tags         easy cond=tag  P2end/end/forget per seed: 1.13/1.43/+0.31  1.21/1.50/+0.29  1.29/1.58/+0.28 | mean end 1.50 mean forget +0.29
+sel          hard cond=null P2end/end/forget per seed: 3.73/3.95/+0.22  3.61/3.85/+0.24  3.66/3.83/+0.18 | mean end 3.88 mean forget +0.21
+sel          easy cond=null P2end/end/forget per seed: 1.55/2.16/+0.61  1.69/2.21/+0.52  1.55/2.44/+0.90 | mean end 2.27 mean forget +0.67
+tags_sel     hard cond=tag  P2end/end/forget per seed: 3.76/3.95/+0.19  3.75/3.82/+0.06  3.60/3.78/+0.18 | mean end 3.85 mean forget +0.14
+tags_sel     easy cond=tag  P2end/end/forget per seed: 1.27/1.45/+0.18  1.37/1.58/+0.21  1.37/1.63/+0.26 | mean end 1.55 mean forget +0.22
+loss         hard cond=null P2end/end/forget per seed: 3.35/3.78/+0.43  3.27/3.78/+0.51  3.43/3.81/+0.38 | mean end 3.79 mean forget +0.44
+loss         easy cond=null P2end/end/forget per seed: 1.56/3.03/+1.47  1.76/2.96/+1.20  1.63/2.98/+1.35 | mean end 2.99 mean forget +1.34
+sel_pos      hard cond=null P2end/end/forget per seed: 3.89/3.89/+0.01  3.87/3.88/+0.01  3.88/3.88/+0.00 | mean end 3.89 mean forget +0.01
+sel_pos      easy cond=null P2end/end/forget per seed: 2.83/2.85/+0.03  2.86/2.88/+0.03  2.66/2.73/+0.07 | mean end 2.82 mean forget +0.04
+tags_nodrop  hard cond=tag  P2end/end/forget per seed: 3.25/3.70/+0.46  3.19/3.69/+0.49  3.09/3.52/+0.43 | mean end 3.64 mean forget +0.46
+tags_nodrop  easy cond=tag  P2end/end/forget per seed: 1.02/1.17/+0.15  1.14/1.39/+0.25  1.19/1.38/+0.19 | mean end 1.31 mean forget +0.20

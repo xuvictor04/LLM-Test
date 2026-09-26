@@ -1,0 +1,5 @@
+seed 0 every 1000 bytes 756000: epoch 3988 windows, 189.55 B/window at build
+  act at 1001: vocab 542 tail ids 382382 -> 371590: whole-tail bytes/token +2.90%; epoch now 3904 windows
+  act at 2001: vocab 572 tail ids 243590 -> 234674: whole-tail bytes/token +3.80%; epoch now 3834 windows
+  act at 3001: vocab 602 tail ids 106674 -> 101780: whole-tail bytes/token +4.81%; epoch now 3796 windows
+  run average bytes/window 199.15 vs build 189.55: +5.06%
