@@ -44,7 +44,13 @@ Updated 2026-09-25 at `ac94811` on `rm-predict-DC` (the only branch pushed to; n
 - DONE: docs/proposals/03b_LIVE_CODEC.md is committed, binding over 03. It was verified by
   wf_68221f90-158 (serious findings 7 -> 4 -> 4, tree-fit clean), then by hand fixes and a targeted
   check. Its record is in results/live_codec_design_2026-09-25/prototypes/rev/.
-  AWAITING the owner's rulings on 03b §16. The next build is S0b, the mid-epoch act (Q-RUN-8
+  Owner, 2026-09-26: stream rebuilding (S0b) approved ("a good way for the llm to learn").
+  Owner beliefs, to carry into design: SELF-REGULATION (the model regulates where it focuses: the
+  frame rate, and in general); CONTEXT AWARENESS (the credibility of sources, and more); EMERGENCE
+  preferred over hand-built behaviour.
+  S0b step 0 DONE: tests/test_baseline.py plus tests/_baseline_fixture.json (80-window trace at the
+  base commit).
+  AWAITING the owner's rulings on the rest of 03b §16. The next build is S0b, the mid-epoch act (Q-RUN-8
   option b-resume), which is text-only and independent of the media rulings.
 - (history) wf_c04d7ab1-d11 was DONE: .../scratchpad/mm2/rev/03_live_codec.md (228k chars) and checklist.md.
   The last fix pass was never re-checked, so verify loop wf_68221f90-158 is IN FLIGHT and must end
