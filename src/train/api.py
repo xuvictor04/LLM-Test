@@ -461,7 +461,8 @@ def streams(run: Config, subsystems):
 
 
 def new_clock(run: Config, *, batch_windows, accum, resume_step=0, resume_epoch=0,
-              resume_backwards=0, resume_opt_steps=0):
+              resume_backwards=0, resume_opt_steps=0, resume_in_epoch=0,
+              resume_windows_in_epoch=None):
     """The run's counters, TYPED, and the ONLY object in the tree that increments any of them.
 
     batch_windows and accum are OPT's and arrive as plain ints. resume_step/resume_epoch come from
@@ -521,6 +522,12 @@ def new_clock(run: Config, *, batch_windows, accum, resume_step=0, resume_epoch=
     `flushes` stays per-process, so a resumed run's report prints windows and optimizer steps as run
     totals beside a flush count that is this process's; run.py's banner says which is which.
 
+    A MID-EPOCH RESUME CONTINUES WHEN THE CHECKPOINT CARRIES THE PARENT'S SEGMENTATION LOG (03b S0b,
+    Q-RUN-16). compose replays that log to rebuild the exact Segmentation the parent held, and passes
+    resume_in_epoch / resume_windows_in_epoch; the clock then opens the epoch at the saved position,
+    and begin_epoch -- which zeroes the cursor -- is not called for it. The replay described above
+    remains only for a checkpoint that predates the log.
+
     LEVERS READ: epochs (via RunClock._finished, published on every Tick as Tick.finished)
     WIRES READ: none
     DID IT FIRE: RunClock.counters() -- the five typed counters plus the batch flush count.
@@ -539,17 +546,27 @@ def new_clock(run: Config, *, batch_windows, accum, resume_step=0, resume_epoch=
     # a plain count, and this refusal is what keeps "plain" from meaning "anything int() accepts".
     for _label, _v in (("resume_step", resume_step), ("resume_epoch", resume_epoch),
                        ("resume_backwards", resume_backwards),
-                       ("resume_opt_steps", resume_opt_steps)):
+                       ("resume_opt_steps", resume_opt_steps),
+                       ("resume_in_epoch", resume_in_epoch)):
         if isinstance(_v, U.Clock):
             raise U.UnitError(
                 f"RUN.new_clock: {_label}={_v!r} is a Clock. It arrives from a CKPT Snapshot as a "
                 f"plain count and the kind is attached here; int() on a Clock succeeds silently, so "
                 f"a wrong-kind clock would seed the counter and raise nothing.")
-    return RunClock(epochs=int(run.epochs),
-                    batch_windows=int(batch_windows), accum=int(accum),
-                    resume_step=int(resume_step), resume_epoch=int(resume_epoch),
-                    resume_backwards=int(resume_backwards),
-                    resume_opt_steps=int(resume_opt_steps))
+    clock = RunClock(epochs=int(run.epochs),
+                     batch_windows=int(batch_windows), accum=int(accum),
+                     resume_step=int(resume_step), resume_epoch=int(resume_epoch),
+                     resume_backwards=int(resume_backwards),
+                     resume_opt_steps=int(resume_opt_steps))
+    if resume_windows_in_epoch is not None:
+        if int(resume_in_epoch) > int(resume_windows_in_epoch):
+            raise ValueError(
+                f"RUN.new_clock: resume_in_epoch={int(resume_in_epoch)} is past the epoch's "
+                f"{int(resume_windows_in_epoch)} windows.")
+        clock.windows_in_epoch = int(resume_windows_in_epoch)
+        clock._in_epoch = int(resume_in_epoch)
+        clock._roll_pending = clock._in_epoch == clock.windows_in_epoch
+    return clock
 
 
 class RunClock:

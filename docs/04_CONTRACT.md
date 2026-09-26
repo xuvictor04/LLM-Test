@@ -518,8 +518,9 @@ re-segmentation fired scored **4.364 against 2.175** held-out b/B.
 | entry point | receives | returns |
 |---|---|---|
 | `build_vocabulary(tok, *, area_heads, seed, soft_cap=None)` | DATA, RUN, CAP | `Vocabulary` |
-| `tokenize(tok, vocab, data, labels=None, *, start=0, regularize=False, seed=0)` | DATA | `Segmentation` |
-| `splice(tok, vocab, seg, data, labels=None, *, at, regularize=False)` | the loop's mid-epoch act (stage X) | `Segmentation` — the unconsumed tail re-segmented, the consumed prefix kept (03b S0b) |
+| `tokenize(tok, vocab, data, labels=None, *, start=0, regularize=False, seed=0, view=None)` | DATA; compose's resume rebuild (`view=`) | `Segmentation` |
+| `view_of(vocab)` | the loop's act; compose's segmentation log | `(size, retired)` — the match table's view, what a segmentation records so a resume can cut at it again |
+| `splice(tok, vocab, seg, data, labels=None, *, at, regularize=False, view=None)` | the loop's mid-epoch act (stage X) | `Segmentation` — the unconsumed tail re-segmented, the consumed prefix kept (03b S0b) |
 | `on_window(tok, vocab, ids, *, step)` | RUN (`Windows`) | `Due` |
 | `mint_burst(tok, vocab, *, step)` | RUN | `list[Mint]` |
 | `judge_probation(tok, vocab, *, step, appearances, residual_ratio=None)` | the loop, LM | `Judgement` |
@@ -4214,7 +4215,24 @@ record would empty a checked mechanism into an unchecked one. **(b) is refused**
 then invent the field names and the four `produces` entries would certify a round trip nothing can
 verify — which is `TOK.vocab_state`'s D-T3 exactly, one package over.
 
-### Q-RUN-8 — a mid-epoch retok needs `windows_in_epoch` revised with the epoch cursor kept — **OPEN, AND MEASURABLE. The act is DEFERRED TO THE EPOCH ROLL today; no signature has moved**
+### Q-RUN-8 — a mid-epoch retok needs `windows_in_epoch` revised with the epoch cursor kept — **RESOLVED 2026-09-26: (a), BUILT AS 03b STAGE S0b. The mid-epoch act (LOOP_ORDER stage X) performs the retok after the flush that raised it; `RunClock.revise_epoch_length` keeps the cursor; a mid-epoch resume continues (Q-RUN-16). The text below, to the next heading, is the question as it stood, kept as history**
+
+**THE RULING (2026-09-26).** The owner: *"Stream rebuilding sounds important. I think it's a good way
+for the llm to learn"*, and, of 03b, *"I don't want anything frozen or fixed unless absolutely
+necessary."* The act runs right after the flush whose `TOK.on_window` Due asked for it, with the
+batch empty: `TOK.splice` keeps every unit up to and including the one under the cursor and
+re-segments the rest at the vocabulary as it now stands; `RunClock.revise_epoch_length` takes the new
+length with the cursor kept (at `n == in_epoch` the next advance rolls without counting a window);
+`OPT.revise_horizon` re-maps the rest of the schedule LR-continuously (Q-OPT-10); `DOM.on_retokenize`
+is told when the view moved; MEM hears `resegment=` on the next flush; the shift is stamped. A request
+whose view (`TOK.view_of`) has not moved is refused as a no-op (`tok.retok_noop`, `loop.acts_noop`) --
+the archive's 2.189 b/B case had 22 of 23 retoks adding zero tokens. `tok.retok_deferred` and
+`tok.retok_satisfied_by_roll` are gone: nothing is deferred. **The measurement below is superseded by
+the ship-rule measurement 03b §13 S0b names** (prequential bits/byte, `TOK_RETOK_EVERY` {0, 3000, 1000},
+3 paired seeds, non-inferiority against a nuisance-seed control); until it runs, `TOK_RETOK_EVERY`
+keeps its shipped 3000 and runs past window 3000 change. Driven: `tests/test_continuation.py` S4.
+
+**THE QUESTION AS IT STOOD.**
 
 `TOK.on_window` raises `Due.retok` on its own `retok_every` cadence, and the act it asks for is to
 re-segment the stream with the vocabulary as it now stands — which is the only route by which an id
@@ -4372,7 +4390,7 @@ time. Running `test_contract.api_signatures()` — K1's own AST walk, the same o
 over `src/` returned exactly the count declared in §7's ```contract block (the count lives in §7), all
 distinct. Per package: CAP 7, CKPT 11, DATA 5, DOM 10, EVAL 9, FAB 11, **LM 12**, MEM 10, OPT 8,
 RUN 16, SIG 10, TOK 9, **WORLD 9** (RUN's two since 2026-09-24 are `Cadences.state` and
-`Cadences.restore`, Q-RUN-9; OPT's eighth, the same day, is `remap_rows`, Q-FAB-13); on 2026-09-26 03b S0b made it OPT 9, RUN 17 and TOK 10 with `revise_horizon`, `RunClock.revise_epoch_length` and `splice`). LM's twelve are `anchor_term`, `build_model`, `counters`, `decode`,
+`Cadences.restore`, Q-RUN-9; OPT's eighth, the same day, is `remap_rows`, Q-FAB-13); on 2026-09-26 03b S0b made it OPT 9, RUN 17 and TOK 11 with `revise_horizon`, `RunClock.revise_epoch_length`, `splice` and `view_of`). LM's twelve are `anchor_term`, `build_model`, `counters`, `decode`,
 **`embed`**, `encode`, `lm_loss`, `load_state`, `on_mint`, **`residual_ratios`**, `resolve`,
 `state_dict` — the two additions are both present and both in §7, so 121 + 2 = 123 is the arithmetic
 and the tree agrees with it in both directions.
@@ -4836,7 +4854,7 @@ accumulation at save time (takes a step the parent's own invariant does not allo
 `Cadences`' private slots from `spine/loop.py` (the root builds the payload through declared entry
 points only).
 
-### Q-RUN-10 — `max_windows`, a finished resume and a mid-epoch resume each trained unrequested or repeated windows — **RESOLVED 2026-09-24: `max_windows` COUNTS THIS PROCESS'S WINDOWS AND STOPS BEFORE A ROLL; A FINISHED RESUME IS REFUSED; A MID-EPOCH RESUME KEEPS THE DECLARED REPLAY AND WARNS**
+### Q-RUN-10 — `max_windows`, a finished resume and a mid-epoch resume each trained unrequested or repeated windows — **RESOLVED 2026-09-24: `max_windows` COUNTS THIS PROCESS'S WINDOWS AND STOPS BEFORE A ROLL; A FINISHED RESUME IS REFUSED; A MID-EPOCH RESUME KEEPS THE DECLARED REPLAY AND WARNS. THE REPLAY IS SUPERSEDED BY Q-RUN-16 (2026-09-26) FOR EVERY CHECKPOINT CARRYING THE SEGMENTATION LOG; IT REMAINS FOR ONE THAT PREDATES IT**
 **`max_windows`.** It was compared with the absolute `tick.step`, which a resume restores, so any
 resume given `--max-windows N` ≤ its restored step trained exactly one window (driven: a 60-window
 parent resumed with `--max-windows 40` printed `61 windows, 1 flushes`), and the test sat after the
@@ -4871,6 +4889,45 @@ resume with the windows it replays and the optimizer step it will end near again
 pre-fix checkpoint at epoch 0 is still exact (`in_epoch = step`), and at a later epoch it is warned as
 unknown. **Rejected:** seeding `in_epoch` from the saved index now (see above); refusing mid-epoch
 resumes (every `CKPT_EVERY` checkpoint is one, and the replay is a declared, working behaviour).
+
+### Q-RUN-16 — a mid-epoch resume replayed its epoch, since the child cut its stream at a later vocabulary than the parent — **RESOLVED 2026-09-26 (03b S0b): THE CHECKPOINT CARRIES THE EPOCH'S SEGMENTATION LOG AND THE LOOP'S CARRIED STATE; A RESUME REBUILDS THE PARENT'S EXACT STREAM AND CONTINUES. ⚠ SIGNATURE MOVES: `RUN.new_clock(..., resume_in_epoch=0, resume_windows_in_epoch=None)`, `TOK.tokenize(..., view=None)`, `TOK.splice(..., view=None)`; +1 ENTRY POINT `TOK.view_of`**
+
+**What stood in the way (Q-RUN-10).** The child tokenised the redrawn stream at the SAVED vocabulary,
+which can hold ids minted after the epoch began (TOK mints every `TOK_GROW_EVERY`, acts every
+`TOK_RETOK_EVERY`), so the saved window index named different bytes; and the critic of 03b found the
+same shape blocking any "re-segment at resume" rule. **The ruling is 03b's option (b): resume at the
+last act's recorded state.**
+- `payload['LOOP']['seg_log']` is the epoch's log: its first cut and every act's splice, each with the
+  match table's VIEW (`TOK.view_of`: `(size, retired)`) and the BPE-dropout stream's state just before
+  it, plus that stream's state at the save. `TOK.tokenize(view=)` / `TOK.splice(view=)` cut at a
+  recorded view by rebuilding the table from the append-only `id2bytes[:size]` minus the view's
+  retirements -- not by filtering today's `seq2id`, which `_retire` pops.
+- compose replays the log at the 'segment' row, refuses if the rebuilt epoch length differs from the
+  saved one, and opens the clock at the saved position through `new_clock`'s two keywords; the
+  'epoch0' row then does not call `begin_epoch`, which would zero the cursor.
+- `payload['LOOP']['carried']` holds what the loop reads at the very next window -- the last flush's
+  per-window losses (`System.novelty`), the pending Due, the shift stamps, MEM's probe and pressure,
+  the live domain count, SIG's boundary run, FAB's manage losses -- mirrored before every save.
+- DOM's checkpoint gains `position` (the current domain, the run, its signature, a pending switch, the
+  boundary clocks at birth); compose passes it only to a continuing resume, and any other resume
+  re-arms as before.
+- OPT: a checkpoint with a horizon revision log is priced on its saved build-time horizon plus the
+  log (Q-OPT-10), not on the resumed build's post-act horizon.
+**Driven:** `tests/test_continuation.py` S5 -- a run saved at window n1 and resumed for n2 windows
+reproduces the uninterrupted run's losses EXACTLY with no act, with a save between a mint and the
+next act, with a save after an act, and at `TOK_DROPOUT` 0.1. A checkpoint without the log still
+replays and is warned (`tests/test_resume_clock.py` C9).
+
+### Q-OPT-10 — revising the LR horizon mid-run — **RESOLVED 2026-09-26 (03b S0b): `OPT.revise_horizon`, LR-CONTINUOUS, AN APPEND-ONLY CHECKPOINTED LOG; IT REOPENS Q-OPT-5's (b) AND ANSWERS BOTH OF ITS GROUNDS. +1 ENTRY POINT**
+The act re-measures the run (minting merges bytes, so it shortens), and a horizon fixed at build
+would then overshoot -- Q-OPT-5's under-anneal inside every run. Q-OPT-5 refused revision on two
+grounds. **Moving target:** the revision is an append-only `st.horizon_revisions` log of
+(opt_step, run_steps), checkpointed; the build-time `Horizon` is never rewritten and a resume rebuilds
+the same map from the same base. **History (the old `_project` jumped and latched):** each revision is
+one continuous re-map anchored at the current step -- `_effective_step` prices step s at
+e0 + (s − a)·(R − e0)/(R' − a) on the build-time horizon -- so lr(now) is unchanged and the cosine ends
+at the floor at the revised end. Inert, with `opt.horizon.revise_inert`, when more than one restart
+cycle was fitted or `lr_sched` is 'none'. Driven: `tests/test_continuation.py` S2.
 
 ### Q-RUN-11 — a resume drew epoch 0's stream whatever epoch it resumed in — **RESOLVED 2026-09-24: THE `stream` ROW DRAWS `Snapshot.epoch`**
 The `stream` row passed `epoch=0` unconditionally. Driven at `RUN_EPOCHS=2 DATA_RESAMPLE=1`: the
@@ -5355,7 +5412,7 @@ nobody has watched fail is indistinguishable from a check that cannot fail.
 
 ## 7. THE FROZEN SIGNATURE SET
 
-Everything above is prose about these 140 entry points — 121 until 2026-09-02, when Q-TOK-11 added
+Everything above is prose about these 141 entry points — 121 until 2026-09-02, when Q-TOK-11 added
 `LM.residual_ratios` (122) and Q-LM-12 added `LM.embed` (123); 133 from 2026-09-15, when P4 wrote
 `CAP.caps` and the `Caps` record it returns brought `Caps.headroom(n)` with it; **134 since
 2026-09-22, when `World.parameters(self)` closed the hole `spine/compose.py::_base_parameters` had
@@ -5366,9 +5423,10 @@ objective and were never STEPPED, because that helper harvests by
 2026-09-24**, when RUN's `Cadences.state(self)` and `Cadences.restore(self, state)` carried every
 cadenced gate's schedule across a resume (Q-RUN-9); **137 since later that day**, when
 `OPT.remap_rows(opt, st, row_events)` gave AdamW's per-row moments a way to follow the expert rows
-FAB moves (Q-FAB-13); **140 since 2026-09-26**, when 03b's stage S0b added the mid-epoch act's
+FAB moves (Q-FAB-13); **140 on 2026-09-26**, when 03b's stage S0b added the mid-epoch act's
 three: `TOK.splice`, `RunClock.revise_epoch_length` and `OPT.revise_horizon` (Q-RUN-8 option (a),
-Q-OPT-10). Neither of the two before them
+Q-OPT-10); **141 since later that day**, with `TOK.view_of`, the match-table view a segmentation
+records so a continuing resume can cut at it again (Q-TOK-15, Q-RUN-16). Neither of the two before them
 is a new ruling: this document has said since the record was specified that "`Caps.headroom(n)`
 exists so the negative clamp (C30) **cannot be written** at a call site", and it became an ENTRY
 POINT the moment a body existed to carry it. A record's public method is public surface, which K1
@@ -5483,7 +5541,7 @@ RUN: mode(run: Config)
 RUN: Timing.span(self, name)
 RUN: Timing.spans(self)
 RUN: streams(run: Config, subsystems)
-RUN: new_clock(run: Config, *, batch_windows, accum, resume_step=0, resume_epoch=0, resume_backwards=0, resume_opt_steps=0)
+RUN: new_clock(run: Config, *, batch_windows, accum, resume_step=0, resume_epoch=0, resume_backwards=0, resume_opt_steps=0, resume_in_epoch=0, resume_windows_in_epoch=None)
 RUN: RunClock.begin_epoch(self, windows_in_epoch)
 RUN: RunClock.revise_epoch_length(self, windows_in_epoch)
 RUN: RunClock.advance(self)
@@ -5508,13 +5566,14 @@ SIG: load_state_dict(sig: Config, st, sd, *, sidecar)
 SIG: encoder_parameters(sig: Config, st)
 SIG: encoder_embedding(sig: Config, st)
 TOK: build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None)
-TOK: tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False, seed=0)
+TOK: tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False, seed=0, view=None)
 TOK: Vocabulary.decode(self, ids)
 TOK: Vocabulary.blen(self, i)
 TOK: Vocabulary.size(self)
 TOK: Vocabulary.live_size(self)
 TOK: Vocabulary.at_cap(self)
-TOK: splice(tok: Config, vocab, seg, data, labels=None, *, at, regularize=False)
+TOK: view_of(vocab)
+TOK: splice(tok: Config, vocab, seg, data, labels=None, *, at, regularize=False, view=None)
 TOK: on_window(tok: Config, vocab, ids, *, step)
 TOK: mint_burst(tok: Config, vocab, *, step)
 TOK: judge_probation(tok: Config, vocab, *, step, appearances, residual_ratio=None)

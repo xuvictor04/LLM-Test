@@ -432,11 +432,27 @@ def open_partition(dom: Config, *, sig_dim, vocab_slots, device, rng, restored=N
         # which is the opposite of the conservative direction. Found by printing both numbers.
         for i in part.cent:
             part.bornb[i] = int(part.nb)
-        # `cur` is NOT restored. The current domain is a property of the stream position, and the
-        # resume starts a new stream; carrying it would attribute the first window of the resumed
-        # run to whatever the parent was in the middle of.
+        # `cur` IS RESTORED ONLY ON A CONTINUING RESUME. The current domain is a property of the
+        # stream position: a resume that starts a new stream must not attribute its first window to
+        # whatever the parent was in the middle of, and the root strips `position` for it. A
+        # continuing mid-epoch resume (03b S0b) reads the parent's stream on from the same window, so
+        # the position -- and the boundary clocks the grace re-arm above would otherwise reset --
+        # comes back exactly.
         part.cur = -1
         part.run, part.run_sig, part.pend = 0, None, None
+        _pos = restored.get("position")
+        if _pos:
+            part.cur = int(_pos.get("cur", -1))
+            part.run = int(_pos.get("run", 0))
+            _rs = _pos.get("run_sig")
+            part.run_sig = None if _rs is None else torch.as_tensor(_rs, dtype=torch.float32,
+                                                                   device=device)
+            _pd = _pos.get("pend")
+            part.pend = None if _pd is None else [
+                torch.as_tensor(x, dtype=torch.float32, device=device) for x in _pd]
+            for k, v in (_pos.get("bornb") or {}).items():
+                if int(k) in part.cent:
+                    part.bornb[int(k)] = int(v)
         # THE STREAM CONTINUES WHERE THE PARENT LEFT IT; see state_dict. A blob older than the key
         # keeps the freshly seeded stream.
         if restored.get("rng") and getattr(part, "rng", None) is not None:
@@ -1907,6 +1923,16 @@ def state_dict(dom: Config, part):
         # _absorb's pooled resample; re-seeded on every resume, the child REPLAYED the parent's
         # first choices (driven: 79 draws in a 160-window parent, 0 in its resumed child).
         "rng": (part.rng._r.getstate(), int(part.rng._draws)) if getattr(part, "rng", None) else None,
+        # THE STREAM POSITION (03b S0b): the current domain, the run in progress, its signature, a
+        # pending switch, and each domain's boundary clock at birth. A continuing mid-epoch resume
+        # reads the same stream on, so these decide its next window exactly as they would have;
+        # the root strips this block for any other resume, where a new stream begins.
+        "position": {
+            "cur": int(part.cur), "run": int(part.run),
+            "run_sig": None if part.run_sig is None else part.run_sig.detach().cpu().tolist(),
+            "pend": (None if part.pend is None
+                     else [x.detach().cpu().tolist() for x in part.pend]),
+            "bornb": {str(k): int(v) for k, v in (part.bornb or {}).items()}},
     }
     # `cur`, `run`, `run_sig` and `pend` ARE NOT SAVED, and open_partition resets them. The current
     # domain is a property of the STREAM POSITION and the resume starts a new stream; carrying it

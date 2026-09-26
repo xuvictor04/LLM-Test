@@ -1261,7 +1261,7 @@ def _replay_merges(vocab, path, *, recon=None, recorded=None):
     return vocab
 
 
-def _segment(vocab, data, *, dropout=0.0, stream=None, start=0, counts=None):
+def _segment(vocab, data, *, dropout=0.0, stream=None, start=0, counts=None, view=None):
     """Greedy longest match from `start`. Returns (ids, byte_pos).
 
     LONGEST MATCH, NOT A MERGE REPLAY, and the difference is that this one function serves the
@@ -1284,6 +1284,14 @@ def _segment(vocab, data, *, dropout=0.0, stream=None, start=0, counts=None):
     ids, pos = [], []
     n, i = len(data), start
     s2i, mlbf, retired = vocab.seq2id, vocab.mlbf, vocab.retired
+    if view is not None:
+        # A VIEW IS THE MATCH TABLE AS IT STOOD AT A RECORDED MOMENT: (size, retired then). It is
+        # REBUILT from id2bytes, which is append-only, rather than filtered from today's seq2id,
+        # because _retire pops seq2id: an id retired since the view is absent from today's table and
+        # present in the view's. The lowest id owns a byte string, as _add's first minting did. mlbf
+        # is only a probe bound and today's is never shorter than the view's.
+        s2i = _view_table(vocab, view)
+        retired = ()
     while i < n:
         b0 = data[i]
         hi = min(mlbf[b0], n - i)
@@ -1317,7 +1325,17 @@ def _segment(vocab, data, *, dropout=0.0, stream=None, start=0, counts=None):
     return ids, pos
 
 
-def tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False, seed=0):
+def _view_table(vocab, view):
+    size, gone = int(view[0]), frozenset(int(r) for r in view[1])
+    table = {}
+    for j in range(size):
+        if j not in gone:
+            table.setdefault(vocab.id2bytes[j], j)
+    return table
+
+
+def tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False, seed=0,
+             view=None):
     """Segment bytes with the vocabulary AS IT NOW STANDS. This ONE function serves the initial
     segmentation, every in-loop re-segmentation, the final one before eval, and the held-out encode.
 
@@ -1393,9 +1411,14 @@ def tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False
     correction: build_vocabulary names it AND demonstrably reads it (`mode = str(tok.mode)`), and
     on_window names it for the body P4 will write.
 
+    view=(size, retired), when given, segments with the match table as it stood at that recorded
+    moment instead of as it now stands (03b S0b, Q-TOK-15): the resume's rebuild of the parent's
+    segmentation. It bypasses the one-slot cache and counts tok.segment_view.
+
     LEVERS READ: dropout
     WIRES READ: none
-    DID IT FIRE: tok.segment, tok.retok, tok.retok_noop (reported SEPARATELY so a frozen run's 39
+    DID IT FIRE: tok.segment, tok.segment_view (a view call; ABSENT until one), tok.retok,
+                 tok.retok_noop (reported SEPARATELY so a frozen run's 39
                  no-op re-tokenizations read as skipped rather than as activity), tok.dropout_skip
                  (ABSENT, not 0, at dropout=0.0, the default -- the branch is unreachable there and a
                  zero printed for a branch that cannot be taken is the collapse Gate exists to
@@ -1472,6 +1495,17 @@ def tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False
     # see that; only a monotone revision number bumped by every match-table mutation can, and there
     # is nothing to bump it in yet. Recorded in this file rather than left for a fifth reader to
     # rediscover as a fresh defect against the same cache.
+    if view is not None:
+        # SEGMENT AT A RECORDED VIEW (03b S0b, Q-TOK-15): the resume's rebuild of the segmentation the
+        # parent held. It neither reads nor writes the one-slot cache, whose stamp describes the table
+        # as it now stands, and it counts in tok.segment_view, not tok.segment.
+        counts = {"skip": 0, "byte": 0}
+        ids, byte_pos = _segment(vocab, data, dropout=drop, stream=stream, start=start,
+                                 counts=counts, view=view)
+        vocab.counters["tok.segment_view"] = vocab.counters.get("tok.segment_view", 0) + 1
+        out_labels = None if labels is None else [labels[q] for q in byte_pos]
+        return Segmentation(ids=ids, byte_pos=byte_pos, labels=out_labels,
+                            bytes_per_token=_derive.bytes_per_token(len(data) - start, len(ids)))
     stamp = (vocab.size(), len(vocab.seq2id), len(vocab.retired), vocab.rev)
     cache = vocab._retok_cache
     is_retok = cache is not None and cache[0] is data and cache[1] == start and cache[2] == len(data)
@@ -1604,7 +1638,19 @@ def tokenize(tok: Config, vocab, data, labels=None, *, start=0, regularize=False
     return seg
 
 
-def splice(tok: Config, vocab, seg, data, labels=None, *, at, regularize=False):
+def view_of(vocab):
+    """The match table's VIEW as it now stands: (size, sorted retired ids). A segmentation records the
+    view it was cut at, and tokenize/splice take one back to cut at it again (03b S0b). Two equal
+    views are the same match table, so an act whose view has not moved is a no-op.
+
+    LEVERS READ: none
+    WIRES READ: none
+    DID IT FIRE: none (a pure reading)
+    """
+    return (int(vocab.size()), tuple(sorted(int(i) for i in vocab.retired)))
+
+
+def splice(tok: Config, vocab, seg, data, labels=None, *, at, regularize=False, view=None):
     """Re-segment the UNCONSUMED TAIL of an existing Segmentation at the vocabulary as it now stands,
     keeping everything up to and including the unit under the cursor. Returns a new Segmentation.
 
@@ -1624,7 +1670,8 @@ def splice(tok: Config, vocab, seg, data, labels=None, *, at, regularize=False):
     caller's (the match table has not moved since the last segmentation, Vocabulary.rev).
 
     regularize=True applies tok.dropout from the ONE dropout stream, continuing it, as tokenize
-    does for the training stream.
+    does for the training stream. view=(size, retired), when given, splices at the match table as it
+    stood at that recorded moment -- the resume replaying the parent's acts (03b S0b).
 
     LEVERS READ: dropout
     WIRES READ: none
@@ -1649,7 +1696,8 @@ def splice(tok: Config, vocab, seg, data, labels=None, *, at, regularize=False):
         return seg
     b = int(seg.byte_pos[p])
     counts = {"skip": 0, "byte": 0}
-    tail_ids, tail_pos = _segment(vocab, data, dropout=drop, stream=stream, start=b, counts=counts)
+    tail_ids, tail_pos = _segment(vocab, data, dropout=drop, stream=stream, start=b, counts=counts,
+                                  view=view)
     vocab.counters["tok.retok"] = vocab.counters.get("tok.retok", 0) + 1
     vocab.counters["tok.retok_mid_epoch"] = vocab.counters.get("tok.retok_mid_epoch", 0) + 1
     vocab.counters["tok.byte_fallback"] = (vocab.counters.get("tok.byte_fallback", 0)

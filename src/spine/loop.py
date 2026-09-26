@@ -82,6 +82,7 @@ from spine.compose import _sig_encode_fn as _c_sig_encode_fn
 from spine.compose import _head as _c_head
 from spine.compose import _signature_stream as _c_signature_stream
 from spine.compose import _signature_cursor as _c_signature_cursor
+from spine.compose import _seg_event as _c_seg_event
 from ckpt import api as ckpt_api
 from domains import api as dom_api
 from memory import api as mem_api
@@ -178,7 +179,9 @@ _CALLS_FLAT = frozenset().union(*_CALLS.values())
 # the B row, because DOM.observe is a row-A entry point and the subtraction was a no-op; the moment
 # the report covered every stage it would have started lying. Two wrongs cancelling is not a test
 # passing.
-_OFF_TABLE = frozenset({"LM.on_mint", "MEM.apply_domain_plan", "TOK.lift_vocab_cap"})
+_OFF_TABLE = frozenset({"LM.on_mint", "MEM.apply_domain_plan", "TOK.lift_vocab_cap",
+                        # named in TOK.splice's X-row text: the act's view test (03b S0b)
+                        "TOK.view_of"})
 
 # WHY EACH UNCALLED MECHANISM'S ABSENCE MATTERS, in the consequence a reader needs rather than the
 # name they already have. Missing keys fall back to a plain sentence; nothing here is load-bearing
@@ -436,7 +439,18 @@ def _payload(sysm):
                  # histograms were counted under a table the child's stream is not cut at, and
                  # the child's first roll must tell DOM (spine/compose.py, System.rev_at_last_seg).
                  "seg_table_moved": (sysm.rev_at_last_seg is not None
-                                     and int(sysm.vocab.rev) != int(sysm.rev_at_last_seg))},
+                                     and int(sysm.vocab.rev) != int(sysm.rev_at_last_seg)),
+                 # THE EPOCH'S SEGMENTATION LOG (03b S0b): the cut and every act's splice with its
+                 # view and dropout-stream state, plus that stream's state now. A continuing
+                 # mid-epoch resume replays it to rebuild the exact stream the parent was reading.
+                 "seg_log": (None if getattr(sysm, "seg_log", None) is None else
+                             {"epoch": int(sysm.seg_log["epoch"]),
+                              "events": list(sysm.seg_log["events"]),
+                              "rng_now": (None if getattr(sysm.vocab, "dropout_rng", None) is None
+                                          else (sysm.vocab.dropout_rng._r.getstate(),
+                                                int(sysm.vocab.dropout_rng._draws)))}),
+                 # THE LOOP-CARRIED VALUES (03b S0b), mirrored by run() before every save.
+                 "carried": getattr(sysm, "loop_carried", None)},
         # RUN'S STATE, THROUGH RUN'S OWN ENTRY POINTS (2026-09-24, Q-RUN-9 and Q-RUN-10). Nothing of
         # RUN crossed the boundary except the two numbers CKPT.save records itself (step, epoch), so
         # every cadenced gate re-seeded at the resumed step and fired a period late, and a resume
@@ -685,7 +699,9 @@ def run(sysm, *, max_windows=None, progress=True):
     # THE EPOCH-LOCAL WINDOW INDEX. Zero at the start of every epoch, which is what makes the cut
     # and the signature slice index the segmentation that is currently loaded rather than the run's
     # cumulative window count. See the paragraph at the cut.
-    win_in_epoch = 0
+    # THE CUT STARTS WHERE THE CLOCK STANDS: 0 on a fresh run or at an epoch boundary, the saved
+    # position on a continuing mid-epoch resume (03b S0b; compose rebuilt the parent's segmentation).
+    win_in_epoch = int(clock.counters()["in_epoch"])
     # HOW MANY TOKENS WERE MINTED BY THE TIME OF THE LAST RE-SEGMENTATION. The segmentation this
     # loop starts on was cut by compose at the vocabulary as it stood then, so the mark starts at
     # the MINT COUNT THE RUN ENTERED WITH, not at 0 (2026-09-24). On a fresh run those are the same
@@ -752,6 +768,11 @@ def run(sysm, *, max_windows=None, progress=True):
     if int(tok_cfg.retok_every) > 0:
         books["loop.acts"] = 0
         books["loop.acts_noop"] = 0
+    # THE BYTES THIS PROCESS'S WINDOWS SCORED, summed over each window's targets (03b S0b). The loss
+    # curve is per token and an act changes how many tokens a byte span holds, so arms that act and
+    # arms that do not compare only in bits per BYTE: sum(loss x targets) / ln 2 / this. Every window
+    # at RUN_EPOCHS=1 is scored before its update, so that ratio is the run's prequential bits/byte.
+    books["loop.bytes_scored"] = 0
     # THE PENDING RESEGMENTATION EVENT, set by the epoch roll and consumed by the next flush. None
     # on every other flush, which is what makes store.n_resegment_events a count of ROLLS.
     resegment = None
@@ -771,6 +792,29 @@ def run(sysm, *, max_windows=None, progress=True):
     # THE FLUSH LOSSES SINCE THE LAST FAB.manage PASS, whose mean is what that pass's depth plateau
     # test compares (see the manage call below for why a single flush cannot be).
     manage_losses = []
+    # A CONTINUING MID-EPOCH RESUME PUTS BACK WHAT THE UNINTERRUPTED RUN WOULD READ NEXT (03b S0b).
+    _car = getattr(sysm, "loop_carried", None)
+    if _car:
+        probe_prev = _car.get("probe_prev")
+        mem_pressure = _car.get("mem_pressure")
+        live_domains = int(_car.get("live_domains", live_domains))
+        since_boundary = int(_car.get("since_boundary", since_boundary))
+        manage_losses = list(_car.get("manage_losses") or [])
+        if _car.get("resegment_pending"):
+            resegment = sysm.segmentation
+
+    def _carry():
+        """Mirror the loop-carried values onto the System for the checkpoint (03b S0b)."""
+        sysm.loop_carried = {
+            "probe_prev": probe_prev, "mem_pressure": mem_pressure, "live_domains": live_domains,
+            "since_boundary": since_boundary, "manage_losses": list(manage_losses),
+            "novelty": sysm.novelty, "due": sysm.due,
+            "retok_pending": int(sysm.retok_pending or 0),
+            "resegment_pending": resegment is not None,
+            "shift_at_windows": (None if getattr(sysm, "shift_at_windows", None) is None
+                                 else int(sysm.shift_at_windows)),
+            "shift_at_steps": (None if getattr(sysm, "shift_at_steps", None) is None
+                               else int(sysm.shift_at_steps))}
     batch = []
     ids = sysm.segmentation.ids
     stopped_early = False
@@ -832,6 +876,9 @@ def run(sysm, *, max_windows=None, progress=True):
                 f"on disagree, which is a defect rather than arithmetic.")
         else:
             batch.append(bounds)
+            _bp = sysm.segmentation.byte_pos
+            books["loop.bytes_scored"] += ((_bp[bounds[1]] if bounds[1] < len(_bp)
+                                            else len(sysm.stream.bytes)) - _bp[bounds[0] + 1])
             # DOM.observe IS CALLED ONCE PER WINDOW, ABOVE THE BATCH EARLY-OUT, and that placement is
             # what makes `sustain` a Windows clock rather than a flush one -- domains/api.py::observe
             # says so, and `s.run` is incremented once per call. Putting it in the flush would divide
@@ -1079,6 +1126,7 @@ def run(sysm, *, max_windows=None, progress=True):
                     # and refuses (NonFinite again) if anything in it is not finite -- a forward
                     # that poisoned a FAB centroid on its way to the nan loss is caught there.
                     _n_ref = len(_save_refused)
+                    _carry()
                     _kept = _save(sysm, clock, "final")
                     _why = _save_refused[_n_ref:]
                     del _save_refused[:]
@@ -1127,8 +1175,13 @@ def run(sysm, *, max_windows=None, progress=True):
                 # comes, so every id the run minted was stranded outside its own training data.
                 if int(sysm.retok_pending or 0) > 0:
                     sysm.retok_pending = 0
-                    if (int(vocab.rev) == int(_rev_at_last_seg)
-                            and float(tok_cfg.dropout) <= 0.0):
+                    # THE NO-OP TEST COMPARES VIEWS, not the per-process Vocabulary.rev, so it reads
+                    # the same after a resume: the view the last segmentation was cut at (the log's
+                    # last event) against the table as it now stands.
+                    _vs, _vr = tok_api.view_of(vocab)
+                    _view_last = sysm.seg_log["events"][-1]["view"]
+                    _moved = (int(_view_last[0]), [int(x) for x in _view_last[1]]) != (_vs, list(_vr))
+                    if not _moved and float(tok_cfg.dropout) <= 0.0:
                         # THE MATCH TABLE HAS NOT MOVED since the last segmentation: re-segmenting
                         # would rebuild the identical stream with every side effect (the archive's
                         # 2.189 bits/byte case). Refused and counted, as tokenize refuses the roll's.
@@ -1138,6 +1191,9 @@ def run(sysm, *, max_windows=None, progress=True):
                     else:
                         k0 = win_in_epoch * ctx
                         prev_n = len(ids)
+                        # LOGGED BEFORE THE CUT, with the dropout stream's state, so a resume can
+                        # replay this splice at this view exactly (03b S0b).
+                        sysm.seg_log["events"].append(_c_seg_event(vocab, "splice", at=k0))
                         sysm.segmentation = tok_api.splice(
                             tok_cfg, vocab, sysm.segmentation, sysm.stream.bytes,
                             sysm.stream.labels, at=k0, regularize=True)
@@ -1158,7 +1214,7 @@ def run(sysm, *, max_windows=None, progress=True):
                         # MEM hears of the event on the next flush, as it does after a roll.
                         resegment = sysm.segmentation
                         sysm.partition.counters.setdefault("part.n_retok_events", 0)
-                        if int(vocab.rev) != int(_rev_at_last_seg):
+                        if _moved:
                             dom_api.on_retokenize(dom_cfg, sysm.partition)
                         _rev_at_last_seg = int(vocab.rev)
                         sysm.rev_at_last_seg = _rev_at_last_seg
@@ -1182,11 +1238,13 @@ def run(sysm, *, max_windows=None, progress=True):
             # is in WINDOWS and Cadences.due is phase-independent by construction.
             if cadences.due("ckpt", periods["ckpt"], clock):
                 with _timing.span("ckpt.save"):
+                    _carry()
                     saves += 1 if _save(sysm, clock, "periodic") else 0
             # AND THE SIGUSR1 FLAG, DRAINED ONCE PER WINDOW. CKPT.install_save_signal armed it at
             # compose; take() returns True exactly once per `kill -USR1`, so a checkpoint is written on
             # demand without the run being stopped to get one.
             if sysm.save_flag is not None and sysm.save_flag.take():
+                _carry()
                 saves += 1 if _save(sysm, clock, "sigusr1") else 0
 
             if progress and cadences.due("progress", periods["progress"], clock):
@@ -1255,6 +1313,8 @@ def run(sysm, *, max_windows=None, progress=True):
             # appear in the run's own training data. Until this line the loop warned, at the end of
             # every run, that its mints were real and unusable.
             prev_n = len(ids)
+            # A NEW EPOCH, A NEW SEGMENTATION LOG: its first event is this cut (03b S0b).
+            sysm.seg_log = {"epoch": int(tick.epoch), "events": [_c_seg_event(vocab, "tokenize")]}
             sysm.segmentation = tok_api.tokenize(
                 tok_cfg, vocab, sysm.stream.bytes, sysm.stream.labels,
                 regularize=True, seed=int(run_cfg.seed))
@@ -1467,6 +1527,7 @@ def run(sysm, *, max_windows=None, progress=True):
     try:
         report = _report(sysm, elapsed_s, ctx)
     except Exception:
+        _carry()
         _save(sysm, clock, "final")
         raise
     # THE DRIVER'S OWN BOOK. An empty dict is a statement too -- neither mechanism was reachable on
@@ -1476,6 +1537,7 @@ def run(sysm, *, max_windows=None, progress=True):
         "no key is reachable on this arm: loop.flush_mixed_domain needs OPT_BATCH_WINDOWS > 1 and "
         "loop.owners_from_domain needs FAB_ON=0 or FAB_NORM_ONLY=1")
 
+    _carry()
     final_written = _save(sysm, clock, "final")
     for _d in dict.fromkeys(_disagree):
         warnings.append(f"loop: recorded-geometry disagreement -- {_d}")

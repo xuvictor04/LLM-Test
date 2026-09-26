@@ -17,7 +17,9 @@ Each of these was driven on the tree before the repair, and none of them failed 
   C6  A STOP ON AN EPOCH BOUNDARY STOPS THERE, without drawing the next epoch or training a window.
   C7  THE EPOCH HOLDS (len(ids) - 1) // ctx WINDOWS, so no flush is counted without a backward.
   C8  THE MINT MARK STARTS AT THE MINT COUNT THE RUN ENTERED WITH, not at 0.
-  C9  A MID-EPOCH RESUME IS WARNED; A BOUNDARY RESUME IS NOT.
+  C9  A MID-EPOCH RESUME CONTINUES (03b S0b): with the parent's segmentation log it rebuilds the
+      exact stream and the clock continues at the saved window, said once; a checkpoint without the
+      log still replays its epoch and is warned; a boundary resume is neither.
 """
 import dataclasses
 import os
@@ -144,9 +146,18 @@ def c2_cadences_c3_max_windows_c9_replay():
     c = build(restored=snap, DOM_MANAGE_EVERY=5)
     check("C2 the ledger is restored at compose", c.cadences.ledger()["dom.manage"][:2] == led[:2],
           c.cadences.ledger()["dom.manage"])
-    replay = [w for w in c.warnings if w.startswith("MID-EPOCH RESUME REPLAYS ITS EPOCH")]
-    check("C9 a mid-epoch resume is warned with the windows it replays",
-          len(replay) == 1 and "saved 12 window(s) into epoch 0" in replay[0], replay[:1])
+    cont = [w for w in c.warnings if w.startswith("MID-EPOCH RESUME CONTINUES")]
+    check("C9 a mid-epoch resume with the segmentation log continues at the saved window",
+          len(cont) == 1 and "saved 12 window(s) into epoch 0" in cont[0]
+          and int(c.clock.counters()["in_epoch"]) == 12
+          and not any(w.startswith("MID-EPOCH RESUME REPLAYS") for w in c.warnings), cont[:1])
+    _nolog = dict(snap.payload)
+    _nolog["LOOP"] = {k: v for k, v in snap.payload["LOOP"].items() if k != "seg_log"}
+    r = build(restored=dataclasses.replace(snap, payload=_nolog), DOM_MANAGE_EVERY=5)
+    replay = [w for w in r.warnings if w.startswith("MID-EPOCH RESUME REPLAYS ITS EPOCH")]
+    check("C9 a checkpoint without the log still replays its epoch and is warned",
+          len(replay) == 1 and "saved 12 window(s) into epoch 0" in replay[0]
+          and int(r.clock.counters()["in_epoch"]) == 0, replay[:1])
     res = loop.run(c, max_windows=6, progress=False)
     led2 = res.cadence_ledger["dom.manage"]
     # ON THE PARENT'S SCHEDULE THE NEXT FIRE IS 16; RE-SEEDED AT 13 IT WOULD HAVE BEEN 18.

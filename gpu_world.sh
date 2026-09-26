@@ -49,11 +49,23 @@
 # is the most expensive operation in the loop, and nothing here needs to be resumed.
 # DEVICE=cpu runs the same pipeline without the GPU parts; it exists so the script itself can be
 # tested on a machine without a card, and its numbers mean nothing about the GPU.
+#
+# EXP=retok RUNS 03b S0b's SHIP-RULE MEASUREMENT INSTEAD (2026-09-26): which TOK_RETOK_EVERY ships,
+# now that the mid-epoch act performs a retok. Arms k0 (0, the control: no act), k3000 (the shipped
+# value), k1000, and k0_nuis (0 again, with SIG_WARMUP=801 -- a small real perturbation neither the act
+# nor TOK reads, so |k0 - k0_nuis| per seed is the paired noise the margin is made of). Metric: each
+# run's PREQUENTIAL bits per byte, sum(per-flush loss x LM_CTX) / ln 2 / loop.bytes_scored -- every
+# window at RUN_EPOCHS=1 is scored before its update, and bits per byte does not move with the
+# segmentation, which is exactly what the arms change. Rule: M = max over seeds |k0 - k0_nuis|; a
+# cadence ships if (arm - k0) <= M at EVERY seed; among those the lower mean wins; if none, 0 ships.
+#     EXP=retok bash gpu_world.sh                         # 20,000 windows, seeds 0-2, auto-filled
+#     EXP=retok bash gpu_world.sh --analyze
 set -u
 
-OUT=${OUT:-gpu_world_out}
+EXP=${EXP:-world}
+OUT=${OUT:-$([[ "$EXP" == retok ]] && echo gpu_retok_out || echo gpu_world_out)}
 WINDOWS=${WINDOWS:-20000}
-SEEDS=${SEEDS:-"0 1 2 3 4"}
+SEEDS=${SEEDS:-$([[ "$EXP" == retok ]] && echo "0 1 2" || echo "0 1 2 3 4")}
 # DATA_STREAM_BYTES >= 1000 x windows, so every run stops at --max-windows and never at the end of
 # the stream. A run that ran out of stream is flagged in the summary; it is a different length of
 # experiment wearing the same label.
@@ -76,6 +88,7 @@ cd "$(dirname "$0")"
 # read off SUMMARY.txt and the logs. It changes nothing and is safe to run at any time.
 # THE ANALYSIS, AS A FUNCTION so --analyze can re-run it on a finished (or interrupted) fleet.
 analyze() {  # out device mps_on par ncpu
+  if [[ "$EXP" == retok ]]; then analyze_retok "$@"; return; fi
   python3 - "$@" <<'PY'
 import glob, json, math, os, re, statistics, sys
 out, dev, mps_on, par, ncpu = sys.argv[1], sys.argv[2], sys.argv[3] == "1", int(sys.argv[4]), int(sys.argv[5])
@@ -223,6 +236,73 @@ if dev == "cuda":
 PY
 }
 
+# THE RETOK SHIP RULE (EXP=retok), 03b S0b. Prequential bits/byte per run, paired by seed.
+analyze_retok() {  # out device mps_on par ncpu
+  python3 - "$@" <<'PY'
+import glob, json, math, os, re, sys
+out = sys.argv[1]
+ctx = int(os.environ.get("CTX", "128"))
+runs = {}
+for log in sorted(glob.glob(os.path.join(out, "logs", "*.log"))):
+    tag = os.path.basename(log)[:-4]
+    name, seed = tag.rsplit(".s", 1)
+    t = open(log).read()
+    m = re.search(r"^\s+loop\.bytes_scored\s+(\d+)\s*$", t, re.M)
+    acts = re.search(r"^\s+loop\.acts\s+(\d+)\s*$", t, re.M)
+    vocab = re.findall(r"vocab=(\d+)", t)
+    try: curve = json.load(open(os.path.join(out, "curves", tag + ".json")))
+    except (OSError, ValueError): curve = None
+    bpb = (sum(curve) * ctx / math.log(2) / int(m.group(1))) if (curve and m and int(m.group(1))) else None
+    runs[(name, int(seed))] = dict(bpb=bpb, acts=acts.group(1) if acts else "-", n=len(curve or []),
+                                   vocab=vocab[-1] if vocab else "?",
+                                   stopped="stopped at max_windows" in t)
+print()
+print(f"=== RUNS (prequential bits/byte = sum(loss) x LM_CTX {ctx} / ln 2 / loop.bytes_scored) ===")
+for (name, seed), v in sorted(runs.items()):
+    print(f"  {name:<10} s{seed:<3} {v['n']:>6} flushes  acts {v['acts']:>4}  vocab {v['vocab']:>5}  "
+          f"preq {v['bpb'] if v['bpb'] is None else round(v['bpb'], 5)}"
+          + ("" if v["stopped"] else "  RAN OUT OF STREAM (raise BYTES)"))
+a, b = runs.get(("k0", 0)), runs.get(("k0_rerun", 0))
+if a and b and a["bpb"] is not None and b["bpb"] is not None:
+    print(f"\n=== RUN-TO-RUN (k0 seed 0 twice): |diff| {abs(a['bpb'] - b['bpb']):.3g}")
+seeds = sorted({s for (n, s) in runs if n == "k0" and runs[(n, s)]["bpb"] is not None})
+M = [abs(runs[("k0", s)]["bpb"] - runs[("k0_nuis", s)]["bpb"]) for s in seeds
+     if runs.get(("k0_nuis", s), {}).get("bpb") is not None]
+if not M:
+    print("\n!! no paired k0 / k0_nuis seeds: the margin cannot be formed and no cadence can ship"); sys.exit(0)
+margin = max(M)
+print(f"\n=== MARGIN M = max over {len(M)} seed(s) |k0 - k0_nuis| = {margin:.5f} bits/byte ===")
+ships = {}
+tested = 0
+for arm in ("k3000", "k1000"):
+    d = {s: runs[(arm, s)]["bpb"] - runs[("k0", s)]["bpb"] for s in seeds
+         if runs.get((arm, s), {}).get("bpb") is not None}
+    if not d: continue
+    fired = [s for s in seeds if runs.get((arm, s), {}).get("acts", "-") not in ("-", "0")]
+    if not fired:
+        print(f"  {arm:<6} NO ACT FIRED at any seed: the run is too short for this cadence to act, so it "
+              f"is the control under another name -- no evidence either way, not a pass")
+        continue
+    tested += 1
+    ok = len(d) == len(seeds) and all(x <= margin for x in d.values())
+    mean = sum(d.values()) / len(d)
+    print(f"  {arm:<6} - k0 per seed: " + "  ".join(f"s{s} {x:+.5f}" for s, x in sorted(d.items()))
+          + f"   mean {mean:+.5f}   {'NON-INFERIOR at every seed' if ok else 'FAILS the margin'}")
+    if ok: ships[arm] = mean
+print()
+if not tested:
+    print("=== DECISION: UNDECIDED -- no cadence acted in these runs; raise WINDOWS past the first act "
+          "(minting starts near window 120-200, the first act follows at the cadence) ===")
+elif ships:
+    best = min(ships, key=ships.get)
+    print(f"=== DECISION: TOK_RETOK_EVERY ships {best[1:]} (lowest mean among the non-inferior; "
+          f"negative = the act helps) ===")
+else:
+    print("=== DECISION: neither cadence is non-inferior; TOK_RETOK_EVERY ships 0 (the act still serves "
+          "resume and, later, AUD) ===")
+PY
+}
+
 # bash gpu_world.sh --analyze : the analysis of whatever runs are on disk, printed and written to
 # ANALYSIS.txt. For a fleet that finished but never reached its own analysis, or one that was
 # stopped part-way (the missing runs simply have no curve and are left out of the pairing).
@@ -362,9 +442,19 @@ arm_env() {  # the lever settings that define each arm
     fb_on)     echo "WORLD_FEEDBACK=1" ;;
     skip)      echo "WORLD_FEEDBACK=1 WORLD_PREDICT_W=0.0 WORLD_COLLAPSE_W=0.0" ;;
     world_off) echo "WORLD_ENABLED=0" ;;
+    k0)        echo "TOK_RETOK_EVERY=0" ;;
+    k3000)     echo "TOK_RETOK_EVERY=3000" ;;
+    k1000)     echo "TOK_RETOK_EVERY=1000" ;;
+    k0_nuis)   echo "TOK_RETOK_EVERY=0 SIG_WARMUP=801" ;;
   esac
 }
-BASE_ARMS="fb_off fb_on skip world_off"
+if [[ "$EXP" == retok ]]; then
+  BASE_ARMS="k0 k3000 k1000 k0_nuis"; CTRL=k0
+  [[ -n "$ARCH_ALSO" || "$LONG" -gt 0 ]] && echo "EXP=retok: ARCH_ALSO and LONG are ignored"
+  ARCH_ALSO=""; LONG=0
+else
+  BASE_ARMS="fb_off fb_on skip world_off"; CTRL=fb_off
+fi
 
 # IT WAITS ON ITS OWN RUNS BY PID, NEVER WITH A BARE `wait`. The nvidia-smi sampler is a background
 # child of this shell too, and it never exits by itself: the first fleet on a real card finished all
@@ -510,7 +600,7 @@ fi
 # ---------------------------------------------------------------- 2. the job list and its size
 JOBS=()
 for s in $SEEDS; do for a in $BASE_ARMS; do add_job "$a $s $WINDOWS $(arm_env $a)"; done; done
-add_job "fb_off_rerun 0 $WINDOWS $(arm_env fb_off)"
+add_job "${CTRL}_rerun 0 $WINDOWS $(arm_env $CTRL)"
 if [[ -n "$ARCH_ALSO" ]]; then
   for s in $SEEDS; do for a in fb_off fb_on; do add_job "${a}@$ARCH_ALSO $s $WINDOWS LM_ARCH=$ARCH_ALSO $(arm_env $a)"; done; done
 fi

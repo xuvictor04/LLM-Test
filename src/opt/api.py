@@ -2855,6 +2855,22 @@ def load_state(opt: Config, st, saved):
     saved_h = dict(saved.get("horizon", {}))
     live_h = {"run_steps": int(st.horizon.run_steps), "warmup": int(st.horizon.warmup),
               "wavelength": int(st.horizon.wavelength), "n_cycles": int(st.horizon.n_cycles)}
+    # A CHECKPOINT CARRYING A REVISION LOG IS PRICED ON ITS OWN BASE (Q-OPT-10). The resumed build
+    # fitted its horizon to the post-act segmentation, which already reflects the acts the log
+    # records; taking it as the base would apply every revision twice. The saved build-time horizon
+    # comes back, the log applies on it, and the live build's length -- the run as it now measures --
+    # is one more revision only if it differs from the log's last entry (a resume at a different
+    # run length, LR-continuous from here).
+    if st.horizon_revisions and saved_h:
+        st.horizon = Horizon(run_steps=U.Steps(int(saved_h["run_steps"])),
+                             warmup=U.Steps(int(saved_h["warmup"])),
+                             wavelength=U.Steps(int(saved_h["wavelength"])),
+                             n_cycles=int(saved_h["n_cycles"]))
+        if int(live_h["run_steps"]) != int(st.horizon_revisions[-1][1]):
+            st.horizon_revisions.append((int(st.opt_step), int(live_h["run_steps"])))
+            st.counters["opt.horizon.revisions"] = st.counters.get("opt.horizon.revisions", 0) + 1
+            st.counters["opt.horizon.revised_run_steps"] = int(live_h["run_steps"])
+        live_h = dict(saved_h)
     if saved_h and saved_h != live_h:
         # REPORTED, NEVER REFUSED: resuming at a different run length is legitimate, and the LIVE
         # horizon is the one this run's run_windows resolved. Re-projecting mid-run is the

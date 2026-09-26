@@ -1323,7 +1323,10 @@ LOOP_ORDER = (
                                       "labels=Stream.labels, at=win_in_epoch*LM.ctx, "
                                       "regularize=True) -- keeps every unit up to and including "
                                       "the one under the cursor and re-segments the rest, so the "
-                                      "ids minted since the last segmentation reach the stream",
+                                      "ids minted since the last segmentation reach the stream. "
+                                      "Before it the root reads TOK.view_of(vocab): an unmoved view "
+                                      "is a no-op, refused; a moved one is logged with the cut "
+                                      "(System.seg_log) so a resume replays it",
                                       "System.segmentation; the loop's ids; the signature stream "
                                       "re-resolved; MEM hears resegment= on the next flush"),
     ("X", "RUN",   "RunClock.revise_epoch_length", "(windows_in_epoch=(len(Segmentation.ids)-1)"
@@ -2191,6 +2194,19 @@ class System:
                  # that predates the record (the loop then starts from the live revision and the roll
                  # warning says the provenance is unknown).
                  "rev_at_last_seg",
+                 # THE PER-EPOCH SEGMENTATION LOG (03b S0b): {"epoch", "events"}, each event the cut
+                 # or splice with its view and dropout-stream state. Written at the epoch's first
+                 # segmentation, appended by every act, checkpointed by the loop, replayed by a
+                 # continuing mid-epoch resume. `resume_pos` is (in_epoch, windows_in_epoch) when this
+                 # process continues a parent's epoch, else None.
+                 "seg_log", "resume_pos",
+                 # THE LOOP'S CARRIED STATE (03b S0b): the values spine/loop.py::run carries from one
+                 # window or flush to the next -- the last flush's per-window losses, the pending Due,
+                 # the shift stamps, MEM's probe and pressure, the live domain count, SIG's boundary
+                 # run, FAB's manage losses. Mirrored here before every save and checkpointed; a
+                 # continuing mid-epoch resume puts them back, because the uninterrupted run would
+                 # have read them at the very next window.
+                 "loop_carried",
                  # `process_dtype` IS AN OBSERVATION AND NOT A DECISION, and it is here because
                  # RUN_AMP had no did-it-fire surface and was inert for the life of the driver
                  # because of it. Process.amp_state says what was ASKED FOR and what
@@ -2276,6 +2292,40 @@ def plan():
     confusion the deferred table exists to prevent.
     """
     return ASSEMBLY_ORDER, LOOP_ORDER
+
+
+def _seg_event(vocab, kind, at=None):
+    """One entry of the per-epoch segmentation log (03b S0b): what was cut, where, at which view,
+    and the BPE-dropout stream's state just before the cut, so a resume can cut it again exactly."""
+    r = getattr(vocab, "dropout_rng", None)
+    size, gone = tok_api.view_of(vocab)
+    return {"kind": kind, "at": None if at is None else int(at), "view": [size, list(gone)],
+            "rng": None if r is None else (r._r.getstate(), int(r._draws))}
+
+
+def _set_dropout_state(vocab, state):
+    r = getattr(vocab, "dropout_rng", None)
+    if r is not None and state is not None:
+        r._r.setstate(state[0])
+        r._draws = int(state[1])
+
+
+def _replay_segmentation(tok, vocab, stream, log):
+    """Rebuild the Segmentation a parent held from its per-epoch log: the epoch's cut at its view,
+    then every act's splice at its view, each after rewinding the dropout stream to where it stood.
+    The dropout stream is then left where the parent's stood at the save (log['rng_now'])."""
+    seg = None
+    for event in log["events"]:
+        view = (int(event["view"][0]), tuple(int(x) for x in event["view"][1]))
+        _set_dropout_state(vocab, event.get("rng"))
+        if event["kind"] == "tokenize":
+            seg = tok_api.tokenize(tok, vocab, stream.bytes, stream.labels, regularize=True,
+                                   view=view)
+        else:
+            seg = tok_api.splice(tok, vocab, seg, stream.bytes, stream.labels, at=int(event["at"]),
+                                 regularize=True, view=view)
+    _set_dropout_state(vocab, log.get("rng_now"))
+    return seg
 
 
 def compose(environ=None, *, restored=None):
@@ -2405,9 +2455,25 @@ def compose(environ=None, *, restored=None):
         seed=int(run.seed))
 
     sysm.stage = "segment"
-    sysm.segmentation = tok_api.tokenize(
-        tok, sysm.vocab, sysm.stream.bytes, sysm.stream.labels,
-        regularize=True, seed=int(run.seed))
+    # A MID-EPOCH RESUME REBUILDS THE PARENT'S SEGMENTATION FROM ITS LOG (03b S0b). The parent cut
+    # this epoch at the vocabulary of its epoch start and then spliced the tail at every act; the
+    # restored vocabulary can hold ids minted since, so a fresh tokenize would cut different ids and
+    # the saved cursor would name different bytes. Replaying the log at its recorded views rebuilds
+    # the exact stream, which is what lets the clock CONTINUE instead of replaying the epoch.
+    sysm.resume_pos = None
+    _slog = (saved.get("LOOP") or {}).get("seg_log") if restored is not None else None
+    _spos = ((saved.get("RUN") or {}).get("clock") or {}) if restored is not None else {}
+    if (_slog and int(_slog.get("epoch", -1)) == int(restored.epoch)
+            and int(_spos.get("in_epoch") or 0) > 0 and _spos.get("windows_in_epoch") is not None):
+        sysm.segmentation = _replay_segmentation(tok, sysm.vocab, sysm.stream, _slog)
+        sysm.seg_log = {"epoch": int(_slog["epoch"]), "events": list(_slog["events"])}
+        sysm.resume_pos = (int(_spos["in_epoch"]), int(_spos["windows_in_epoch"]))
+    else:
+        sysm.seg_log = {"epoch": 0 if restored is None else int(restored.epoch),
+                        "events": [_seg_event(sysm.vocab, "tokenize")]}
+        sysm.segmentation = tok_api.tokenize(
+            tok, sysm.vocab, sysm.stream.bytes, sysm.stream.labels,
+            regularize=True, seed=int(run.seed))
 
     # -- 8. the model, the signature space, and the two populations -------------------------------
     sysm.stage = "model"
@@ -2483,7 +2549,11 @@ def compose(environ=None, *, restored=None):
     sysm.stage = "partition"
     sysm.partition = dom_api.open_partition(
         dom, sig_dim=int(sig.d), vocab_slots=int(lm.vocab_slots), device=sysm.process.device,
-        rng=sysm.streams["domains"], restored=saved.get("DOM"))
+        rng=sysm.streams["domains"],
+        # THE STREAM POSITION CROSSES ONLY ON A CONTINUING MID-EPOCH RESUME (03b S0b): any other
+        # resume starts a new stream, and DOM's restore then re-arms rather than continues.
+        restored=(saved.get("DOM") if saved.get("DOM") is None or sysm.resume_pos is not None
+                  else {k: v for k, v in saved["DOM"].items() if k != "position"}))
     # A TRAINED PARTITION RESTORED INTO A RUN THAT TURNED DOMAINS OFF IS SAID, NOT REFUSED (Q-DOM-1,
     # 2026-09-24). DOM_ENABLED=0 builds the same Partition the on-arm does, so the restore is sound
     # and the ablation the operator asked for is kept -- unlike WORLD_ENABLED=0, which builds a
@@ -2609,18 +2679,45 @@ def compose(environ=None, *, restored=None):
     # saved partway through an accumulation left the two gates out of phase for the whole child:
     # zero optimizer steps, then a raise at R before the final save (Q-RUN-9).
     sysm.stage = "clock"
+    _rp = sysm.resume_pos
     sysm.clock = run_api.new_clock(
         run, batch_windows=int(opt.batch_windows), accum=int(opt.accum),
         resume_step=0 if restored is None else restored.step,
         resume_epoch=0 if restored is None else restored.epoch,
         resume_backwards=int(sysm.optimizer.n_backward),
-        resume_opt_steps=int(sysm.optimizer.opt_step))
+        resume_opt_steps=int(sysm.optimizer.opt_step),
+        resume_in_epoch=0 if _rp is None else _rp[0],
+        resume_windows_in_epoch=None if _rp is None else _rp[1])
 
     # Epoch 0 is never rolled into, so its length is declared here rather than at stage E. It is a
     # COUNT OF WINDOWS measured on the segmentation that exists, never stream_bytes // ctx. ON A
     # RESUME it is the RESUMED epoch's length, measured on the stream the `stream` row drew for it.
+    sysm.loop_carried = None
+    if _rp is not None:
+        _car = (saved.get("LOOP") or {}).get("carried")
+        if _car:
+            from spine import units as _Uc
+            sysm.loop_carried = dict(_car)
+            sysm.novelty = _car.get("novelty")
+            sysm.due = _car.get("due")
+            sysm.retok_pending = int(_car.get("retok_pending") or 0)
+            if _car.get("shift_at_windows") is not None:
+                sysm.shift_at_windows = _Uc.Windows(int(_car["shift_at_windows"]))
+            if _car.get("shift_at_steps") is not None:
+                sysm.shift_at_steps = _Uc.Steps(int(_car["shift_at_steps"]))
+
     sysm.stage = "epoch0"
-    sysm.clock.begin_epoch(_windows_in_epoch(sysm))
+    # ON A CONTINUING MID-EPOCH RESUME THE CLOCK IS ALREADY OPEN AT THE SAVED POSITION (new_clock),
+    # and begin_epoch would zero the cursor, so it is not called; the rebuilt segmentation's length
+    # must equal the saved epoch length, or the log did not rebuild what the parent held.
+    if _rp is None:
+        sysm.clock.begin_epoch(_windows_in_epoch(sysm))
+    elif _windows_in_epoch(sysm) != _rp[1]:
+        raise RuntimeError(
+            f"compose: the segmentation rebuilt from the checkpoint's log holds "
+            f"{_windows_in_epoch(sysm)} windows, and the parent's epoch held {_rp[1]}. The log did "
+            f"not rebuild the stream the parent was reading, so continuing at window {_rp[0]} would "
+            f"read different bytes; refusing rather than training on them.")
 
     # A RESUME OF A FINISHED RUN IS REFUSED, THE WAY RUN_EPOCHS=0 IS (2026-09-24, Q-RUN-10). The
     # loop's first act is clock.advance(), so a clock already at epoch >= RUN_EPOCHS trained one
@@ -2673,6 +2770,12 @@ def compose(environ=None, *, restored=None):
                 f"{int(restored.step)} of epoch {int(restored.epoch)} was an epoch boundary cannot "
                 f"be told. If it was not, the {_wie}-window epoch restarts at window 0 and the "
                 f"windows already trained in it are trained again (train/api.py::new_clock).")
+        elif _in > 0 and _rp is not None:
+            sysm.warnings.append(
+                f"MID-EPOCH RESUME CONTINUES: the checkpoint was saved {_in} window(s) into epoch "
+                f"{int(restored.epoch)}; the parent's segmentation was rebuilt from its log "
+                f"({len(sysm.seg_log['events'])} event(s)) and the clock continues at window {_in} "
+                f"of {_rp[1]} (03b S0b).")
         elif _in > 0:
             from spine import derive as _derive, units as _U
             # THE WINDOWS LEFT, THROUGH THE NAMED CONVERSIONS: this epoch replayed whole plus every
