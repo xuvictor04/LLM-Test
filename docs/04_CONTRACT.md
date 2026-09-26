@@ -3581,8 +3581,11 @@ WORLD; scripts under `results/decisions_2026-09-26/verify/`).** The numbers abov
 of them change. (1) *D-A13 did not apply to this fleet.* At d97779d, as at HEAD, `RUN_SEED` already
 chose the synthetic text: seeds 0, 1 and 2 give three different stream hashes and twelve different
 area bodies, identical between the two trees (`verify/emp2/seedvar.out`, `verify/emp3/seeds_d977.out`),
-because the `make_proc` repair (`.rework/ISSUES.md`, "WHAT IT ALSO CLOSED") predates the fleet. The
-five seeds trained on five texts, so the spread spans data as well as initialisation. (2) *The fleet
+because the `make_proc` repair (`.rework/ISSUES.md`, "WHAT IT ALSO CLOSED") predates the fleet, and
+`gpu_world.sh` passes `RUN_SEED` per run (`d97779d:gpu_world.sh:346`). Provided the fleet ran the
+default synthetic source (its `EXTRA` did not set `DATA_SOURCE`; one run log's data banner settles
+it, and `results/` holds only the analysis), the five seeds trained on five texts and the spread
+spans data as well as initialisation. (2) *The fleet
 read phase 1 only.* At `DATA_STREAM_BYTES=20000000` an epoch is about 102,000-106,000 windows and the
 first phase bound (5 MB) falls near window 26,000; 20,000 windows at about 190 bytes each read
 3.75-3.84 MB of eng + py (`verify/emp/pc_d977_s0.txt`, `verify/emp2/pp_*.txt`). Every arm therefore
