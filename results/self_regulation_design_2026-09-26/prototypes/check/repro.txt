@@ -1,0 +1,113 @@
+{
+ "reruns": [
+  {
+   "claim": "1. The self-regulated retention draw (d3 focus) beats the planned draw (d2 base) on mean6; d1 lp does too.",
+   "command": "cd repro/d3 && OMP_NUM_THREADS=1 PYTHONHASHSEED=2718 python3 -W ignore run.py --arm focus --seed {0,3,4}; cd repro/d2 && ... run.py --arm base --seed {0,3,4}; cd repro/d1 && ... run.py --arm lp --seed {0,3,4}; tabulated with repro/newseeds.py (same mean6 definition as judge/score.py)",
+   "original": "focus mean6 1.467/1.326/1.357 vs base 1.751/1.665/1.621, paired -0.284/-0.338/-0.264 (s0/1/2); d1 lp -0.296/-0.237/-0.191",
+   "reproduced_same_seed": "s0: focus 1.4667, base 1.7507, paired -0.284; lp paired -0.296. focus_s0, base_s0 and lp_s0 are bit-identical to the designer files (bpb_end_null and facts_end exactly equal)",
+   "reproduced_new_seeds": "s3/s4: base 1.655/1.621, focus 1.468/1.391, paired -0.188/-0.231; lp 1.438/1.468, paired -0.217/-0.154",
+   "verdict": "reproduced",
+   "notes": "The sign holds at all 5 seeds (0-4). At the new seeds the effect is somewhat smaller (-0.19/-0.23 vs -0.26 to -0.34). Seeds 1 and 2 were not rerun. PYTHONHASHSEED was 2718, which differs from the designers' and judge's values."
+  },
+  {
+   "claim": "2. Against matched fixed replay (27%, deficit-spread) the self-regulated draw ties within seed spread.",
+   "command": "cd repro/d3 && OMP_NUM_THREADS=1 PYTHONHASHSEED=2718 python3 -W ignore run.py --arm replay_fixed --replay 0.27 --tag _m27 --seed {0,3,4}",
+   "original": "focus minus m27 mean6 +0.033/-0.074/-0.017; d1 lp minus m27 +0.021/+0.028/+0.056 (s0/1/2)",
+   "reproduced_same_seed": "s0: m27 mean6 1.4335 (bit-identical to the designer file); focus-m27 +0.033, lp-m27 +0.021",
+   "reproduced_new_seeds": "s3/s4: m27 1.477/1.395; focus-m27 -0.009/-0.004; lp-m27 -0.039/+0.073",
+   "verdict": "reproduced",
+   "notes": "Tie confirmed. Across 5 seeds focus-m27 ranges -0.074 to +0.033 and lp-m27 ranges -0.039 to +0.073, so neither beats matched replay on mean6. On mean5 (false area excluded), focus-m27 is +0.021/+0.005/+0.023 at s0/3/4."
+  },
+  {
+   "claim": "3. The self-regulated draw learns the late area better; fixed replay protects the hard old area better.",
+   "command": "same runs as claims 1-2; repro/newseeds.py keys late, fh",
+   "original": "late gap focus 1.839/1.727/1.702 vs m27 2.221/2.090/2.061; forget_hard m27 0.051/0.054/0.036 vs focus 0.251/0.212/0.269",
+   "reproduced_same_seed": "s0 identical: late 1.839 vs 2.221; fh 0.051 vs 0.251",
+   "reproduced_new_seeds": "s3/s4: late focus 1.825/1.799 vs m27 2.114/2.060; fh m27 0.019/0.037 vs focus 0.142/0.205",
+   "verdict": "reproduced",
+   "notes": "The trade-off holds at every seed tested. Forget_easy is about 0 for both arms (s3/s4 focus -0.027/0.041, m27 0.003/0.010). Focus also pays on noise calibration: noise gap is +0.09 to +0.15 vs m27 at s0/3/4."
+  },
+  {
+   "claim": "4. The held-out probe is load-bearing: lp_train (in-stream loss) is null on mean6 and blind to forgetting.",
+   "command": "cd repro/d1 && OMP_NUM_THREADS=1 PYTHONHASHSEED=2718 python3 -W ignore run.py --arm lp_train --seed {0,3,4}",
+   "original": "lp_train vs base mean6 -0.116/+0.035; forget_easy 1.685/1.850 vs base 1.871/1.650 (s0/1)",
+   "reproduced_same_seed": "s0 bit-identical: mean6 1.634 (-0.116 vs base); forget_easy 1.685 vs 1.871",
+   "reproduced_new_seeds": "s3/s4: mean6 1.615/1.609, i.e. -0.040/-0.012 vs base; forget_easy 1.131/1.228 vs base 0.895/1.310 (probe-driven lp: 0.071/0.165)",
+   "verdict": "reproduced",
+   "notes": "Near-null on mean6 at all 4 seeds (range -0.116 to +0.035). The probe-driven lp gives -0.15 to -0.30. Forgetting stays at base level."
+  },
+  {
+   "claim": "5. Claim-level truth discovery (fulltd) finds the fluent liar and moves contested facts; step-100 trust log shows 48 conflicted claims, r_false 0.02, r_cred 0.98.",
+   "command": "cd repro/d3 && OMP_NUM_THREADS=1 PYTHONHASHSEED=2718 python3 -W ignore run.py --arm fulltd --seed {0,3,4}",
+   "original": "Qc share_true fulltd 0.739/0.802/0.956 vs base 0.450/0.536/0.870 vs focus (no trust) 0.346/0.396/0.858",
+   "reproduced_same_seed": "s0 bit-identical: fulltd 0.739, base 0.450, focus 0.346; trust_log step 100: 48 conflicted, r_false 0.02, r_cred 0.98",
+   "reproduced_new_seeds": "s3/s4: fulltd 0.676/0.846 vs base 0.485/0.535 vs focus 0.329/0.266; Qc acc 0.583/0.917 vs base 0.250/0.625; step 100: 48/47 conflicted, r_false 0.02, r_cred 0.98",
+   "verdict": "reproduced",
+   "notes": "This is a strong effect: +0.19/+0.31 share_true vs base at the new seeds. There is a cost: fulltd mean6 is +0.018/+0.090 vs m27 at s3/s4 (+0.102 at s0). The step-100 figure in the claim comes from trust_td_s0; fulltd shows the same values."
+  },
+  {
+   "claim": "6. Truth discovery is defeated when the majority lies (mf world).",
+   "command": "cd repro/d3 && OMP_NUM_THREADS=1 PYTHONHASHSEED=2718 python3 -W ignore run.py --arm mf_base --seed {0,3,4} and --arm mf_trust_td --seed {0,3,4}",
+   "original": "s0 only: Qc acc 0.125 (trust) vs 0.333 (no trust); Wc 0.083 vs 0.250",
+   "reproduced_same_seed": "s0 bit-identical: Qc 0.125 vs 0.333, Wc 0.083 vs 0.250; step-100 trust_log r_false 0.98, r_cred 0.02 (trust inverted)",
+   "reproduced_new_seeds": "s3/s4: Qc 0.167/0.250 vs 0.208/0.292; Wc 0.000/0.000 vs 0.042/0.167; Qc share_true 0.365/0.353 vs 0.491/0.447; trust inverted at step 100 in both",
+   "verdict": "reproduced-weaker",
+   "notes": "Trust hurts at 3/3 seeds and the trust inversion reproduces at every seed. At the new seeds the Qc accuracy harm is smaller (-0.04/-0.04 vs -0.21 at s0). With only 24-48 entities per class, accuracy moves in steps of 0.04. mf_trust_td also costs mean6 (+0.019 to +0.263 vs base)."
+  },
+  {
+   "claim": "7. Source tags with 25% dropout: tagged read improves mean6, untagged read about equal to today, trusted-tag Qc is high, and the model's TD trusts the credible source.",
+   "command": "cd repro/d2 && OMP_NUM_THREADS=1 PYTHONHASHSEED=2718 python3 -W ignore run.py --arm tags --seed {0,3,4}",
+   "original": "tagged mean6 1.352/1.337/1.425 vs base 1.751/1.665/1.621; untagged -0.015/+0.092/+0.049; trustQc 0.958/0.917/1.000 vs base Qc 0.417/0.583/0.917; TD trusts tag_c 3/3",
+   "reproduced_same_seed": "s0 bit-identical, including bpb_end_tag, trusted_tag_acc and td_tag (trusted_source tag_c)",
+   "reproduced_new_seeds": "s3/s4: tagged mean6 1.481/1.286 vs base 1.655/1.621 (-0.174/-0.335); untagged +0.092/+0.037; trustQc 0.833/0.833 vs base Qc 0.250/0.625; TD trusts tag_c at both seeds (5/5 over s0-4)",
+   "verdict": "reproduced",
+   "notes": "The untagged read is consistently slightly worse than today (+0.04 to +0.09 at 4 of 5 seeds). The tagged benefit at s3 (-0.17) is smaller than at the other seeds."
+  },
+  {
+   "claim": "8. The d2+d3 graft composes: tagged mean5 beats fulltd null and tags-only tagged; rehearsal fraction falls; untagged costs vs fulltd.",
+   "command": "cd repro/d3 && OMP_NUM_THREADS=1 PYTHONHASHSEED=2718 python3 -W ignore run_tags.py --arm fulltd --tags 1 --tag _tags --seed {0,3,4}",
+   "original": "graft tagged mean5 1.335/1.197/1.209 vs fulltd 1.422/1.319/1.285 vs tags 1.416/1.362/1.352; rho3 0.181/0.236/0.236 vs 0.286/0.299/0.277; untagged mean6 +0.086/+0.048/+0.117 vs fulltd",
+   "reproduced_same_seed": "s0 bit-identical: mean5_tag 1.335, rho3 0.181, untagged mean6 1.622 (+0.086 vs fulltd)",
+   "reproduced_new_seeds": "s3/s4: graft tagged mean5 1.292/1.270 vs fulltd 1.385/1.337 vs tags-tagged 1.475/1.332; rho3 0.206/0.225 vs fulltd 0.286/0.292; untagged mean6 +0.044/+0.092 vs fulltd",
+   "verdict": "reproduced",
+   "notes": "All four parts hold. Graft Qa (agreed facts) is lower than base at all 3 seeds (0.792/0.750/0.833 vs 1.000/0.833/1.000). The claim does not mention this."
+  },
+  {
+   "claim": "9. The tree's act constraint (re-plan at phase entry then every 6 probes) costs nothing.",
+   "command": "cd repro/d3 && OMP_NUM_THREADS=1 PYTHONHASHSEED=2718 python3 -W ignore run_act.py --arm fulltd --act_every 6 --tag _act6 --seed {0,3,4}",
+   "original": "act6 mean6 1.500/1.449 vs fulltd 1.536/1.452; mean5 1.383/1.317 vs 1.422/1.319 (s0/1)",
+   "reproduced_same_seed": "s0 bit-identical: mean6 1.5004, mean5 1.3832",
+   "reproduced_new_seeds": "s3/s4: act6 mean6 1.483/1.459 vs fulltd 1.495/1.485; mean5 1.354/1.323 vs 1.385/1.337; Qc share 0.817/0.816 vs 0.676/0.846",
+   "verdict": "reproduced",
+   "notes": "act6 is no worse, and slightly better, at all 4 seeds. The claim does not say whether the act count was 35; I checked only the metrics."
+  },
+  {
+   "claim": "10. d1's pre-fix seed-0 base/full are unpaired; post-fix full-lp Qc share is -0.009 (not +0.170) and Qa is 0.625.",
+   "command": "cd repro/d1 && OMP_NUM_THREADS=1 PYTHONHASHSEED=2718 python3 -W ignore run.py --arm full --seed 0 --tag _judge && ... --arm base --seed 0 --tag _judge",
+   "original": "pre-fix cred oracle 1.544821/1.54413 vs post-fix 1.543928; full-lp Qc share -0.009 post-fix vs +0.170 pre-fix; Qa 0.625",
+   "reproduced_same_seed": "full_judge_s0 and base_judge_s0 bit-identical to the judge's files. Oracle cred 1.5439 (pre-fix files: 1.544821, 1.544130). Post-fix full-lp Qc share -0.0085; pre-fix +0.1702; Qa 0.625",
+   "reproduced_new_seeds": "not run (the claim is about seed-0 bookkeeping)",
+   "verdict": "reproduced",
+   "notes": "The d1-code base_judge_s0 is also bit-identical to d2 base_s0."
+  },
+  {
+   "claim": "11. d1's fixed replay front-loads rehearsal and forgets easy more than d3's deficit-spread replay at 20%; d1 LP loses to the spread control on mean6 at 3/3 seeds.",
+   "command": "cd repro/d1 && OMP_NUM_THREADS=1 PYTHONHASHSEED=2718 python3 -W ignore run.py --arm replay --seed {3,4}; cd repro/d3 && ... run.py --arm replay_fixed --seed {3,4}; code: d1/run.py Controller.choose vs d3/run.py SharePolicy.pick",
+   "original": "forget_easy d1 replay 0.398/0.371 vs d3 replay 0.050/0.030 (s0/1); LP loses on mean6 to the spread control 3/3",
+   "reproduced_same_seed": "not rerun (s0/s1 replay files taken as given). Code confirmed: d1 replay uses rng.choice among areas with budget left, so the faded budgets run out early in the phase; d3 uses deficit scheduling to target shares",
+   "reproduced_new_seeds": "s3/s4: forget_easy d1 replay 0.269/0.242 vs d3 replay 0.026/0.041. mean6 lp minus d3 replay20: -0.042 (s3, LP wins) / +0.066 (s4, LP loses); lp minus m27: -0.039/+0.073",
+   "verdict": "reproduced-weaker",
+   "notes": "The forgetting difference and the code-level front-loading reproduce. The 'LP loses at 3/3 seeds' part does not hold at new seeds: LP beats the 20% spread control at s3 by 0.042 and loses at s4. Across seeds the two are a wash."
+  },
+  {
+   "claim": "12. The prototypes are deterministic across processes after the fix.",
+   "command": "All same-seed reruns above used PYTHONHASHSEED=2718, which differs from the judge's 999/31/12345 and from the designers' unset (random) value",
+   "original": "judge reruns bit-identical for d3 fulltd s0, d2 tags s0, d3 focus s0, d1-code base s0",
+   "reproduced_same_seed": "13/13 same-seed reruns are bit-identical (bpb_end_null and facts_end exactly equal): d3 focus, fulltd, replay_fixed_m27, mf_base, mf_trust_td, fulltd_tags (run_tags), fulltd_act6 (run_act); d2 base, tags; d1 lp, lp_train, full_judge, base_judge (all s0). d1 base_judge_s0 is identical to d2 base_s0",
+   "reproduced_new_seeds": "n/a",
+   "verdict": "reproduced",
+   "notes": "Determinism is confirmed by the bit-identical reruns."
+  }
+ ],
+ "summary": "I reran 39 runs (the 13 seed-0 reruns plus 26 runs at new seeds 3 and 4), 2 at a time with OMP_NUM_THREADS=1 and PYTHONHASHSEED=2718. They took about 36 min wall (about 70 CPU-min), roughly 95-140 s each. Everything ran in /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/mm3/repro/ using copied code (testbed/, d1/, d2/, d3/ incl. run_act.py and run_tags.py); outputs are in repro/{d1,d2,d3}/out/. Helper scripts: repro/cmp.py (same-seed identity check), repro/newseeds.py (paired table, output in repro/ns.txt) and repro/runjob.sh. I did not touch the repository or the designer/judge files.\n\nDeterminism: all 13 same-seed reruns are bit-identical to the original JSONs. So seed-0 reproduction is exact for claims 1-10 and 12.\n\nNew seeds 3 and 4 confirm most headline effects:\n- **Focus vs base (claim 1):** focus beats the planned draw on mean6 by -0.188/-0.231; d1 lp by -0.217/-0.154.\n- **Focus vs matched 27% replay (claim 2):** a tie, focus minus replay -0.009/-0.004.\n- **Trade-off (claim 3):** focus learns the late area better (1.825/1.799 vs 2.114/2.060); replay protects the hard area better (forget_hard 0.019/0.037 vs 0.142/0.205).\n- **Stream-loss LP (claim 4):** null on mean6 (-0.040/-0.012 vs base) and blind to forgetting.\n- **Truth discovery (claim 5):** moves Qc share_true to 0.676/0.846 vs base 0.485/0.535 and no-trust 0.329/0.266.\n- **Tags (claim 7):** tagged read helps, the untagged read is slightly worse than today, and the model trusts tag_c at 5/5 seeds.\n- **Graft (claim 8):** composes (tagged mean5 1.292/1.270 vs fulltd 1.385/1.337), and rehearsal falls.\n- **act6 (claim 9):** no worse than fulltd.\n\nWeaker on new seeds:\n- **Majority-lies world (claim 6):** trust still hurts at 3/3 seeds and the trust inversion reproduces, but the Qc accuracy harm is smaller at s3/s4 (-0.04 each vs -0.21 at s0).\n- **Claim 11:** d1's replay forgetting more than d3's spread replay reproduces (forget_easy 0.269/0.242 vs 0.026/0.041). The part saying d1 LP loses to the spread control at 3/3 seeds does not: LP wins at s3 (-0.042) and loses at s4 (+0.066).\n\nCosts the claims understate: all focus variants have a worse noise gap (+0.03 to +0.15 bits/byte vs matched replay). fulltd pays +0.02 to +0.10 mean6 vs matched replay. The graft lowers Qa (agreed facts).\n\nNot rerun: seeds 1 and 2 of any arm, and the 20% replay arms at seeds 0 and 1."
+}

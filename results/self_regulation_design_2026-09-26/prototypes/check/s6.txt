@@ -1,0 +1,84 @@
+## 6. Defaults, ON and OFF
+
+**Default behaviour changes: what a run at the shipped defaults does differently after this lands.**
+1. **`DATA_SYNTH_HOLDOUT` ON.** Synthetic areas withhold a held-out block from training, so every
+   synthetic-source run's stream changes and no pre-change run pairs with a post-change one. A
+   resume of an older synthetic checkpoint is admitted (`data.holdout_admitted`).
+2. **The retention probe ON** at a 1000-window cadence.
+   - On a shipped-default run (`DATA_STREAM_BYTES` 120000, about 506-937 windows) the cadence never
+     fires: `eval.holdout.calls` reads PRESENT-and-0 for it. The change there is the run-boundary
+     read, 32 windows per area at each save site and at the end.
+   - At the owner's 20,000-window runs, it adds 2.4% extra forward windows at 4 areas.
+   - Training numbers are unchanged. SR0's bit-identity test proves it, at a cadence that fires
+     several probes with FAB and MEM on, before it ships.
+3. **The reliability book ON in observe mode.** It adds wall (6-7% on the toy, owed at owner
+   shape: E3's ≤ 2% rule). Training numbers are unchanged, proven by SR3's bit-identity test.
+Everything else below is OFF, or unchanged unless a lever is set.
+
+**At the shipped schedule** (the generated sliding window, 2 live areas; pure-add, 1):
+- if `DATA_DRAW='retention'` is set, what it regulates in practice is ρ;
+- on the toy ρ sat at `DATA_REHEARSE_MAX` most of the time;
+- the relative cap gives the 2-area split room, whose use `data.focus.alloc_freedom` reports;
+- at pure-add with no admitted parent areas, 'retention' trains as 'planned' and pays only the
+  probe.
+
+| Lever | Default | Unit | ON/OFF | Meaning |
+|---|---|---|---|---|
+| `DATA_DRAW` | 'planned' | name | self-regulation **OFF** | + 'replay' (SR0), 'retention' (SR2). E1 decides the flip |
+| `DATA_REPLAY_SHARE` | 0.27 | U.FRACTION of a phase's bytes | used under 'replay' | fixed share to faded areas, split evenly, deficit-spread |
+| `DATA_REPLAY_NEWEST` | 0.0 | U.FRACTION of a phase's bytes | OFF at 0 | the newest live area's share; the other live areas split the rest evenly. E1's hand-set arm uses 0.34 (the critic's control) |
+| `DATA_FOCUS_SIGNAL` | 'probe' | name | — | 'stream' is the measured-null ablation |
+| `DATA_FOCUS_RULE` | 'lp' | name | — | 'loss' (noisy TV) and 'exp3' (d1's explore mix) are ablations |
+| `DATA_FOCUS_LP` | 'signed' | name | — | R-4. 'abs' (the toy rule) and 'net' (drift-corrected) |
+| `DATA_FOCUS_FLOOR` | 0.3 | U.FRACTION of live bytes | — | split evenly across live areas |
+| `DATA_FOCUS_CAP_MULT` | 3.0 | U.RATIO × the even live share | — | R-1. cap_a = min(M / n_live, 1 − the others' floors); equals the toy's 0.5 at 6 live areas. Replaces `DATA_FOCUS_CAP` |
+| `DATA_FOCUS_WARM` | 10 | probes | — | optimism until an area has this many probes |
+| `DATA_FOCUS_EMA_FAST` / `_SLOW` | 0.3 / 0.05 | per probe | — | LP books |
+| `DATA_REHEARSE_MAX` | 0.3 | U.FRACTION | — | ceiling on ρ; at the shipped schedule it is effectively the rehearsal amount |
+| `DATA_REHEARSE_EVEN` | 0.0 | U.FRACTION of ρ | OFF | even floor across faded areas (§1 item 3). Replaces the dropped `DATA_REHEARSE_MIN` |
+| `DATA_REHEARSE_HREC` | 10 | probes | — | forgetting recovery horizon |
+| `DATA_FOCUS_MIR` | False | bool | **OFF** | interference estimate (measured inert), functional copies |
+| `DATA_FOCUS_ACT_EVERY` | 6 | probes | — | minimum act spacing (960 windows at 160) |
+| `DATA_FOCUS_SHIFT_TV` | 0.1 | TV distance | — | plan change that triggers an act and a shift stamp |
+| `EVAL_RETENTION_EVERY` | 1000 | U.Windows | **ON** (telemetry): **default behaviour change 2** | literal default, no wire (M5). 'retention' with 0 is refused, and above 160 prints a notice. The retention arms set 160. 0 = off (ABSENT) |
+| `EVAL_RETENTION_N` | 6 | windows per area | — | a prefix of the pinned `holdout_probe` draw |
+| `EVAL_HOLDOUT_WINDOWS` | 32 | windows per area | unchanged | the full read at the run-boundary report |
+| `DATA_SYNTH_HOLDOUT` | True | bool | **ON: default behaviour change 1** | synthetic areas hold out under the real sources' law |
+| `DATA_SYNTH_KIND` | 'order2' | name | — | **new lever**: 'order2' names today's hard-wired generator (`src/data/api.py:751`), so it changes nothing. 'focusbed' is the known-answer corpus with its schedules and worlds |
+| `DATA_REHEARSE_PARENT` | False | bool | OFF; built only if §8 Q4 says yes | a pure-add child may rehearse the parent's areas as faded from window 0 |
+| `DATA_TRUST` | 'observe' | name | **ON as telemetry: default behaviour change 3; actuation OFF** | 'off' / 'observe' / 'loss' / 'loss+draw'. Actuation may never default on while a truthful different-format source is floored, nor before copy detection |
+| `DATA_TRUST_RULE` | 'claims' | name | — | 'peer', 'residual' and 'fluency' are ablations |
+| `DATA_TRUST_CLAIM` | 'kv' | name | — | R-5. Normalised (key, value) claims, the build target. 'ctx' is the prototype: it measures surface conformity |
+| `DATA_TRUST_CTX` | 5 | **TOK units** (not bytes) | — | maximum key length ('kv') or the context length ('ctx') |
+| `DATA_TRUST_VAL` | 1 | TOK units | — | value length ('kv') |
+| `DATA_TRUST_DELIMS` | '=', ':', ' is ', ' are ', ' was ', ' were ' | byte strings | — | the delimiter class for 'kv' keys (unmeasured) |
+| `DATA_TRUST_HOT` / `_SELF` / `_MIN_N` | 20 / 0.8 / 3 | count / share / count | — | claim admission |
+| `DATA_TRUST_MIN_EV` | 10 | conflicted claims | — | below this, evidence is ABSENT and trust is 1 |
+| `DATA_TRUST_MIN` | 0.3 | loss-weight multiplier | — | trust floor |
+| `DATA_TRUST_EVERY` | 160 | U.Windows | — | truth-discovery cadence (testbed: 10 steps × 16); lengthened if E3 measures > 2% wall |
+| `DATA_TRUST_SKETCH` | 4194301 | buckets (int32) | — | fixed at build (geometry) |
+| `DATA_TRUST_TABLE` | 200000 | contexts | — | LRU bound (unmeasured on real text) |
+| `DATA_TAG` | 'off' | name | **OFF** | 'area', 'domain'. E4 decides |
+| `DATA_TAG_DROP` | 0.25 | U.FRACTION of segments | — | untagged share (0 rejected) |
+| `LM_SRC_SLOTS` | 64 | rows | — | zero-initialised source table |
+| `EVAL_SRC_EVERY` | 2000 | U.Windows | active only when `DATA_TAG` ≠ off | agreement readout |
+| `LM_SEL` | 'off' | name | **OFF** | 'abs', 'pos', 'loss' (measured negative) |
+| `LM_SEL_EMA` / `_FLOOR` / `_CAP` | 0.99 / 0.25 / 4.0 | per U.Steps / U.FRACTION / × mean | — | selective-loss arm |
+| `OPT_DAMP_SOURCE` | 'off' | name | **OFF** | 'probe' would feed the mean probe bits/byte to OPT's restart damping (§8 Q10) |
+| `AUD_RATE_MODE` | 'measured' (03b) | name | unchanged | + 'progress' at 03b S3, OFF |
+
+**Numbers with no toy measurement behind them.**
+- `DATA_FOCUS_CAP_MULT` away from 6 live areas.
+- `DATA_REHEARSE_EVEN`, `DATA_FOCUS_LP='signed'`, `DATA_REPLAY_NEWEST` 0.34 away from the toy.
+- `DATA_FOCUS_SHIFT_TV`: the act emulation acted every 6 probes unconditionally
+  (`judge/w/d3/run_act.py:260-264`), so the TV gate was never exercised.
+- The whole 'kv' spec (`DATA_TRUST_CLAIM`, `_VAL`, `_DELIMS`), `DATA_TRUST_EVERY` and
+  `DATA_TRUST_TABLE`.
+- Each has an owner experiment in §7.
+
+**Unchanged:** everything else in the tree, including the phase schedule, `DATA_PHASE_LIVE` (0,
+derived: 2 at 4 areas) and `DATA_EXPOSURE_MAX` (2.0).
+
+---
+
+## 7. Staged build plan, and the GPU experiments that decide the defaults

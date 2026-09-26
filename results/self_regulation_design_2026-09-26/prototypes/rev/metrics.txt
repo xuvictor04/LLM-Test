@@ -1,0 +1,428 @@
+Proposal 04 revision: goal-B end-state, time-integrated and per-phase readings, re-derived from the
+preserved run JSONs (no new training). Usage: python3 metrics.py <prototypes dir> > metrics.txt
+
+Definitions (all bits/byte, null read, held-out windows of testbed.eval):
+  gap_end[a]      = bpb_end_null[a] - oracle[a]                     (the file's own gap_end)
+  gap_p2end_hard  = hard_at_p2end - oracle[hard]                    (hard just before it fades)
+  forget_hard     = the file's forget_hard (= end minus end of P2; LEVEL-RELATIVE, secondary)
+  tig[a]          = time-integrated gap: mean over the 8 prequential eval points (frac 0.125 .. 1.0)
+                    of curve[i].null[a] - oracle[a], from the area's first live point on
+                    (late: frac >= 0.875; every other area: all 8 points)
+  tig_P3[a]       = the same mean over the P3 points only (frac 0.875, 1.0): the fade period
+  share_P{k}[a]   = phase_drawn_share[k][a] (planned base: 1/6 in P0-P2, 1/5 of live in P3)
+  mean6 / mean5   = mean gap_end over hard,easy,cred,false,corrob,late (mean5 drops false)
+
+pairing check, oracle cred per seed:
+  base         {0: 1.543928, 1: 1.525853, 2: 1.542021, 3: 1.536144, 4: 1.518966}
+  focus        {0: 1.543928, 1: 1.525853, 2: 1.542021, 3: 1.536144, 4: 1.518966}
+  m27          {0: 1.543928, 1: 1.525853, 2: 1.542021, 3: 1.536144, 4: 1.518966}
+  replay_late  {0: 1.543928, 1: 1.525853}
+  fulltd       {0: 1.543928, 1: 1.525853, 2: 1.542021, 3: 1.536144, 4: 1.518966}
+  graft        {0: 1.543928, 1: 1.525853, 2: 1.542021}
+  lp           {0: 1.543928, 1: 1.525853, 2: 1.542021}
+  rehearse     {0: 1.543928, 1: 1.525853}
+  focus_nomir  {0: 1.543928, 1: 1.525853}
+
+== mean6 (end state) ==   seeds 0/1/2/3/4
+  base         1.751  1.665  1.621  1.655  1.621
+  focus        1.467  1.326  1.357  1.468  1.391
+  m27          1.434  1.400  1.374  1.477  1.395
+  replay_late  1.441  1.395     -       -       -  
+  fulltd       1.536  1.452  1.374  1.495  1.485
+  graft        1.622  1.500  1.491     -       -  
+  lp           1.455  1.428  1.430     -       -  
+
+== mean5 (end state, excl. false) ==   seeds 0/1/2/3/4
+  base         1.854  1.737  1.616  1.654  1.674
+  focus        1.478  1.338  1.285  1.459  1.419
+  m27          1.457  1.399  1.320  1.454  1.396
+  replay_late  1.448  1.376     -       -       -  
+  fulltd       1.422  1.319  1.285  1.385  1.337
+  graft        1.521  1.376  1.442     -       -  
+  lp           1.471  1.374  1.378     -       -  
+
+== gap_end hard ==   seeds 0/1/2/3/4
+  base         2.023  2.013  1.912  1.980  1.927
+  focus        1.592  1.336  1.338  1.663  1.450
+  m27          1.599  1.629  1.483  1.630  1.555
+  replay_late  1.729  1.719     -       -       -  
+  fulltd       1.538  1.360  1.383  1.451  1.421
+  graft        1.687  1.593  1.434     -       -  
+  lp           1.662  1.666  1.540     -       -  
+
+== gap_end easy ==   seeds 0/1/2/3/4
+  base         2.482  2.310  1.753  1.362  1.805
+  focus        0.635  0.631  0.616  0.496  0.619
+  m27          0.532  0.583  0.499  0.499  0.502
+  replay_late  0.562  0.616     -       -       -  
+  fulltd       0.584  0.564  0.525  0.462  0.563
+  graft        0.860  0.610  1.049     -       -  
+  lp           0.786  0.805  0.885     -       -  
+
+== gap_end cred ==   seeds 0/1/2/3/4
+  base         1.352  1.270  1.237  1.495  1.403
+  focus        1.596  1.434  1.370  1.603  1.632
+  m27          1.387  1.346  1.304  1.473  1.441
+  replay_late  1.461  1.405     -       -       -  
+  fulltd       1.418  1.414  1.284  1.556  1.351
+  graft        1.456  1.421  1.388     -       -  
+  lp           1.593  1.397  1.503     -       -  
+
+== gap_end false ==   seeds 0/1/2/3/4
+  base         1.234  1.304  1.647  1.663  1.359
+  focus        1.409  1.271  1.719  1.512  1.251
+  m27          1.314  1.405  1.645  1.595  1.393
+  replay_late  1.407  1.488     -       -       -  
+  fulltd       2.107  2.115  1.818  2.043  2.227
+  graft        2.124  2.120  1.740     -       -  
+  lp           1.373  1.696  1.689     -       -  
+
+== gap_end corrob ==   seeds 0/1/2/3/4
+  base         1.486  1.254  1.194  1.478  1.394
+  focus        1.730  1.560  1.400  1.707  1.593
+  m27          1.547  1.348  1.251  1.552  1.419
+  replay_late  1.601  1.408     -       -       -  
+  fulltd       1.676  1.522  1.462  1.669  1.597
+  graft        1.696  1.468  1.494     -       -  
+  lp           1.646  1.462  1.414     -       -  
+
+== gap_end late ==   seeds 0/1/2/3/4
+  base         1.928  1.839  1.985  1.955  1.841
+  focus        1.839  1.727  1.702  1.825  1.799
+  m27          2.221  2.090  2.061  2.114  2.060
+  replay_late  1.888  1.733     -       -       -  
+  fulltd       1.893  1.736  1.771  1.788  1.753
+  graft        1.907  1.788  1.843     -       -  
+  lp           1.669  1.541  1.550     -       -  
+
+== gap_end noise ==   seeds 0/1/2/3/4
+  base         0.189  0.286  0.184  0.155  0.223
+  focus        0.361  0.473  0.419  0.348  0.438
+  m27          0.266  0.255  0.259  0.257  0.293
+  replay_late  0.303  0.289     -       -       -  
+  fulltd       0.300  0.408  0.405  0.330  0.407
+  graft        0.312  0.487  0.430     -       -  
+  lp           0.421  0.459  0.394     -       -  
+
+== hard gap at end of P2 (just before fade) ==   seeds 0/1/2/3/4
+  base         1.574  1.419  1.478  1.673  1.506
+  focus        1.341  1.124  1.069  1.521  1.245
+  m27          1.548  1.575  1.447  1.611  1.518
+  replay_late  1.549  1.575     -       -       -  
+  fulltd       1.309  1.034  1.138  1.214  1.215
+  graft        1.410  1.243  1.133     -       -  
+  lp           1.376  1.334  1.089     -       -  
+
+== forget_hard (level-relative, secondary) ==   seeds 0/1/2/3/4
+  base         0.449  0.594  0.434  0.306  0.420
+  focus        0.251  0.212  0.269  0.142  0.205
+  m27          0.051  0.054  0.036  0.019  0.037
+  replay_late  0.180  0.144     -       -       -  
+  fulltd       0.229  0.326  0.245  0.237  0.205
+  graft        0.277  0.350  0.302     -       -  
+  lp           0.286  0.332  0.451     -       -  
+
+== forget_easy (level-relative, secondary) ==   seeds 0/1/2/3/4
+  base         1.871  1.650  1.231  0.895  1.310
+  focus        0.010  -0.001  0.046  -0.027  0.041
+  m27          0.003  -0.002  -0.003  0.003  0.010
+  replay_late  0.033  0.031     -       -       -  
+  fulltd       0.003  0.011  0.059  0.025  0.011
+  graft        0.053  -0.026  0.389     -       -  
+  lp           0.297  0.275  0.184     -       -  
+
+== time-integrated gap, mean of 6 learnable areas ==   seeds 0/1/2/3/4
+  base         1.678  1.619  1.573  1.674  1.621
+  focus        1.577  1.466  1.456  1.570  1.520
+  m27          1.603  1.570  1.506  1.607  1.575
+  replay_late  1.566  1.527     -       -       -  
+  fulltd       1.654  1.558  1.471  1.590  1.596
+  graft        1.706  1.627  1.528     -       -  
+  lp           1.536  1.509  1.476     -       -  
+
+== time-integrated gap hard ==   seeds 0/1/2/3/4
+  base         1.880  1.800  1.770  1.912  1.747
+  focus        1.765  1.569  1.541  1.812  1.604
+  m27          1.726  1.754  1.631  1.754  1.692
+  replay_late  1.756  1.777     -       -       -  
+  fulltd       1.714  1.518  1.529  1.613  1.555
+  graft        1.841  1.771  1.583     -       -  
+  lp           1.643  1.743  1.644     -       -  
+
+== time-integrated gap easy ==   seeds 0/1/2/3/4
+  base         1.303  1.331  1.068  0.889  1.125
+  focus        0.743  0.718  0.664  0.602  0.707
+  m27          0.781  0.813  0.678  0.673  0.750
+  replay_late  0.788  0.822     -       -       -  
+  fulltd       0.677  0.652  0.592  0.536  0.628
+  graft        0.754  0.717  0.718     -       -  
+  lp           0.780  0.770  0.757     -       -  
+
+== time-integrated gap late ==   seeds 0/1/2/3/4
+  base         1.947  1.903  1.945  2.012  1.888
+  focus        1.898  1.802  1.772  1.880  1.869
+  m27          2.260  2.137  2.094  2.135  2.093
+  replay_late  1.950  1.799     -       -       -  
+  fulltd       1.946  1.810  1.850  1.857  1.817
+  graft        1.975  1.846  1.901     -       -  
+  lp           1.719  1.604  1.639     -       -  
+
+== P3 (fade period) mean gap hard ==   seeds 0/1/2/3/4
+  base         2.006  1.954  1.915  1.945  1.902
+  focus        1.608  1.351  1.345  1.679  1.451
+  m27          1.598  1.629  1.486  1.632  1.552
+  replay_late  1.717  1.721     -       -       -  
+  fulltd       1.557  1.365  1.376  1.436  1.417
+  graft        1.696  1.604  1.455     -       -  
+  lp           1.627  1.653  1.522     -       -  
+
+== P3 (fade period) mean gap easy ==   seeds 0/1/2/3/4
+  base         2.283  2.211  1.741  1.117  1.552
+  focus        0.645  0.640  0.618  0.503  0.621
+  m27          0.536  0.585  0.503  0.503  0.506
+  replay_late  0.565  0.621     -       -       -  
+  fulltd       0.590  0.569  0.528  0.458  0.557
+  graft        0.847  0.624  0.918     -       -  
+  lp           0.770  0.797  0.843     -       -  
+
+== phase P2 drawn share hard ==   seeds 0/1/2/3/4
+  base         0.167  0.167  0.167  0.167  0.167
+  focus        0.371  0.328  0.419  0.241  0.280
+  m27          0.167  0.166  0.166  0.167  0.167
+  replay_late  0.167  0.166     -       -       -  
+  fulltd       0.361  0.435  0.322  0.440  0.305
+  graft        0.319  0.393  0.320     -       -  
+  lp           0.167  0.167  0.167     -       -  
+
+== phase P2 drawn share easy ==   seeds 0/1/2/3/4
+  base         0.167  0.167  0.167  0.167  0.167
+  focus        0.095  0.074  0.113  0.112  0.096
+  m27          0.166  0.166  0.166  0.166  0.167
+  replay_late  0.166  0.166     -       -       -  
+  fulltd       0.117  0.100  0.133  0.112  0.098
+  graft        0.119  0.096  0.129     -       -  
+  lp           0.167  0.167  0.167     -       -  
+
+== phase P2 drawn share noise ==   seeds 0/1/2/3/4
+  base         0.167  0.167  0.167  0.167  0.167
+  focus        0.072  0.093  0.114  0.079  0.086
+  m27          0.167  0.166  0.166  0.167  0.166
+  replay_late  0.167  0.166     -       -       -  
+  fulltd       0.077  0.110  0.111  0.126  0.099
+  graft        0.071  0.065  0.064     -       -  
+  lp           0.167  0.167  0.167     -       -  
+
+== phase P2 drawn share cred ==   seeds 0/1/2/3/4
+  base         0.167  0.167  0.167  0.167  0.167
+  focus        0.109  0.143  0.184  0.110  0.101
+  m27          0.167  0.167  0.167  0.166  0.167
+  replay_late  0.166  0.167     -       -       -  
+  fulltd       0.243  0.181  0.272  0.150  0.335
+  graft        0.224  0.206  0.291     -       -  
+  lp           0.167  0.167  0.167     -       -  
+
+== phase P2 drawn share corrob ==   seeds 0/1/2/3/4
+  base         0.167  0.167  0.167  0.167  0.167
+  focus        0.147  0.080  0.109  0.116  0.095
+  m27          0.167  0.167  0.167  0.166  0.167
+  replay_late  0.167  0.167     -       -       -  
+  fulltd       0.144  0.109  0.104  0.102  0.100
+  graft        0.196  0.181  0.138     -       -  
+  lp           0.167  0.167  0.167     -       -  
+
+== phase P2 drawn share late ==   seeds 0/1/2/3/4
+  base         0.000  0.000  0.000  0.000  0.000
+  focus        0.000  0.000  0.000  0.000  0.000
+  m27          0.000  0.000  0.000  0.000  0.000
+  replay_late  0.000  0.000     -       -       -  
+  fulltd       0.000  0.000  0.000  0.000  0.000
+  graft        0.000  0.000  0.000     -       -  
+  lp           0.000  0.000  0.000     -       -  
+
+== phase P3 drawn share hard ==   seeds 0/1/2/3/4
+  base         0.000  0.000  0.000  0.000  0.000
+  focus        0.175  0.198  0.207  0.160  0.189
+  m27          0.135  0.135  0.135  0.135  0.135
+  replay_late  0.136  0.135     -       -       -  
+  fulltd       0.192  0.187  0.207  0.189  0.194
+  graft        0.125  0.127  0.163     -       -  
+  lp           0.000  0.000  0.000     -       -  
+
+== phase P3 drawn share easy ==   seeds 0/1/2/3/4
+  base         0.000  0.000  0.000  0.000  0.000
+  focus        0.097  0.081  0.079  0.119  0.081
+  m27          0.134  0.135  0.135  0.135  0.135
+  replay_late  0.135  0.136     -       -       -  
+  fulltd       0.090  0.111  0.061  0.091  0.092
+  graft        0.054  0.109  0.064     -       -  
+  lp           0.000  0.000  0.000     -       -  
+
+== phase P3 drawn share noise ==   seeds 0/1/2/3/4
+  base         0.200  0.200  0.200  0.200  0.200
+  focus        0.137  0.121  0.122  0.075  0.109
+  m27          0.146  0.146  0.147  0.146  0.146
+  replay_late  0.098  0.097     -       -       -  
+  fulltd       0.117  0.132  0.103  0.078  0.085
+  graft        0.075  0.068  0.087     -       -  
+  lp           0.200  0.200  0.200     -       -  
+
+== phase P3 drawn share cred ==   seeds 0/1/2/3/4
+  base         0.200  0.200  0.200  0.200  0.200
+  focus        0.064  0.066  0.107  0.075  0.061
+  m27          0.146  0.146  0.146  0.146  0.146
+  replay_late  0.097  0.098     -       -       -  
+  fulltd       0.108  0.096  0.146  0.076  0.137
+  graft        0.174  0.156  0.158     -       -  
+  lp           0.200  0.200  0.200     -       -  
+
+== phase P3 drawn share corrob ==   seeds 0/1/2/3/4
+  base         0.200  0.200  0.200  0.200  0.200
+  focus        0.065  0.061  0.072  0.070  0.075
+  m27          0.147  0.145  0.146  0.147  0.146
+  replay_late  0.098  0.097     -       -       -  
+  fulltd       0.071  0.065  0.067  0.079  0.068
+  graft        0.088  0.086  0.076     -       -  
+  lp           0.200  0.200  0.200     -       -  
+
+== phase P3 drawn share late ==   seeds 0/1/2/3/4
+  base         0.200  0.200  0.200  0.200  0.200
+  focus        0.340  0.344  0.334  0.345  0.343
+  m27          0.146  0.146  0.145  0.146  0.146
+  replay_late  0.339  0.340     -       -       -  
+  fulltd       0.332  0.341  0.348  0.338  0.336
+  graft        0.386  0.367  0.366     -       -  
+  lp           0.200  0.200  0.200     -       -  
+
+== whole-run drawn share late ==   seeds 0/1/2/3/4
+  base         0.050  0.050  0.050  0.050  0.050
+  focus        0.085  0.086  0.084  0.086  0.086
+  m27          0.037  0.037  0.036  0.036  0.037
+  replay_late  0.085  0.085     -       -       -  
+  fulltd       0.083  0.085  0.087  0.084  0.084
+  graft        0.096  0.092  0.092     -       -  
+  lp           0.109  0.116  0.120     -       -  
+
+== whole-run drawn share noise ==   seeds 0/1/2/3/4
+  base         0.175  0.175  0.175  0.175  0.175
+  focus        0.104  0.104  0.113  0.092  0.102
+  m27          0.162  0.162  0.162  0.162  0.161
+  replay_late  0.150  0.149     -       -       -  
+  fulltd       0.106  0.114  0.111  0.108  0.101
+  graft        0.103  0.096  0.099     -       -  
+  lp           0.090  0.094  0.109     -       -  
+
+== last-phase rho (rho_by_phase[3]) ==   seeds 0/1/2/3/4
+  focus        0.279  0.280  0.293  0.279  0.281
+  fulltd       0.286  0.299  0.277  0.286  0.292
+  graft        0.181  0.236  0.236     -       -  
+
+== rho_cap_binds (counter) ==   seeds 0/1/2/3/4
+  focus        37.000  28.000  46.000  26.000  42.000
+  fulltd       36.000  47.000  39.000  38.000  43.000
+  graft        2.000  1.000  4.000     -       -  
+
+== focus.replans (counter) ==   seeds 0/1/2/3/4
+  focus        195.000  195.000  195.000  195.000  195.000
+  fulltd       195.000  195.000  195.000  195.000  195.000
+  graft        195.000  195.000  195.000     -       -  
+
+== Qa acc_true null_c ==   seeds 0/1/2/3/4
+  base         1.000  1.000  1.000  0.833  1.000
+  focus        0.875  0.958  0.958  0.958  1.000
+  m27          1.000  0.917  1.000  1.000  0.958
+  replay_late  1.000  0.875     -       -       -  
+  fulltd       0.917  0.875  1.000  0.792  1.000
+  graft        0.792  0.917  0.875     -       -  
+  lp           0.917  0.917  0.958     -       -  
+
+== Qc share_true null_c ==   seeds 0/1/2/3/4
+  base         0.450  0.536  0.870  0.485  0.535
+  focus        0.346  0.396  0.858  0.329  0.266
+  m27          0.411  0.620  0.893  0.491  0.520
+  replay_late  0.400  0.631     -       -       -  
+  fulltd       0.739  0.802  0.956  0.676  0.846
+  graft        0.800  0.844  0.802     -       -  
+  lp           0.392  0.676  0.781     -       -  
+
+== wall s ==   seeds 0/1/2/3/4
+  base         125.747  135.759  199.627  98.991  97.235
+  focus        270.190  267.834  126.978  123.027  119.221
+  m27          135.823  136.870  96.198  90.233  88.308
+  replay_late  95.365  94.660     -       -       -  
+  fulltd       241.067  243.507  124.665  126.404  125.938
+
+== wall_probe s ==   seeds 0/1/2/3/4
+  focus        49.796  48.966  24.009  23.042  22.996
+  m27          0.000  0.000  0.000  0.000  0.000
+  replay_late  0.000  0.000     -       -       -  
+  fulltd       42.620  43.784  22.515  22.668  22.829
+  rehearse     37.055  37.081     -       -       -  
+  focus_nomir  4.477  4.599     -       -       -  
+
+== probe share of wall (wall_probe / wall; MIR on except focus_nomir) ==   seeds 0/1/2/3/4
+  focus        0.184  0.183  0.189  0.187  0.193
+  fulltd       0.177  0.180  0.181  0.179  0.181
+  rehearse     0.191  0.191     -       -       -  
+  focus_nomir  0.043  0.043     -       -       -  
+
+== rehearse/focus_nomir mean6 ==   seeds 0/1
+  rehearse     1.442  1.339
+  focus_nomir  1.462  1.324
+  m27          1.434  1.400
+  focus        1.467  1.326
+
+== rehearse/focus_nomir gap_end hard ==   seeds 0/1
+  rehearse     1.715  1.481
+  focus_nomir  1.596  1.356
+  m27          1.599  1.629
+
+== rehearse/focus_nomir gap_end late ==   seeds 0/1
+  rehearse     2.054  2.065
+  focus_nomir  1.845  1.730
+  m27          2.221  2.090
+
+== rehearse last-phase rho ==   seeds 0/1
+  rehearse     0.197  0.193
+  focus_nomir  0.288  0.278
+
+== rehearse rho_cap_binds ==   seeds 0/1
+  rehearse     1.000  1.000
+  focus_nomir  41.000  26.000
+
+== per-phase noise gauge (live bytes only): noise share of the phase's LIVE bytes / even live share; then the learnable live areas noise out-draws ==
+  focus     s0  P0 0.80 []  P1 0.44 []  P2 0.43 []  P3 0.94 [cred,false,corrob]
+  focus     s1  P0 0.80 []  P1 0.42 []  P2 0.56 [easy,corrob]  P3 0.84 [cred,corrob]
+  focus     s2  P0 0.85 []  P1 0.44 []  P2 0.69 [easy,false,corrob]  P3 0.86 [cred,false,corrob]
+  focus     s3  P0 0.83 []  P1 0.45 []  P2 0.47 []  P3 0.52 [cred,corrob]
+  focus     s4  P0 0.85 []  P1 0.42 []  P2 0.51 []  P3 0.75 [cred,corrob]
+  fulltd    s0  P0 0.92 [false]  P1 0.45 [false]  P2 0.46 [false]  P3 0.81 [cred,false,corrob]
+  fulltd    s1  P0 0.86 [false]  P1 0.44 []  P2 0.66 [easy,false,corrob]  P3 0.94 [cred,false,corrob]
+  fulltd    s2  P0 0.90 [false]  P1 0.47 [false]  P2 0.67 [false,corrob]  P3 0.71 [false,corrob]
+  fulltd    s3  P0 0.86 [false]  P1 0.50 [false]  P2 0.76 [easy,false,corrob]  P3 0.54 [cred]
+  fulltd    s4  P0 0.88 [false]  P1 0.44 [false]  P2 0.60 [easy,false]  P3 0.59 [corrob]
+  graft     s0  P0 0.91 [false]  P1 0.69 [false]  P2 0.43 [false]  P3 0.46 []
+  graft     s1  P0 0.89 [false]  P1 0.62 [false]  P2 0.39 [false]  P3 0.44 []
+  graft     s2  P0 0.91 [false]  P1 0.57 [false]  P2 0.38 [false]  P3 0.56 [false,corrob]
+  rehearse  s0  P0 0.99 [hard,cred,false]  P1 1.02 [hard,easy,cred,false,corrob]  P2 1.01 [hard,easy,cred,false,corrob]  P3 0.93 []
+  rehearse  s1  P0 1.02 [hard,easy,cred,false,corrob]  P1 0.99 [easy,false]  P2 0.97 []  P3 0.99 []
+
+== paired differences ==   seeds 0/1/2/3/4
+  focus - m27          0.033  -0.074  -0.016  -0.009  -0.004   [mean6]
+  focus - base         -0.284  -0.338  -0.264  -0.188  -0.231   [mean6]
+  m27 - base         -0.317  -0.265  -0.248  -0.178  -0.226   [mean6]
+  replay_late - m27          0.008  -0.005     -       -       -     [mean6]
+  focus - replay_late  0.025  -0.068     -       -       -     [mean6]
+  focus - m27          0.021  -0.061  -0.035  0.005  0.023   [mean5]
+  focus - m27          -0.008  -0.293  -0.145  0.033  -0.105   [gap_end hard]
+  focus - m27          0.103  0.048  0.117  -0.003  0.117   [gap_end easy]
+  focus - m27          -0.382  -0.363  -0.359  -0.290  -0.261   [gap_end late]
+  focus - replay_late  -0.049  -0.005     -       -       -     [gap_end late]
+  focus - m27          0.095  0.218  0.160  0.091  0.145   [gap_end noise]
+  focus - m27          0.209  0.088  0.066  0.130  0.191   [gap_end cred]
+  focus - m27          0.183  0.212  0.149  0.155  0.174   [gap_end corrob]
+  focus - m27          -0.026  -0.105  -0.050  -0.038  -0.055   [time-integrated gap mean6]
+  focus - m27          0.039  -0.186  -0.090  0.058  -0.088   [time-integrated gap hard]
+  focus - m27          0.009  -0.278  -0.140  0.047  -0.102   [P3 mean gap hard]
+  focus - m27          0.200  0.158  0.233  0.123  0.168   [forget_hard]
+  fulltd - m27          -0.061  -0.269  -0.100  -0.179  -0.135   [gap_end hard]
+  fulltd - m27          0.102  0.052  0.000  0.018  0.090   [mean6]

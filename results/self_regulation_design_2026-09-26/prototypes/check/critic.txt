@@ -1,0 +1,2018 @@
+VERDICT sound-with-fixes
+
+##### 1 {
+ "severity": "blocking",
+ "what": "The self-regulated live allocation cannot act at the owner's default schedule. With 2 live areas, DATA_FOCUS_CAP 0.5 forces an exact 0.5/0.5 split whatever LP says. Pure-add has 1 live area, so there is nothing to allocate. That leaves rho as the only regulated quantity, and it mostly sits at its hand-set cap DATA_REHEARSE_MAX 0.3. At the owner's run shape, 'retention' is a hand schedule in disguise: roughly fixed replay at 0.3 plus a need-weighted split over at most 2 faded areas.",
+ "evidence": "I ran d3's exact cap-with-redistribution code (FocusPolicy.replan) with n_live=2. LP {1,0}, {0.9,0.1}, {0.01,0.02} and {0.5,0.5} all give shares 0.5/0.5. At 3 live areas, LP {1,0,0} gives 0.5/0.25/0.25. The map measured the tree's default generated schedule as [[0,1],[1,2],[1,2],[2,3]], which is 2 live areas per phase. rho sat at its cap in 37/49, 28/49 and 46/48 last-phase re-plans (focus s0/s1/s2 counters focus.rho_cap_binds) and in 36/47/39 (fulltd). The owner's real areas (eng, py, num, c) have no noise area and no mastered area, so the known-answer gauges can fire only on 'focusbed'. The one gain the controller genuinely earns on the toy comes from promoting hard in P2: hard share 0.33-0.42 among 6 live areas, and hard end gap 1.592/1.336/1.338 against 1.599/1.629/1.483 for m27. That is exactly the part the cap removes at 2 live areas.",
+ "fix": "(1) Make the cap relative: cap_a = min(DATA_FOCUS_CAP_MULT/n_live, 1 - floor share of the others), or apply the cap only at n_live >= 3. Say this in \u00a71 and \u00a76. (2) Add a gauge data.focus.alloc_freedom: the fraction of acts where the plan differs from what floor and cap alone force. It is ABSENT at n_live <= 1. (3) Add a 'focusbed' arm with the owner's schedule shape (phase_live 2, sequential fades) and a real-area E1 arm at DATA_PHASE_LIVE >= 3. (4) State plainly that at the shipped schedule only rho is regulated, and that rho is at its cap most of the time."
+}
+
+##### 2 {
+ "severity": "major",
+ "what": "The headline trade-off 'fixed replay protects the hard old area 4-7x better' is an artefact of the metric. forget_hard is measured relative to hard's level at the end of P2, and focus lowered that level by promoting hard in P2. On the end state, focus is as good as or better than matched replay on hard at 3 of 3 seeds, and it rehearses hard more in P3 than replay does.",
+ "evidence": "Hard gap at the end (bits/byte above oracle, null read): focus 1.592/1.336/1.338, m27 1.599/1.629/1.483, base 2.023/2.013/1.912 (s0/s1/s2), so focus minus m27 is -0.007/-0.293/-0.145. Hard gap at the end of P2: focus 1.341/1.124/1.069, m27 1.548/1.575/1.447. Hard's share of P3 bytes: focus 0.175/0.198/0.207, m27 0.135 (from phase_drawn_share). The dissent, \u00a70, \u00a71 item 1 'Why OFF', \u00a74 'Starving old areas', \u00a78 Q2 and the motivation for DATA_REHEARSE_MIN all rest on forget_hard 0.21-0.27 against 0.036-0.054.",
+ "fix": "Make per-area end-state gaps (and a time-integrated gap) the primary goal-B readings, and keep forget_X as secondary with its reference point stated. Rewrite the dissent and \u00a78 Q2 on end-state numbers, and re-derive or drop the DATA_REHEARSE_MIN rationale. Apply the same correction to E1's pre-set rule."
+}
+
+##### 3 {
+ "severity": "major",
+ "what": "The newest-area 'plasticity' advantage, which is E1's tie-break condition, comes from exposure. A one-number hand schedule reproduces it, so it cannot tell self-regulation from a fixed boost to the newest area.",
+ "evidence": "Late's share of all bytes drawn: focus 0.085/0.086/0.084, m27 0.037/0.037/0.036. Its share of P3: 0.33-0.34 against 0.146. I added a critic arm, replay_late (critic/w/d3/run.py): 27% deficit-spread replay, late fixed at 0.34 of P3, the rest even. Seeds 0/1, paired (cred oracle identical). Late gap: replay_late 1.888/1.733, focus 1.839/1.727, m27 2.221/2.090. mean6: replay_late 1.441/1.395, focus 1.467/1.326, m27 1.434/1.400. The 0.34 value was taken from focus's realised share. This arm has the PYTHONHASHSEED set-order effect in minor issue 1: magnitude of order 0.003 at the one pair checked (m27 s1), well below these gaps.",
+ "fix": "Add a hand-set 'replay + newest boost' arm to E1. Replace 'AND its newest-area gap is better' with a pre-registered all-area end-state criterion charged for compute. Report per-phase byte shares next to every per-area gap, so exposure effects are visible."
+}
+
+##### 4 {
+ "severity": "major",
+ "what": "The noisy-TV trap comes back through absolute LP under interference. Once the conflicting late area arrives, noise's held-out loss drifts, |LP| rewards that drift, and noise out-draws the credible sources for the whole last phase. \u00a74's guard statement is contradicted. The whole-run noise_demoted gauge hides it.",
+ "evidence": "From the focus_s0/s1 focus_log_sample, P3 re-plans at steps 1550-1900: LP for noise is 0.0009-0.0040, cred 0-0.0005, corrob 0-0.0006. P3 shares: noise 0.137/0.121/0.122, cred 0.064/0.066/0.107, corrob 0.065/0.061/0.072. \u00a74 says 'noise never fades, so its interference-driven loss rise cannot re-attract it'. It is re-attracted as a live area. The whole-run noise share of 0.104-0.113 averages over this.",
+ "fix": "Make the gauges per phase (noise_demoted per phase, not per run). For live areas, use signed improvement on the held-out probe (decrease only) or an LP net of a drift estimate, and keep absolute or negative slope only for faded areas' need. Add the P3 interference case to the known-answer tests."
+}
+
+##### 5 {
+ "severity": "major",
+ "what": "The claim-level truth discovery chosen as the credibility book judges surface-form agreement with the majority, not truth. Its context length is tuned to the testbed's record format, and it fails when a truthful source uses another format, when a source label lies, and when the truth goes stale. The tree's DATA_TRUST_CTX is 5 TOK units, not bytes, so the known answer would not port either.",
+ "evidence": "Critic stress runs, model-free, reproducing ClaimTD's logic on the planned draw (critic/td_stress.py, critic/out/td_*.json). (a) K=5 baseline: the liar is floored by step 100, reproducing d3. (b) A truthful cred that writes '@EEE:V;' is floored (r 0.001, t 0.3) and the liar is fully trusted (r 0.999) at seeds 0 and 1. The decoded conflicts are ';@EEE' -> '=' vs ':'. (c) A liar that switches delimiter is still floored, but only for its format (1631 'conflicts', all delimiter). (d) K=3 floors the harmless easy area (r 0.016, t 0.3) and only reduces the liar to t 0.61. K=8 has 0 conflicts until step 1460 and 11 at the end, and trust never actuates. K=5 equals len('@EEE='). (e) Impersonation, 50% of the liar's segments labelled cred: corrob is floored and the liar trusted (r 0.973) at seed 0. At 30% it still works. (f) Staleness, a late source stating updated truth for 24 W entities: down-weighted to t 0.58 (seed 0). Separately, fulltd costs agreed facts: Qa 0.92/0.88/1.00 against base 1.00/1.00/1.00, which the proposal does not report.",
+ "fix": "Keep 'observe' (as proposed), but: add format-variant, impersonation, stale-truth and mixed-reliability-area worlds to 'focusbed' and to E5's actuation guard. Report the K sweep. Specify claims as aligned (key, value) pairs with a normalised key rather than raw K-unit contexts, or state that the rule measures conformity. Declare that 'loss+draw' may never default on while a truthful-but-different-format source is floored. Report the Qa cost."
+}
+
+##### 6 {
+ "severity": "major",
+ "what": "The specified resume order is not bit-exact. \u00a75 says resume replays draw_stream, then every logged redraw, then S0b's seg_log. compose.py::_replay_segmentation replays every tokenize and splice event against ONE stream, but each splice was cut on the bytes as they stood at that act. Longest-match lookahead across at_byte and the consumption of the dropout stream both depend on those bytes.",
+ "evidence": "src/spine/compose.py:2315-2330 replays events with tok_api.tokenize and tok_api.splice(stream.bytes, stream.labels) of a single stream. src/tok/api.py:1665 splice keeps ids[:at+1] and segments data from byte_pos[at+1], so the token at the cursor was chosen on the pre-redraw bytes. The act at src/spine/loop.py:1195-1240 always passes sysm.stream.bytes.",
+ "fix": "Log a redraw as an event kind inside seg_log (at_byte, shares, rng child), and replay tokenize, splice and redraw strictly in act order, rebuilding the stream at each redraw event. SR1's test should include a retok act before and after a redraw, TOK_DROPOUT > 0, and a token that straddles at_byte."
+}
+
+##### 7 {
+ "severity": "major",
+ "what": "The retention probe will read the tree's own retok acts as learning progress or forgetting. Probe windows are token ids at the current view, and S0b acts now re-segment whenever TOK mints. Each act moves the probe's tokenization and puts fresh, untrained ids into it. The result is a step in L that the fast/slow books count as |LP| and that faded areas count as Lf - best > 0, so rehearsal is triggered by vocabulary growth. The toy has no tokenizer, so this was never exercised.",
+ "evidence": "The S0b act is live in HEAD (src/spine/loop.py:1195, TOK retok_pending -> TOK.splice, commits 54378b8/c8d8e33/c5768be). The map measured tok.mint 12-18 per short run on a 200-window grow cadence. d3's Books.update applies EMAs across any discontinuity.",
+ "fix": "Rebase the focus books at every view change: drop the interval that spans an act, reset best and Lf to the first post-act reading, and count data.focus.rebased. Alternatively, probe at a recorded fixed view. Measure the size of the probe step per act at SR2 on real text."
+}
+
+##### 8 {
+ "severity": "major",
+ "what": "'Probe ON by default is telemetry only' is untested, and DATA_SYNTH_HOLDOUT ON is not free. SR0's test (bit-exact against HEAD with the probe off) checks the wrong condition. A probe forward through a stateful model (FAB forward with its training flag, MEM reads, RNG streams) can perturb training. Turning on a synthetic holdout changes the holdout record from 0 bytes to n bytes, which restore_stream_state refuses when resuming an existing synthetic checkpoint.",
+ "evidence": "The proposal's header says the default changes 'in exactly two places, both telemetry'. src/data/api.py:1678 restore_stream_state refuses a resume whose holdout size moved. src/fabric/api.py:2134 forward takes training= and step_windows=.",
+ "fix": "Add a SR0 test: probe ON against probe OFF gives identical training losses and state, bit for bit. Give DATA_SYNTH_HOLDOUT a resume rule (admit 0 -> n under a named counter) or ship it OFF. List both as default behaviour changes."
+}
+
+##### 9 {
+ "severity": "major",
+ "what": "E1's decision rule is biased toward the costly arm and ignores compute. retention wins if it is within 1 paired SD of replay at n=3, which is a very wide band. The tie-break is the exposure-confounded newest-area gap (see above). The probe's compute is not charged, although the owner says performance decides.",
+ "evidence": "On the toy, the probe is 50/270 s (18.5%, focus s0, MIR on) and trust is 16.7/241 s (7%). The tree projection at 160 windows is about 15% extra forward windows. None of the toy comparisons are compute-matched; d1's base_cm exists but is not used in E1.",
+ "fix": "Pre-register E1 on all-area end-state bits/byte with a compute-matched replay arm (the probe's FLOPs given back as training bytes). Use at least 5 seeds or a stated paired test, and fix the tie-break before the runs."
+}
+
+##### 10 {
+ "severity": "major",
+ "what": "'replay' is wrongly made dependent on the S0b act and SR1. The faded set of every phase is known from the phase schedule at data_plan time, so fixed replay can be laid by draw_stream at startup, with exact exposure gates, no redraw log and no act. The one measured, cheap goal-B gain is therefore delayed behind the riskiest build stage.",
+ "evidence": "\u00a75 says: \"'retention' and 'replay' re-lay the tail and need the act\". d3's ReplayFixed sets its shares at phase entry from PHASES alone and uses no runtime signal. Against planned it measured mean6 -0.317/-0.265/-0.248, hard forgetting 0.051/0.054/0.036 against 0.449/0.594/0.434.",
+ "fix": "Build DATA_DRAW='replay' at SR0 inside data_plan and draw_stream, with a startup plan and exact gates. Keep only 'retention' behind SR1."
+}
+
+##### 11 {
+ "severity": "minor",
+ "what": "The matched-replay control is not deterministic across processes. ReplayFixed iterates a Python set (self.ever), so the order of faded areas and the deficit tie-breaks depend on PYTHONHASHSEED. This is the same bug class the judge declared fixed, but the judge's determinism checks did not cover this arm.",
+ "evidence": "Critic rerun of d3 replay_fixed --replay 0.27 --seed 1 under PYTHONHASHSEED=31337: drawn_share differs. mean6 1.4002 against the designer's 1.4000, hard gap 1.6265 against 1.6286, forget_hard 0.0516 against 0.0537. By contrast, d1 lp s2 rerun under the same hash seed is bit-identical to d1/out/lp_s2.json.",
+ "fix": "Iterate areas in AREAS or name order in every policy, and say that the tree's 'replay' must do the same. The effect is small (under 0.004 bits/byte), so the conclusions stand."
+}
+
+##### 12 {
+ "severity": "minor",
+ "what": "The rehearsal amount and onset are listed as self-regulated or emergent, but they are hand-set or fixed by construction. rho is at DATA_REHEARSE_MAX most of the time. Onset equals the probe cadence, because need > 0 at the first post-fade probe, and fixed replay also turns on at the fade.",
+ "evidence": "At the first P3 re-plan (step 1480, s0), need easy is 0.0033 and rho is 0.3 immediately. rho cap binds 28-46 of 48-49. \u00a70 says 'the rehearsal amount ... are the run's, not the operator's'.",
+ "fix": "Report rho-at-cap as a gauge. Move onset and amount from 'left to emerge' to 'built'."
+}
+
+##### 13 {
+ "severity": "minor",
+ "what": "Emergence is mislabelled. \u00a73 lists 'the ranking of sources by reliability' as left to emerge, but an explicit truth-discovery algorithm computes it. credibility.emerged 'fires for tag-TD', which is an explicit TD run over tag-conditioned outputs. steer_gap only shows that the model uses a predictive input. The only model-internal credibility gauges are default_trust and style_gap, and both are PRESENT-and-0.",
+ "evidence": "proposal \u00a73 gauge table; tags null_c Qc share 0.62/0.59/0.81 vs tag_c 0.79/0.80/0.88; style gap <= 0.083",
+ "fix": "Relabel the built pieces as built. Keep the emergence claim to per-source conditionals given the tag, and state that trust inside the model did not emerge."
+}
+
+##### 14 {
+ "severity": "minor",
+ "what": "The graft 'composes' headline compares a tagged read against a null read.",
+ "evidence": "Graft tagged mean5 1.335/1.197/1.209 is compared with fulltd's NULL read 1.422/1.319/1.285. The like-for-like comparison is against tags-only tagged read 1.416/1.362/1.352 (-0.08/-0.17/-0.14). The untagged cost is +0.086/+0.048/+0.117 mean6 against fulltd.",
+ "fix": "Lead with the like-for-like comparisons."
+}
+
+##### 15 {
+ "severity": "minor",
+ "what": "The tag channel enters LM.encode's output h, which feeds FAB routing and MEM keys. FAB expert specialisation and MEM retrieval may therefore key on the given label, turning 'emergent' structure into label-driven structure. This is untested and has no gauge.",
+ "evidence": "src/spine/loop.py:1890 h = lm_api.encode(...) feeds FAB.forward(h=...). SIG signatures come from bytes (compose._signature_stream), so DOM is not affected.",
+ "fix": "Add E4 gauges: FAB expert-area purity and MEM hit-area purity with the tag on and off."
+}
+
+##### 16 {
+ "severity": "minor",
+ "what": "Several tree-fit details are wrong or missing.",
+ "evidence": "(a) HEAD's act branch treats an act with no view move as tok.retok_noop, and otherwise always sets mem_remap and resegment and stamps a shift (loop.py:1203-1240). A redraw-only act needs its own branch, yet \u00a75 says 'MEM needs no remap'. (b) Every stamp blacks out FAB growth for FAB_COOLDOWN 400 windows. At one act per 960 windows plus retok acts, that is a large blackout fraction nobody counts. OPT_LR_SHIFT_WARM defaults to 0, so 'OPT's re-warm reads it' is inert. (c) DATA_EXPOSURE_MAX is an exposure ratio, not a share, so 'hard ceiling on any share' needs a conversion to bytes. (d) Rolling back seg_contig cursors at a redraw is not specified (the map flagged it). (e) EVAL.retention_probe duplicates the frozen, deferred EVAL.holdout_probe(ev, *, units_by_domain, logits_fn, rng) at eval/api.py:271. (f) d3's MIR does in-place p.sub_ then p.add_, which is not exactly reversible in floating point.",
+ "fix": "Specify a redraw-only act branch. Add a fab.blackout_windows counter. Convert exposure_max to a byte ceiling. Snapshot cursors per segment. Consider filling holdout_probe keyed by area name instead of adding an entry point. Require interference_probe to use functional parameter copies."
+}
+
+##### 17 {
+ "severity": "minor",
+ "what": "The testbed is too easy for the risks the owner asked about.",
+ "evidence": "There is 1 fade event, and 6 areas are co-live for 75% of the stream. Batch is 16 against 1. There is no tokenizer, and the corpus is 4 MB against ~20 MB. Facts are byte-exact repeated records. Nothing tests 2-live-area phases, multiple sequential fades or a mixed-reliability area. The frame-rate thread has no measurement at all.",
+ "fix": "Extend 'focusbed' with a schedule shaped like the owner's (sequential fades, 2 live areas, pure-add), batch 1, a tokenizer in the loop, and paraphrased or format-varied fact records."
+}
+
+##### MISSING
+1 1
+2 .
+3  
+4 A
+5 n
+6  
+7 a
+8 r
+9 m
+10  
+11 a
+12 t
+13  
+14 t
+15 h
+16 e
+17  
+18 o
+19 w
+20 n
+21 e
+22 r
+23 '
+24 s
+25  
+26 s
+27 c
+28 h
+29 e
+30 d
+31 u
+32 l
+33 e
+34  
+35 s
+36 h
+37 a
+38 p
+39 e
+40 .
+41  
+42 T
+43 h
+44 a
+45 t
+46  
+47 m
+48 e
+49 a
+50 n
+51 s
+52  
+53 p
+54 h
+55 a
+56 s
+57 e
+58 _
+59 l
+60 i
+61 v
+62 e
+63  
+64 2
+65  
+66 (
+67 t
+68 h
+69 e
+70  
+71 g
+72 e
+73 n
+74 e
+75 r
+76 a
+77 t
+78 e
+79 d
+80  
+81 s
+82 l
+83 i
+84 d
+85 i
+86 n
+87 g
+88  
+89 w
+90 i
+91 n
+92 d
+93 o
+94 w
+95 )
+96  
+97 a
+98 n
+99 d
+100  
+101 p
+102 u
+103 r
+104 e
+105 -
+106 a
+107 d
+108 d
+109  
+110 w
+111 i
+112 t
+113 h
+114  
+115 1
+116  
+117 l
+118 i
+119 v
+120 e
+121  
+122 a
+123 r
+124 e
+125 a
+126 ,
+127  
+128 a
+129 t
+130  
+131 b
+132 a
+133 t
+134 c
+135 h
+136  
+137 1
+138 .
+139  
+140 A
+141 t
+142  
+143 t
+144 h
+145 a
+146 t
+147  
+148 s
+149 h
+150 a
+151 p
+152 e
+153  
+154 t
+155 h
+156 e
+157  
+158 a
+159 l
+160 l
+161 o
+162 c
+163 a
+164 t
+165 i
+166 o
+167 n
+168  
+169 c
+170 a
+171 n
+172 n
+173 o
+174 t
+175  
+176 m
+177 o
+178 v
+179 e
+180  
+181 (
+182 b
+183 l
+184 o
+185 c
+186 k
+187 i
+188 n
+189 g
+190  
+191 i
+192 s
+193 s
+194 u
+195 e
+196 )
+197 ,
+198  
+199 a
+200 n
+201 d
+202  
+203 n
+204 o
+205  
+206 r
+207 u
+208 n
+209  
+210 t
+211 e
+212 s
+213 t
+214 s
+215  
+216 i
+217 t
+218 .
+219 
+
+220 2
+221 .
+222  
+223 H
+224 a
+225 n
+226 d
+227 -
+228 s
+229 e
+230 t
+231  
+232 c
+233 o
+234 n
+235 t
+236 r
+237 o
+238 l
+239 s
+240  
+241 s
+242 t
+243 r
+244 o
+245 n
+246 g
+247  
+248 e
+249 n
+250 o
+251 u
+252 g
+253 h
+254  
+255 t
+256 o
+257  
+258 t
+259 e
+260 l
+261 l
+262  
+263 s
+264 e
+265 l
+266 f
+267 -
+268 r
+269 e
+270 g
+271 u
+272 l
+273 a
+274 t
+275 i
+276 o
+277 n
+278  
+279 f
+280 r
+281 o
+282 m
+283  
+284 a
+285  
+286 s
+287 c
+288 h
+289 e
+290 d
+291 u
+292 l
+293 e
+294 .
+295  
+296 '
+297 R
+298 e
+299 p
+300 l
+301 a
+302 y
+303  
+304 +
+305  
+306 n
+307 e
+308 w
+309 e
+310 s
+311 t
+312  
+313 b
+314 o
+315 o
+316 s
+317 t
+318 '
+319  
+320 w
+321 a
+322 s
+323  
+324 n
+325 e
+326 v
+327 e
+328 r
+329  
+330 r
+331 u
+332 n
+333  
+334 b
+335 y
+336  
+337 t
+338 h
+339 e
+340  
+341 d
+342 e
+343 s
+344 i
+345 g
+346 n
+347 e
+348 r
+349 s
+350 ;
+351  
+352 t
+353 h
+354 e
+355  
+356 c
+357 r
+358 i
+359 t
+360 i
+361 c
+362  
+363 r
+364 a
+365 n
+366  
+367 i
+368 t
+369  
+370 a
+371 t
+372  
+373 2
+374  
+375 s
+376 e
+377 e
+378 d
+379 s
+380 .
+381  
+382 A
+383  
+384 c
+385 o
+386 m
+387 p
+388 u
+389 t
+390 e
+391 -
+392 m
+393 a
+394 t
+395 c
+396 h
+397 e
+398 d
+399  
+400 r
+401 e
+402 p
+403 l
+404 a
+405 y
+406  
+407 w
+408 a
+409 s
+410  
+411 a
+412 l
+413 s
+414 o
+415  
+416 m
+417 i
+418 s
+419 s
+420 i
+421 n
+422 g
+423 .
+424 
+
+425 3
+426 .
+427  
+428 E
+429 n
+430 d
+431 -
+432 s
+433 t
+434 a
+435 t
+436 e
+437  
+438 a
+439 n
+440 d
+441  
+442 t
+443 i
+444 m
+445 e
+446 -
+447 i
+448 n
+449 t
+450 e
+451 g
+452 r
+453 a
+454 t
+455 e
+456 d
+457  
+458 p
+459 e
+460 r
+461 -
+462 a
+463 r
+464 e
+465 a
+466  
+467 m
+468 e
+469 t
+470 r
+471 i
+472 c
+473 s
+474  
+475 i
+476 n
+477  
+478 p
+479 l
+480 a
+481 c
+482 e
+483  
+484 o
+485 f
+486  
+487 l
+488 e
+489 v
+490 e
+491 l
+492 -
+493 r
+494 e
+495 l
+496 a
+497 t
+498 i
+499 v
+500 e
+501  
+502 f
+503 o
+504 r
+505 g
+506 e
+507 t
+508 t
+509 i
+510 n
+511 g
+512 .
+513 
+
+514 4
+515 .
+516  
+517 P
+518 e
+519 r
+520 -
+521 p
+522 h
+523 a
+524 s
+525 e
+526  
+527 s
+528 h
+529 a
+530 r
+531 e
+532  
+533 g
+534 a
+535 u
+536 g
+537 e
+538 s
+539 .
+540  
+541 W
+542 i
+543 t
+544 h
+545 o
+546 u
+547 t
+548  
+549 t
+550 h
+551 e
+552 m
+553 ,
+554  
+555 t
+556 h
+557 e
+558  
+559 P
+560 3
+561  
+562 i
+563 n
+564 t
+565 e
+566 r
+567 f
+568 e
+569 r
+570 e
+571 n
+572 c
+573 e
+574 -
+575 d
+576 r
+577 i
+578 v
+579 e
+580 n
+581  
+582 n
+583 o
+584 i
+585 s
+586 e
+587  
+588 r
+589 e
+590 -
+591 a
+592 t
+593 t
+594 r
+595 a
+596 c
+597 t
+598 i
+599 o
+600 n
+601  
+602 i
+603 s
+604  
+605 i
+606 n
+607 v
+608 i
+609 s
+610 i
+611 b
+612 l
+613 e
+614 .
+615 
+
+616 5
+617 .
+618  
+619 C
+620 r
+621 e
+622 d
+623 i
+624 b
+625 i
+626 l
+627 i
+628 t
+629 y
+630  
+631 s
+632 t
+633 r
+634 e
+635 s
+636 s
+637  
+638 w
+639 o
+640 r
+641 l
+642 d
+643 s
+644 :
+645  
+646 f
+647 o
+648 r
+649 m
+650 a
+651 t
+652  
+653 v
+654 a
+655 r
+656 i
+657 a
+658 t
+659 i
+660 o
+661 n
+662 ,
+663  
+664 l
+665 a
+666 b
+667 e
+668 l
+669  
+670 i
+671 m
+672 p
+673 e
+674 r
+675 s
+676 o
+677 n
+678 a
+679 t
+680 i
+681 o
+682 n
+683 ,
+684  
+685 s
+686 t
+687 a
+688 l
+689 e
+690  
+691 t
+692 r
+693 u
+694 t
+695 h
+696 ,
+697  
+698 a
+699 n
+700 d
+701  
+702 a
+703  
+704 m
+705 i
+706 x
+707 e
+708 d
+709 -
+710 r
+711 e
+712 l
+713 i
+714 a
+715 b
+716 i
+717 l
+718 i
+719 t
+720 y
+721  
+722 a
+723 r
+724 e
+725 a
+726 .
+727  
+728 T
+729 h
+730 e
+731  
+732 c
+733 r
+734 i
+735 t
+736 i
+737 c
+738  
+739 r
+740 a
+741 n
+742  
+743 f
+744 o
+745 r
+746 m
+747 a
+748 t
+749  
+750 v
+751 a
+752 r
+753 i
+754 a
+755 t
+756 i
+757 o
+758 n
+759  
+760 (
+761 s
+762 e
+763 e
+764 d
+765 s
+766  
+767 0
+768 /
+769 1
+770 )
+771 ,
+772  
+773 i
+774 m
+775 p
+776 e
+777 r
+778 s
+779 o
+780 n
+781 a
+782 t
+783 i
+784 o
+785 n
+786  
+787 (
+788 s
+789 e
+790 e
+791 d
+792  
+793 0
+794 )
+795 ,
+796  
+797 s
+798 t
+799 a
+800 l
+801 e
+802  
+803 t
+804 r
+805 u
+806 t
+807 h
+808  
+809 (
+810 s
+811 e
+812 e
+813 d
+814  
+815 0
+816 )
+817  
+818 a
+819 n
+820 d
+821  
+822 a
+823  
+824 K
+825  
+826 s
+827 w
+828 e
+829 e
+830 p
+831  
+832 (
+833 s
+834 e
+835 e
+836 d
+837  
+838 0
+839 )
+840 ;
+841  
+842 t
+843 h
+844 e
+845  
+846 m
+847 i
+848 x
+849 e
+850 d
+851 -
+852 r
+853 e
+854 l
+855 i
+856 a
+857 b
+858 i
+859 l
+860 i
+861 t
+862 y
+863  
+864 a
+865 r
+866 e
+867 a
+868  
+869 r
+870 e
+871 m
+872 a
+873 i
+874 n
+875 s
+876  
+877 u
+878 n
+879 t
+880 e
+881 s
+882 t
+883 e
+884 d
+885 .
+886 
+
+887 6
+888 .
+889  
+890 A
+891  
+892 r
+893 e
+894 a
+895 l
+896 -
+897 t
+898 e
+899 x
+900 t
+901  
+902 c
+903 l
+904 a
+905 i
+906 m
+907  
+908 a
+909 u
+910 d
+911 i
+912 t
+913  
+914 (
+915 E
+916 3
+917  
+918 i
+919 s
+920  
+921 p
+922 r
+923 o
+924 p
+925 o
+926 s
+927 e
+928 d
+929  
+930 b
+931 u
+932 t
+933  
+934 u
+935 n
+936 m
+937 e
+938 a
+939 s
+940 u
+941 r
+942 e
+943 d
+944 )
+945 .
+946 
+
+947 7
+948 .
+949  
+950 F
+951 o
+952 u
+953 r
+954  
+955 t
+956 e
+957 s
+958 t
+959 s
+960  
+961 t
+962 h
+963 a
+964 t
+965  
+966 d
+967 o
+968  
+969 n
+970 o
+971 t
+972  
+973 e
+974 x
+975 i
+976 s
+977 t
+978  
+979 y
+980 e
+981 t
+982 :
+983  
+984 p
+985 r
+986 o
+987 b
+988 e
+989  
+990 O
+991 N
+992  
+993 v
+994 s
+995  
+996 O
+997 F
+998 F
+999  
+1000 t
+1001 r
+1002 a
+1003 i
+1004 n
+1005 i
+1006 n
+1007 g
+1008  
+1009 b
+1010 i
+1011 t
+1012 -
+1013 e
+1014 x
+1015 a
+1016 c
+1017 t
+1018 n
+1019 e
+1020 s
+1021 s
+1022 ;
+1023  
+1024 t
+1025 h
+1026 e
+1027  
+1028 i
+1029 n
+1030 t
+1031 e
+1032 r
+1033 a
+1034 c
+1035 t
+1036 i
+1037 o
+1038 n
+1039  
+1040 b
+1041 e
+1042 t
+1043 w
+1044 e
+1045 e
+1046 n
+1047  
+1048 r
+1049 e
+1050 t
+1051 o
+1052 k
+1053  
+1054 a
+1055 c
+1056 t
+1057 s
+1058  
+1059 a
+1060 n
+1061 d
+1062  
+1063 t
+1064 h
+1065 e
+1066  
+1067 p
+1068 r
+1069 o
+1070 b
+1071 e
+1072 ;
+1073  
+1074 r
+1075 e
+1076 d
+1077 r
+1078 a
+1079 w
+1080 -
+1081 i
+1082 n
+1083 t
+1084 e
+1085 r
+1086 l
+1087 e
+1088 a
+1089 v
+1090 e
+1091 d
+1092  
+1093 s
+1094 e
+1095 g
+1096 _
+1097 l
+1098 o
+1099 g
+1100  
+1101 r
+1102 e
+1103 p
+1104 l
+1105 a
+1106 y
+1107 ;
+1108  
+1109 t
+1110 h
+1111 e
+1112  
+1113 r
+1114 e
+1115 s
+1116 u
+1117 m
+1118 e
+1119  
+1120 c
+1121 o
+1122 m
+1123 p
+1124 a
+1125 t
+1126 i
+1127 b
+1128 i
+1129 l
+1130 i
+1131 t
+1132 y
+1133  
+1134 o
+1135 f
+1136  
+1137 D
+1138 A
+1139 T
+1140 A
+1141 _
+1142 S
+1143 Y
+1144 N
+1145 T
+1146 H
+1147 _
+1148 H
+1149 O
+1150 L
+1151 D
+1152 O
+1153 U
+1154 T
+1155 .
+1156 
+
+1157 8
+1158 .
+1159  
+1160 T
+1161 h
+1162 e
+1163  
+1164 T
+1165 O
+1166 K
+1167 .
+1168 s
+1169 p
+1170 l
+1171 i
+1172 c
+1173 e
+1174  
+1175 t
+1176 i
+1177 m
+1178 i
+1179 n
+1180 g
+1181  
+1182 o
+1183 n
+1184  
+1185 a
+1186  
+1187 1
+1188 7
+1189  
+1190 M
+1191 B
+1192  
+1193 t
+1194 a
+1195 i
+1196 l
+1197 ,
+1198  
+1199 s
+1200 t
+1201 i
+1202 l
+1203 l
+1204  
+1205 o
+1206 w
+1207 e
+1208 d
+1209 .
+1210 
+
+1211 9
+1212 .
+1213  
+1214 A
+1215 n
+1216 y
+1217  
+1218 m
+1219 e
+1220 a
+1221 s
+1222 u
+1223 r
+1224 e
+1225 m
+1226 e
+1227 n
+1228 t
+1229  
+1230 a
+1231 t
+1232  
+1233 a
+1234 l
+1235 l
+1236  
+1237 f
+1238 o
+1239 r
+1240  
+1241 f
+1242 r
+1243 a
+1244 m
+1245 e
+1246 -
+1247 r
+1248 a
+1249 t
+1250 e
+1251  
+1252 s
+1253 e
+1254 l
+1255 f
+1256 -
+1257 r
+1258 e
+1259 g
+1260 u
+1261 l
+1262 a
+1263 t
+1264 i
+1265 o
+1266 n
+1267 .
+1268 
+
+1269 1
+1270 0
+1271 .
+1272  
+1273 F
+1274 o
+1275 r
+1276  
+1277 t
+1278 h
+1279 e
+1280  
+1281 c
+1282 r
+1283 e
+1284 d
+1285 i
+1286 b
+1287 i
+1288 l
+1289 i
+1290 t
+1291 y
+1292  
+1293 h
+1294 e
+1295 a
+1296 d
+1297 l
+1298 i
+1299 n
+1300 e
+1301 :
+1302  
+1303 Q
+1304 c
+1305  
+1306 i
+1307 s
+1308  
+1309 2
+1310 4
+1311  
+1312 i
+1313 t
+1314 e
+1315 m
+1316 s
+1317 ,
+1318  
+1319 a
+1320 n
+1321 d
+1322  
+1323 t
+1324 h
+1325 e
+1326  
+1327 b
+1328 a
+1329 s
+1330 e
+1331  
+1332 s
+1333 e
+1334 e
+1335 d
+1336  
+1337 s
+1338 p
+1339 r
+1340 e
+1341 a
+1342 d
+1343  
+1344 o
+1345 f
+1346  
+1347 0
+1348 .
+1349 4
+1350 2
+1351 -
+1352 0
+1353 .
+1354 9
+1355 2
+1356  
+1357 d
+1358 w
+1359 a
+1360 r
+1361 f
+1362 s
+1363  
+1364 m
+1365 o
+1366 s
+1367 t
+1368  
+1369 p
+1370 e
+1371 r
+1372 -
+1373 s
+1374 e
+1375 e
+1376 d
+1377  
+1378 d
+1379 i
+1380 f
+1381 f
+1382 e
+1383 r
+1384 e
+1385 n
+1386 c
+1387 e
+1388 s
+1389 .
+1390 
+
+1391 
+
+1392 C
+1393 r
+1394 i
+1395 t
+1396 i
+1397 c
+1398  
+1399 s
+1400 c
+1401 r
+1402 a
+1403 t
+1404 c
+1405 h
+1406  
+1407 p
+1408 a
+1409 t
+1410 h
+1411 s
+1412 :
+1413 
+
+1414 -
+1415  
+1416 /
+1417 t
+1418 m
+1419 p
+1420 /
+1421 c
+1422 l
+1423 a
+1424 u
+1425 d
+1426 e
+1427 -
+1428 0
+1429 /
+1430 -
+1431 h
+1432 o
+1433 m
+1434 e
+1435 -
+1436 u
+1437 s
+1438 e
+1439 r
+1440 -
+1441 L
+1442 L
+1443 M
+1444 -
+1445 T
+1446 e
+1447 s
+1448 t
+1449 /
+1450 e
+1451 8
+1452 8
+1453 0
+1454 c
+1455 a
+1456 f
+1457 7
+1458 -
+1459 1
+1460 2
+1461 0
+1462 8
+1463 -
+1464 5
+1465 8
+1466 d
+1467 e
+1468 -
+1469 9
+1470 3
+1471 f
+1472 d
+1473 -
+1474 4
+1475 9
+1476 c
+1477 4
+1478 1
+1479 5
+1480 4
+1481 9
+1482 b
+1483 f
+1484 7
+1485 0
+1486 /
+1487 s
+1488 c
+1489 r
+1490 a
+1491 t
+1492 c
+1493 h
+1494 p
+1495 a
+1496 d
+1497 /
+1498 m
+1499 m
+1500 3
+1501 /
+1502 c
+1503 r
+1504 i
+1505 t
+1506 i
+1507 c
+1508 /
+1509 t
+1510 d
+1511 _
+1512 s
+1513 t
+1514 r
+1515 e
+1516 s
+1517 s
+1518 .
+1519 p
+1520 y
+1521  
+1522 (
+1523 m
+1524 o
+1525 d
+1526 e
+1527 l
+1528 -
+1529 f
+1530 r
+1531 e
+1532 e
+1533  
+1534 C
+1535 l
+1536 a
+1537 i
+1538 m
+1539 T
+1540 D
+1541  
+1542 s
+1543 t
+1544 r
+1545 e
+1546 s
+1547 s
+1548 )
+1549 
+
+1550 -
+1551  
+1552 c
+1553 r
+1554 i
+1555 t
+1556 i
+1557 c
+1558 /
+1559 t
+1560 d
+1561 _
+1562 d
+1563 b
+1564 g
+1565 .
+1566 p
+1567 y
+1568  
+1569 (
+1570 d
+1571 e
+1572 c
+1573 o
+1574 d
+1575 e
+1576 s
+1577  
+1578 c
+1579 o
+1580 n
+1581 f
+1582 l
+1583 i
+1584 c
+1585 t
+1586 e
+1587 d
+1588  
+1589 c
+1590 l
+1591 a
+1592 i
+1593 m
+1594 s
+1595 )
+1596 
+
+1597 -
+1598  
+1599 c
+1600 r
+1601 i
+1602 t
+1603 i
+1604 c
+1605 /
+1606 o
+1607 u
+1608 t
+1609 /
+1610 t
+1611 d
+1612 _
+1613 *
+1614 .
+1615 j
+1616 s
+1617 o
+1618 n
+1619 
+
+1620 -
+1621  
+1622 c
+1623 r
+1624 i
+1625 t
+1626 i
+1627 c
+1628 /
+1629 q
+1630 _
+1631 t
+1632 d
+1633 .
+1634 s
+1635 h
+1636 
+
+1637 -
+1638  
+1639 c
+1640 r
+1641 i
+1642 t
+1643 i
+1644 c
+1645 /
+1646 w
+1647 /
+1648 d
+1649 3
+1650 /
+1651 r
+1652 u
+1653 n
+1654 .
+1655 p
+1656 y
+1657  
+1658 (
+1659 d
+1660 3
+1661  
+1662 p
+1663 l
+1664 u
+1665 s
+1666  
+1667 t
+1668 h
+1669 e
+1670  
+1671 r
+1672 e
+1673 p
+1674 l
+1675 a
+1676 y
+1677 _
+1678 l
+1679 a
+1680 t
+1681 e
+1682  
+1683 a
+1684 r
+1685 m
+1686 )
+1687 
+
+1688 -
+1689  
+1690 c
+1691 r
+1692 i
+1693 t
+1694 i
+1695 c
+1696 /
+1697 w
+1698 /
+1699 d
+1700 3
+1701 /
+1702 o
+1703 u
+1704 t
+1705 /
+1706 {
+1707 r
+1708 e
+1709 p
+1710 l
+1711 a
+1712 y
+1713 _
+1714 l
+1715 a
+1716 t
+1717 e
+1718 _
+1719 s
+1720 0
+1721 ,
+1722 r
+1723 e
+1724 p
+1725 l
+1726 a
+1727 y
+1728 _
+1729 l
+1730 a
+1731 t
+1732 e
+1733 _
+1734 s
+1735 1
+1736 ,
+1737 r
+1738 e
+1739 p
+1740 l
+1741 a
+1742 y
+1743 _
+1744 f
+1745 i
+1746 x
+1747 e
+1748 d
+1749 _
+1750 m
+1751 2
+1752 7
+1753 c
+1754 r
+1755 i
+1756 t
+1757 _
+1758 s
+1759 1
+1760 }
+1761 .
+1762 j
+1763 s
+1764 o
+1765 n
+1766 
+
+1767 -
+1768  
+1769 c
+1770 r
+1771 i
+1772 t
+1773 i
+1774 c
+1775 /
+1776 w
+1777 /
+1778 d
+1779 1
+1780 /
+1781 o
+1782 u
+1783 t
+1784 /
+1785 l
+1786 p
+1787 _
+1788 c
+1789 r
+1790 i
+1791 t
+1792 _
+1793 s
+1794 2
+1795 .
+1796 j
+1797 s
+1798 o
+1799 n
+1800 
+
+1801 
+
+1802 N
+1803 o
+1804  
+1805 t
+1806 r
+1807 a
+1808 c
+1809 k
+1810 e
+1811 d
+1812  
+1813 f
+1814 i
+1815 l
+1816 e
+1817 s
+1818  
+1819 w
+1820 e
+1821 r
+1822 e
+1823  
+1824 t
+1825 o
+1826 u
+1827 c
+1828 h
+1829 e
+1830 d
+1831 .
+1832  
+1833 C
+1834 r
+1835 i
+1836 t
+1837 i
+1838 c
+1839  
+1840 c
+1841 o
+1842 m
+1843 p
+1844 u
+1845 t
+1846 e
+1847  
+1848 w
+1849 a
+1850 s
+1851  
+1852 a
+1853 b
+1854 o
+1855 u
+1856 t
+1857  
+1858 1
+1859 2
+1860  
+1861 p
+1862 r
+1863 o
+1864 c
+1865 e
+1866 s
+1867 s
+1868 -
+1869 m
+1870 i
+1871 n
+1872 u
+1873 t
+1874 e
+1875 s
+1876 .

@@ -65,8 +65,11 @@ Updated 2026-09-25 at `ac94811` on `rm-predict-DC` (the only branch pushed to; n
   sound-with-fixes: 1 blocking (at the default of 2 live areas the allocation cannot move) and
   9 major. The honest headline is that self-regulated focus ties a hand-set 27% replay at toy
   scale.
-  IN FLIGHT: a reviser agent writes scratch/mm3/rev/04_SELF_REGULATION.md under decisions R-1..R-10.
-  Then verify it and commit it as docs/proposals/04_SELF_REGULATION.md.
+  DONE: docs/proposals/04_SELF_REGULATION.md, revised under decisions R-1..R-10. It went through two
+  independent checks: 22 findings, then 2 more, all fixed. Its record is in
+  results/self_regulation_design_2026-09-26/prototypes/rev/.
+  AWAITING the owner's rulings on 04 §8, including the tie-break: a tie goes to self-regulation.
+  The next build is SR0: DATA_DRAW='replay' and the probe as telemetry.
   (history) was IN FLIGHT: self-regulation design workflow wf_3b1b5d92-dc4 (scratch mm3/). It produces
   docs/proposals/04_SELF_REGULATION.md text; commit its evidence under
   results/self_regulation_design_2026-09-26/.

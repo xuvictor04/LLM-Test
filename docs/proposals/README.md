@@ -16,6 +16,7 @@ page — and raise the questions that only the design work can surface.
 | 02 | [Router recursion](02_ROUTER_RECURSION.md) — stacked independent routers, experts at the leaves, results passed up | *not yet cut* | design only |
 | 03 | [Audio and video](03_AUDIO_VIDEO.md) — understand and generate, codecs learned from scratch, synthetic first; supersedes 01's build order for audio and video | *not yet cut* | design, reviewed (sound with fixes, all adopted in its §0) |
 | 03b | [Nothing frozen: live codec, measured rate](03b_LIVE_CODEC.md) — binding over 03: the codec never freezes, the Hz is measured per run, and the mid-epoch act (Q-RUN-8) makes text and media tokenization live | *not yet cut* | design, reviewed and checked |
+| 04 | [Self-regulation](04_SELF_REGULATION.md) — the run chooses its focus (retention-paced draw, fixed replay as control), weighs its sources (source tags; claim-level reliability in observe mode) and shows what emerged; built behind levers, GPU E1 decides | *not yet cut* | design, reviewed and checked; honest headline: at toy scale self-regulated focus ties one hand-set replay rate |
 
 **They are one change wearing two names, and the order matters.** Proposal 02 is what makes 01
 tractable: a flat population routed by one signature has to put an image window and a text window in
