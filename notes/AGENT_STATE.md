@@ -57,10 +57,10 @@ Updated 2026-09-26 (the decision register, Proposal 05) on `rm-predict-DC` (the 
   Owed:
   - the owner's GPU ship-rule fleet (EXP=retok bash gpu_world.sh);
   - the CPU regression check in scratch/s0b (4000 windows, seeds 0-1, k0 vs k1000).
-  DONE (superseded the 4000-window check, which compared unequal bytes): the CPU equal-bytes pre-read,
-  one whole 760,000-byte epoch per run: k1000 - k0 = +0.0003 (seed 0), +0.0078 (seed 1) prequential
-  bits/byte; k1000 used 4.5-4.8% fewer windows. Owed: the two k0_nuis runs for a margin (05 §8 0.3).
-  Evidence: results/decisions_2026-09-26/s0b/.
+  DONE as an OPERATION check (owner rule: CPU decides nothing about efficacy): whole-epoch CPU runs
+  at 760,000 bytes, seeds 0-1, k0 and k1000: the acts fire, the runs finish finite, bytes are
+  accounted (k1000 - k0 = +0.0003 / +0.0078 prequential bits/byte, recorded, not a verdict). The CPU
+  nuisance pair is dropped; the ship rule is the GPU fleet. Evidence: results/decisions_2026-09-26/s0b/.
   DONE: self-regulation design workflow wf_3b1b5d92-dc4. Evidence is in
   results/self_regulation_design_2026-09-26/. The judge picked d3 (retention-paced focus plus
   claim-level truth discovery) with d2's source tags grafted on. The critic returned
@@ -108,6 +108,15 @@ Updated 2026-09-26 (the decision register, Proposal 05) on `rm-predict-DC` (the 
   at the stop; its seeds did vary the data (D-A13 was already closed); a finished continuation's LR is
   shape-dependent (revision-log parent: floor for good; k0 parent: ~0.48 of peak at 756 KB, ~0.22 at
   3.78 MB, the floor only for a full 20 MB epoch).
+
+## OWNER RULE, 2026-09-26: CPU tests operation, GPU tests whether it works
+> "CPU check should only be to test operation ability. To test whether something works, it will
+> require a gpu."
+- CPU: runs, finite, known answers, bit-identity, resume exactness, counters fire, cost/timing,
+  model-free replays of the tree's functions, arithmetic. Never an efficacy verdict.
+- Efficacy (which arm is better, retention, plasticity, the belief, preset values) is decided only on
+  the owner's GPU. Toy readings may order the GPU queue; they set no default.
+- The owner will rule O1-O20 (Proposal 05 §3.3) next.
 
 ## Next
 0. Proposal 05 §8 orders everything: Stage 0 (owner rulings O1-O20; the fleet-archive reads; the

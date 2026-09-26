@@ -53,18 +53,13 @@ fixer pass applied the findings.
 - `check_tables.py`: the table-shape check.
 - `patch_round2*.py`: the round-2 fixer's patches.
 
-**`s0b/`**: the CPU equal-bytes pre-read of the mid-epoch act. It ran k0 against `TOK_RETOK_EVERY`
-1000 over one whole 760,000-byte epoch, at seeds 0 and 1, with `OMP_NUM_THREADS=1` (see
-`preq_eq.py`). The measured prequential bits/byte:
-
-| seed | k0 | k1000 | k1000 - k0 |
-|---|---|---|---|
-| 0 | 2.6892 | 2.6895 | +0.0003 |
-| 1 | 2.7880 | 2.7958 | +0.0078 |
-
-k1000 read the same bytes in 4.5-4.8% fewer windows, because acts lengthen the tokens. Neither seed
-has a nuisance margin yet: the k0_nuis pair is owed (register §8 0.3). This is a pre-read, not the
-ship rule, which is the owner's GPU `EXP=retok` fleet.
+**`s0b/`**: a CPU OPERATION check of the mid-epoch act. It ran k0 against `TOK_RETOK_EVERY` 1000
+over one whole 760,000-byte epoch, at seeds 0 and 1, with `OMP_NUM_THREADS=1` (see `preq_eq.py`).
+What it establishes: the act fires (3 acts per k1000 run), both arms finish with finite losses, and
+the prequential bytes are accounted over the whole epoch. The recorded prequential bits/byte
+(k0 2.6892 / 2.7880, k1000 2.6895 / 2.7958) are **not** an efficacy reading: by the owner's rule of
+2026-09-26, CPU checks test operation only, and whether live re-segmentation works is decided by the
+GPU `EXP=retok` fleet.
 
 ## Left out
 
