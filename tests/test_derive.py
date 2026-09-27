@@ -970,6 +970,32 @@ def smoke():
     assert derive.blowup_stale([3.0, 4.82, 2.95], 2.0, 300) is True
     assert derive.blowup_stale([3.0, 4.82, 2.95], 2.0, 50) is False    # elevated but not yet stale
     assert derive.phase_schedule(2)[-1] != [0, 1]                 # the last phase must exclude someone
+    #
+    # THE RETENTION PROBE'S NAMED CONVERSIONS (2026-09-27, Q-EVAL-12). No shipped ancestor to replay:
+    # the old tree had no in-run probe. The properties: a span of n readings is n periods of windows,
+    # an off cadence spans nothing and reads nothing, a count of readings in a span is the floor, and
+    # the alarm's horizon is blowup_stale's OWN `stale` default -- so moving that default moves the
+    # horizon with it, and a restated 80 anywhere would be caught here as a disagreement.
+    assert derive.windows_for_readings(Windows(1000), 80) == Windows(80000)
+    assert derive.windows_for_readings(Windows(0), 80) == Windows(0)
+    assert derive.readings_in(Windows(999), Windows(160)) == 6
+    assert derive.readings_in(Windows(320), Windows(160)) == 2
+    assert derive.readings_in(Windows(500), Windows(0)) == 0
+    assert derive.blowup_horizon(Windows(160)) == (80, Windows(12800))
+    import inspect as _inspect
+    assert derive.blowup_horizon(Windows(1))[0] == \
+        _inspect.signature(derive.blowup_stale).parameters["stale"].default
+    for _bad in ((Steps(5), 3), (5, 3)):
+        try:
+            derive.windows_for_readings(*_bad)
+            raise AssertionError(f"windows_for_readings accepted {_bad!r}")
+        except UnitError:
+            pass
+    try:
+        derive.readings_in(500, Windows(160))
+        raise AssertionError("readings_in accepted a bare int span")
+    except UnitError:
+        pass
 
 
 def main():

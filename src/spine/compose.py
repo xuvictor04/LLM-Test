@@ -134,12 +134,15 @@ RNG_SUBSYSTEMS = ("lm", "sig", "fabric", "memory", "domains", "world", "tok.drop
 # what is declared here, and rng.py::_check_name makes the dot the supported separator.
 # "eval" IS A DRAWN PARENT WITH DERIVED CHILDREN OF ITS OWN (Q-EVAL-9, 2026-09-02), and it is NOT
 # re-declared per child for the same reason "data.stream.e<n>" is not: the child is derived by the
-# package from a name this tuple already carries. EVAL.holdout_probe draws each domain's held-out
-# window starts ONCE from rng_for("eval.holdout." + domain_name, seed) so that every probe in a run
-# and across a resume scores the IDENTICAL byte windows and the 2-sigma verdict is computed on
-# PAIRED differences. If that stream advanced between probes the pairing would be lost silently and
-# no check in this tree would see it -- rng.issued() is the only surface that can say a domain's
-# holdout stream was never drawn, which is why the draw is named rather than left to P5.
+# package from a name this tuple already carries. SINCE 2026-09-27 (Q-EVAL-12) EVAL.pin_holdout
+# draws each area's held-out window starts ONCE, per HALF, from
+# rng_for("eval.holdout.<key>.<half>", seed) -- <key> is derive.stream_key(area), <half> is
+# 'control' or 'report' -- at the 'probe' row, so that every reading in a run and across a resume
+# scores the IDENTICAL byte windows and a verdict is computed on PAIRED differences; and the 'probe'
+# row mints rng_for("eval.generate", seed) once per System for EVAL.generate's draws. Neither is
+# minted at EVAL_RETENTION_EVERY=0. If a pinned stream advanced between readings the pairing would
+# be lost silently -- which is why the draw happens once, at assembly, and rng.issued() is the
+# surface that says which halves were drawn.
 # "world" WAS MISSING AND THE ROOT REACHED FOR IT WITH .get(), so WORLD.build received rng=None for
 # the life of every run. The four sibling constructors all use streams["name"], which raises on a
 # missing key; this one line used .get() and returned None instead, and world/api.py::build takes rng as
@@ -525,6 +528,29 @@ ASSEMBLY_ORDER = (
                                               "cannot carry width_units at all. _sidecar still "
                                               "warns when a blob has no sidecar, which now means a "
                                               "blob older than the producer)"),
+    ("probe",     "EVAL",  "pin_holdout",     "(blocks=Areas.holdout, seed=RUN.seed, window_bytes "
+                                              "and prefix_bytes from the geometry LOOP.eval recorded "
+                                              "when the snapshot carries one, else LM.ctx + 1 and "
+                                              "SigState.width_units, the SIG width -- which is why "
+                                              "this row follows SIG's restore row) -- THE RETENTION "
+                                              "PROBE'S ONE DRAW (Q-EVAL-12): each area's held-out "
+                                              "block split at its midpoint into control and report, "
+                                              "each half's window starts drawn once from "
+                                              "rng_for('eval.holdout.<key>.<half>', seed). EMPTY, "
+                                              "with its reason and no stream minted, at "
+                                              "EVAL_RETENTION_EVERY=0 or with no block. The same "
+                                              "stage mints rng_for('eval.generate', seed) ONCE PER "
+                                              "System onto System.gen_rng where generation can run "
+                                              "-- minted at R it would raise RngError on a second "
+                                              "loop.run over one System -- and prints, never "
+                                              "applies, two notices: EVAL_RETENTION_EVERY above "
+                                              "160, the only measured cadence, and a phase the "
+                                              "cadence would read fewer than five times "
+                                              "(derive.readings_in, plus the phase-start read)",
+                                              "probe_set -- EVAL.pin_holdout's ProbeSet, carried on "
+                                              "System.probe_set, from which _holdout_units and "
+                                              "_gen_prompts cut the units each reading and each "
+                                              "generation takes"),
     ("fabric",    "FAB",   "build",           "(d_model=LM.width, signature_dim=SIG.d, device, "
                                               "generator)",
                                               "live_experts -- Population.n_live under "
@@ -714,12 +740,13 @@ ASSEMBLY_ORDER = (
                                               "'dom.manage': DOM.manage_period(dom), 'fab.manage': "
                                               "FAB.manage_period(fab), 'dom.rekey': "
                                               "MEM.rekey_period(mem), 'ckpt': CKPT.save_period(ck), "
+                                              "'retention': EVAL.retention_period(ev), "
                                               "'progress': RUN.PROGRESS_WINDOWS}) "
-                                              "-- the SIX gates the loop evaluates, each period "
-                                              "supplied by the package that DECLARES its kind. Five "
+                                              "-- the SEVEN gates the loop evaluates, each period "
+                                              "supplied by the package that DECLARES its kind. Six "
                                               "arrive through a typed accessor because a Config "
                                               "hands back a bare int for a Clock-unit LEVER; the "
-                                              "sixth is RUN's own module CONSTANT, written "
+                                              "seventh is RUN's own module CONSTANT, written "
                                               "units.Windows at its definition, so it needs no "
                                               "accessor and mints no entry point -- Q-RUN-1, "
                                               "RESOLVED 2026-09-02. 'progress' is the ONLY key here "
@@ -732,9 +759,9 @@ ASSEMBLY_ORDER = (
                                               "first compose() to reach this row -- a defect hidden "
                                               "behind an earlier stub, this file's oldest shape. "
                                               "THERE ARE THREE EARLIER STUBS AND NOT ONE: "
-                                              "CAP.startup_refusals at row 29, RUN.new_clock at "
-                                              "row 32 and RUN.RunClock.begin_epoch at row 33, each "
-                                              "raising NotImplementedError before this row 35 is "
+                                              "CAP.startup_refusals at row 30, RUN.new_clock at "
+                                              "row 33 and RUN.RunClock.begin_epoch at row 34, each "
+                                              "raising NotImplementedError before this row 36 is "
                                               "reached -- measured by stubbing them one at a time "
                                               "and re-running compose() in a fresh process. This "
                                               "row named RUN.process_setup until 2026-09-04 and "
@@ -763,9 +790,12 @@ ASSEMBLY_ORDER = (
                                               "(data/api.py::<module>) and the same wrong fact "
                                               "_run_windows' own docstring already caught once; "
                                               "periods=the SAME mapping) -- states which of those "
-                                              "SIX cannot fire at this run's length BEFORE the "
-                                              "first window. Six, not five, since the cadence stage "
-                                              "was repaired to pass _periods(sysm): the sixth is "
+                                              "SEVEN cannot fire at this run's length BEFORE the "
+                                              "first window. Seven since 2026-09-27, when "
+                                              "'retention' joined (EVAL.retention_period, off at 0 "
+                                              "and so reported DISARMED), and six before that, "
+                                              "since the cadence stage was repaired to pass "
+                                              "_periods(sysm): the sixth was "
                                               "'progress', whose period is RUN.PROGRESS_WINDOWS, "
                                               "and the inline five-key dict this row described "
                                               "dropped it. At the shipped defaults a run is at "
@@ -1185,13 +1215,20 @@ LOOP_ORDER = (
                                       "StepOutcome.lr as a RETURN VALUE. Its step 2 IS "
                                       "OPT.lr_at(st, st.opt_step) -- the schedule is PURE and is "
                                       "read from inside this one function, which is why it has no "
-                                      "row of its own. best_bpb HAS NO PRODUCER: it wants a Reading "
-                                      "carrying (value, seed_count) and the only candidate, "
-                                      "EVAL.curve_probe, is deferred -- and CurveReading carries no "
-                                      "seed_count either (eval/api.py::<module> against opt/api.py::maybe_step), "
-                                      "so opt.restart.damped and opt.restart.damp_refused_n1 are "
-                                      "UNREACHABLE, not zero. It is a defaulted argument, which is "
-                                      "the only reason a check does not say so",
+                                      "row of its own. best_bpb <- System.probe_reading, A "
+                                      "BACKWARDS EDGE CARRIED ON System the way novelty is "
+                                      "(2026-09-27, Q-OPT-13): the retention probe's latest "
+                                      "CONTROL-half Reading(value, seed_count=1, at), set by "
+                                      "the EVAL.holdout_probe row below after the flush before "
+                                      "it and read by the NEXT flush; None until the first "
+                                      "reading and at EVAL_RETENTION_EVERY=0. At the shipped "
+                                      "OPT_DAMP_SOURCE='off' maybe_step drops it before reading "
+                                      "it, so no training decision moves; at 'probe' every "
+                                      "losing restart is REFUSED (seed_count 1, PLAN 3.8) and "
+                                      "counted in opt.restart.damp_refused_n1, and a Reading "
+                                      "re-delivered with the same `at` counts once. It is a "
+                                      "defaulted argument, so no check asks for its producer, "
+                                      "which is why this row names it",
                                       "applied_lr -- StepOutcome.lr under FAB.own_lr_scale's "
                                       "spelling; restart -- StepOutcome.restart, one of the three "
                                       "self-inflicted shifts a capacity blackout would be OR-ed "
@@ -1329,6 +1366,39 @@ LOOP_ORDER = (
                                       "time (spine/loop.py::_build_token_scale); at DOM_LEVELS=0 "
                                       "the per-token loss / ln 2, bits per token; the rate is the "
                                       "d_comp_ema wire"),
+    ("B", "EVAL",  "holdout_probe",   "THE RETENTION PROBE (Q-EVAL-12), once per window AFTER the "
+                                      "flush and the X block and BEFORE the checkpoint gate. THE "
+                                      "ARM TEST COMES FIRST -- EVAL_RETENTION_EVERY > 0 and a "
+                                      "pinned System.probe_set -- and only then "
+                                      "Cadences.due('retention', EVAL.retention_period(ev), "
+                                      "clock), so at 0 the gate is never asked; a PHASE-START "
+                                      "read also runs at the first window of every phase (the "
+                                      "window's first byte against Stream.phase_bounds, against "
+                                      "the (epoch, phase) LOOP.eval last read). One MEMORY-OFF "
+                                      "reading of retention_n windows per arrived area, through "
+                                      "the closure's path: DOM.nearest(dom, part, signature=...), "
+                                      "SIG.encode(sig, st, [prefix]), LM.embed(lm, model, x), "
+                                      "WORLD.forecast(world, w, obs_emb), LM.encode(lm, model, x, "
+                                      "extra=...), FAB.forward(training=False, "
+                                      "step_windows=clock.step + 1, ...), LM.decode(lm, model, h, "
+                                      "...) and, for each window's ids, TOK.tokenize(view=...) at "
+                                      "the view the stream was last cut at -- each writing nothing "
+                                      "a training pass reads. A NON-FINITE control mean is "
+                                      "counted (eval.holdout.nonfinite) and not forwarded; "
+                                      "otherwise it becomes System.probe_reading, the next "
+                                      "flush's best_bpb"),
+    ("B", "EVAL",  "blowup",          "(series=LOOP.eval's per-area and all-area control means, "
+                                      "the all-area series re-armed at each arrival) -- after every "
+                                      "reading that forwarded a mean. It REPORTS and changes "
+                                      "nothing: eval.blowup.fired, eval.blowup.since_best"),
+    ("B", "CKPT",  "Retention.consider", "(curve_bpb=the reading's control mean, step=clock.step) "
+                                      "-- after the blow-up row, on the same forwarded mean. Its "
+                                      "BestAction is acted on HERE: _carry(), then "
+                                      "CKPT.save(reason='best', suffix='.best') when save_best, "
+                                      "then CKPT.save(reason='bestN', suffix='.best<slot>') when "
+                                      "rotate_slot, each followed by the C row "
+                                      "Retention.note_saved with what that save returned. With "
+                                      "CKPT_DIR off it tracks the best and orders nothing"),
     ("B", "CKPT",  "save",            "Cadences.due('ckpt', CKPT.save_period(ck), clock), or the "
                                       "SIGUSR1 flag -- the B-level route INTO the C block, with "
                                       "reason='periodic' or 'sigusr1'. It does not assemble "
@@ -1485,15 +1555,43 @@ LOOP_ORDER = (
     ("C", "CKPT",  "save",            "(payload, geometry, step=clock.step, epoch=clock.epoch, "
                                       "reason, suffix) -- LAST, because it is handed the finished "
                                       "product. reason is one of the five declared routes and is "
-                                      "RECORDED, so 'saves: 0' can name which route was never taken"),
+                                      "RECORDED, so 'saves: 0' can name which route was never taken",
+                                      "ok -- CKPT.save's return, True iff a file was written, "
+                                      "which the row below hands back to the retention policy"),
+    ("C", "CKPT",  "Retention.note_saved", "(ok, slot=the BestAction's rotate_slot for a bestN "
+                                      "save, None for the global .best) -- ONLY after a save a "
+                                      "BestAction ordered: the C fan-out runs for every save, and a "
+                                      "periodic, SIGUSR1 or final save answers nothing here "
+                                      "(Q-CKPT-6). A refused best save sets best_saved False; a "
+                                      "refused slot save puts the slot's previous resident back and "
+                                      "the pointer with it, so the ring advances only on a written "
+                                      "file, as self_organize.py:6481-6483 did"),
 
     # -- R: the report. Once, after Tick.finished. NEVER ASKED and ASKED AND REFUSED are two
     # different statements and this stage is where the second half of the evidence is collected.
-    # MEM.read and MEM.blend WERE HERE and are now deferred: nothing produces `queries`, and blend's
-    # `model_probs` are probabilities while every scoring hook in the tree takes a logits_fn -- the
-    # row's own prose conceded that join was missing (Q-MEM-10) and was written anyway, which is the
-    # same double standard that put a row under EVAL.curve_probe and a deferral under
-    # EVAL.holdout_probe.
+    # MEM.read and MEM.blend WERE rows HERE until 2026-08-30 and were then deferred, because nothing
+    # produced `queries` and blend's `model_probs` are probabilities while every scoring hook takes a
+    # logits_fn. SINCE 2026-09-27 BOTH ARE REACHED, and not as rows: the memory-on closure
+    # (_logits_fn(sysm, use_memory=True)) forms softmax -> MEM.encode_queries -> MEM.read(promote=
+    # False) -> MEM.blend -> log once, and the EVAL.holdout_probe row below names each call in its
+    # note -- Q-MEM-10 as amended the same day, which had said blend is "called from that spine
+    # helper and never from a row" and now says the helper is credited through the row that calls
+    # it.
+    ("R", "EVAL",  "holdout_probe",   "THE BOUNDARY READING, at the HEAD of R and INSIDE the try "
+                                      "that saves the final checkpoint when the R stage raises: "
+                                      "holdout_windows windows per arrived area (boundary=True), "
+                                      "through BOTH closures -- memory-off, then memory-on, whose "
+                                      "closure adds MEM.encode_queries(mem, contexts=x, "
+                                      "key_fn=...), MEM.read(mem, store, queries=..., "
+                                      "promote=False) and MEM.blend(mem, probs, retrieval), then "
+                                      "log -- each paired against the resume's start reading, or "
+                                      "the parent's last boundary reading, when there is one. A "
+                                      "RESUME ALSO READS AT ITS START, after run()'s refusal and "
+                                      "finished-clock guards, at the parent's last-cut view and "
+                                      "live-domain count, so at the same weights it equals the "
+                                      "parent's final reading; eval.holdout.boundary_reads and "
+                                      "eval.holdout.resume_reads count the two. Boundary readings "
+                                      "are reported and never consumed"),
     ("R", "DOM",   "prior",           "(did) -- the per-domain token prior AND its weight, together. "
                                       "At R it is asked once for EACH id DOM.census's `live` list "
                                       "carries (it was asked for did=0 alone until 2026-09-24), not "
@@ -1531,9 +1629,10 @@ LOOP_ORDER = (
                                       "is now a key that is PRESENT with zero checks, because its "
                                       "period is declared and the probe that would ask it is "
                                       "deferred"),
-    ("R", "CKPT",  "Retention.counters", "() -- probes_seen, new_bests, rotations, slots_used and "
-                                      "inert_reason, which is the one surface that can say 'no curve "
-                                      "value has ever arrived' instead of 'zero local lows'. At P3 "
+    ("R", "CKPT",  "Retention.counters", "() -- probes_seen, new_bests, rotations, slots_used, "
+                                      "saves_refused and inert_reason, which is the one surface "
+                                      "that can say 'no curve value has ever arrived' instead of "
+                                      "'zero local lows'. At the shipped EVAL_RETENTION_EVERY=0 "
                                       "that is exactly what it must say"),
     ("R", "RUN",   "bench_summary",   "(clock, elapsed_s=the root's own wall clock across the run -- "
                                       "RunMode.timing.spans() is per-span and is not a run total, "
@@ -1550,6 +1649,12 @@ LOOP_ORDER = (
     ("R", "CKPT",  "save",            "the third route into the C block: reason='final'. It runs "
                                       "after the counters above so the checkpointed counter vectors "
                                       "are the ones the report printed"),
+    ("R", "EVAL",  "generate",        "(logits_fn=each closure in turn, prompts_by_domain from "
+                                      "_gen_prompts, rng=System.gen_rng) -- AFTER the final save, "
+                                      "so generation costs the run nothing it keeps and the "
+                                      "checkpoint is byte-identical with it on or off. ABSENT -- "
+                                      "eval.generate.* not seeded -- at EVAL_GENERATE=0 or with no "
+                                      "ProbeSet; its row in the report is added after the save"),
 )
 
 
@@ -1562,39 +1667,45 @@ LOOP_ORDER = (
 # place orphans go to be forgotten -- an orphan with paperwork is still an orphan, and the check
 # says so.
 #
-# IT IS NO LONGER ONLY EVAL, AND THAT IS THE POINT OF THE `produces` COLUMN. EIGHT EVAL entries sit
-# below, each deferred for a stated reason -- an argument with no producer -- and when the column was
-# added it found seven rows ELSEWHERE in the tables naming calls with exactly the same gap:
-# EVAL.curve_probe, MEM.read, MEM.blend, MEM.judge, FAB.contribution, CAP.observe and WORLD.manage.
-# EVAL.curve_probe and EVAL.holdout_probe had BYTE-IDENTICAL signatures and got opposite verdicts.
-# The column made every one of them decidable, and those seven are the ones where nothing in the
-# frozen entry-point set supplies a required argument and no join in this file honestly can. Each
-# names what would close it. NONE of the seven is deferred for being late, and none is deferred
-# because a body is missing: the whole tree is stubs.
+# IT IS NO LONGER ONLY EVAL, AND THAT IS THE POINT OF THE `produces` COLUMN. When the column was
+# added it found seven rows ELSEWHERE in the tables naming calls with exactly the same gap as the
+# EVAL entries: EVAL.curve_probe, MEM.read, MEM.blend, MEM.judge, FAB.contribution, CAP.observe and
+# WORLD.manage. EVAL.curve_probe and EVAL.holdout_probe had BYTE-IDENTICAL signatures and got
+# opposite verdicts. The column made every one of them decidable, and each entry names what would
+# close it. NONE was deferred for being late, and none because a body was missing: the whole tree
+# was stubs.
 #
-# THE COUNT ABOVE SAID SEVEN EVAL ENTRIES UNTIL 2026-09-04, AND THERE HAVE BEEN EIGHT SINCE THE
-# COMMIT THAT WROTE THE SENTENCE: EVAL.curve_probe moved into this table from a row in the very edit
-# that added this paragraph, and the count was taken before it landed. The table now holds
-# twenty-four entries and they divide the way the two sentences above do rather than by package.
-# FIFTEEN are deferred because a required argument has no producer: the eight EVAL entries, the six
-# non-EVAL rows named above, and CKPT.Retention.consider, whose `curve_bpb` is the output of a
-# deferred entry point. NINE are deferred because the CALLER is missing while every argument is one
-# the caller already holds: FAB.Population's two accessors, WORLD.World.parameters, four of
-# Vocabulary's five, and RUN.Timing's two. (This said twenty-three and EIGHT, leaving
-# WORLD.World.parameters out of the enumeration, until 2026-09-24.) The miscount is not cosmetic -- this table's whole claim is that every orphan is enumerated,
-# and an enumeration whose own total is wrong is one no reader re-checks.
+# THE TABLE HOLDS EIGHTEEN ENTRIES SINCE 2026-09-27, when the retention probe (Q-EVAL-12) closed
+# five: EVAL.holdout_probe and EVAL.generate got rows, CKPT.Retention.consider got its caller, and
+# MEM.read and MEM.blend are reached through the memory-on closure the R row's note names. The
+# eighteen divide by WHY rather than by package:
+#   TEN are deferred at the ARGUMENT or at the SCOPE. Six are EVAL's -- EVAL.null_excess,
+#   EVAL.verdicts, EVAL.wrongness_probe and EVAL.verification_fit wait on an argument nothing
+#   produces, and EVAL.curve_probe and EVAL.coherence, whose producers exist since the probe
+#   landed, are SCOPE deferrals: no row of the register's section 8 builds them. Four are not EVAL's
+#   -- MEM.judge (the scorer's (ctx, src) arity the closure does not have), FAB.contribution
+#   (candidates and targets), CAP.observe and WORLD.manage.
+#   EIGHT are deferred because the CALLER is missing while every argument is one the caller already
+#   holds: FAB.Population's two accessors, WORLD.World.parameters, three of Vocabulary's five
+#   accessors (live_size, at_cap, blen), and RUN.Timing's two.
+# (Until 2026-09-27 this paragraph counted twenty-four entries, FIFTEEN by argument and NINE by
+# caller with "four of Vocabulary's five" -- which was stale twice by then: the table held
+# twenty-three, and three Vocabulary accessors, since TOK.Vocabulary.size left it.) The count is not
+# cosmetic -- this table's whole claim is that every orphan is enumerated, and an enumeration whose
+# own total is wrong is one no reader re-checks.
 # SOME OF THOSE NOW HAVE A CALLER THAT IS NOT A ROW, AND THEIR ENTRIES SAY SO (2026-09-24):
 # FAB.Population.parameters and WORLD.World.parameters are called by _base_parameters on every
 # compose(), and RUN.Timing's two by spine/loop.py. They stay listed because K6 credits only a row,
 # and a helper or an instrumentation span is not one; their reasons stopped describing an absence.
 #
 # WHAT THIS COSTS, SAID PLAINLY, because a deferral that hides its cost is the shape it replaces:
-# with these seven unrowed the run has no capacity valve (nothing lifts a cap), no WORLD growth, no
-# learning-curve probe and therefore no best-model save and no restart damping, no per-expert
-# contribution and therefore no informed spare rule, and no memory retrieval or wrongness sweep.
-# That is a large part of goal B's machinery, and it was ALREADY inert -- the rows named calls whose
-# arguments nothing supplies. The deferral does not remove a mechanism, it stops the tables claiming
-# one, and it names the producer each mechanism is waiting on.
+# with these unrowed the run has no capacity valve (nothing lifts a cap), no WORLD growth, no
+# learning-curve probe at EVAL_CURVE_EVERY, no per-expert contribution and therefore no informed
+# spare rule, and no wrongness sweep. The retention probe that closed five of them is BUILT OFF
+# (EVAL_RETENTION_EVERY=0), so at the shipped defaults the best-model save and the restart damping
+# still read their inert reasons until the register's C9 flip. The deferral does not remove a
+# mechanism, it stops the tables claiming one, and it names the producer each mechanism is waiting
+# on.
 DEFERRED_ENTRY_POINTS = {
     # THE TWO Population ACCESSORS AND FOUR OF Vocabulary'S FIVE. They arrived with their records in
     # P4's FAB and TOK slices, one increment before the rows that call them, for the same reason
@@ -1684,39 +1795,17 @@ DEFERRED_ENTRY_POINTS = {
         "not-profiled case, and an EMPTY dict from it is a "
         "different statement from an absent one: 'measured nothing' versus 'did not measure'. That "
         "distinction is why RunMode always carries a Timing rather than sometimes carrying None.",
-    "CKPT.Retention.consider":
-        "P5, WITH EVAL.curve_probe, AND THIS IS THE SAME DOUBLE STANDARD ONE ROW DOWNSTREAM. It had "
-        "an A row until 2026-08-30 while its only input's producer sat in this table: `curve_bpb` is "
-        "the held-out value EVAL.curve_probe returns, curve_probe is deferred because nothing "
-        "produces units_by_domain or logits_fn, and a row consuming the output of a deferred entry "
-        "point is a call whose argument cannot arrive -- the exact thing this table's standard "
-        "forbids. K10 could not see it because the check dropped the FIRST POSITIONAL as 'the "
-        "package's own live object', and Retention.consider is a METHOD: self was already skipped, "
-        "so the rule discarded curve_bpb and asked only about `step`. "
-        "THE COST IS STATED RATHER THAN HIDDEN: Saves.best can never be non-zero, so the only "
-        "copies of the model are the periodic ones and the final one, and Retention.counters() must "
-        "report inert_reason='no curve value has ever arrived' rather than a bare zero. It returns "
-        "with curve_probe.",
     "EVAL.curve_probe":
-        "P5 (eval). SAME SIGNATURE, SAME GAP, SAME VERDICT AS holdout_probe below -- which is the "
-        "whole reason this table was re-read. Nothing produces `units_by_domain`: Areas carries "
-        "names/bodies/holdout/holdout_bytes/cursors, DOM.census returns sizes and radii, and "
-        "Segmentation carries ids/byte_pos/labels/bytes_per_token; there is no per-domain window "
-        "supplier anywhere. Nothing produces `logits_fn` either, and it cannot be faked from "
-        "LM.encode + LM.decode alone: eval/api.py::<module> requires THE PATH THE RUN TRAINED, which "
-        "goes through FAB.forward, and building that callable needs the same `novelty`, "
-        "`live_domains` and `training` the flush body is handed. Two consequences are stated in the "
-        "rows rather than left to be discovered: CKPT.Retention.consider's event can never arrive, "
-        "so Retention.counters().inert_reason must report 'no curve value has ever arrived'; and "
-        "OPT.maybe_step's best_bpb has no producer, so the restart damping is unreachable. The "
-        "'curve' period stays in RUN.new_cadences' mapping so the ledger carries a key with zero "
-        "checks. P5 lands the pair and the row together.",
-    "EVAL.holdout_probe":
-        "P5 (eval). The R matrix -- goal B's only cross-boundary number -- and the row that calls "
-        "it belongs at stage R and at every save site. It is deferred rather than rowed because it "
-        "needs units_by_domain drawn in BYTE coordinates from Areas.holdout together with a "
-        "logits_fn, and the root has no join that produces that pair; writing a row now would name "
-        "a call whose arguments nothing supplies. P5 lands the pair and the row together.",
+        "P5 (eval), AND SINCE 2026-09-27 A SCOPE DEFERRAL, NOT A GAP. Every argument it takes now "
+        "has a producer in this file: units_by_domain comes off the retention probe's pinned "
+        "ProbeSet (_holdout_units), logits_fn is the memory-off closure "
+        "_logits_fn(sysm, use_memory=False), step is RunClock.step and rng an 'eval' child -- the "
+        "join this reason used to say nothing produces (Q-EVAL-12). It is not built because no row "
+        "of the register's section 8 builds it (the priority order of its section 2): the "
+        "learning curve at EVAL_CURVE_EVERY is a second held-out reading beside the retention "
+        "probe, on unpinned windows, and building it now would be a second instrument answering "
+        "one question. The 'curve' period stays in RUN.new_cadences' mapping so the ledger "
+        "carries a key with zero checks.",
     "EVAL.null_excess":
         "P5 (eval). The permutation null every 2-sigma verdict is judged against. THE REASON "
         "WRITTEN HERE UNTIL 2026-08-30 WAS FALSE AND POINTED THE WRONG WAY: it said `real` and "
@@ -1729,29 +1818,25 @@ DEFERRED_ENTRY_POINTS = {
         "very gap EVAL.verdicts is deferred for -- and no entry point anywhere returns a "
         "permutation callable. Neither exists. A deferral reason that names the wrong producer is "
         "worse than none: it reads as a dependency somebody has already placed.",
-    "EVAL.generate":
-        "P6 (eval). The generation battery. `prompts_by_domain` has no producer among the frozen "
-        "entry points: DOM.census returns domain sizes and radii, not prompts. `logits_fn` is the "
-        "same missing join as curve_probe's.",
     "EVAL.coherence":
-        "P6 (eval). TWO arguments have no producer and BOTH are named: `logits_fn`, the same join "
-        "curve_probe and holdout_probe wait on, and `units_by_domain`, the same per-domain unit "
-        "supplier those two wait on -- one missing join, three deferrals, and the same sentence. "
-        "The third callable, `encode`, is NOT a gap: _sig_encode_fn already forms it for DOM.rekey "
-        "and this function takes the same one. THE REASON WRITTEN HERE UNTIL 2026-08-30 WAS FALSE: "
-        "it said 'no entry point in the tree returns a Sample today', and EVAL.generate returns one "
-        "(eval/api.py). THE `sample` PARAMETER IS GONE, 2026-09-02, Q-EVAL-10 RESOLVED: a Sample is "
-        "the printed generations, so the signature invited the one argument the docstring forbids "
-        "and the old code passed it. It is now `units_by_domain` plus `encode` -- material and an "
-        "encoder, not a measurement -- and the docstring's sentence is true.",
+        "P6 (eval), AND SINCE 2026-09-27 A SCOPE DEFERRAL, NOT A GAP. Its four arguments all have "
+        "producers now: logits_fn is _logits_fn's closure and units_by_domain the probe's pinned "
+        "held-out windows (Q-EVAL-12), `encode` is _sig_encode_fn's callable (the SAME one "
+        "DOM.rekey takes), and rng an 'eval' child. It is not built because no row of the "
+        "register's section 8 builds it (the priority order of its section 2). THE `sample` "
+        "PARAMETER WENT 2026-09-02, Q-EVAL-10 RESOLVED: a Sample is the printed generations, so the "
+        "signature invited the one argument the docstring forbids -- and EVAL.generate, which "
+        "returns that Sample, is itself built since 2026-09-27, which is exactly why the "
+        "parameter had to go first.",
     "EVAL.verdicts":
         "P6 (eval). Three of its four arguments -- silhouettes, affiliation, coherence_reading -- "
         "have no producer in the tree; the fourth, domain_sizes, comes from DOM.census, which the "
         "R stage above already collects.",
     "EVAL.wrongness_probe":
         "P6 (eval). Takes a `store_copy` so the instrument cannot edit what it measures; nothing in "
-        "MEM's surface produces one -- the ten entry points are open_store, write, read, blend, "
-        "maintain, apply_domain_plan, judge, census, state_dict and rekey_period, and no copy -- "
+        "MEM's surface produces one -- the eleven entry points are open_store, write, read, "
+        "encode_queries (2026-09-27), blend, maintain, apply_domain_plan, judge, census, state_dict "
+        "and rekey_period, and no copy -- "
         "and inventing it is a signature change. Its "
         "`scorer` is the same missing logits callable as MEM.judge's, AND IT TAKES THE SAME ARITY: "
         "`scorer(ctx, src) -> logits`, ruled under Q-MEM-8/Q-MEM-10 on 2026-09-02. One callable "
@@ -1765,55 +1850,21 @@ DEFERRED_ENTRY_POINTS = {
         "row will spell it verify_mode=MEM.verify the way the store row above spells "
         "vocab_slots=LM.vocab_slots. It is named here because a deferred entry point has no row "
         "for K12 to read a producer off, not because nothing produces it.",
-    "MEM.read":
-        "P5 (eval/report). Nothing produces `queries`. The R row that called it named none of "
-        "them, and the probe contexts it would key on are the same held-out material "
-        "EVAL.holdout_probe's units_by_domain needs -- one missing join, two deferrals, and "
-        "deferring only one of them was the inconsistency this edit exists to end. The cost is "
-        "recorded where it bit, PAST TENSE AS OF 2026-09-21: MEM.maintain's job 1 is this "
-        "package's own retrieval and its `probe_contexts` had no producer either, so evict='lru' "
-        "and evict='usage' were write-order FIFO and probation could never promote. THE LOOP "
-        "LANDED THE CONTEXTS, NOT P5 -- spine/loop.py::_flush passes the PREVIOUS flush's batch, "
-        "lagged by one so the probe asks whether the store can still retrieve material it has had "
-        "a full flush of eviction pressure to lose rather than what it stored microseconds ago. "
-        "Measured over 600 windows at the shipped defaults: store.n_promoted 184 where it had been "
-        "ABSENT, and store.n_evict_main 6272 where it had been IDENTICALLY 0 for every "
-        "configuration this project had ever run -- and that at ONE query per probe, the rate "
-        "Q-MEM-12 corrected on 2026-09-24 to the declared MEM_PROBE_ROWS: over 300 windows at "
-        "DATA_STREAM_BYTES=200000 the corrected probe gives n_promoted 2349 against 88 and "
-        "n_evict_main 4608 against 2560. That number is the whole of the claim -- four "
-        "archive files recorded evict='usage' as not protecting faded knowledge 'by construction' "
-        "when it was being measured through a constant. "
-        "DEFERRED AS A ROW, REACHED IN-PACKAGE: Q-MEM-9 is RESOLVED (a) as of 2026-09-02 and "
-        "MEM.maintain's job 1 IS this call, with `queries` maintain encoded itself. K6 is satisfied "
-        "by the absence of a ROW, not by the absence of a call, and an in-package call is not a "
-        "cross-package import (O10/K3 untouched), so this deferral stays valid and is not stale.",
-    "MEM.blend":
-        "P5 (eval/report). Its `retrieval` comes from MEM.read, deferred above, and its "
-        "`model_probs` are PROBABILITIES while every scoring hook in the tree takes a logits_fn -- "
-        "the join between them is Q-MEM-10, which the deleted row's own prose CONCEDED while being "
-        "written anyway. `model_probs` is also the first positional after the Config, which K10 "
-        "drops as 'the package's own live object' -- it is not; MEM's live object is `store`, and "
-        "blend is the one entry point in the package that does not take it. So the check is "
-        "structurally blind here and the deferral is the only thing that records the gap. "
-        "Q-MEM-10 IS RESOLVED (a) as of 2026-09-02 and it does NOT close this deferral: it rules "
-        "that the join is spine work, written once as _logits_fn(sysm, *, use_memory), that NEITHER "
-        "MEM.blend NOR ANY EVAL SIGNATURE MOVES, and that the scoring caller takes log() of the "
-        "mixture -- which is exact, not a pseudo-logit. What still has no producer is the "
-        "logits_fn itself. When it lands, blend is called from that spine helper and never from a "
-        "row, so K10's blind spot here is retired rather than papered over.",
     "MEM.judge":
-        "P4/P5 (memory + eval). `scorer(ctx) -> logits` is required by the DEFAULT arm: MEM.verify "
-        "defaults to 'selfcon' and memory/api.py::judge says the scorer must be THE SAME FORWARD "
-        "PATH TRAINING USED, passed in and never constructed there (M47). That callable does not "
-        "exist -- see EVAL.curve_probe -- and scoring a STORED ctx through it needs a signature and "
-        "a domain id per stored entry -- WHICH THE STORE ITSELF CARRIES as Store.src, so the datum "
-        "exists and what cannot carry it is the DECLARED CALLABLE SHAPE: it is `scorer(ctx, src) -> "
-        "logits`, ruled once here and in memory/api.py, and EVAL.wrongness_probe's `scorer` takes "
-        "the same two arguments (Q-MEM-8/Q-MEM-10, 2026-09-02). Because `scorer` carries a "
-        "default, no check asks about it: a row calling judge(mem, store) passes every check in the "
-        "tree and yields n_checked = 0 forever, which memory/api.py::judge itself names as the "
-        "inert state. That is precisely why this is a deferral and not a row with a note. "
+        "P4/P5 (memory + eval). `scorer(ctx, src) -> logits` is required by the DEFAULT arm: "
+        "MEM.verify defaults to 'selfcon' and memory/api.py::judge says the scorer must be THE SAME "
+        "FORWARD PATH TRAINING USED, passed in and never constructed there (M47). SINCE 2026-09-27 "
+        "THAT PATH EXISTS AS A CLOSURE, AND ITS ARITY IS THE GAP: _logits_fn's convention is "
+        "fn(x, *, prefix_bytes) (Q-EVAL-12) -- it routes on the bytes BEFORE the window, through "
+        "SIG.encode and DOM.nearest -- and a STORED entry has no prefix bytes. What it carries is "
+        "Store.src, the domain it was written under, which is why the declared shape is "
+        "`scorer(ctx, src)` (Q-MEM-8/Q-MEM-10, 2026-09-02, and EVAL.wrongness_probe's `scorer` takes "
+        "the same two arguments). A scorer of that arity routes on the stored id instead of on a "
+        "signature, which is a second routing rule nobody has ruled on, so no closure is formed "
+        "here. Because `scorer` carries a default, no check asks about it: a row calling "
+        "judge(mem, store) passes every check in the tree and yields n_checked = 0 forever, which "
+        "memory/api.py::judge itself names as the inert state. That is precisely why this is a "
+        "deferral and not a row with a note. "
         "Q-MEM-8 IS RESOLVED 2026-09-02 AND THIS IS THE ROW TO WRITE WHEN THE SCORER EXISTS: an "
         "('A', 'MEM', 'judge', ...) row at the END of the dom.manage block, after the DOM.census "
         "row, INSIDE the one Cadences.due('dom.manage', ...) answer that block already asks and "
@@ -1830,17 +1881,24 @@ DEFERRED_ENTRY_POINTS = {
         "CENSUS AMENDMENT shipped at 0.0 (the re-score is off), with the full-store arm at 1.0 "
         "costing about 1.7x the interval's whole training compute.",
     "FAB.contribution":
-        "P4 (fabric). THREE arguments have no producer, not two: the reason said two until K12 counted them. `targets` is the flush's shifted token cut -- the same `y` LM.lm_loss takes, which is the loop's own slice and has no row -- so it is a gap of a different KIND from the other two and that difference is why it was missed. `candidates` is the eligible past-grace set, "
-        "which lives in Population's use/uage books; no entry point exports it and O10 forbids the "
-        "root reaching into `pop`, so either FAB adds an accessor or `candidates` gains a "
-        "documented default of 'all past-grace'. `baseline_logits_fn` is the same missing callable "
-        "as EVAL's, and fabric/api.py::contribution makes it load-bearing rather than convenient: the "
-        "whole C3/H11 repair is that the baseline must come from THE SAME CALLABLE that produced "
-        "`baseline_loss`, and a row that named a call whose baseline came from somewhere else would "
-        "rebuild the offset that set contrib's SIGN. Under Q-MEM-10 (a) there will be TWO closures, "
-        "memory-off and memory-on, and THIS ONE IS ALWAYS THE MEMORY-OFF CLOSURE -- handing it the "
-        "memory-on one would put retrieval in the baseline and undo that repair from the other side. Until then fab.contrib_measured reads "
-        "unreachable, and the two spare rules and the replication parent choice have no signal.",
+        "P4 (fabric). TWO arguments still have no producer, and a third has a producer of the wrong "
+        "shape. `candidates` is the eligible past-grace set, which lives in Population's use/uage "
+        "books; no entry point exports it and O10 forbids the root reaching into `pop`, so either "
+        "FAB adds an accessor or `candidates` gains a documented default of 'all past-grace'. "
+        "`targets` is the flush's shifted token cut -- the same `y` LM.lm_loss takes, which is the "
+        "loop's own slice and has no row -- a gap of a different KIND from the other two, and that "
+        "difference is why it was once missed. `baseline_logits_fn` HAS A CANDIDATE SINCE "
+        "2026-09-27 and it is still not this argument: _logits_fn(sysm, use_memory=False) is the "
+        "memory-off path the run trained, and fabric/api.py::contribution makes it load-bearing "
+        "that the baseline comes from THE SAME CALLABLE that produced `baseline_loss` -- the whole "
+        "C3/H11 repair, since a baseline from anywhere else rebuilds the offset that set contrib's "
+        "SIGN. The closure scores held-out windows through fn(x, *, prefix_bytes); the flush's "
+        "baseline_loss is the training forward's, with this flush's signatures, novelty and "
+        "routing clock, so the two are not one callable until the manage pass forms the baseline "
+        "loss through the closure as well. Under Q-MEM-10 (a) THIS ONE IS ALWAYS THE MEMORY-OFF "
+        "CLOSURE -- handing it the memory-on one would put retrieval in the baseline and undo that "
+        "repair from the other side. Until then fab.contrib_measured reads unreachable, and the "
+        "two spare rules and the replication parent choice have no signal.",
     "CAP.observe":
         "P4 (fabric + capacity). THREE arguments have no producer, not two: `elapsed_windows` was "
         "omitted from this reason until K12 counted them. It is the valve's PIN DELTA -- how many "
@@ -2011,9 +2069,10 @@ ROW_ARGUMENTS_ELSEWHERE = {
     # shift_at_windows, added 2026-09-02 with Q-FAB-6; the fifth is its Steps twin
     # shift_at_steps, added 2026-09-24 when OPT.maybe_step was first handed a shift_at).
     "RUN.new_cadences":
-        "periods is _periods(sysm) -- the SIX gates' thresholds. Five arrive through their OWNING "
+        "periods is _periods(sysm) -- the SEVEN gates' thresholds. Six arrive through their OWNING "
         "package's typed accessor (EVAL.curve_period, DOM.manage_period, FAB.manage_period, "
-        "MEM.rekey_period, CKPT.save_period); the sixth is RUN.PROGRESS_WINDOWS, a module constant "
+        "MEM.rekey_period, CKPT.save_period and, since 2026-09-27, EVAL.retention_period); the "
+        "seventh is RUN.PROGRESS_WINDOWS, a module constant "
         "and not a lever, for the progress/ETA line and the profiler dump (Q-RUN-1, RESOLVED "
         "2026-09-02). A mapping spanning six packages is precisely the object O10 forbids any one "
         "of them to build, so the root builds it. RUN evaluates gates and owns no threshold that "
@@ -2108,6 +2167,39 @@ ROW_ARGUMENTS_ELSEWHERE = {
         "to the accumulator and returns a Tick(step, epoch, flush_due, rolled, finished), a clock "
         "and not a batch. The cut is named here so the loop and this table define it once between "
         "them; the tensors themselves are the loop's to slice.",
+    # ---- THE RETENTION PROBE'S JOINS (2026-09-27, Q-EVAL-12). Each value below is this file's work
+    # over two or three packages' state, which O10 forbids any one package to form; none is a row's
+    # return. They are named here because naming them in the rows would restate the signatures.
+    "EVAL.pin_holdout":
+        "blocks is Areas.holdout -- DATA's per-area held-out blocks, carved and removed by "
+        "open_areas -- and seed is RUN.seed. window_bytes and prefix_bytes are the geometry the "
+        "snapshot's LOOP.eval recorded, so a child re-pins its parent's windows, and on a fresh run "
+        "LM.ctx + 1 and SigState.width_units: the root's arithmetic over LM's frozen Config and "
+        "SIG's built state, which is why the row follows SIG's restore row.",
+    "EVAL.holdout_probe":
+        "units_by_domain is _holdout_units(sysm, ...) -- the arrived areas' pinned (prefix, window) "
+        "pairs cut from System.probe_set, each area marked seen_by_parent or not. logits_fn is "
+        "_logits_fn(sysm, use_memory=...) -- the memory-off closure at B and at a resume's start, "
+        "both closures at R. tokenize_fn is _holdout_tokenize(sysm, view) -- TOK.tokenize bound to "
+        "the vocabulary at the view the stream was last cut at (the parent's recorded view for a "
+        "resume's start reading), with no labels and regularize=False, so it draws nothing and "
+        "counts tok.segment_remap. step is RunClock.step, units.Windows, stamped on the Readings as "
+        "`at`.",
+    "EVAL.blowup":
+        "series is LOOP.eval's reading history -- one list of control means per area and one of the "
+        "all-area mean, whose entry at each arrival re-arms the alarm -- appended by the loop after "
+        "every forwarded reading. A running record between calls, like SIG's boundary count, which "
+        "no entry point returns.",
+    "EVAL.generate":
+        "logits_fn is each of the two closures in turn. prompts_by_domain is _gen_prompts(sysm) -- "
+        "the report-half pinned windows of the arrived areas, tokenized at the last-cut view. rng is "
+        "System.gen_rng, rng_for('eval.generate', seed), minted once per System at the 'probe' "
+        "stage so a second loop.run over one System does not raise on a duplicate stream.",
+    "CKPT.Retention.consider":
+        "curve_bpb is the retention probe's forwarded CONTROL mean (HoldoutReading.control_mean) -- "
+        "a value the loop holds between the EVAL.holdout_probe row and this one, finite or not "
+        "forwarded at all, which no produces column can carry because it is taken and consumed in "
+        "one window. step is RunClock.step, units.Windows, as consider requires.",
 }
 
 
@@ -2258,7 +2350,34 @@ class System:
                  # every subsequent flush see a difference and fire the event again, forever.
                  # None UNTIL THE FIRST FLUSH, AND THE FIRST FLUSH IS A BASELINE AND NOT A LIFT: a
                  # lift is a CHANGE, so the first observation has nothing to be a change from.
-                 "cap_vocab_seen")
+                 "cap_vocab_seen",
+                 # THE RETENTION PROBE'S STATE (2026-09-27, Q-EVAL-12), six slots:
+                 #   probe_set      EVAL.pin_holdout's ProbeSet, pinned ONCE at the 'probe' stage;
+                 #                  empty (with its reason) when the probe is off or no area holds
+                 #                  a block.
+                 #   eval_books     the root's own did-it-fire book for the probe -- eval.holdout.*,
+                 #                  eval.mem.*, eval.blowup.* and eval.generate.* -- EMPTY when the
+                 #                  probe is not armed, which is this tree's ABSENT; seeded 0 when it
+                 #                  is. No package can keep it: the counts are of calls the ROOT
+                 #                  makes across five packages.
+                 #   probe_reading  the latest forwarded CONTROL-half Reading, a BACKWARDS edge like
+                 #                  novelty: set after one flush, read as OPT.maybe_step's best_bpb
+                 #                  by the next. None until the first reading, or put back from
+                 #                  LOOP.eval's `reading` on a resumed System (Q-OPT-13).
+                 #   live_domains   DOM.census's n_live as the loop last carried it, mirrored here so
+                 #                  the closures route with the count the next training window will
+                 #                  use; 1 until the first dom.manage pass, like the loop's own.
+                 #   gen_rng        rng_for('eval.generate', seed), minted once per System at the
+                 #                  'probe' stage where generation can run, so a second loop.run
+                 #                  over one System does not mint it twice (RngError).
+                 #   eval_carried   the loop's probe state as the snapshot carried it (LOOP.eval)
+                 #                  and as the loop mirrors it before every save: the pinned
+                 #                  geometry, the arrived areas, the last (epoch, phase) read, the
+                 #                  last-cut view, the live-domain count, the reading series, the
+                 #                  last forwarded Reading and the books. None on a pre-probe
+                 #                  checkpoint and on every run the probe is off.
+                 "probe_set", "eval_books", "probe_reading", "live_domains", "gen_rng",
+                 "eval_carried")
 
     def __init__(self, configs, wires, warnings):
         for name in self.__slots__:
@@ -2455,6 +2574,18 @@ def compose(environ=None, *, restored=None):
     sysm.stage = "refuse"
     sysm.refusals = list(run_api.startup_refusals(run, disk_stream=bool(data.resample)))
     sysm.refusals += list(world_api.startup_refusals(world, ctx_tokens=int(lm.ctx)))
+    # A DAMPING SOURCE THAT CAN NEVER PRODUCE IS REFUSED BY NAME (2026-09-27, Q-OPT-13): a check over
+    # two packages' frozen Configs, so it is the root's and it is taken here, before any tensor.
+    # OPT_DAMP_SOURCE='probe' asks OPT to judge restarts on the retention probe's control mean, and
+    # at EVAL_RETENTION_EVERY=0 there is no probe -- the armed-but-inert state this tree refuses
+    # rather than runs.
+    if str(opt.damp_source) == "probe" and int(ev.retention_every) <= 0:
+        sysm.refusals.append(
+            f"OPT_DAMP_SOURCE='probe' with EVAL_RETENTION_EVERY={int(ev.retention_every)}: the "
+            f"damping would judge every restart on the retention probe's control mean, and the "
+            f"probe is off, so no Reading can ever arrive. Set EVAL_RETENTION_EVERY above 0 "
+            f"(1000 is the register's 04-6.2 cadence, 160 the only measured one), or leave "
+            f"OPT_DAMP_SOURCE at 'off'.")
     _stop_if_refused(sysm)
 
     # -- 4. geometry, then the corpus -------------------------------------------------------------
@@ -2670,6 +2801,47 @@ def compose(environ=None, *, restored=None):
         sysm.stage = "restore.sig"
         sig_api.load_state_dict(sig, sysm.sig, saved["SIG"],
                                 sidecar=_sidecar(sysm, restored, "SIG"))
+
+    # -- 8b. THE RETENTION PROBE'S ONE DRAW (2026-09-27, Proposal 04 SR0 and NEW-03, Q-EVAL-12) ---
+    # AFTER SIG's restore row because the routing prefix is SIG's width, and before anything the
+    # probe reads is trained. EVAL.pin_holdout draws each area's control and report windows ONCE, so
+    # every reading of this run and of its resumes scores the same bytes. A RESUME RE-PINS AT ITS
+    # PARENT'S GEOMETRY, which LOOP.eval records, so a child whose LM.ctx or SIG width differs still
+    # reads the parent's windows; a pre-probe checkpoint carries none and pins at this run's.
+    # AT EVAL_RETENTION_EVERY=0 THE ProbeSet IS EMPTY, NO STREAM IS MINTED AND THE BOOK STAYS EMPTY
+    # -- every eval.* key ABSENT, this tree's "unreachable" -- so a default run is this tree before
+    # the probe, bit for bit.
+    sysm.stage = "probe"
+    _ev_saved = ((saved.get("LOOP") or {}).get("eval") if restored is not None else None) or None
+    sysm.eval_carried = dict(_ev_saved) if _ev_saved else None
+    _geo = (_ev_saved or {}).get("geometry")
+    sysm.probe_set = eval_api.pin_holdout(
+        ev, blocks=sysm.areas.holdout, seed=int(run.seed),
+        window_bytes=int(_geo[0]) if _geo else int(lm.ctx) + 1,
+        prefix_bytes=int(_geo[1]) if _geo else int(sysm.sig.width_units))
+    sysm.eval_books = {}
+    sysm.live_domains = 1
+    if sysm.probe_set.items:
+        # ARMED: every key the loop and the closures write is PRESENT-and-0 from here, so "armed and
+        # not yet read" and "unreachable" print differently (G4). eval.holdout.seconds is a float,
+        # wall-clock, this process's only, never checkpointed and never in the integer channel.
+        for _k in _EVAL_BOOK_KEYS:
+            sysm.eval_books[_k] = 0
+        sysm.eval_books["eval.holdout.seconds"] = 0.0
+        sysm.eval_books["eval.mem.blend_weight_sum"] = 0.0
+        sysm.eval_books["eval.holdout.shortfall"] = sum(
+            int(n) for h in sysm.probe_set.shortfall.values() for n in h.values())
+        if bool(ev.generate):
+            from spine import rng as _rng_g
+            sysm.gen_rng = _rng_g.rng_for("eval.generate", int(run.seed))
+            sysm.eval_books["eval.generate.samples"] = 0
+            sysm.eval_books["eval.generate.tokens"] = 0
+        # A CONTINUED LINEAGE'S BOOK IS ITS TOTAL, as every package's restored counters are; the
+        # seconds and the generation counts are this process's and are never carried.
+        for _k, _v in dict((_ev_saved or {}).get("books") or {}).items():
+            if _k in sysm.eval_books and not isinstance(sysm.eval_books[_k], float):
+                sysm.eval_books[_k] = int(_v)
+        _probe_notices(sysm, ev)
 
     sysm.stage = "fabric"
     sysm.fabric = fab_api.build(
@@ -3057,16 +3229,17 @@ def compose(environ=None, *, restored=None):
 
     # THE PERIODS ARE ARGUMENTS AND THE CALL WAS NOT PASSING ANY. new_cadences(run: Config, *,
     # periods) is keyword-only with no default (train/api.py::new_cadences), so this line was a TypeError on
-    # every compose() -- unreachable behind THREE stubs and not one. This is row 35 of
-    # ASSEMBLY_ORDER's 40, and rows 29, 32 and 33 each raise NotImplementedError before it:
+    # every compose() -- unreachable behind THREE stubs and not one. This is row 36 of
+    # ASSEMBLY_ORDER's 41 (35 of 40 until the 'probe' row landed, 2026-09-27), and rows 30, 33 and
+    # 34 each raised NotImplementedError before it:
     # capacity/api.py::startup_refusals, train/api.py::new_clock and
     # train/api.py::RunClock.begin_epoch. Row 29 is the FIRST of the three and not the reason, so
     # repairing CAP alone does not bring this line into reach -- the run then stops earlier, at
     # this file's `clock` stage. Measured one stub at a time by re-running
     # compose.compose(environ={}) in a fresh process and reading where the traceback ends:
-    # unpatched -> `refuse`, row 29; startup_refusals returning [] -> `clock`, row 32; new_clock
-    # also handing back a bare RunClock -> `epoch0`, row 33; the clock stubbed whole -> here.
-    # Rows 30, 31 and 34 (OPT.build, OPT.load_state, SIG.warm_up) have bodies and pass through.
+    # unpatched -> `refuse`, row 30; startup_refusals returning [] -> `clock`, row 33; new_clock
+    # also handing back a bare RunClock -> `epoch0`, row 34; the clock stubbed whole -> here.
+    # Rows 31, 32 and 35 (OPT.build, OPT.load_state, SIG.warm_up) have bodies and pass through.
     # THIS BLOCKER HAS NOW BEEN NAMED WRONG TWICE, THE SAME WAY BOTH TIMES: one mechanism, stated
     # as the reason, that had stopped being sufficient. Until 2026-09-04 the comment read
     # RUN.process_setup, which is row 1 and HAS A BODY (train/api.py::process_setup returns a
@@ -3082,7 +3255,7 @@ def compose(environ=None, *, restored=None):
     # 'progress' -- so RUN.PROGRESS_WINDOWS had no Cadences.ledger row and no cadence_audit
     # coverage, which is exactly the "0 fires nobody can read" state new_cadences' docstring
     # describes, and K9 could not see it because K9 reads _periods rather than this call. The
-    # ROW says "periods is _periods(sysm) -- the SIX gates' thresholds" and the audit's row says
+    # ROW says "periods is _periods(sysm) -- the SEVEN gates' thresholds" and the audit's row says
     # "the SAME _periods(sysm) mapping new_cadences receives -- the same object, not a second
     # construction, or the audit would describe gates other than the ones evaluated". Both are
     # true of the call now. Found 2026-09-15, writing the three RUN bodies these two rows call.
@@ -3229,20 +3402,21 @@ def _run_windows(sysm):
     and derive.opt_steps_from_windows does the same (derive.py::opt_steps_from_windows), so RUN.cadence_audit would
     have raised on its first call and OPT.build on its first horizon. THE TWO CONSUMERS ARE
     UNREACHABLE FOR DIFFERENT REASONS, AND SAYING SO IS THE WHOLE VALUE OF THE SENTENCE. OPT.build
-    is row 30 of ASSEMBLY_ORDER's 40 and capacity/api.py::startup_refusals at row 29 is its ONLY
+    is row 31 of ASSEMBLY_ORDER's 41 and capacity/api.py::startup_refusals at row 30 is its ONLY
     blocker: make startup_refusals return an empty list and compose() runs straight through
     OPT.build and OPT.load_state -- this function is CALLED there, at the `optimizer` stage -- and
-    stops at row 32. RUN.cadence_audit is row 37 and has FOUR blockers above it, not one: row 29,
-    then train/api.py::new_clock at row 32, train/api.py::RunClock.begin_epoch at row 33 and
-    train/api.py::new_cadences at row 35, each raising NotImplementedError in its turn. So
+    stops at row 33. RUN.cadence_audit is row 38 and has FOUR blockers above it, not one: row 30,
+    then train/api.py::new_clock at row 33, train/api.py::RunClock.begin_epoch at row 34 and
+    train/api.py::new_cadences at row 36, each raising NotImplementedError in its turn (one row
+    lower each until the 'probe' row landed, 2026-09-27). So
     "unreachable today only because CAP.startup_refusals", which stood in this paragraph until
     2026-09-04, was true of one consumer and false of the other, and a reader who repaired CAP
     expecting the audit's UnitError to surface would not have seen it. MEASURED ONE STUB AT A TIME,
     by re-running compose.compose(environ={}) in a fresh process and reading where the traceback
-    ends: unpatched it stops at the `refuse` stage, row 29; with startup_refusals returning [] at
-    `clock`, row 32; with new_clock also handing back a bare RunClock at `epoch0`, row 33; with the
-    clock stubbed whole at `cadence`, row 35; and with new_cadences returning a mapping at `audit`,
-    row 37, which is this function's second call site and the audit's first. Rows 31 and 34
+    ends: unpatched it stops at the `refuse` stage, row 30; with startup_refusals returning [] at
+    `clock`, row 33; with new_clock also handing back a bare RunClock at `epoch0`, row 34; with the
+    clock stubbed whole at `cadence`, row 36; and with new_cadences returning a mapping at `audit`,
+    row 38, which is this function's second call site and the audit's first. Rows 32 and 35
     (OPT.load_state, SIG.warm_up) have bodies and pass through. A stack of stubs is this file's
     oldest shape and the reason K7 exists; what it costs is that "unreachable" needs the whole list
     to stay true, and one name is the answer a repair disproves. THE BLOCKER NAMED HERE UNTIL
@@ -3252,8 +3426,8 @@ def _run_windows(sysm):
     mechanism that no longer holds is a false equation, which this file rates worse than printing
     nothing. Measured, not inferred: `compose.compose(environ={})` raises NotImplementedError from
     compose.py's `refuse` stage into capacity/api.py::startup_refusals, and docs/04_CONTRACT.md
-    says the same in as many words ("halts on the 29th of the 40 rows in ASSEMBLY_ORDER, at
-    CAP.startup_refusals"). ISSUES P1-H51 is the general case: all 36 Clock-unit levers resolve to bare
+    says the same in as many words ("halts on the 29th of the 41 rows in ASSEMBLY_ORDER, at
+    CAP.startup_refusals"). ISSUES P1-H51 is the general case: all 37 Clock-unit levers resolve to bare
     ints and the typing is real only where derive or assemble puts it back, which for this quantity
     is here, at the one place it is computed.
 
@@ -3607,60 +3781,40 @@ def _signature_units(sysm, sig):
 # named in ROW_ARGUMENTS_ELSEWHERE instead, for the reasons that table gives.
 #
 # WHAT IS DELIBERATELY NOT HERE, because writing it would be inventing a producer rather than naming
-# one: a `logits_fn` (it must be THE PATH THE RUN TRAINED, eval/api.py::<module>, which runs through
-# FAB.forward and so needs the flush's own novelty, live_domains and training); an `improving` EMA
-# pair (FAB already keeps one and a second would be two mechanisms deciding the same question); an
-# `owners` rule beyond the one the old tree used; a `plateau` boolean (WORLD holds that state).
-# FOUR ABSENCES, AND EACH IS ONE PRODUCER SOME DEFERRAL WAITS ON RATHER THAN THE SET ANY OF THEM
-# WAITS ON. THIS LINE READ "Those are the seven deferrals" until 2026-09-04, which called a list of
-# FOUR things seven and made the list read as an enumeration OF the deferrals instead of the joins
-# they wait on. The replacement written the same day said "THEY ARE WHAT THE SEVEN NON-EVAL
-# DEFERRALS ARE WAITING ON", and that was false twice, so it is corrected here rather than left to
-# be found. FIRST, THE SEVEN ARE NOT NON-EVAL. They are EVAL.curve_probe, MEM.read, MEM.blend,
-# MEM.judge, FAB.contribution, CAP.observe and WORLD.manage -- SIX non-EVAL and ONE EVAL, which is
-# the split the DEFERRED_ENTRY_POINTS preamble states in as many words ("the eight EVAL entries, the
-# six non-EVAL rows named above, and CKPT.Retention.consider"). One file saying two things about one
-# set is the failure the OPT.load_state ordering row was rewritten to end, reappearing 1200 lines
-# below it in the same sweep. SECOND, THESE FOUR ARE NOT WHAT THOSE SEVEN ARE WAITING ON, and the
-# table says so entry by entry: EVAL.curve_probe waits on `units_by_domain` as well as a logits_fn,
-# MEM.read on `queries`, MEM.judge on `scorer(ctx) -> logits`, MEM.blend on MEM.read's `retrieval`
-# and on the probabilities-against-logits join (Q-MEM-10), FAB.contribution on `targets`,
-# `candidates` AND `baseline_logits_fn`, CAP.observe on `elapsed_windows` and `observations` as well
-# as `improving`, and WORLD.manage on `add_param_group` -- which has no row to hand it over -- as
-# well as `plateau`. THREE of these four bear on a deferral at all: logits_fn on EVAL.curve_probe
-# (and, in the same shape, on MEM.judge's scorer and FAB's baseline_logits_fn), `improving` on
-# CAP.observe, `plateau` on WORLD.manage. THE FOURTH BEARS ON NONE OF THEM. `owners` is not one of
-# the seven and is not even the same kind of absence: the RULE is declared -- argmax over
-# FabricOut.weights modulo MEM.d_owner_blocks, on MEM.write's ROW_ARGUMENTS_ELSEWHERE entry, with P4
-# writing the tensor operation because nothing in src/ imports torch -- and MEM.write is not in
-# DEFERRED_ENTRY_POINTS at all, so what is declined here is inventing a BETTER rule, not supplying a
-# missing one. The other three genuinely have no producer anywhere.
+# one: an `improving` EMA pair (FAB already keeps one and a second would be two mechanisms deciding
+# the same question); an `owners` rule beyond the one the old tree used; a `plateau` boolean (WORLD
+# holds that state); and a scorer of the (ctx, src) arity MEM.judge and EVAL.wrongness_probe
+# declare. THREE ABSENCES AND ONE ARITY, and each is one producer some deferral waits on rather than
+# the set any of them waits on: `improving` bears on CAP.observe, `plateau` on WORLD.manage, the
+# scorer on MEM.judge and EVAL.wrongness_probe. `owners` bears on none of them -- its RULE is
+# declared on MEM.write's ROW_ARGUMENTS_ELSEWHERE entry, and what is declined here is inventing a
+# BETTER rule, not supplying a missing one. (THIS PARAGRAPH COUNTED A `logits_fn` AMONG THE ABSENCES
+# UNTIL 2026-09-27 and argued at length which deferrals waited on it; the history is in git.)
 #
-# THE logits_fn IS STILL NOT FORMABLE, BUT ITS SHAPE AND ITS OWNER ARE NOW RULED (Q-MEM-10, RESOLVED
-# 2026-09-02 (a)). When the missing data exist it is written HERE, once, as
-# `_logits_fn(sysm, *, use_memory)`, beside _key_fn / _head / _sig_encode_fn, and it is the ONLY
-# place softmax -> MEM.read(promote=False) -> MEM.blend -> log is written anywhere in the tree.
-# NEITHER SIDE'S FROZEN SIGNATURE MOVES: MEM.blend keeps `model_probs` as probabilities and EVAL
-# keeps `logits_fn`. The document's own recommendation was (c), passing `blend_fn` into the four
-# scoring entry points, and it is NOT TAKEN: it moves four frozen EVAL `def`s and then makes each of
-# the four bodies write the mix for itself, which is the ungated recomputed blend of C8 (prompt.py)
-# and C9 (cl_bench.py) rebuilt inside the instrument line -- the exact thing memory/api.py's blend
-# exists to prevent ("THE ARITHMETIC LIVES IN THIS PACKAGE so the mixing weight never travels").
-# TWO CLOSURES, TWO SYSTEMS, AND THE READING NAMES WHICH. use_memory=False is the trained path;
-# use_memory=True is the trained path plus retrieval, which has never entered training. FAB's
-# `baseline_logits_fn` MUST ALWAYS BE THE MEMORY-OFF ONE, because fabric/api.py makes it
-# load-bearing that the baseline comes from the same callable that produced `baseline_loss`, and a
-# memory-on baseline there would silently undo the C3/H11 repair.
-# WHAT IS STILL MISSING, so this stays a deferral and not a helper: FAB.forward needs `signature`,
-# `domain_id`, `novelty` and `live_domains` per row. For a HELD-OUT window the closure can encode
-# the signature itself with _sig_encode_fn -- off the width_units units BEFORE the scored window,
-# the slice _sample_window takes at that window's own index, and never off the window being scored,
-# which is the training-path leak Q-FAB-7 closed -- and pass training=False and DOM's live count -- `novelty`
-# is the one datum with no honest source off the training path, and it is named here rather than
-# defaulted to zero in silence. For a STORED entry the domain id is Store.src, which is why the
-# declared callable is `scorer(ctx, src) -> logits` and not `scorer(ctx)`; see MEM.judge below.
-# ONE ARITY, WRITTEN ONCE: EVAL.wrongness_probe's `scorer` is the same callable and takes the same
-# two arguments.
+# THE logits_fn IS HERE NOW, AS TWO NAMED CLOSURES (2026-09-27, Q-EVAL-12, discharging Q-MEM-10's
+# ruling). _logits_fn(sysm, *, use_memory) below is the ONLY place softmax -> MEM.read(promote=False)
+# -> MEM.blend -> log is written anywhere in the tree, and NEITHER SIDE'S FROZEN SIGNATURE MOVED FOR
+# IT: MEM.blend keeps `model_probs` as probabilities and EVAL keeps `logits_fn`. TWO CLOSURES, TWO
+# SYSTEMS, AND EVERY READING NAMES WHICH (`.name`, 'memory-off' / 'memory-on'). use_memory=False is
+# the trained path; use_memory=True adds retrieval, which has never entered training. FAB's
+# `baseline_logits_fn` MUST ALWAYS BE THE MEMORY-OFF ONE, because fabric/api.py makes it load-bearing
+# that the baseline comes from the same callable that produced `baseline_loss`.
+# WHAT THE THREE DATA THIS PARAGRAPH SAID A HELD-OUT WINDOW LACKED BECAME, each ruled in Q-EVAL-12:
+#   signature   encoded off the width_units bytes BEFORE the window (the pinned prefix), the slice
+#               _sample_window takes at a training window's own index -- never off the window being
+#               scored, which is the leak Q-FAB-7 closed.
+#   domain_id   DOM.nearest, the id DOM.observe WOULD assign, with nothing written; -1 where it would
+#               spawn, which bans exactly what a newborn domain's id would.
+#   novelty     ZEROS, NAMED: the one datum with no honest source off the training path. A held-out
+#               window has no previous flush, and zero says "nothing was surprising yet", as the
+#               first flush of every run says it.
+# AND ONE MORE, WHICH NO SENTENCE HERE ANTICIPATED: the ROUTING CLOCK. An eval pass runs
+# FAB.forward at step_windows = clock.step + 1, the routing state the NEXT training window will use.
+# FAB's identity cache hands a same-step pass the keys the training pass computed BEFORE the
+# optimizer stepped, so at clock.step the probe read stale keys while a resumed child, whose cache
+# is empty, computed fresh ones -- and a start reading could never equal the uninterrupted run's.
+# At +1 the keys are recomputed at FAB_EMB_EVERY=1 (the shipped value) and are the next window's
+# cached ones at larger values; nothing else FAB.forward reads from the step moves on an eval pass.
 # ==================================================================================================
 
 def _window_bounds(sysm, at_window):
@@ -3839,15 +3993,343 @@ def _sig_encode_fn(sysm):
     return lambda windows: sig_api.encode(sig, sysm.sig, windows)
 
 
+# ==================================================================================================
+# THE RETENTION PROBE'S JOINS (2026-09-27, Proposal 04 SR0 and NEW-03, docs/04_CONTRACT.md Q-EVAL-12)
+# ==================================================================================================
+
+# THE ROOT'S EVAL BOOK, THE INTEGER KEYS. Seeded 0 at the 'probe' stage when the probe is armed and
+# ABSENT otherwise; the two floats (eval.holdout.seconds, eval.mem.blend_weight_sum) and the
+# generation pair are seeded beside them, the pair only where EVAL_GENERATE is on.
+#   eval.holdout.calls             holdout_probe calls, every closure and every arm
+#   eval.holdout.cadence_reads     readings the 'retention' cadence asked for
+#   eval.holdout.phase_reads       readings at the first window of a phase
+#   eval.holdout.boundary_reads    readings at R (both closures count)
+#   eval.holdout.resume_reads      readings at a resume's start (both closures count)
+#   eval.holdout.windows           windows scored
+#   eval.holdout.cuts              TOK.tokenize calls the probe made (so MEM's remap count is
+#                                  tok.segment_remap minus this)
+#   eval.holdout.forwards          closure forwards; eval.holdout.decodes the head calls inside them
+#   eval.holdout.sig_calls         SIG.encode calls the closures made -- the READINGS' passes, as R
+#                                  reads the package rows; generation's, made after R, are counted
+#                                  only as eval.generate.tokens (one forward per token per closure)
+#   eval.holdout.areas_unarrived   a GAUGE: areas holding a pinned block the run has not reached, at
+#                                  the last reading
+#   eval.holdout.shortfall         items the pinned halves were too short to supply
+#   eval.holdout.nonfinite         readings whose control mean was not finite, not forwarded
+#   eval.holdout.domain_spawn      closure passes DOM.nearest answered -1 for (a window the
+#                                  partition would have minted a domain for)
+#   eval.mem.reads / key_encodes / empty / blends   the memory-on closure's MEM calls
+#   eval.blowup.fired              the alarm's fires, summed over every series; since_best a GAUGE
+_EVAL_BOOK_KEYS = (
+    "eval.holdout.calls", "eval.holdout.cadence_reads", "eval.holdout.phase_reads",
+    "eval.holdout.boundary_reads", "eval.holdout.resume_reads", "eval.holdout.windows",
+    "eval.holdout.cuts", "eval.holdout.forwards", "eval.holdout.decodes",
+    "eval.holdout.sig_calls", "eval.holdout.areas_unarrived", "eval.holdout.shortfall",
+    "eval.holdout.nonfinite", "eval.holdout.domain_spawn",
+    "eval.mem.reads", "eval.mem.key_encodes", "eval.mem.empty", "eval.mem.blends",
+    "eval.blowup.fired", "eval.blowup.since_best")
+
+
+def _probe_armed(sysm):
+    """Whether the retention probe can read at all: a pinned ProbeSet holding at least one area.
+
+    EVAL_RETENTION_EVERY > 0 is folded in, because pin_holdout pins nothing at 0. This is the ARM
+    TEST the loop makes BEFORE Cadences.due('retention', ...) is asked, so at 0 the gate's ledger
+    reads zero checks."""
+    ps = sysm.probe_set
+    return ps is not None and bool(ps.items)
+
+
+def _phase_of(phase_bounds, byte):
+    """The phase a byte of the epoch's stream falls in: the k with lo <= byte < hi in
+    Plan.phase_bounds, the last phase past the final bound. 0 with no bounds."""
+    for k, (lo, hi) in enumerate(phase_bounds or ()):
+        if int(lo) <= int(byte) < int(hi):
+            return k
+    return max(0, len(phase_bounds or ()) - 1)
+
+
+def _phase_windows(sysm):
+    """How many of this epoch's windows open in each phase: [count per phase], each window placed
+    by its FIRST byte (Segmentation.byte_pos at its first token), the byte the loop's phase-start
+    test reads. The startup notice's input, and nothing else."""
+    ctx = int(sysm.configs["LM"].ctx)
+    bounds = tuple(sysm.plan.phase_bounds)
+    counts = [0] * max(1, len(bounds))
+    pos = sysm.segmentation.byte_pos
+    start = 0
+    for _w in range(_windows_in_epoch(sysm)):
+        counts[_phase_of(bounds, pos[start])] += 1
+        start += ctx
+    return counts
+
+
+def _probe_notices(sysm, ev):
+    """The two startup notices the register asks for, PRINTED AND NEVER APPLIED (04 section 6).
+
+    EVAL_RETENTION_EVERY above 160 is outside the only cadence ever measured (the d3 toy's 160);
+    and a phase the cadence would read fewer than five times -- derive.readings_in over the phase's
+    windows, plus its phase-start read -- gives a focus signal too thin to act on. Both are said
+    before the first window, into System.warnings, and neither changes a number."""
+    from spine import derive as _dv, units as _Ud
+    every = int(ev.retention_every)
+    if every > 160:
+        sysm.warnings.append(
+            f"EVAL_RETENTION_EVERY={every} is above 160, the only retention cadence ever measured "
+            f"(Proposal 04 section 6). The probe runs at it; nothing is changed. The register's "
+            f"04-6.2 value is 1000 for telemetry, and every retention arm sets 160.")
+    period = eval_api.retention_period(ev)
+    thin = []
+    for k, n in enumerate(_phase_windows(sysm)):
+        reads = _dv.readings_in(_Ud.Windows(int(n)), period) + 1
+        if reads < 5:
+            thin.append(f"phase {k}: {n} window(s), about {reads} reading(s)")
+    if thin:
+        sysm.warnings.append(
+            f"EVAL_RETENTION_EVERY={every}: {len(thin)} phase(s) of this epoch would be read fewer "
+            f"than five times ({'; '.join(thin)} -- the cadence's readings plus the phase-start "
+            f"read, derive.readings_in). A reading series that short cannot show a phase's trend; "
+            f"nothing is changed.")
+
+
+def _view_tuple(view):
+    """A recorded segmentation view ([size, [retired ids]] in the log) as TOK.tokenize's `view`."""
+    return (int(view[0]), tuple(int(x) for x in view[1]))
+
+
+def _last_cut_view(sysm):
+    """The view the stream in force was last cut at: the segmentation log's last event's."""
+    return _view_tuple(sysm.seg_log["events"][-1]["view"])
+
+
+def _holdout_tokenize(sysm, view=None):
+    """EVAL.holdout_probe's `tokenize_fn`: TOK.tokenize bound to the vocabulary AT A RECORDED VIEW.
+
+    THE VIEW IS THE LAST CUT'S, NOT THE TABLE AS IT NOW STANDS (Q-EVAL-12). The model was trained on
+    the stream cut at that view, and ids minted since have appeared in no training window, so a
+    held-out window cut at the live table would be scored in a segmentation the run never trained
+    on -- a reading of the vocabulary's growth, not of retention. A resume's start reading passes
+    its PARENT's last-cut view (LOOP.eval), so it reads what the parent's final reading read.
+
+    NO LABELS AND regularize=False, so it draws nothing from the dropout stream, bypasses TOK's
+    one-slot cache and counts tok.segment_remap; every cut is booked as eval.holdout.cuts, so
+    MEM's remap count is tok.segment_remap minus it."""
+    tok = sysm.configs["TOK"]
+    v = _last_cut_view(sysm) if view is None else _view_tuple(view)
+    books = sysm.eval_books if sysm.eval_books is not None else {}
+
+    def tokenize_fn(data):
+        if "eval.holdout.cuts" in books:
+            books["eval.holdout.cuts"] += 1
+        return tok_api.tokenize(tok, sysm.vocab, bytes(data), view=v)
+    return tokenize_fn
+
+
+def _holdout_units(sysm, arrived, parent=()):
+    """EVAL.holdout_probe's `units_by_domain`: the ARRIVED areas' pinned (prefix, window) pairs.
+
+    {area: {"control": [(prefix, window), ...], "report": [...], "seen_by_parent": bool}}. An area
+    whose phase this run has not reached is left out: it has trained on nothing, and its reading
+    would be a measurement of nothing (eval.holdout.areas_unarrived counts them). `parent` is the
+    set the snapshot's parent had reached, so a reader can tell retention of what the parent
+    learned from a first look at an area this lineage has just met."""
+    ps = sysm.probe_set
+    out = {}
+    for area in sorted(arrived):
+        got = ps.items.get(area) if ps is not None else None
+        if not got:
+            continue
+        out[area] = {"control": [(p, w) for _s, p, w in got["control"]],
+                     "report": [(p, w) for _s, p, w in got["report"]],
+                     "seen_by_parent": area in set(parent or ())}
+    return out
+
+
+def _gen_prompts(sysm, arrived, view=None):
+    """EVAL.generate's `prompts_by_domain`: each arrived area's REPORT-half pinned windows, cut at
+    the last-cut view -- {area: [{"prefix": bytes, "ids": [token ids]}]}. Report-half, so a prompt
+    is text no consumer has read and the run never trained on; EVAL chooses how many to use."""
+    ps = sysm.probe_set
+    cut = _holdout_tokenize(sysm, view)
+    out = {}
+    for area in sorted(arrived):
+        got = ps.items.get(area) if ps is not None else None
+        if not got:
+            continue
+        out[area] = [{"prefix": p, "ids": list(cut(w).ids)} for _s, p, w in got["report"]]
+    return out
+
+
+def _eval_modules(sysm):
+    """Every torch module a probe pass runs through -- the LM, FAB's module dict, WORLD's parts and
+    SIG's encoder -- so the closure can put each in eval mode and restore each submodule's own
+    flag afterwards. A part that is not a module (a bare parameter, the bigram table) has no mode."""
+    import torch
+    tops = [sysm.model, getattr(sysm.fabric, "modules", None)]
+    for name in ("encoder", "qproj", "world_proj", "preds", "keys"):
+        tops.append(getattr(sysm.world, name, None))
+    tops.append(getattr(sysm.sig, "encoder", None))
+    return [m for m in tops if isinstance(m, torch.nn.Module)]
+
+
+def _prefix_units(sysm, prefix, view, books):
+    """SIG's units for one row: the width_units units ENDING at the row's first byte, the slice
+    _sample_window takes at a training window's own index (Q-FAB-7), cut from the pinned prefix and
+    LEFT-PADDED where the prefix is shorter, as _sample_window pads the opening windows of a stream.
+    Under space='tokens' the prefix is cut at `view` first (a cut, booked) and padded with id 0; a
+    prefix of width_units BYTES then yields fewer tokens than width_units, so the tokens-space
+    signature is more padded than a training window's -- recorded in Q-EVAL-12, on an arm the
+    tree does not ship."""
+    width = int(sysm.sig.width_units)
+    if sysm.configs["SIG"].space == "tokens":
+        ids = []
+        if prefix:
+            if "eval.holdout.cuts" in books:
+                books["eval.holdout.cuts"] += 1
+            ids = list(tok_api.tokenize(sysm.configs["TOK"], sysm.vocab, bytes(prefix),
+                                        view=view).ids)
+        ids = ids[len(ids) - width:] if len(ids) > width else ids
+        return [0] * (width - len(ids)) + ids
+    units = bytes(prefix)[max(0, len(prefix) - width):]
+    return bytes(width - len(units)) + units
+
+
+def _logits_fn(sysm, *, use_memory, view=None, live_domains=None, live_vocab=None):
+    """THE PATH THE RUN TRAINED, as a closure: fn(x, *, prefix_bytes) -> (B, L, V) logits.
+
+    ONE CLOSURE PER SCORED SYSTEM (eval/api.py::<module>'s ONE LOGITS PATH; Q-MEM-10, Q-EVAL-12).
+    use_memory=False is the trained path and is named 'memory-off'; use_memory=True adds retrieval
+    -- softmax -> MEM.encode_queries -> MEM.read(promote=False) -> MEM.blend -> log, written here and
+    nowhere else -- and is named 'memory-on'. Every reading records the name. At MEM_BLEND_MAX=0
+    blend returns the model's distribution itself, and the memory-on closure then returns the
+    memory-off logits unchanged rather than their log-softmax, so the two agree to the bit there.
+
+    THE PATH, IN THE FLUSH'S ORDER: SIG.encode on each row's prefix units (_prefix_units), then
+    DOM.nearest on row 0's signature (the domain the window WOULD be routed to, with nothing
+    written; -1 where DOM would spawn, which bans what a newborn id would), then under
+    Process.autocast LM.embed, WORLD.forecast, LM.encode(extra=), FAB.forward(training=False) with
+    the head (LM.decode at the live vocabulary boundary, wrapped to count decodes), targets=None,
+    step_windows=clock.step + 1 (the NEXT window's routing clock -- see the paragraph above these
+    joins), the nearest domain, the live-domain count the next training window will use and
+    novelty ZEROS; then the vote's logits, or LM.decode of the routed hidden where nothing voted.
+    ALL UNDER no_grad, every module in eval mode, each submodule's own mode put back after -- so a
+    closure pass trains nothing, drops nothing and draws nothing (EVAL.holdout_probe refuses a
+    reading that moved a global stream).
+
+    THE CLOSURE OWNS GENERATION'S WINDOW AND PREFIX: handed more than LM.ctx tokens it keeps the
+    last LM.ctx and appends the dropped ids' bytes (TOK.Vocabulary.decode) to the row's prefix, so
+    a continuation is routed on the text before its window exactly as a training window is.
+
+    `view` (the cut the tokens-space prefix is taken at) and `live_domains` default to the live
+    run's -- the last-cut view and System.live_domains; a resume's start reading passes its parent's
+    recorded ones.
+
+    `live_vocab` IS GENERATION'S AND ONLY GENERATION'S: the ids at and above it (TOK.Vocabulary.size(),
+    the positional boundary LM.decode's own live_vocab takes) are set to -inf after the whole path,
+    the memory blend included -- the frozen tree's `vlim`, "never sample untrained ids"
+    (self_organize.py:3857-3867). At the shipped LM_MASK_DEAD_ROWS=0 the head spans LM_VOCAB_SLOTS and
+    a never-minted row keeps some mass, and a sampled one has no bytes: driven 2026-09-27, a 30-window
+    run's generation drew one and TOK.Vocabulary.decode raised IndexError after the final save,
+    taking the report with it. A READING never passes it: the held-out bits/byte are scored on
+    the distribution the run trains on, dead rows and all."""
+    import torch
+    from spine import units as _Ul
+    cfg = sysm.configs
+    lm, fab, sig, world, dom, mem = (cfg["LM"], cfg["FAB"], cfg["SIG"], cfg["WORLD"], cfg["DOM"],
+                                     cfg["MEM"])
+    ctx = int(lm.ctx)
+    books = sysm.eval_books if sysm.eval_books is not None else {}
+    vw = _last_cut_view(sysm) if view is None else _view_tuple(view)
+    key_fn = _key_fn(sysm)
+
+    def _book(k, n=1):
+        if k in books:
+            books[k] += n
+
+    def head(h):
+        _book("eval.holdout.decodes")
+        return lm_api.decode(lm, sysm.model, h, live_vocab=int(sysm.vocab.size()),
+                             retired_ids=tuple(sysm.vocab.retired))
+
+    def fn(x, *, prefix_bytes):
+        dev = sysm.process.device
+        x = x.to(device=dev, dtype=torch.long)
+        pref = [bytes(p) for p in prefix_bytes]
+        n_tok = int(x.shape[1])
+        if n_tok > ctx:
+            drop = x[:, :n_tok - ctx].tolist()
+            x = x[:, n_tok - ctx:]
+            pref = [pref[b] + sysm.vocab.decode([int(t) for t in drop[b]]) for b in range(len(pref))]
+        B = int(x.shape[0])
+        tops = _eval_modules(sysm)
+        modes = [(m, m.training) for t in tops for m in t.modules()]
+        try:
+            for t in tops:
+                t.eval()
+            with torch.no_grad():
+                units = [_prefix_units(sysm, p, vw, books) for p in pref]
+                sig_vec = sig_api.encode(sig, sysm.sig, units)
+                _book("eval.holdout.sig_calls")
+                if sig_vec.device != x.device:
+                    sig_vec = sig_vec.to(x.device)
+                did = dom_api.nearest(dom, sysm.partition, signature=sig_vec[0])
+                if did < 0:
+                    _book("eval.holdout.domain_spawn")
+                n_live = int(live_domains if live_domains is not None else (sysm.live_domains or 1))
+                with sysm.process.autocast():
+                    obs_emb = lm_api.embed(lm, sysm.model, x)
+                    h = lm_api.encode(lm, sysm.model, x,
+                                      extra=world_api.forecast(world, sysm.world, obs_emb))
+                    out = fab_api.forward(
+                        fab, sysm.fabric, h=h, signature=sig_vec,
+                        novelty=torch.zeros(B, device=x.device), head=head, targets=None,
+                        step_windows=_Ul.Windows(int(sysm.clock.step) + 1), domain_id=did,
+                        live_domains=n_live, training=False)
+                    logits = out.logits if out.logits is not None else head(out.hidden)
+                _book("eval.holdout.forwards")
+                if use_memory:
+                    V = int(logits.shape[-1])
+                    probs = torch.softmax(logits.float(), dim=-1).reshape(-1, V)
+                    queries = mem_api.encode_queries(mem, contexts=x, key_fn=key_fn)
+                    _book("eval.mem.key_encodes", int(queries.shape[0]))
+                    got = mem_api.read(mem, sysm.store, queries=queries, promote=False)
+                    _book("eval.mem.reads")
+                    if not bool((got.hits >= 0).any()):
+                        _book("eval.mem.empty")
+                    mixed = mem_api.blend(mem, probs, got)
+                    _book("eval.mem.blends")
+                    if "eval.mem.blend_weight_sum" in books:
+                        books["eval.mem.blend_weight_sum"] += float(got.blend.float().sum())
+                    # AT MEM_BLEND_MAX=0 blend HANDS BACK THE MODEL'S OWN DISTRIBUTION, the same
+                    # object, and the memory-on prediction IS the memory-off one: it is returned as
+                    # those logits, not as log(softmax(logits)), whose rounding would part two
+                    # closures that agree in law at the last bit -- and a generation drawing on
+                    # that bit by inverse CDF at one boundary uniform.
+                    if mixed is not probs:
+                        logits = torch.log(mixed).reshape(B, -1, V)
+                if live_vocab is not None and int(live_vocab) < int(logits.shape[-1]):
+                    logits = logits.clone()
+                    logits[..., int(live_vocab):] = float("-inf")
+        finally:
+            for m, was in modes:
+                m.training = was
+        return logits
+
+    fn.name = "memory-on" if use_memory else "memory-off"
+    return fn
+
+
 def _periods(sysm):
     """{gate key: units.Windows} -- the periods RUN.new_cadences and RUN.cadence_audit take.
 
     ASSEMBLED HERE BECAUSE NO PACKAGE CAN. Each period belongs to the package that DECLARES its kind
     and arrives through that package's typed accessor -- EVAL.curve_period, DOM.manage_period,
-    FAB.manage_period, MEM.rekey_period, CKPT.save_period -- and a mapping spanning six packages is
-    exactly the object O10 forbids any one of them to build. RUN evaluates gates, and RUN owns no
-    threshold THAT DECIDES ANYTHING THE MODEL COMPUTES -- which is the sentence new_cadences means,
-    and the one sixth entry is the exception that has to be stated rather than smuggled.
+    FAB.manage_period, MEM.rekey_period, CKPT.save_period and, since 2026-09-27 (Q-EVAL-12),
+    EVAL.retention_period -- and a mapping spanning six packages is exactly the object O10 forbids
+    any one of them to build (EVAL was already in it, so the seventh key added no package). RUN
+    evaluates gates, and RUN owns no threshold THAT DECIDES ANYTHING THE MODEL COMPUTES -- which is
+    the sentence new_cadences means, and the one 'progress' entry is the exception that has to be
+    stated rather than smuggled.
 
     'progress' IS RUN'S OWN AND IT IS NOT A LEVER (Q-RUN-1, RESOLVED 2026-09-02: option (b)). It is
     RUN.PROGRESS_WINDOWS (run_api.PROGRESS_WINDOWS here), a module constant in train/api.py written units.Windows at its definition,
@@ -3872,10 +4354,10 @@ def _periods(sysm):
     be edited to a bare int -- H51 exactly, and Cadences.due raises on it at the first evaluation --
     with every suite green. K9 now reads THIS MAPPING as well as the rows: every value here must be
     a CALL or a module-level constant CONSTRUCTED with a Clock kind, and its detail line prints how
-    many of these six are which.
+    many of these seven are which.
 
     THE ACCESSORS EXIST BECAUSE Cadences.due REFUSES A BARE INT. Three of the five gates were handed
-    cfg.manage_every directly until 2026-08-30, and Config hands back a bare int for all 35 levers
+    cfg.manage_every directly until 2026-08-30, and Config hands back a bare int for all 37 levers
     that declare a Clock unit (ISSUES P1-H51), so three of the five would have raised on their first
     evaluation while the row said they were fine. K9 refuses that shape now.
 
@@ -3890,6 +4372,7 @@ def _periods(sysm):
         "fab.manage": fab_api.manage_period(r["FAB"]),
         "dom.rekey": mem_api.rekey_period(r["MEM"]),
         "ckpt": ckpt_api.save_period(r["CKPT"]),
+        "retention": eval_api.retention_period(r["EVAL"]),
         "progress": run_api.PROGRESS_WINDOWS,
     }
 

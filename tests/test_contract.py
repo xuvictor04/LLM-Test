@@ -2420,7 +2420,7 @@ def check_k9_cadence_periods_are_typed(src_dir=SRC):
     THE DEFECT. RUN.Cadences.due states its own contract: "`period` MUST be units.Windows. An int
     raises; a Flushes raises." Three rows handed it a bare lever read --
     Cadences.due('fab.manage', FAB.manage_every, clock), and the same for DOM.manage_every and
-    MEM.rekey_every -- and Config hands back a bare int for all 35 levers that declare a Clock unit
+    MEM.rekey_every -- and Config hands back a bare int for all 37 levers that declare a Clock unit
     (ISSUES P1-H51). So three of the five periodic gates in the system would have raised on their first
     evaluation, and the row said they were fine.
 

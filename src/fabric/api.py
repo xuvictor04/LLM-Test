@@ -2252,13 +2252,15 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                  dom_min, div_w, ind_k, ind_w, dk, rank, emb_hid, emb_var, emb_every, ae_w, spawn,
                  spawn_mult, spawn_floor
     WIRES READ: none
-    DID IT FIRE: ALL 24 KEYS THIS BODY WRITES -- counted against the body in BOTH directions on
-    2026-09-04 and found four short, which is why the last four lines exist. A key written and not
+    DID IT FIRE: ALL 25 KEYS THIS BODY WRITES -- counted against the body in BOTH directions on
+    2026-09-04 and found four short, which is why the last four lines exist, and one more since
+    2026-09-27, fab.eval_passes (Q-FAB-17). A key written and not
     declared is a number in the report that the contract does not admit to producing; a key declared
-    and not written is the opposite and there are none (all 24 below are written, and 19 of them are
+    and not written is the opposite and there are none (all 25 below are written, and 19 of them are
     SEEDED to 0 before any branch decides, so absent never masquerades as zero -- 16 on every routed
     pass and 3, fab.ind_applied, fab.hopsup_applied and fab.halt_spent_on_base, only on the arm
-    that can reach them, so that absent says UNREACHABLE for those three as G4 requires). The count is stated
+    that can reach them, so that absent says UNREACHABLE for those three as G4 requires; the
+    twenty-fifth is seeded by the composition root, on the arm whose held-out probe is armed). The count is stated
     because the previous one was wrong: this body writes 24 keys, not nineteen, and it declared 14
     distinct Gates and not thirteen when that count was taken -- 15 after that, fab.halt_spent_on_base
     being the one added with this reconciliation, and 16 now: fab.ponder (2026-09-24) says what
@@ -2267,6 +2269,16 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     exists to count leave-one-out passes. It used to write fab.route_calls and fab.hops_taken like
     any other pass, so eight candidates on one window read 9 route calls and 27 hops taken for a
     walk that took 3 -- a counterfactual moving the instrument it is measured by.
+    AN EVAL PASS (training=False, no hold_out) WRITES NONE OF THEM EITHER except fab.eval_passes,
+    the twenty-fifth key, which counts eval passes (2026-09-27, Q-FAB-17). Every per-pass tally
+    below -- fab.route_calls, fab.hops_taken, fab.halt_clamped, fab.explored_rows,
+    fab.explore_distinct_targets, fab.discovered, fab.discover_targets, fab.banned_experts,
+    fab.ec_applied, fab.halt_spent_on_base, fab.div_applied, fab.ind_applied, fab.hopsup_applied,
+    and the two arms' fab.forward_identity and fab.norm_only_passes -- is a TRAINING pass's, and they
+    read `solo` (true of an eval pass) until the held-out probe's closures began calling this entry
+    point beside training. fab.eval_passes is seeded 0 by the composition root on the arm whose
+    probe is armed (the tok.due_merged precedent) and is ABSENT everywhere else; the key-seeding
+    loop below still runs on every pass, since setdefault creates a key at zero and moves none.
                  fab.route_calls, fab.hops_taken, fab.halt_mass_train (TRAINING passes only -- the
                  old EMA averaged eval passes in and moved when nothing but HOLDOUT_N changed),
                  fab.halt_clamped, fab.explored_rows, fab.explore_distinct_targets,
@@ -2290,7 +2302,9 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                  collapsed -- so the two counters are the falsifier for that being retied),
                  fab.halt_spent_on_base (the society arm only, and ONLY when halt mass was actually
                  spent: at FAB_HALT=0 the blend is the identity on the vote, and counting that as a
-                 spend was a wrong measurement wearing a counter's name)
+                 spend was a wrong measurement wearing a counter's name),
+                 fab.eval_passes (the eval passes of the held-out probe's closures, which move no
+                 other key -- see the paragraph above the list)
     """
     fab = fab.owned_by("FAB")
     # THE INCOMING CLOCK IS PUT THROUGH units.Windows, exactly as sig/api.py::cadence_due does with
@@ -2330,7 +2344,13 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                           reason="FAB_ON=0: the forward is the identity, so no expert is computed, "
                                  "no routing distribution exists, and every FAB-side term of the "
                                  "objective is ABSENT rather than zero."))
-        _bump(counters, "fab.forward_identity")
+        # A TRAINING PASS'S COUNT, AND AN EVAL PASS COUNTS ITSELF APART (2026-09-27, Q-FAB-17): the
+        # held-out probe's closures call this entry point with training=False beside training, and
+        # one bump per eval pass here would move the arm's own count by the probe's cadence.
+        if training and hold_out is None:
+            _bump(counters, "fab.forward_identity")
+        elif hold_out is None:
+            _bump(counters, "fab.eval_passes")
         if training and hold_out is None:
             pop.pass_gates = tuple(gates)
         return FabricOut(hidden=h, aux_loss=zero, gates=tuple(gates),
@@ -2351,7 +2371,11 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
         out = h
         for _ in range(max(1, min(hops, 2 + int(pop.n_live) // 2))):
             out = pop.modules["norm"](out)
-        _bump(counters, "fab.norm_only_passes")
+        # TRAINING PASSES ONLY, as at FAB_ON=0 above (Q-FAB-17).
+        if training and hold_out is None:
+            _bump(counters, "fab.norm_only_passes")
+        elif hold_out is None:
+            _bump(counters, "fab.eval_passes")
         gates.append(Gate("fab.forward.routed", False, value="FAB_NORM_ONLY=1",
                           threshold="FAB_NORM_ONLY=0", reachable=False,
                           reason="FAB_NORM_ONLY=1: the control arm keeps the fabric's normalization "
@@ -2555,8 +2579,16 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
         counters.setdefault("fab.hopsup_applied", 0)
     if society and halt_on and head is not None:
         counters.setdefault("fab.halt_spent_on_base", 0)
-    if solo:
+    # A ROUTED CALL IS A TRAINING PASS'S, AND AN EVAL PASS IS COUNTED APART (2026-09-27, Q-FAB-17).
+    # This read `if solo:`, which is True of a no_grad eval pass as well, so the held-out probe's
+    # closures (spine/compose.py::_logits_fn) would have moved fab.route_calls, fab.hops_taken and
+    # the six per-pass tallies below by the probe's cadence -- the leave-one-out case above, one
+    # door over. fab.eval_passes counts those passes instead; the root seeds it at 0 on the arm
+    # whose probe is armed, and it is ABSENT everywhere else.
+    if learn:
         _bump(counters, "fab.route_calls")
+    elif solo:
+        _bump(counters, "fab.eval_passes")
     # DEPTH. society PINS THE WALK AT ONE HOP and keeps per-expert logits, which is what makes
     # leave-one-out a reweighted sum rather than a re-walk -- it is the same forward pass with a
     # different depth and a different return, NOT a second path. The old tree had two, and
@@ -2778,7 +2810,11 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     # fab.holdout_applied, which exists to count counterfactuals: it is not a reading of the routed
     # walk, it is the number of times the walk was interrogated. The seeding loop above stays on both
     # paths because setdefault can create a key at zero and can never move one.
-    if solo:
+    # AND AN EVAL PASS MOVES NONE OF THEM EITHER (2026-09-27, Q-FAB-17): the block read `if solo:`,
+    # true of an ordinary no_grad eval pass, so every held-out read would have added its hops, its
+    # halt clamps and its bans to the training walk's books. fab.eval_passes is the eval pass's one
+    # key, above.
+    if learn:
         _bump(counters, "fab.hops_taken", hops_taken)
         if halt_on:
             _bump(counters, "fab.halt_clamped", halt_clamped)
@@ -2820,7 +2856,7 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
         # keeps the two arms one code path. Only the claim is now conditional on the operator being
         # on AND on some row actually halting, and `fab.halt_mass_train` carries how much.
         spent_on_base = 1 if (halt_on and float(entry_halt.detach().max()) > 0.0) else 0
-        if spent_on_base and solo:
+        if spent_on_base and learn:
             _bump(counters, "fab.halt_spent_on_base")
     elif hop_vote and vote is not None:
         logits_out = vote
@@ -2860,7 +2896,10 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     if div_acc is not None and div_w > 0.0:
         aux = aux + div_w * (div_acc / max(1, hops_taken))
         div_applied = 1
-        _bump(counters, "fab.div_applied")
+        # A TRAINING PASS'S TERM (Q-FAB-17): div_acc is formed on every solo pass, an eval pass's
+        # included, and an eval pass adds no loss to anything.
+        if learn:
+            _bump(counters, "fab.div_applied")
     ind_applied = 0
     if society and ind_w > 0.0 and per_expert is not None and targets is not None:
         # EACH OF ind_k EXPERTS MUST SOLVE THE TASK ALONE, weighted by its routing mass -- which
@@ -2873,7 +2912,7 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
             ce = F.cross_entropy(per_expert[:, j].reshape(-1, vocab), targets.reshape(-1))
             aux = aux + ind_w * share * ce
             ind_applied = 1
-        if ind_applied and solo:
+        if ind_applied and learn:
             _bump(counters, "fab.ind_applied")
     hopsup_applied = 0
     if hop_sup_w > 0.0 and targets is not None and len(hop_logits) > 1:
@@ -2883,7 +2922,7 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
             sup = ce if sup is None else sup + ce
         aux = aux + hop_sup_w * (sup / max(1, len(hop_logits) - 1))
         hopsup_applied = 1
-        if solo:
+        if learn:
             _bump(counters, "fab.hopsup_applied")
     ident_term = 0
     ae_rows = None
@@ -5418,7 +5457,7 @@ def manage_period(fab: Config):
 
     WHY THIS EXISTS RATHER THAN THE ROOT PASSING cfg.manage_every. Cadences.due states that its
     period "MUST be units.Windows. An int raises; a Flushes raises." -- and Config hands back a bare
-    int for all 35 levers that declare a Clock unit (ISSUES P1-H51), so the row that read
+    int for all 37 levers that declare a Clock unit (ISSUES P1-H51), so the row that read
     `Cadences.due('fab.manage', FAB.manage_every, clock)` was passing an int into a function whose
     contract refuses one. EVAL and CKPT already had typed accessors (curve_period, save_period);
     FAB, DOM and MEM did not, and their three rows were the only ones that would have raised.

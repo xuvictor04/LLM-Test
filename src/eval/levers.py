@@ -35,7 +35,7 @@ hardcoded slice:
 Every number this package produces is a SIGNAL, not a fact, and the levers here are the only thing that
 says how strong a signal it is.
 
-CENSUS ACCOUNTING (.rework/census.json, filtered on new_owner == "EVAL"): 19 rows.
+CENSUS ACCOUNTING (.rework/census.json, filtered on new_owner == "EVAL"): 19 rows + 2 AMENDMENTS.
     17 rename                     -> 17 levers declared below
      1 drop                       -> not declared (VERIFY_SWEEP: it made the report delete the entries it
                                      was measuring, mem.delete(mem.is_unverified()) at :8889-8891, after
@@ -44,9 +44,13 @@ CENSUS ACCOUNTING (.rework/census.json, filtered on new_owner == "EVAL"): 19 row
                                      declares here; see DEFECT 3 for the default that collides
      0 promote-to-wire            -> none of EVAL's own rows; the wires that reach this package are
                                      listed under WHAT IS DELIBERATELY ABSENT below
-   17 levers in total. The rows came from four old families -- 9 `report`, 7 `misc`, 2 `memory`, 1
-   `fabric` -- which is the census's largest single correction visible from one package: `report` was
-   never an owner, and the instruments were filed apart from the switch that runs them.
+     2 amend                      -> EVAL_RETENTION_EVERY and EVAL_RETENTION_N, minted 2026-09-27
+                                     (Proposal 04 SR0, Q-EVAL-12), with NO ANCESTOR KNOB: the old
+                                     tree read held-out text only at the end of a run
+   19 levers in total, 17 from the rows and 2 amendments. The rows came from four old families -- 9
+   `report`, 7 `misc`, 2 `memory`, 1 `fabric` -- which is the census's largest single correction
+   visible from one package: `report` was never an owner, and the instruments were filed apart from
+   the switch that runs them. (This said "17 levers in total" until the two amendments landed.)
 
 THREE CENSUS DEFECTS REPAIRED WHILE READING IT. All three were real. All three are recorded here rather
 than fixed in silence, because a correction nobody can find reads exactly like a transcription error.
@@ -104,8 +108,8 @@ than fixed in silence, because a correction nobody can find reads exactly like a
 WHY NOT ONE LEVER HERE CARRIES choices=. The eleven silent-else knobs the survey found (ISSUES P1-M24:
 DATA_MODE, SIG_MODE, MODEL, VERIFY, LR_SCHED, KEY_SRC, SIG_SPACE, EVICT, CULL_MODE, WARMSTART_MODE,
 TOK_PROBATION_BY, CHAIN_ROUTE) are every one of them owned elsewhere -- FAB, MEM, SIG, TOK, DATA, OPT --
-and they carry choices= in those files. EVAL owns no string-valued knob at all: fifteen numbers and two
-flags. AND THE HONEST LIMIT ON THE TWO FLAGS, because this is the same class of defect from a direction
+and they carry choices= in those files. EVAL owns no string-valued knob at all: seventeen numbers and two
+flags (fifteen until 2026-09-27, when retention_every and retention_n joined them). AND THE HONEST LIMIT ON THE TWO FLAGS, because this is the same class of defect from a direction
 choices= cannot reach: a bool lever's coercion (lever.py::Lever.coerce) reads anything outside
 ("0", "", "off", "no", "none", "false") as TRUE, so `EVAL_GENERATE=of` -- one dropped letter -- resolves
 to ON, silently, exactly like an unrecognised string falling into an else. choices=(True, False) would be
@@ -204,8 +208,15 @@ class EVALLevers(LeverSet):
     # invite exactly the comparison (`if n >= curve_every`) that units.py exists to make impossible.
 
     holdout_windows = Lever(
-        32, "Held-out windows per domain for the retention probe -- the resolution of the R matrix.",
+        32, "Held-out windows per area for the BOUNDARY reading of the retention probe (the end of the "
+            "run and a resume's start) -- half from each area's control half, half from its report half.",
         U.COUNT)
+    # SINCE 2026-09-27 (Q-EVAL-12) THE BOUNDARY READING'S SIZE, AND NOT THE CADENCE'S: the reading at
+    # R and the one a resume takes at its start read holdout_windows per arrived area -- 16 from the
+    # control half and 16 from the report half at 32, the odd one to control -- while the in-run
+    # reading at EVAL_RETENTION_EVERY reads retention_n (below). The cadence items are a PREFIX of the
+    # boundary items: both are the first n of one pinned draw per (area, half), so the boundary
+    # reading scores every window the cadence reading does and more.
     # GOAL B'S HEADLINE INSTRUMENT, and the reason it is a separate lever from `windows` rather than a
     # share of it: merging them would make the resolution of a null claim about forgetting a side effect
     # of what unrelated instruments happen to cost. RETENTION compares earliest to latest windows WITHIN
@@ -248,6 +259,19 @@ class EVALLevers(LeverSet):
     # child rather than from one order-consumed stream (Q-DATA-6), so adding an area moves neither
     # the held-out TEXT nor the windows drawn over it. Both halves are needed; either alone leaves
     # the add-an-area comparison broken, which is the one run goal B rests on.
+
+    retention_n = Lever(
+        6, "Held-out windows per arrived area for each in-run retention reading -- split between the "
+           "area's control and report halves, the odd one to control.", U.COUNT, domain=(1, None))
+    # CENSUS AMENDMENT, 2026-09-27 (Proposal 04 SR0, docs/04_CONTRACT.md Q-EVAL-12), with NO ANCESTOR:
+    # the old tree's holdout_bpb drew EVAL_N windows per call from an unpinned slice and read them only
+    # at the end, so there was no in-run reading to size. 6 PER AREA, 3 + 3: the control mean is what
+    # CKPT's best-model policy, EVAL's blow-up alarm and (at OPT_DAMP_SOURCE='probe') OPT's damping
+    # consume, and the report half is the reading nothing acts on, kept so a consumer can never be
+    # tuned against the number the run reports. A reading costs retention_n forwards per arrived area
+    # under no_grad; at the 04-6.2 cadence of 1000 windows that is under 1% of a default run's forwards.
+    # DOMAIN (1, None): at 0 an armed probe would read nothing and print a mean of no windows, which is
+    # the armed-but-inert state; EVAL_RETENTION_EVERY=0 is the one off switch.
 
     null_draws = Lever(
         5, "Permutation draws used to build the null distribution every 2-sigma verdict is judged against.",
@@ -390,6 +414,24 @@ class EVALLevers(LeverSet):
     # THE SAME GUARD LINE IS WHERE A CRASH LIVED: `... and VALC:` with VALC built only inside
     # `if DATA_MODE == 'real':`, so every synthetic run died the first time the meter came round -- for
     # twelve days, unnoticed, because nothing exercised the synthetic path.
+
+    retention_every = Lever(
+        0, "Windows between in-run retention readings on the pinned held-out windows (0 = the probe "
+           "is off: nothing is pinned, read or consumed).", U.Windows)
+    # CENSUS AMENDMENT, 2026-09-27 (Proposal 04 SR0 and NEW-03, docs/04_CONTRACT.md Q-EVAL-12), with
+    # NO ANCESTOR: the old tree measured held-out text only at the end of a run (holdout_bpb), never on
+    # a cadence, so there is no knob to rename. BUILT 0, AND 0 IS THE WHOLE SUBSYSTEM OFF -- no ProbeSet
+    # is pinned, no stream is minted, no reading is taken, CKPT.Retention.consider is never called and
+    # no generation runs -- so a default run is this tree before the probe existed, bit for bit. The
+    # register's 04-6.2 value (1000, plus a read at the first window of every phase) lands at its C9
+    # flip, last and alone.
+    # UNIT IS Windows, the same clock curve_every counts: the gate is Cadences.due('retention',
+    # EVAL.retention_period(ev), clock), evaluated once per window after the flush, and the phase-start
+    # read is an EVENT (the first window of each phase), not a period. A NEGATIVE IS REFUSED by
+    # retention_period under REFUSE_NEGATIVE_PERIOD, as curve_every's is.
+    # WHAT IT COSTS: retention_n forwards per arrived area per reading under no_grad (see retention_n),
+    # plus, where CKPT_DIR is set, a .best checkpoint on every new best -- the first reading of a run
+    # is always one -- which is the I/O owner fleets pay for a best-by-held-out snapshot.
 
     # ==============================================================================================
     # VERDICT THRESHOLDS -- the four numbers that turn a measurement into a printed word

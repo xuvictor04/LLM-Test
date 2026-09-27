@@ -113,7 +113,10 @@ def g3_negative_period_text():
     for env, pfx, fn in (("CKPT_EVERY", "CKPT", ckpt_api.save_period),
                          ("MEM_REKEY_EVERY", "MEM", mem_api.rekey_period),
                          ("DOM_MANAGE_EVERY", "DOM", dom_api.manage_period),
-                         ("EVAL_CURVE_EVERY", "EVAL", ev_api.curve_period)):
+                         ("EVAL_CURVE_EVERY", "EVAL", ev_api.curve_period),
+                         # THE RETENTION PROBE'S CADENCE (2026-09-27, Q-EVAL-12): the same switch,
+                         # the same sentence.
+                         ("EVAL_RETENTION_EVERY", "EVAL", ev_api.retention_period)):
         _reopen()
         cfgs, _, _ = assemble.build(environ={env: "-1"})
         try:

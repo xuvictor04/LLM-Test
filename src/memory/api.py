@@ -1620,7 +1620,12 @@ def read(mem: Config, store, *, queries, promote=True):
 
     promote=False is the read that MUST NOT MOVE THE STORE: it skips the use/last/prob updates. The
     report path uses it, because holdout_bpb(use_mem=True) mutating use, prob and last is L49 and
-    it is an instrument editing what it measures (G7).
+    it is an instrument editing what it measures (G7). AND SINCE 2026-09-27 IT MOVES NO COUNTER
+    EITHER (Q-MEM-15, amending Q-MEM-10's wording): it seeds none of the six below and bumps none,
+    so the store's ledger stays the in-package probe's -- G7 again, a reading may not move the
+    store's ledger -- and an unarmed report path leaves the six ABSENT at MEM_PROBE_EVERY=0 rather
+    than printing "armed, did not fire" for a probe that cannot run. The caller books its own
+    reads: the held-out probe's memory-on closure counts eval.mem.reads and eval.mem.empty.
 
     LEVERS READ: topk, blend_max, match_floor, wrong_read, verify
     WIRES READ: none
@@ -1628,7 +1633,8 @@ def read(mem: Config, store, *, queries, promote=True):
                  n_wrong_blocked -- the wrong-flag counters incremented WHERE THE GATE GATES, never
                  derived from the flags left at the end of the run (H32/M42: every write resets
                  selfcon to -1, so an end-of-run snapshot said "0 entries checked" in the same
-                 report as "61,952 entries excluded from EVERY retrieval")
+                 report as "61,952 entries excluded from EVERY retrieval"). ALL SIX ON A
+                 promote=True READ ONLY (Q-MEM-15): a promote=False read is the caller's to count
     """
     mem = mem.owned_by("MEM")
     topk, blend_max = int(mem.topk), float(mem.blend_max)
@@ -1648,10 +1654,14 @@ def read(mem: Config, store, *, queries, promote=True):
     # cadence ledger shipped a counter absent rather than 0 for a whole run at the one configuration
     # the tree ships, because the lines that seeded it stood inside the else of their own gate
     # (sig/api.py::cadence_due carries the repaired form).
-    for _k in ("store.n_reads", "store.n_read_empty", "store.n_promoted",
-               "store.n_wrong_reads", "store.n_wrong_read_hit", "store.n_wrong_blocked"):
-        _bump(store, _k, 0)
-    _bump(store, "store.n_reads")
+    # A promote=False READ SEEDS AND BUMPS NONE OF THE SIX (2026-09-27, Q-MEM-15): it is the report
+    # path's reading, which the caller counts, and the six are the in-package probe's ledger. Until
+    # this date the seed ran on both arms, and nothing called the promote=False arm.
+    if promote:
+        for _k in ("store.n_reads", "store.n_read_empty", "store.n_promoted",
+                   "store.n_wrong_reads", "store.n_wrong_read_hit", "store.n_wrong_blocked"):
+            _bump(store, _k, 0)
+        _bump(store, "store.n_reads")
 
     # ==============================================================================================
     # A QUERY THAT IS NOT A KEY IS REFUSED BY NAME
@@ -1712,11 +1722,13 @@ def read(mem: Config, store, *, queries, promote=True):
     # the end of the run, because every write resets the sentinel underneath them.
     flags = _flagged(store, verify)
     if wrong_read and flags is not None:
-        _bump(store, "store.n_wrong_reads")
-        blocked = int((valid & flags).sum())
-        if blocked:
-            _bump(store, "store.n_wrong_blocked", blocked)
-            _bump(store, "store.n_wrong_read_hit")
+        # THE EXCLUSION APPLIES ON BOTH ARMS; ONLY THE COUNT IS THE PROMOTING READ'S (Q-MEM-15).
+        if promote:
+            _bump(store, "store.n_wrong_reads")
+            blocked = int((valid & flags).sum())
+            if blocked:
+                _bump(store, "store.n_wrong_blocked", blocked)
+                _bump(store, "store.n_wrong_read_hit")
         valid = valid & (~flags)
 
     # ==============================================================================================
@@ -1734,7 +1746,7 @@ def read(mem: Config, store, *, queries, promote=True):
     # calls over-refusal. The hole is named here; closing it is the owner's call, the way
     # memory/api.py::open_store's `< 1` refusal on quota and owners was.
     M = int(valid.sum())
-    if M == 0:
+    if M == 0 and promote:
         _bump(store, "store.n_read_empty")
     kk = min(topk, M)
     if kk <= 0:
@@ -1805,8 +1817,11 @@ def read(mem: Config, store, *, queries, promote=True):
             # which makes "born at window 120, last retrieved at window 400" unsayable.
             store.last[uniq] = int(store.tick)
         # promote=False SKIPS ALL THREE WRITES AND NOTHING ELSE CHANGES -- L49/G7, an instrument
-        # that edits what it measures. It still counts n_reads and the wrong_* trio, because those
-        # describe the READ and not the store.
+        # that edits what it measures. IT COUNTS NOTHING EITHER, SINCE 2026-09-27 (Q-MEM-15): this
+        # said it still counted n_reads and the wrong_* trio, "because those describe the READ and
+        # not the store" -- but the six are the store's ledger, which census and the mem.pressure
+        # Gate read as the in-package probe's retrievals, so a report-path reading would have moved
+        # the numbers that gate judges. The caller counts its own reads (eval.mem.*).
         # AND READ DRAWS NO RANDOMNESS ON EITHER ARM: it must never touch store.gen. The probe's
         # whole claim (deterministic stride, memory/levers.py::MEMLevers at probe_rows) is that a
         # diagnostic does not move the training trajectory, and a retrieval that consumed draws
@@ -1839,6 +1854,49 @@ def read(mem: Config, store, *, queries, promote=True):
     return Retrieval(dist=dist, conf=conf, hits=hits, weights=weights, blend=blend)
 
 
+def encode_queries(mem: Config, *, contexts, key_fn):
+    """(B, L) token ids -> (B*L, key_dim) unit-norm queries in the write path's own key space.
+
+    ONE KEY SPACE WITH THE WRITE PATH, AND THIS IS THE ONLY WAY A CALLER OUTSIDE THE PACKAGE GETS
+    ONE. Each position's query is built from the key_win tokens ending at it (_key_windows, the
+    frozen `_windows(x, KW)`) and encoded by `key_fn` at key_depth (_encode_keys) -- the same two
+    helpers MEM.write and maintain's probe use, at the same three key levers. MEM.read declares no
+    key lever and takes no key_fn, so until 2026-09-27 a caller outside the package had to rebuild
+    this arithmetic by hand, and a second copy is the store queried in one key space and written in
+    another (Q-MEM-15).
+
+    FLAT, (B*L, key_dim), BECAUSE MEM.read TAKES 2-D QUERIES. The row order is batch-major, so the
+    caller's `.reshape(B, L, -1)` of any per-query result puts every row back at its position.
+
+    `contexts` ARE TOKEN IDS, as MEM.write's are -- the `x` LM.encode takes -- and are refused by
+    name otherwise, for the reason write gives: a hidden state cannot be encoded again and cannot
+    be sliced to key_win preceding positions.
+
+    MEM_KEY_SRC='frozen' IS REFUSED HERE AS IN write: its encoder does not exist in this tree
+    (MEM.open_store refuses it at startup, so the root never reaches this with it).
+
+    It writes nothing and draws nothing: no store is passed, and the encode runs under no_grad
+    (_encode_keys).
+
+    LEVERS READ: key_win, key_depth, key_src
+    WIRES READ: none
+    DID IT FIRE: none; it holds no store, and the caller counts its encodes (eval.mem.key_encodes)
+    """
+    mem = mem.owned_by("MEM")
+    kwin, kdepth, ksrc = int(mem.key_win), int(mem.key_depth), str(mem.key_src)
+    if ksrc != "model":
+        raise NotBuilt(f"MEM_KEY_SRC={ksrc!r}: {_FROZEN_KEYS_UNBUILT}")
+    if not torch.is_tensor(contexts) or contexts.dim() != 2 or contexts.is_floating_point():
+        got = (f"{tuple(contexts.shape)} of {contexts.dtype}" if torch.is_tensor(contexts)
+               else type(contexts).__name__)
+        raise StoreError(
+            f"MEM.encode_queries: `contexts` arrived as {got}. It must be (B, L) TOKEN IDS -- the "
+            f"same `x` LM.encode takes and MEM.write's `contexts` are -- because each position's "
+            f"query is the MEM_KEY_WIN tokens ending at it, encoded by `key_fn`.")
+    rows = _key_windows(contexts, kwin).reshape(-1, kwin)
+    return _encode_keys(key_fn, rows, kdepth)
+
+
 def blend(mem: Config, model_probs, retrieval):
     """Mix retrieval into the model's distribution AT THE WEIGHT `read` ALREADY COMPUTED.
 
@@ -1860,16 +1918,69 @@ def blend(mem: Config, model_probs, retrieval):
     the model's mass can vanish entirely; that clamp belongs here, with the arithmetic, not at the
     log site.
 
+    THE BODY, 2026-09-27 (Q-MEM-15). `model_probs` is (N, V) with N the retrieval's rows -- the
+    caller flattens (B, L, V) to (B*L, V) to match MEM.encode_queries' flat queries -- and V must
+    be the store's vocab_slots (both are LM.vocab_slots at the root), refused by name otherwise,
+    because a vote in a slot the model does not have is a token it cannot emit. THE RE-ASSERTION
+    recomputes the weight from retrieval.conf with this Config's match_floor and blend_max, by
+    read's own ramp, and refuses a record whose `blend` departs from it; a weight this package did
+    not compute is never applied.
+    THE CLAMP: any row whose weight reaches 1.0 is floored at the smallest positive float of the
+    dtype and renormalised, so the log the caller takes is finite. At blend_max < 1 the clamp
+    cannot fire and the mixture is exactly (1-w)p + w*dist.
+
     LEVERS READ: blend_max, match_floor
     WIRES READ: none
-    DID IT FIRE: store.n_blends, store.blend_weight_sum (the MEAN APPLIED WEIGHT is the honest
-                 statement of how much mass retrieval actually took; the defect it replaces was a
-                 constant 0.5 reported as a gate)
+    DID IT FIRE: none in the store's ledger since 2026-09-27 (Q-MEM-15): a blend is the report
+                 path's reading and moves no store counter, so the caller books it -- the held-out
+                 probe's memory-on closure counts eval.mem.blends and eval.mem.blend_weight_sum (the
+                 MEAN APPLIED WEIGHT is the honest statement of how much mass retrieval actually
+                 took; the defect it replaces was a constant 0.5 reported as a gate). The two
+                 store.n_blends / store.blend_weight_sum keys this line named were never written.
     """
     mem = mem.owned_by("MEM")
-    raise NotImplementedError(
-        "MEM.blend: P4 (memory) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section MEM.")
+    blend_max, match_floor = float(mem.blend_max), float(mem.match_floor)
+    if blend_max == 0.0:
+        # THE CLEAN RETRIEVAL-OFF NULL: model_probs UNTOUCHED, the same object back.
+        return model_probs
+    conf = retrieval.conf
+    w = retrieval.blend
+    if not torch.is_tensor(w) or not torch.is_tensor(conf) or w.dim() != 1 \
+            or int(w.shape[0]) != int(model_probs.shape[0]):
+        raise StoreError(
+            f"MEM.blend: the Retrieval's `blend` is "
+            f"{tuple(w.shape) if torch.is_tensor(w) else type(w).__name__} against model_probs of "
+            f"{tuple(model_probs.shape)}. One weight per ROW is required; the caller flattens its "
+            f"(B, L, V) probabilities to (B*L, V), the shape MEM.encode_queries' queries take.")
+    # THE RE-ASSERTION: read's ramp, recomputed from conf under THIS Config's two levers.
+    g = ((conf - match_floor) / max(1e-6, 1.0 - match_floor)).clamp(0.0, 1.0)
+    want = (blend_max * g).clamp(min=0.0)
+    if not torch.allclose(w.float(), want.float(), atol=1e-6, rtol=0.0):
+        raise StoreError(
+            f"MEM.blend: the Retrieval's weight departs from MEM_BLEND_MAX={blend_max} and "
+            f"MEM_MATCH_FLOOR={match_floor} applied to its own conf (largest gap "
+            f"{float((w.float() - want.float()).abs().max()):.3g}). A weight this package did not "
+            f"compute is never applied: that is the ungated 50/50 mix one layer up "
+            f"(ISSUES P1-C8/C9).")
+    V = int(model_probs.shape[-1])
+    if int(retrieval.dist.shape[-1]) != V:
+        raise StoreError(
+            f"MEM.blend: the Retrieval votes over {int(retrieval.dist.shape[-1])} token slots and "
+            f"model_probs has {V}. Both are LM.vocab_slots at the root; a mismatch is a store and a "
+            f"model sized under two vocabularies, and mixing them would move mass between ids that "
+            f"do not name the same token.")
+    dist = retrieval.dist.to(model_probs.dtype)
+    wc = w.to(model_probs.dtype).unsqueeze(-1)
+    out = (1.0 - wc) * model_probs + wc * dist
+    full = (w >= 1.0)
+    if bool(full.any()):
+        # THE ONE CLAMPED CASE: blend_max == 1.0 at conf == 1.0 hands the row wholly to dist, and a
+        # token dist gave no vote would take log(0). Floored and renormalised, on those rows only.
+        tiny = torch.finfo(out.dtype).tiny
+        rows = out[full].clamp_min(tiny)
+        out = out.clone()
+        out[full] = rows / rows.sum(-1, keepdim=True)
+    return out
 
 
 def maintain(mem: Config, store, *, now, key_fn, probe_contexts=None, resegment=None, remap=None):

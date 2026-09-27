@@ -93,6 +93,13 @@ def main(argv=None):
                     help="after the run, write RunResult.flush_bytes (the bytes each flush's "
                          "windows' targets cover, one per --loss-curve entry) to PATH as a JSON "
                          "list")
+    # THE RETENTION PROBE'S READINGS, WRITTEN FOR A SCRIPT TO READ (2026-09-27, docs/04_CONTRACT.md
+    # Q-EVAL-12): every reading this process took, in order, with its kind, closure, control and
+    # report means and per-area values. An empty list where the probe is off
+    # (EVAL_RETENTION_EVERY=0). A driver argument like --loss-curve, not a lever.
+    ap.add_argument("--probe-series", default=None, metavar="PATH",
+                    help="after the run, write RunResult.probe_series (one dict per retention "
+                         "reading this process took) to PATH as a JSON list")
     args = ap.parse_args(argv)
 
     # THE CALLER OWNS THE ENVIRONMENT, which is compose()'s own first line: `system =
@@ -234,6 +241,10 @@ def main(argv=None):
         import json
         with open(args.flush_bytes, "w", encoding="utf-8") as fh:
             json.dump([int(v) for v in result.flush_bytes], fh)
+    if args.probe_series:
+        import json
+        with open(args.probe_series, "w", encoding="utf-8") as fh:
+            json.dump(list(result.probe_series), fh)
     # THE PRECISION ASKED FOR AND THE PRECISION OBSERVED, ON ONE LINE, BECAUSE THEY DISAGREED FOR
     # THE LIFE OF THIS DRIVER. amp_state above is what RUN.process_setup decided; this is the dtype
     # of the tensor the step actually produced. RUN_AMP=bf16 printed "active" and ran fp32 until

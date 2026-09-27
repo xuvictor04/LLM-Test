@@ -19,7 +19,7 @@ WIRES READ:  <comma-separated d_ fields, or "none">
 DID IT FIRE: <the counters that prove the mechanism executed, in G4's three states>
 ```
 
-`tests/test_contract.py` parses those blocks. **All 269** of the declared levers are named by at
+`tests/test_contract.py` parses those blocks. **All 272** of the declared levers are named by at
 least one stub as read by it — **261, not 259, since 2026-09-02: there are now TWO CENSUS
 AMENDMENTS, `OPT_GRAD_CLIP` under Q-OPT-3 and `MEM_JUDGE_FRAC` under Q-MEM-8** (see
 `.rework/CENSUS.md`, section `amendments`, which holds both and states that the census's 328 is
@@ -34,7 +34,7 @@ with no reader still lands there with a reason or the check fails.
 of the entry points (§7 holds the count, and it is the only place that does — this sentence was one
 of five copies) are named by a row — 102 in a row's entry column and 16 by a call written
 into a row's note (2026-09-26, after 03b S0b's act rows and its MEM remap) — with the remaining
-**23 declared deferred**, each with the argument that has no
+**18 declared deferred**, each with the argument that has no
 producer as the reason. That number was seven until the order tables grew a `produces` column and
 the same standard was applied to every row rather than to EVAL alone (§3.6). *(This sentence said
 "14" while `DEFERRED_ENTRY_POINTS` held 15; corrected 2026-09-02. K6 prints all three numbers, so
@@ -43,7 +43,7 @@ the count is checkable from the suite rather than from here.)*
 **Executable today.** `python3 -c "import sys;sys.path.insert(0,'src');from spine.compose import
 compose; compose(environ={})"` runs the composition root against the stubs and stops at the first
 unimplemented one with `NotImplementedError: CAP.startup_refusals: P4 (capacity) fills this in` —
-the **29th** of the 40 rows in `ASSEMBLY_ORDER`. *(This sentence named `RUN.process_setup` until
+the **29th** of the 41 rows in `ASSEMBLY_ORDER`. *(This sentence named `RUN.process_setup` until
 2026-09-04, and had been wrong since that entry point got a body: the root now reaches past the
 resume, the corpus, the vocabulary, the model, the fabric, the store, the partition and
 `CAP.new_valve` before it halts. Three further copies of the same stale claim — §3.8, §5's
@@ -623,7 +623,7 @@ A resume across a `compose` flip is **refused in both directions** and named —
 `emb`/`head` are not constructed at all. That is a real operational restriction and P7's add-area
 entry point must know it before planning an arm table.
 
-### OPT — `src/opt/api.py` (18 levers, six of them census amendments — `OPT_GRAD_CLIP` and §8 1.4's five)
+### OPT — `src/opt/api.py` (19 levers, seven of them census amendments — `OPT_GRAD_CLIP`, §8 1.4's five and `OPT_DAMP_SOURCE`)
 
 Owns every rate and the size of the batch it acts on. **OPT maintains its own optimizer-step
 counter**, so `units.Steps` becomes literally true — and the horizon's `Windows→Steps` division is
@@ -1084,14 +1084,16 @@ predictor is **skipped in the forward**, not down-weighted at `1e-6`. `geometry`
 **No period enters WORLD's Config** (C3), and **Q-WORLD-6 is RESOLVED (b)**: no wire, a `NOT_WIRES`
 entry instead — the ledger stays at **19 of 25, 23 declared couplings**.
 
-### EVAL — `src/eval/api.py` (17 levers)
+### EVAL — `src/eval/api.py` (19 levers, two of them census amendments — `EVAL_RETENTION_EVERY` and `EVAL_RETENTION_N`)
 
 Everything that measures the run and nothing that changes it.
 
-`curve_period` (P3) · `curve_probe`, `holdout_probe`, `null_excess` (P5) · `generate`, `coherence`,
-`verdicts`, `wrongness_probe`, `verification_fit` (P6).
+`curve_period` (P3) · `retention_period`, `pin_holdout`, `holdout_probe`, `blowup`, `generate`
+(the retention probe, built 2026-09-27 and off at `EVAL_RETENTION_EVERY=0` — **Q-EVAL-12**) ·
+`curve_probe`, `null_excess` (P5) · `coherence`, `verdicts`, `wrongness_probe`,
+`verification_fit` (P6).
 
-**All 17 levers now have a declared reader.** The five P6 instruments are declared here — with
+**All 19 levers now have a declared reader.** The five P6 instruments are declared here — with
 signatures, not bodies — precisely so that `EVAL_GEN_TEMP` is a knob whose consumer is written down
 rather than one of the 57 armed-but-inert records. What P6 owns is the body.
 **Two rules every function obeys:** G7 (an instrument may not leave the model in a different mode or
@@ -1099,14 +1101,17 @@ move an RNG stream) and the one-logits-path rule (`logits_fn` is passed in, neve
 `null_excess` **refuses `null_draws < 2` at construction**: at 0 it is a `ZeroDivisionError` that
 takes the rest of the report with it, and at 1 the sd is exactly 0.0 so the 2σ test becomes a rubber
 stamp.
-**Where they are called (§3):** `curve_period` alone has an `A` row. The other **eight** are all
-deferred, each with the phase and the argument that has no producer — not "a later phase", which by
-itself is no reason at all. *(This paragraph said `curve_probe` "has a row" and that the deferrals
+**Where they are called (§3):** since 2026-09-27 (Q-EVAL-12) `pin_holdout` has an ASSEMBLY row,
+`retention_period` sits in the cadence row's mapping beside `curve_period`, `holdout_probe` and
+`blowup` have `B` rows, and `holdout_probe` and `generate` have `R` rows. The other **six** are
+deferred, four for an argument that has no producer and two — `curve_probe` and `coherence`, whose
+producers exist since the probe landed — as scope deferrals, not "a later phase", which by itself
+is no reason at all. *(This paragraph said `curve_probe` "has a row" and that the deferrals
 were **seven** and "the whole of `compose.DEFERRED_ENTRY_POINTS`". Both were true when written and
 neither is now: §3.6 moved `curve_probe` into the deferrals — that move is the finding the `produces`
-column was written to expose — and the table grew past EVAL, so EVAL's eight are now eight of
-twenty-three. Corrected 2026-09-04. The numbers here are words, which is why `K13` could not see
-them.)*
+column was written to expose — and the table grew past EVAL, so EVAL's eight became eight of
+twenty-three. Corrected 2026-09-04; EVAL's are six of eighteen since 2026-09-27. The numbers here are
+words, which is why `K13` could not see them.)*
 
 **Two declared outputs had no channel in the signature that must produce them, and both closed on
 2026-09-04 — `Q-EVAL-11`.** `curve_probe` gained `step` (RUN's window counter, which `CurveReading`
@@ -1166,7 +1171,7 @@ report live joins as missing:
 
 | one value | the spellings it is consumed under |
 |---|---|
-| `RunClock.step` | `step` (TOK ×3, `Retention.consider`, `CKPT.save`), `step_windows` (SIG, FAB ×3), `now` (MEM ×2, DOM ×2) |
+| `RunClock.step` | `step` (TOK ×3, `Retention.consider`, `CKPT.save`, `EVAL.holdout_probe`), `step_windows` (SIG, FAB ×3; the probe's closures pass `clock.step + 1`, Q-EVAL-12), `now` (MEM ×2, DOM ×2) |
 | `Snapshot.payload` | `state` (DATA, TOK, CAP), `saved` (LM, OPT), `sd` (SIG, FAB, WORLD), `restored` (MEM, DOM, CAP, CKPT), `resume` (OPT), `snapshot` (CKPT) |
 | `LM.lm_loss`'s two returns | `per_window_loss` (FAB.observe), `flush_loss` (FAB.manage/grow_check), `baseline_loss` (FAB.contribution), `bits` (DOM.note_competence; over ln 2, and in bits per build-time token at `DOM_LEVELS`, Q-DOM-5), and one summand of the objective |
 | `Assignment.did` | `did` (DOM ×2), `domain_id` (FAB ×3), `sources` (MEM.write) |
@@ -1184,8 +1189,9 @@ asks whether an *earlier* row produced each argument, so a value crossing **back
 in it at all. The loop has three such edges and each is written into the consuming row as a
 previous-iteration value, with a carrier named on `System`: `novelty` (the previous flush's mean
 surprise, `:7499`), `windows_since_boundary` (the boundary `DOM.observe` reported on an earlier
-window), and `Due` (asked per window at `A`, acted on per flush at `B`). A fourth, `best_bpb`, has no
-producer at all now that the curve probe is deferred.
+window), and `Due` (asked per window at `A`, acted on per flush at `B`). A fourth, `best_bpb`, is
+`System.probe_reading` since 2026-09-27: the retention probe's last forwarded control mean, set after
+one flush and read by the next `OPT.maybe_step` (Q-OPT-13, Q-EVAL-12), written into that row's note.
 
 ### 3.0.1 `ROW_ARGUMENTS_ELSEWHERE` — the rule, and the two clearest cases
 
@@ -1224,12 +1230,17 @@ training path and 1 byte on the eval path with every check green.
 | `_key_fn` / `_head` / `_sig_encode_fn` | `key_fn` (MEM ×2), `head` (FAB), `encode` (`DOM.rekey` **and**, since 2026-09-02, `EVAL.coherence` — Q-EVAL-10; the *same* callable under the *same* name, because two encoders would be two signature spaces) — entry points partially applied. The callable class of argument has no other producer. |
 | `_n_params` / `_bytes_per_window` | `RUN.bench_summary`'s two measured arguments. `_n_params` sums **both** param groups; summing only the base list undercounts by the whole encoder. |
 | `_geometry_manifest` / `_run_windows` / `_windows_in_epoch` / `_signature_width` / `_alphabet_size` / `_base_parameters` / `_sidecar` / `_signature_stream` / `_signature_units` | the assembly-side joins, unchanged except where §3.8 records a repair. |
+| `_logits_fn(sysm, *, use_memory, view=None, live_domains=None, live_vocab=None)` | `logits_fn` (`EVAL.holdout_probe`, `EVAL.generate`) — **the two closures**, `memory-off` and `memory-on`, each `fn(x, *, prefix_bytes) -> (B, L, V)` along the path the run trained, at the next window's routing clock, under `no_grad` in eval mode; the only place `softmax → MEM.read(promote=False) → MEM.blend → log` is written (Q-EVAL-12, Q-MEM-10). A resume's start reading passes its parent's `view` and `live_domains`; generation passes `live_vocab`, the live vocabulary it may draw from. |
+| `_holdout_units` / `_holdout_tokenize` / `_gen_prompts` | `units_by_domain` (the arrived areas' pinned `(prefix, window)` pairs, with `seen_by_parent`), `tokenize_fn` (`TOK.tokenize` at the last cut's view, no labels, no regularizer) and `prompts_by_domain` (report-half windows, tokenized at that view) — Q-EVAL-12. |
+| `_phase_of` / `_phase_windows` / `_probe_notices` | the phase a window's first byte falls in (the phase-start read's test) and the startup notices, printed and never applied — Q-EVAL-12. |
 
 What is deliberately **not** there, because writing it would be inventing a producer rather than
-naming one: a `logits_fn` (it must be *the path the run trained*, `eval/api.py:27-30`, which runs
-through `FAB.forward` and so needs the flush's own `novelty`, `live_domains` and `training`); an
-`improving` EMA pair (FAB already keeps one, and a second would be two mechanisms deciding the same
-question); an `owners` rule beyond the old tree's; a `plateau` boolean (WORLD holds that state).
+naming one: an `improving` EMA pair (FAB already keeps one, and a second would be two mechanisms
+deciding the same question); an `owners` rule beyond the old tree's; a `plateau` boolean (WORLD
+holds that state); and a scorer of the `(ctx, src)` arity `MEM.judge` and `EVAL.wrongness_probe`
+declare — the closures route on prefix bytes, which a stored entry does not have. *(A `logits_fn`
+headed this list until 2026-09-27, "it must be the path the run trained … and so needs the flush's
+own novelty, live_domains and training"; Q-EVAL-12 names what each of those became.)*
 
 ### 3.1 The stages
 
@@ -1244,10 +1255,10 @@ with a table of its own that no check can see is still an orphan.*
 | stage | when | what is in it |
 |---|---|---|
 | `E` | before the first window of an epoch, and again whenever `RunClock.advance` returns `Tick.rolled` | `DATA.draw_stream` → `TOK.tokenize` → `RunClock.begin_epoch`. The root also stamps `clock.opt_steps` here as the `shift_at` `OPT.maybe_step` consumes — a resample is a **self-inflicted** shift, and the old tree carried that fact in a closure variable (`:6518-6521`). **At the shipped default these rows never run — see below.** |
-| `A` | per WINDOW, above the accumulator | `Retention.consider`, `MEM.census` (before `DOM.manage`, whose `memory_counts`/`mem_floor_entries` had **no producer**), `DOM.manage`, `DOM.census` (supplying `live_sources` and `live_domains`), `FAB.manage`, `SIG.cadence_due` → `SIG.train_step` (before `encode`), `SIG.encode`, `DOM.observe`, `DOM.rekey` (after `observe`), `TOK.on_window`, `RunClock.advance`. `MEM.judge` and `WORLD.manage` **were here and are now deferred** (§3.6). |
-| `B` | per FLUSH | the flush body, plus `TOK.judge_probation`, event-driven on the `Due.probation` `TOK.on_window` already asked at `A`. `CAP.observe` and `FAB.contribution` **were here and are now deferred**. |
-| `C` | the CHECKPOINT FAN-OUT — an **event**, entered from `B` (periodic/SIGUSR1), `A` (a `BestAction`) and `R` (final) | the twelve `state_dict`/`state`/`vocab_state`/`stream_state`/`Retention.state`/`WORLD.geometry` calls that build the payload and the recorded manifest, then `TOK.save_vocabulary`, then `CKPT.save`. *(2026-09-26: the driver, `spine/loop.py::_save`, calls `CKPT.save` first and `TOK.save_vocabulary` only when it wrote, and since this date that order is load-bearing: the vocabulary's rotation with `ckpt.pt.prev` must not run for a checkpoint CKPT refused. The rows list the reverse order and are unchanged, since K6 checks reach, not order.)* |
-| `R` | once, after `Tick.finished` | `DOM.prior`, both censuses, every `counters()`, `Cadences.ledger()`, `RUN.bench_summary`, and the `reason="final"` save. `MEM.read` and `MEM.blend` **were here and are now deferred**. |
+| `A` | per WINDOW, above the accumulator | `MEM.census` (before `DOM.manage`, whose `memory_counts`/`mem_floor_entries` had **no producer**), `DOM.manage`, `DOM.census` (supplying `live_sources` and `live_domains`), `FAB.manage`, `SIG.cadence_due` → `SIG.train_step` (before `encode`), `SIG.encode`, `DOM.observe`, `DOM.rekey` (after `observe`), `TOK.on_window`, `RunClock.advance`. `MEM.judge` and `WORLD.manage` **were here and are now deferred** (§3.6). |
+| `B` | per FLUSH | the flush body, plus `TOK.judge_probation`, event-driven on the `Due.probation` `TOK.on_window` already asked at `A`. `CAP.observe` and `FAB.contribution` **were here and are now deferred**. Since 2026-09-27, per WINDOW after the flush and the act: the retention probe's `EVAL.holdout_probe` → `EVAL.blowup` → `CKPT.Retention.consider`, behind its arm test (Q-EVAL-12). |
+| `C` | the CHECKPOINT FAN-OUT — an **event**, entered from `B` (periodic/SIGUSR1, and a `BestAction` since 2026-09-27, followed by `Retention.note_saved`) and `R` (final) | the twelve `state_dict`/`state`/`vocab_state`/`stream_state`/`Retention.state`/`WORLD.geometry` calls that build the payload and the recorded manifest, then `TOK.save_vocabulary`, then `CKPT.save`. *(2026-09-26: the driver, `spine/loop.py::_save`, calls `CKPT.save` first and `TOK.save_vocabulary` only when it wrote, and since this date that order is load-bearing: the vocabulary's rotation with `ckpt.pt.prev` must not run for a checkpoint CKPT refused. The rows list the reverse order and are unchanged, since K6 checks reach, not order.)* |
+| `R` | once, after `Tick.finished` | the retention probe's boundary reading (`EVAL.holdout_probe`, both closures, at the head), `DOM.prior`, both censuses, every `counters()`, `Cadences.ledger()`, `RUN.bench_summary`, the `reason="final"` save, and `EVAL.generate` after it. `MEM.read` and `MEM.blend` **were rows here until 2026-08-30**; since 2026-09-27 they are reached through the memory-on closure the R probe row's note names (Q-MEM-10, amended). |
 
 **`Tick.rolled` and `Tick.finished`: the precedence, and the E stage on a one-epoch run.**
 `advance()` sets `rolled` when the stream is exhausted and the epoch increments, and `finished` when
@@ -1403,8 +1414,9 @@ under this key**; `WORLD.manage` rode `fab.manage`'s single answer **without its
 deferral records that when it returns it must either be written inside that answer, in the shape this
 block uses, or take a key of its own.)
 
-Everything else that fires is **event-driven and says so**: `Retention.consider` (a curve value
-arrived — which today it never can), `SIG.train_step` (`cadence_due` said yes),
+Everything else that fires is **event-driven and says so**: `Retention.consider` (a retention
+reading's control mean arrived, finite — which at the shipped `EVAL_RETENTION_EVERY=0` it never
+does), `SIG.train_step` (`cadence_due` said yes),
 `TOK.judge_probation` (`Due.probation`), `DOM.on_retokenize` (the epoch roll's re-segmentation at a
 moved match table — Q-DOM-2), and the whole `C`
 stage (a save site). **`SIG.cadence_due` is the one periodic gate that cannot go through
@@ -1413,7 +1425,7 @@ stage (a save site). **`SIG.cadence_due` is the one periodic gate that cannot go
 did-it-fire surface the encoder's cadence has. That is stated in its row rather than left for a
 reader to discover from a missing ledger line.
 
-### 3.6 `DEFERRED_ENTRY_POINTS` — fifteen, and no longer only EVAL
+### 3.6 `DEFERRED_ENTRY_POINTS` — eighteen, and no longer only EVAL
 
 `{"PFX.entry": "the phase that will call it, and why it cannot be called now"}`. K6 reads it **both
 ways**: an entry no row names is accepted, and an entry a row **now** names is reported as *stale*
@@ -1424,36 +1436,39 @@ an argument with no producer — while seven rows elsewhere in the tables named 
 same gap. The `produces` column made every one of them decidable, and the seven added below are the
 rows where nothing among the entry points (§7 holds the count) supplies a required argument and no
 join in `compose.py` honestly can. **None is deferred for being late**, and none because a body is missing:
-the whole tree is stubs.
+the whole tree was stubs. **Since 2026-09-27 the retention probe (Q-EVAL-12) has closed five** —
+`EVAL.holdout_probe` and `EVAL.generate` have rows, `CKPT.Retention.consider` has its caller, and
+`MEM.read` and `MEM.blend` are reached through the memory-on closure — and turned two more
+(`EVAL.curve_probe`, `EVAL.coherence`) into **scope** deferrals, whose producers exist. The table
+below holds the ten deferred for an argument or a scope; the eight deferred for want of a CALLER
+(accessors and RUN.Timing's two) are listed in `spine/compose.py` with their reasons.
 
 | entry | phase | why there is no row |
 |---|---|---|
-| `EVAL.curve_probe` | P5 | **New.** Byte-identical signature to `holdout_probe` until `step` landed (**Q-EVAL-11**, 2026-09-04), same gap, and the same verdict. Nothing produces `units_by_domain` (Areas carries names/bodies/holdout/holdout_bytes/cursors, `DOM.census` returns sizes and radii, `Segmentation` carries ids/byte_pos/labels/bytes_per_token — there is no per-domain window supplier), and nothing produces `logits_fn`. **`step` is not part of the gap**: it is RUN's window counter off `RunClock`, which the root holds when the P5 row lands, and `K12` already counts it as produced. |
-| `EVAL.holdout_probe` | P5 | Needs `units_by_domain` drawn in **byte** coordinates from `Areas.holdout` together with a `logits_fn`, and the root has no join producing that pair. |
+| `EVAL.curve_probe` | P5 | **A SCOPE DEFERRAL SINCE 2026-09-27.** Every argument has a producer now — `units_by_domain` from the retention probe's pinned `ProbeSet`, `logits_fn` the memory-off closure, `step` `RunClock.step`, `rng` an `eval` child (Q-EVAL-12) — and it is not built because no row of the register's §8 builds it: a learning curve at `EVAL_CURVE_EVERY` on unpinned windows would be a second instrument answering the retention probe's question. *(Until then: byte-identical signature to `holdout_probe` until `step` landed, Q-EVAL-11, and the same gap — nothing produced `units_by_domain` or `logits_fn`.)* |
 | `EVAL.null_excess` | P5 | **Reason corrected.** It said `real` and `permute` come from "the verdict machinery, which is P6's" — but `EVAL.verdicts` takes `domain_sizes`, `silhouettes`, `affiliation`, `coherence_reading` and is this function's **consumer**, not its producer. `real` is the measured statistic under test and `permute` the label-permuting redraw of it, so the candidates are the silhouette and affiliation statistics — which have **no producer in the tree**, the very gap `verdicts` is deferred for — and nothing returns a permutation callable. **Neither exists.** |
-| `EVAL.generate` | P6 | `prompts_by_domain` has **no producer** among the entry points (§7 holds the count); `logits_fn` is the same missing join. |
-| `EVAL.coherence` | P6 | **Reason corrected, and the parameter is gone.** It said "nothing in the tree returns a `Sample`" — `EVAL.generate` does. Two arguments have no producer and both are named: `logits_fn`, and `units_by_domain`, the same per-domain supplier `curve_probe` and `holdout_probe` wait on. `encode` is **not** a gap — `_sig_encode_fn` already forms it for `DOM.rekey`. The `sample` parameter was resolved away on 2026-09-02: **Q-EVAL-10**. |
+| `EVAL.coherence` | P6 | **A SCOPE DEFERRAL SINCE 2026-09-27.** Its arguments all have producers — `logits_fn` and `units_by_domain` as `curve_probe`'s, `encode` `_sig_encode_fn`'s callable (the one `DOM.rekey` takes), `rng` an `eval` child — and no row of the register's §8 builds it. The `sample` parameter was resolved away on 2026-09-02: **Q-EVAL-10**. |
 | `EVAL.verdicts` | P6 | Three of four arguments — `silhouettes`, `affiliation`, `coherence_reading` — have no producer; the fourth, `domain_sizes`, comes from `DOM.census`, which stage `R` already collects. |
 | `EVAL.wrongness_probe` | P6 | Takes a **copy** of the store so the instrument cannot edit what it measures; MEM's surface produces no copy, and adding one is a signature change. Its `scorer` is the same missing logits callable as `MEM.judge`'s **and takes the same arity, `scorer(ctx, src) -> logits`** (Q-MEM-8/Q-MEM-10, 2026-09-02). |
 | `EVAL.verification_fit` | P6 | Same missing copy; its inner loop is genuine `units.Steps` and must never be compared against `curve_every`. **`verify_mode` landed 2026-09-04 (Q-EVAL-11) and is not part of the gap**: it is `MEM.verify`, a frozen lever the root holds, passed the way `vocab_slots=LM.vocab_slots` and `lm_kind=LM.arch` already are into `MEM.open_store`. `K12` computes "produced" from the order tables' prose and a deferred entry point has no row, so **until `compose.DEFERRED_ENTRY_POINTS` names it, K12 reads `verify_mode` as a second gap** — the residue is one clause and it is recorded below in §5. |
-| `MEM.read` | P5 | **New.** Nothing produces `queries`. The deleted `R` row named none of them, and the probe contexts it would key on are the same held-out material `holdout_probe`'s `units_by_domain` needs — one missing join, and deferring only one of the two was the inconsistency. **Deferred as a ROW, reached in-package:** Q-MEM-9 (RESOLVED (a)) makes `MEM.maintain`'s job 1 *this call*, with `queries` maintain encoded itself. K6 is satisfied by the absence of a row, not the absence of a call, so this deferral is current and not stale. |
-| `MEM.blend` | P5 | **New.** `retrieval` comes from `MEM.read`; `model_probs` are **probabilities** while every scoring hook takes a `logits_fn` (Q-MEM-10, RESOLVED (a) 2026-09-02: the join is a composition-root closure, `_logits_fn(sysm, *, use_memory)`, and **no signature moves on either side** — but the `logits_fn` still has no producer, so this deferral stands) — which the deleted row's own prose conceded while being written anyway. `model_probs` is also the first positional after the Config, which K10 drops as "the package's own live object" — it is not (MEM's is `store`), so the check is structurally blind here and the deferral is the only record. |
-| `MEM.judge` | P4/P5 | **New.** `scorer(ctx, src) -> logits` is needed by the **default** arm (`MEM.verify` defaults to `selfcon`) and must be *the same forward path training used* (M47). That callable does not exist, and scoring a **stored** ctx needs a signature — the domain id is `Store.src`, so only the *declared shape* was missing, and it is now two arguments (Q-MEM-8). **Q-MEM-8 is RESOLVED and names the row to write when the scorer lands:** at the END of the `dom.manage` block, inside that block's single `Cadences.due` answer. Because `scorer` carries a default, **no check can see it**: a row calling `judge(mem, store)` passes everything and yields `n_checked = 0` forever, which `memory/api.py:350-352` itself names as the inert state. |
-| `FAB.contribution` | P4 | **New.** `candidates` is the eligible past-grace set, which lives in `Population`'s books — no entry point exports it and O10 forbids the root reaching into `pop`. `baseline_logits_fn` is the same missing callable as EVAL's, and it is load-bearing rather than convenient: the whole C3/H11 repair is that the baseline must come from **the same callable** that produced `baseline_loss`. |
+| `MEM.judge` | P4/P5 | `scorer(ctx, src) -> logits` is needed by the **default** arm (`MEM.verify` defaults to `selfcon`) and must be *the same forward path training used* (M47). **Since 2026-09-27 that path exists as a closure, and its ARITY is the gap:** `_logits_fn` is `fn(x, *, prefix_bytes)` and routes on the bytes before the window (Q-EVAL-12), while a **stored** entry has no prefix bytes and carries `Store.src` — so the declared shape is two arguments (Q-MEM-8), and a scorer that routes on a stored id is a second routing rule nobody has ruled on. **Q-MEM-8 is RESOLVED and names the row to write when the scorer lands:** at the END of the `dom.manage` block, inside that block's single `Cadences.due` answer. Because `scorer` carries a default, **no check can see it**: a row calling `judge(mem, store)` passes everything and yields `n_checked = 0` forever, which `memory/api.py:350-352` itself names as the inert state. |
+| `FAB.contribution` | P4 | `candidates` is the eligible past-grace set, which lives in `Population`'s books — no entry point exports it and O10 forbids the root reaching into `pop` — and `targets` is the flush's own shifted cut, the loop's slice with no row. `baseline_logits_fn` has a candidate since 2026-09-27, the memory-off closure, and it is still not this argument: the whole C3/H11 repair is that the baseline comes from **the same callable** that produced `baseline_loss`, which is the training flush's forward, not a held-out closure over prefix bytes. |
 | `CAP.observe` | P4 | **New.** `improving` = `(slow - fast)/|slow|` off the growth controller's EMAs, which live **inside FAB** and are on no returned record; `observations` is the valve-evaluation count tied to a hardcoded 0.998 EMA rate the caller cannot see. The root must **not** maintain a second EMA pair over the same loss to manufacture them — two mechanisms deciding independently whether the run has stalled is the recorded defect where the valve fired hardest exactly when the run was degrading worst. `blackout`'s home is now half-built: **Q-FAB-6** gave `FAB.grow_check` the `shift_at` stamp and put the resulting blackout state on `GrowReport`, so CAP neither reads FAB's `cooldown` at the call site nor has to mint a blackout-window lever it has no census row for; what is still missing is the root join and the two EMAs. |
 | `WORLD.manage` | P4 | **New.** `plateau` contradicts the package's own `state_dict`, which says the plateau state `(_wl_ema, _wl_lastgrow)` **moves inside this package** and travels in the checkpoint — if the state is inside, the boolean is computed inside, and both sentences cannot hold. `add_param_group` needs OPT to name one of its two AdamW instances (**Q-OPT-7**). `latent` is real but arrives **backwards** (`loss_terms` is a `B` row, this pass was `A`). |
 
 **A later phase is not by itself a reason to defer.** Each reason above is about an **argument with
 no producer**, which is the only kind that survives the backwards check.
 
-**What the seven new deferrals cost, said plainly**, because a deferral that hides its cost is the
+**What the deferrals cost, said plainly**, because a deferral that hides its cost is the
 shape it replaces: the run has no capacity valve (nothing lifts a cap, so `CAP.caps` returns the
 starting ceilings and every block reason reads *unreachable*), no WORLD growth, no learning-curve
-probe — and therefore **no best-model save** (`Retention.counters().inert_reason` must report "no
-curve value has ever arrived") and **no restart damping** (`OPT.maybe_step`'s `best_bpb` has no
-producer, so `opt.restart.damped` is unreachable, not zero) — no per-expert contribution and so no
-informed spare rule, and no memory retrieval or wrongness sweep (so `evict="lru"` and `evict="usage"`
-stay write-order FIFO and probation can never promote). **All of that was already inert**: the rows
+probe at `EVAL_CURVE_EVERY`, no per-expert contribution and so no informed spare rule, and no
+wrongness sweep. *(This paragraph also listed no best-model save, no restart damping and no memory
+retrieval until 2026-09-27: the retention probe (Q-EVAL-12) supplies the first and the reading the
+second judges on, and the memory-on closure is the report path's retrieval — built OFF, so at the
+shipped `EVAL_RETENTION_EVERY=0` `Retention.counters().inert_reason` still reports "no curve value
+has ever arrived" and `OPT_DAMP_SOURCE='off'` keeps the damping unjudged. The in-package read probe
+reached `MEM.read` from 2026-09-21, Q-MEM-9.)* **All of that was already inert**: the rows
 named calls whose arguments nothing supplies. The deferral does not remove a mechanism, it stops the
 tables claiming one, and it names the producer each is waiting on.
 
@@ -1529,7 +1544,7 @@ tables claiming one, and it names the producer each is waiting on.
 
 Six defects in `spine/compose.py` that the column exposed and that are repaired here. None of them
 is a signature change, and none is reached by the stub-only `compose(environ={})` above: it halts on
-the **29th** of the 40 rows in `ASSEMBLY_ORDER`, at `CAP.startup_refusals`, and the rows carrying
+the **29th** of the 41 rows in `ASSEMBLY_ORDER`, at `CAP.startup_refusals`, and the rows carrying
 these six either sit past that point or are on the resume path an empty environment never takes.
 That is the shape this file's own header calls *"a defect hidden behind an earlier stub, this
 project's oldest"*. *(This paragraph said `RUN.process_setup` "raises several rows earlier" until
@@ -1547,7 +1562,7 @@ defects hide behind has moved.)*
    `System.warnings`; an **empty** list is a real result and must be printed as one.
 3. **`_run_windows` returned a bare `int`** into two functions that refuse one:
    `derive.cadences_that_cannot_fire` and `derive.opt_steps_from_windows` both raise `UnitError` on
-   a non-`Windows` (ISSUES P1-H51: all 36 Clock-unit levers resolve to bare ints and the typing is real
+   a non-`Windows` (ISSUES P1-H51: all 37 Clock-unit levers resolve to bare ints and the typing is real
    only where `derive` puts it back). It now returns `units.Windows`.
 4. **`_run_windows`' row said `run_windows=Plan's measured length`.** `Plan` has no such field
    (`data/api.py:22`) — the same wrong fact the helper's own docstring had already caught once, in
@@ -1698,7 +1713,7 @@ been fixed is a real outcome and acting on it writes a second wrong sentence. **
 The union of the five `levers_unconsumed` lists was **15**. Thirteen of them were EVAL's, and all
 thirteen were given a declared reader by writing the P6 instrument signatures into
 `src/eval/api.py`. **The last two were FAB's, and as of 2026-09-02 this table is EMPTY: every one of
-the 269 declared levers is named `LEVERS READ:` by a stub.** Neither of the two was dropped, and
+the 272 declared levers is named `LEVERS READ:` by a stub.** Neither of the two was dropped, and
 neither was given a fake reader; each was ruled, and the ruling is what produced the reader.
 
 | lever | env name | why it has no reader | disposition |
@@ -1915,7 +1930,7 @@ with `int(held) >= cap.pin_windows` as the only form that runs — which `capaci
 as *"the original defect again"*. A reviewer found it by reading both surfaces; nothing executed,
 because `compose()` **then** stopped at `RUN.process_setup`, long before the valve. *(That is no
 longer where it stops, and this sentence said it was until 2026-09-04: `compose(environ={})` now
-halts on the 29th of the 40 rows in `ASSEMBLY_ORDER`, at `CAP.startup_refusals`, which is **past**
+halts on the 29th of the 41 rows in `ASSEMBLY_ORDER`, at `CAP.startup_refusals`, which is **past**
 `CAP.new_valve` — so the valve is built on every `compose()` today and both its Gates are readable
 without writing a line. The reading that found this one still had to be done by hand; what has
 changed is that the next one of its kind need not be.)*
@@ -2866,7 +2881,7 @@ prints rather than a claim in a docstring.
 **What it does NOT need, and this is why nothing was minted.** No typed accessor and therefore **no
 new entry point**. The **five** accessors — `EVAL.curve_period`, `DOM.manage_period`,
 `FAB.manage_period`, `MEM.rekey_period`, `CKPT.save_period` — exist because `Config` hands back a
-bare `int` for all 36 Clock-unit *levers* (ISSUES P1-H51, three of five gates handed bare ints until
+bare `int` for all 37 Clock-unit *levers* (ISSUES P1-H51, three of five gates handed bare ints until
 2026-08-30); a module constant has no `Config` to drop its kind, so it is written `units.Windows` at
 its definition. That is a **construction, not a conversion** — it re-attaches a kind, it does not
 cross one. *(This sentence said "four" until 2026-09-03. It is the sixth count this document has got
@@ -2874,8 +2889,9 @@ wrong, and the one K13 cannot catch: **`four` is a word, and the check reads dig
 in K13's own docstring as the worked example of what it does not see.)*
 
 **And this gate has no row**: rows are entry-point calls and no entry point prints the progress line
-— the loop driver does, the way it owns the window cut `_window_bounds` names. So six keys, five of
-them rowed, and that asymmetry is stated at `_periods`, at `new_cadences` and in the `cadence` row.
+— the loop driver does, the way it owns the window cut `_window_bounds` names. So seven keys since
+2026-09-27 (`'retention'`, Q-EVAL-12), six of them rowed, and that asymmetry is stated at `_periods`,
+at `new_cadences` and in the `cadence` row.
 
 **⚠ THE ASYMMETRY IS NO LONGER ONLY STATED — K9 WAS WIDENED TO READ THE MAPPING (2026-09-03).** This
 section said *"`K9` reads the order tables only"*, and that was true and was the defect: the sixth
@@ -3521,6 +3537,19 @@ rng)` → `coherence(ev, *, logits_fn, units_by_domain, encode, rng)` — one pa
 **two**, under a different name — and Q-EVAL-10's own section below **refuses** `seed_units` by
 name, because the per-domain keys are load-bearing and `seed_units` would throw the labels away. Two statements in one document naming two different signatures for one entry point is
 the C12 shape; the ruling wins, and this sentence now points at it instead of restating it.)*
+
+**AMENDED 2026-09-27 (Q-EVAL-12, Q-MEM-15): THE HELPER IS WRITTEN, THE RESIDUAL IS RESOLVED, AND
+BLEND IS CREDITED THROUGH A ROW.** `_logits_fn(sysm, *, use_memory)` exists beside `_key_fn` /
+`_head` / `_sig_encode_fn`, and the four data the residual paragraph above named are ruled in
+Q-EVAL-12: `signature` off the pinned prefix before the window, `domain_id` from `DOM.nearest`,
+`live_domains` the count the next training window will use, and **`novelty` as zeros, named** —
+still the one datum with no honest source off the training path, now said at the call rather than
+left open. The sentence that `blend` "is called from that spine helper and never from a row"
+changes in one respect: the helper is still the only caller, and `MEM.encode_queries(...)`,
+`MEM.read(promote=False, ...)` and `MEM.blend(...)` are written as calls in the note of the `R`
+`EVAL.holdout_probe` row, which is how K6 credits an entry point reached inside another row's
+reading. And `read(promote=False)` counts nothing now (Q-MEM-15), where this ruling's text had it
+counting the read.
 
 **Literature bore, narrowly.** kNN-LM (Khandelwal et al., ICLR 2020) interpolates **in probability
 space** — `p = (1-λ)·p_LM + λ·p_kNN` — and reports the perplexity of that mixture, i.e. it takes the
@@ -6636,6 +6665,237 @@ on existing rulings:** gate `fab.on` at `FAB_ON=0` (ruled a switch read false, `
 `fab.lr_own` at `FAB_LR_OWN=False` ("an ARMED arm that chose not to scale", `own_lr_scale`) and
 `fab.growth_armed` at `FAB_GROW=0`, whose `grow_check` family is seeded on that arm the same way.
 
+### Q-EVAL-12 — the retention probe: what it reads, through which closure, at which routing clock, and who consumes its readings — **RESOLVED 2026-09-27 (Proposal 04 SR0 and NEW-03; register §8 3.1/3.2): BUILT OFF AT `EVAL_RETENTION_EVERY=0`. TWO NEW LEVERS, BOTH CENSUS AMENDMENTS; `EVAL.holdout_probe` MOVES; `EVAL.pin_holdout`, `EVAL.retention_period` AND `EVAL.blowup` ARE NEW; `_logits_fn`'s TWO CLOSURES ARE WRITTEN. NO WIRE**
+**What was asked.** Goal B is decided on held-out readings taken *during* training, and the tree
+had none: `EVAL.holdout_probe` was deferred for want of `units_by_domain` and a `logits_fn`, so
+`CKPT.Retention.consider` never heard a value, `OPT.maybe_step`'s `best_bpb` had no producer, the
+blow-up alarm had no series and `EVAL.generate` had no prompts. Proposal 04's SR0 fills
+`holdout_probe` as the retention probe and ships it ON only after a test proves it is telemetry;
+NEW-03 binds the closures, generation, the consumers and the blow-up Reading to the same commit.
+
+**The ruling, as built.**
+* **The levers.** `EVAL_RETENTION_EVERY` (`U.Windows`, built **0**: the whole subsystem off — no
+  `ProbeSet`, no stream, no reading, no consumer input, no generation; 04-6.2's 1000 plus
+  phase-start reads flips in its own commit) and `EVAL_RETENTION_N` (6 per arrived area, split 3 + 3,
+  domain `(1, None)`). `EVAL_HOLDOUT_WINDOWS` (32) is now the BOUNDARY reading's size. A negative
+  `EVAL_RETENTION_EVERY` is refused by `EVAL.retention_period` under this package's
+  `REFUSE_NEGATIVE_PERIOD`; `_periods` carries it as `'retention'`, the seventh gate.
+* **The pinned windows (`EVAL.pin_holdout`, the `probe` ASSEMBLY row after SIG's restore row).**
+  Each area's held-out block (`Areas.holdout`) splits at its **midpoint** into **control** (first
+  half) and **report** (second half). Each (area, half) draws its window starts once, sequentially
+  and without repeats, from `rng_for("eval.holdout.<derive.stream_key(area)>.<half>", seed)`, in
+  `[prefix_bytes, half_len - window_bytes]` — so a window **and its routing prefix** stay inside one
+  half and neither half reads the other's text. A half draws the larger of its share of
+  `EVAL_RETENTION_N` and of `EVAL_HOLDOUT_WINDOWS` (the odd one to control); both readings take the
+  **first n**, so the cadence items are a prefix of the boundary items and the two are paired too. A
+  short half records `shortfall`. **Geometry:** `window_bytes = LM.ctx + 1` — a window of ctx+1 bytes
+  tokenizes to at most ctx+1 ids, so its inputs fit the model's context at any vocabulary — and
+  `prefix_bytes` = the SIG width. Both are recorded in `LOOP.eval`, so a resume re-pins its parent's
+  windows even where its own geometry moved.
+* **Who is read.** The arrived set: the areas live in every phase this run has entered, plus, on a
+  resume, the parent's arrived set from `LOOP.eval` — or, for a pre-probe parent, `Areas.parent_names`,
+  **assumed** and said so in a warning. An area whose phase has not begun is left out
+  (`eval.holdout.areas_unarrived`, a gauge); its reading would be of text the run never trained on.
+  Each row carries `seen_by_parent`.
+* **The closures (`spine/compose.py::_logits_fn(sysm, *, use_memory)`, Q-MEM-10's ruling carried
+  out).** **Convention: `fn(x, *, prefix_bytes) -> (B, L, V)`**, x the token ids and
+  `prefix_bytes` the bytes before each row's first byte. The path is the flush's: `SIG.encode` on
+  the width_units units ending at the window's first byte (left-padded like `_sample_window`'s
+  opening windows; under `SIG_SPACE='tokens'` the byte prefix is cut at the view and yields fewer
+  tokens than width_units, so that arm's signature is more padded than a training window's — a
+  known approximation on an arm the tree does not ship), then **`DOM.nearest`** (Q-DOM-6: the id
+  `DOM.observe` would assign, with nothing written; **-1** where it would spawn, which bans exactly
+  what a newborn id would, counted `eval.holdout.domain_spawn`), then under `Process.autocast`
+  `LM.embed`, `WORLD.forecast`, `LM.encode(extra=)`, `FAB.forward(training=False)` with the head
+  (wrapped to count decodes), `targets=None`, **novelty ZEROS** (named: the one datum with no honest
+  source off the training path — a held-out window has no previous flush), `System.live_domains` —
+  and **`step_windows = clock.step + 1`**. Then the vote's logits, or `LM.decode` of the routed hidden.
+  All under `no_grad`, every module put in eval mode and each submodule's own mode restored.
+  `use_memory=True` adds `softmax → MEM.encode_queries → MEM.read(promote=False) → MEM.blend → log`
+  with the `(B*L, key_dim)` reshape; each reading names its closure (`memory-off`, `memory-on`). At
+  `MEM_BLEND_MAX=0` `MEM.blend` hands back the model's distribution itself and the memory-on closure
+  returns the memory-off logits unchanged — not their log-softmax, whose rounding would part the two
+  closures' generations at a boundary draw.
+* **Why `clock.step + 1` (the routing clock).** FAB's identity cache hands a pass at the SAME step
+  the keys the training pass computed **before** the optimizer stepped. At `clock.step` an in-run
+  reading therefore routed on stale keys while a resumed child, whose cache is empty, computed fresh
+  ones — so a start reading could never equal the uninterrupted run's reading at the same weights.
+  At `+1` the keys are recomputed at `FAB_EMB_EVERY=1` (shipped) and are the next window's cached
+  ones at larger values; nothing else `FAB.forward` reads from the step moves on an eval pass
+  (`_ae_rows`, spawn and the learn guard are learn-gated; the anneals are aux-loss only).
+* **The view.** `tokenize_fn` is `TOK.tokenize` at the view the stream was **last cut** at
+  (`seg_log`'s last event), `labels=None`, `regularize=False` — no draw, no cache, counted
+  `tok.segment_remap` and booked `eval.holdout.cuts`. The live table would score a window in a
+  segmentation the run never trained on.
+* **When it reads.** At B, after the flush and the act and before the checkpoint gate: the **arm
+  test first** (a pinned `ProbeSet`), then `Cadences.due('retention', ...)`, plus a **phase-start
+  read** at the first window of every phase k ≥ 0 of every epoch (the window's first byte against
+  `Stream.phase_bounds`, against the (epoch, phase) `LOOP.eval` last read) — one memory-off reading
+  of `EVAL_RETENTION_N` per arrived area. **Boundary readings** — `EVAL_HOLDOUT_WINDOWS` per area,
+  both closures — happen at **R** (inside the guard that saves when R raises) and at a **resume's
+  start**, and nowhere else. The start reading uses the **parent's** last-cut view and live-domain
+  count from `LOOP.eval`, so at the same weights it equals the parent's final R reading (**like for
+  like**); a later reading's difference is what this process changed. Boundary readings are
+  reported, **never consumed**. A continuing resume reproduces every memory-off reading the
+  uninterrupted run takes; its later memory-on readings do not, because MEM's rows depart after any
+  continuing resume (`memory/api.py::maintain` retakes its rekey snapshot rather than checkpointing
+  it — recorded in `tests/_state_digest.py` before the probe existed, not repaired here).
+* **Who consumes, and what.** Consumers read the **control mean** of a cadence or phase reading,
+  as `Reading(value, seed_count=1, at=step)`, and only when finite (`eval.holdout.nonfinite` counts
+  the rest, which are not forwarded): `CKPT.Retention.consider` (its `BestAction` saved on the spot,
+  `_carry()` first, then `Retention.note_saved` — Q-CKPT-6), `EVAL.blowup` (reports only), and
+  `System.probe_reading`, the next flush's `best_bpb` (Q-OPT-13). The report half feeds nothing.
+  **The all-area mean drifts with the arrived set, and only the alarm corrects for it.** An arriving
+  area's held-out text is text the run has barely trained on, so the mean steps up at each arrival;
+  the blow-up series re-arms there (below), while `Retention.consider` keeps judging every reading
+  against the best so far, so on a phased run the `.best` checkpoint stays at a pre-arrival reading
+  — driven in `tests/test_probe.py` P6: best at window 41 of 200, `num` arriving at 80 and no later
+  reading beating it. Recorded, not repaired: the plan's R7 sends the gates NEW-04 builds to the
+  per-area rows.
+* **`EVAL.blowup`.** blowup_test.py's call-site rule over each area's control series and an
+  all-area series that **re-arms at every arrival** (the mean steps up when an area arrives, so the
+  stale-80 rule would otherwise fire ~80 readings after it on a healthy run); its horizon is
+  `derive.blowup_horizon` — `blowup_stale`'s own `stale` default read off its signature, times the
+  period through `derive.windows_for_readings` — because O11 refuses that arithmetic elsewhere.
+* **Generation.** `EVAL.generate` after the **final save**, through both closures, on report-half
+  prompts cut at the last-cut view, drawing by inverse CDF from `rng_for('eval.generate', seed)`,
+  minted **once per System** at the `probe` stage (a second `loop.run` would otherwise raise
+  `RngError`). **The closure owns generation's window and prefix**: handed more than `LM.ctx` tokens
+  it keeps the last `LM.ctx` and appends the dropped ids' bytes (`TOK.Vocabulary.decode`) to the
+  prefix, because EVAL can read neither. **Generation's closures are capped at the live vocabulary**
+  (`live_vocab = TOK.Vocabulary.size()`, every id at or above it set to `-inf` after the whole path):
+  at the shipped `LM_MASK_DEAD_ROWS=0` a never-minted row keeps some mass, and one drawn has no bytes
+  — driven, a 30-window run's generation drew one and `decode` raised after the final save, taking
+  the report with it. The frozen tree's `vlim` ("never sample untrained ids"). Readings never pass
+  it: they are scored on the distribution the run trains on.
+* **The books.** `System.eval_books`: `eval.holdout.{calls, cadence_reads, phase_reads,
+  boundary_reads, resume_reads, windows, cuts, forwards, decodes, sig_calls, areas_unarrived,
+  shortfall, nonfinite, domain_spawn}`, `eval.mem.{reads, key_encodes, empty, blends}`,
+  `eval.blowup.fired` (and `since_best`, a gauge) — **ABSENT** unarmed, **PRESENT-and-0** armed;
+  `eval.holdout.seconds` and `eval.mem.blend_weight_sum` are floats outside the integer channel and
+  the seconds are never checkpointed; `eval.generate.{samples, tokens}` ABSENT at `EVAL_GENERATE=0`
+  or with no `ProbeSet`. Generation's own closure passes are counted there and **only** there — one
+  forward per generated token per closure — and the rest of the book is put back as R read it,
+  because the package rows were read at R, before generation, and the accounting below pairs the
+  two. (A second `run()` over one System — a test's shape; `run.py` makes one call per process, and a
+  checkpoint is written before generation — therefore reads the first call's generation passes in
+  the package rows and not in the book.) The root seeds `fab.eval_passes` when armed (Q-FAB-17). The gated-call
+  report reads `eval.holdout.calls` and `eval.generate.samples`.
+* **THE SIGNATURE MOVE, AND ONE DEPARTURE FROM THE PLAN THAT WROTE IT.**
+  `holdout_probe(ev, *, units_by_domain, logits_fn, tokenize_fn, step, boundary=False,
+  previous=None)`. `rng` left (the draw is `pin_holdout`'s, made once); `tokenize_fn` arrived because
+  EVAL may not import TOK. **`step` is the departure**: the plan's signature had none, and the
+  Readings it returns carry `at` — the window, which EVAL owns no clock to know. It is the Q-EVAL-11
+  precedent exactly (`curve_probe` gained `step` for `CurveReading.step`).
+* **THE EXACT-ACCOUNTING AMENDMENT OF `docs/proposals/04_SELF_REGULATION.md:1396-1397`.** That line
+  asks for "every counter but `eval.*` and `tok.segment_remap`" equal with the probe on and off. The
+  closures run the flush's entry points, and those count their calls, so the honest statement is
+  exact rather than empty: **losses, parameters, optimizer state and every counter are equal, except
+  the probe's own book and a named set each of which moves by exactly the book's own count** —
+  `tok.segment_remap` by `eval.holdout.cuts`; `fab.eval_passes`, `lm.embed.*`, `world.forecast.calls`
+  and `.inert` by `eval.holdout.forwards`; `lm.decode.calls` by `eval.holdout.decodes`;
+  `sig.encode_calls` and `sig.encode_windows` by `eval.holdout.sig_calls`; `lm.encode.calls` by the
+  forwards plus the memory-on closure's key encodes; `lm.mask.*` and `lm.encode.key_path_truncated`
+  with them; and `Retention.counters()`. `tests/test_probe.py` P1/P2 hold that set to it.
+* **What it costs.** A reading is `EVAL_RETENTION_N` forwards per arrived area under `no_grad`;
+  where `CKPT_DIR` is set, a `.best` checkpoint on every new best — the first reading of a run is
+  always one — which owner fleets with `CKPT_DIR` pay in I/O (listed as a risk; `Saves.best` per run is
+  what `tests/test_probe.py` P6 reads). CPU runs establish operation only.
+
+### Q-OPT-13 — where the restart damping's held-out Reading comes from — **RESOLVED 2026-09-27 (Proposal 04 NEW-03): `OPT_DAMP_SOURCE`, BUILT `'off'`; `'probe'` HANDS IT THE RETENTION PROBE'S CONTROL MEAN; `st.reading_at` CHECKPOINTED. ⚠ ONE NEW LEVER, A CENSUS AMENDMENT. NO SIGNATURE MOVES, NO WIRE**
+`OPT.maybe_step`'s `best_bpb` is the one held-out measurement that crosses back into a training
+decision, and it had no producer. It has one now (`System.probe_reading`, Q-EVAL-12), and whether
+it crosses is a lever rather than a consequence of turning the probe on. **`'off'` (shipped):**
+`maybe_step` sets `best_bpb = None` before `_reading` reads it, so `opt.restart.readings` stays 0 and
+the damping gate's reason names `OPT_DAMP_SOURCE='off'` (a new arm, ahead of the "no Reading has
+ever arrived" arm, which would otherwise send a reader to EVAL for a Reading OPT declined).
+**`'probe'`:** the Reading is `Reading(control mean, seed_count=1, at)`; one run is one seed, so every
+losing restart is **refused** under PLAN 3.8 and counted in `opt.restart.damp_refused_n1` — the
+restart amplitude never moves, which is what a single-seed run can honestly say. The root hands the
+same Reading over on every flush until the next reading; a Reading whose `at` equals the last one
+counted is that measurement re-delivered and counts **once** (the `opt.shift.notifications` rule,
+2026-09-24), with `st.reading_at` on `OptState`, in `state_dict` and in `load_state` (absent → None).
+**The Reading crosses a save too**: `LOOP.eval` carries the last forwarded one (`reading`) and the
+loop puts it back on a resumed System that holds none, so a child's first flushes hand `maybe_step`
+what the uninterrupted run's would — without it a continuing child read `None` until its own first
+reading and, under `'probe'`, departed at the first restart inside that gap; the restored
+`reading_at` keeps it counted once.
+`'probe'` with `EVAL_RETENTION_EVERY=0` is **refused at startup** (`RefusedRun`, the `refuse` stage):
+a source that can never produce is the armed-but-inert state this tree refuses by name. The backward
+edge is written in the `maybe_step` row's note, not in `ROW_ARGUMENTS_ELSEWHERE`: `maybe_step` has
+no required parameter, so K10 would report an entry there stale.
+
+### Q-DOM-6 — the domain a held-out window would be routed to, asked read-only — **RESOLVED 2026-09-27 (Q-EVAL-12): `DOM.nearest(dom, part, *, signature)`, `_assign`'s DECISION FACTORED INTO ONE PURE HELPER. NO LEVER, NO WIRE**
+The closures route windows the run did not train on, and `DOM.observe` advances the boundary clock,
+drags a centroid, feeds the reservoir and counts the visit — a reading through it would move the
+partition it reads. `_assign`'s three exclusive arms moved whole into `_decide(part, q, ...)`, which
+returns `(kind, did, bumps)` and writes nothing; `_assign` applies the same drag and the same
+counters in the same order (the drag now precedes the radius arm's bootstrap counters; they touch
+disjoint state, and B3 reproduces its fixture). `DOM.nearest` applies the same decision to one
+normalised signature and returns the id `_assign` would re-enter, the nearest at `d_expert_slots`,
+**-1** where it would spawn (the empty partition included) and **0** at `DOM_ENABLED=0`. It skips the
+boundary test — a held-out window is not the stream's next window — writes, bumps and draws nothing,
+and its caller books the -1 answers. LEVERS READ: `enabled`, `accept_rule`, `spawn_dist`, `margin`;
+WIRES READ: `d_expert_slots`.
+
+### Q-MEM-15 — the report path's queries, and what a `promote=False` read counts — **RESOLVED 2026-09-27 (Q-EVAL-12): `MEM.encode_queries(mem, *, contexts, key_fn)`; A `promote=False` READ SEEDS AND BUMPS NO STORE COUNTER; `MEM.blend` HAS A BODY AND IS BOOKED BY ITS CALLER. NO LEVER, NO WIRE**
+* **`encode_queries`** returns `(B*L, key_dim)` unit-norm queries, one per position, built from the
+  `key_win` tokens ending at it (`_key_windows`) and encoded at `key_depth` (`_encode_keys`) — the
+  write path's own helpers, so the report path queries the store in the key space it was written in.
+  Flat because `MEM.read` takes 2-D queries; `MEM_KEY_SRC='frozen'` is refused as in `write`.
+* **A `promote=False` read moves no counter** (amending Q-MEM-10's and `read`'s wording, which said
+  it "still counts `n_reads` and the wrong_* trio"): the six are the store's ledger, which `census`
+  and the `mem.pressure` Gate read as the in-package probe's retrievals, so a report-path reading
+  would move the numbers that Gate judges (G7), and at `MEM_PROBE_EVERY=0` an unarmed report path
+  would print them PRESENT-and-0 for a probe that cannot run. The wrong-flag **exclusion** still
+  applies on both arms; only the count is the promoting read's. The caller books its own:
+  `eval.mem.reads`, `eval.mem.empty`, `eval.mem.key_encodes`.
+* **`blend`'s body** re-asserts the weight (read's ramp recomputed from `conf` under this Config's
+  `match_floor` and `blend_max`, refusing a record that departs), returns `model_probs` untouched at
+  `blend_max == 0`, mixes `(1-w)·p + w·dist` otherwise, and clamps and renormalises only rows at
+  `w >= 1`. It writes no store counter; its declared `store.n_blends` / `store.blend_weight_sum`
+  were never written, and the closure books `eval.mem.blends` and `eval.mem.blend_weight_sum`.
+
+### Q-CKPT-6 — the answer a best save hands back to the retention policy — **RESOLVED 2026-09-27 (Q-EVAL-12): `Retention.note_saved(self, ok, slot=None)`, CALLED ONLY AFTER BEST AND bestN SAVES. NOTHING NEW IS CHECKPOINTED. NO LEVER, NO WIRE**
+`new_retention`'s obligation (1) said `best_saved` and the ring meant "ordered", because nothing
+carried `CKPT.save`'s answer back. `consider` now stashes what it ordered — the slot's previous
+resident and the pointer before it — and `note_saved(ok)` sets `best_saved` from the global `.best`
+save's return, while `note_saved(ok, slot)` on a refused slot save puts the resident back and returns
+the pointer, so the ring advances only on a written file, as the old tree's `if _save_ckpt(...)`
+did. `rotations` keeps counting orders; `counters()` gains `saves_refused`. A note nothing ordered is
+refused. The stash is not in `state()`: `_STATE_FIELDS` is unchanged, because a restore refuses a
+missing field and old blobs must still load. **Recorded, not repaired:** when one reading earns both,
+the `.best` blob is written first and holds the ordered slot, so a refused `.best<k>` save leaves that
+one blob naming a slot whose file was never written. The row is `('C', 'CKPT',
+'Retention.note_saved')`, fed `ok` by the C `CKPT.save` row's `produces` column.
+
+### Q-FAB-17 — which passes FAB's did-it-fire counters count — **RESOLVED 2026-09-27 (Q-EVAL-12): TRAINING PASSES ONLY; AN EVAL PASS COUNTS `fab.eval_passes`. NO TRAINING-PATH NUMBER MOVES**
+Until now nothing but the training flush called `FAB.forward`, so its counters never had to say
+which passes they count. The retention probe's closures call it with `training=False`, and a reading
+must not move the ledger that describes training. Every counter the body wrote on a solo pass —
+`fab.route_calls`, `hops_taken`, `halt_clamped`, `explored_rows`, `explore_distinct_targets`,
+`discovered`, `discover_targets`, `banned_experts`, `ec_applied`, `halt_spent_on_base`,
+`div_applied`, `ind_applied`, `hopsup_applied`, `forward_identity`, `norm_only_passes` — is now
+bumped on **learn** passes only (training and not a counterfactual), which is every pass it counted
+before; an eval pass bumps `fab.eval_passes` (the twenty-fifth key the body writes). **Two more than
+the plan's list**: `fab.ind_applied` and `fab.hopsup_applied` need targets, which an eval pass does
+not hand in, so they could not fire there — gated anyway, so the rule is one rule. `fab.holdout_applied`
+(the counterfactual's) is unchanged. The root seeds `fab.eval_passes` at 0 when the probe is armed,
+because FAB cannot see whether it is (the `tok.due_merged` precedent).
+
+### Q-WORLD-11 — the forecast's gauges on a pass outside training — **RESOLVED 2026-09-27 (Q-EVAL-12): `world.forecast_rms`, `world.forecasts` AND `_proj_trained` ARE WRITTEN ONLY UNDER GRAD. NO TRAINING-PATH NUMBER MOVES**
+`WORLD.forecast` returns the forecast on every call and counts `world.forecast.calls` /
+`world.forecast.inert` as before; the gauge, the fire count and the `_proj_trained` flag — which
+`load_into` reads to decide whether a restored `world_proj` was ever trained — describe training and
+are written only when `torch.is_grad_enabled()`. A probe pass under `no_grad` therefore leaves them
+where the last flush left them.
+
+### Q-LM-14 — encode's `extra` gauges on a pass outside training — **RESOLVED 2026-09-27 (Q-EVAL-12): `lm.encode.extra_ratio`, `extra_ratio_max` AND `extra_applied` ARE WRITTEN ONLY UNDER GRAD. NO TRAINING-PATH NUMBER MOVES**
+The forecast is still added to the hidden state on every call — the closures score the path the run
+trained — but the ratio gauges and the applied count describe the training flush, so a `no_grad`
+probe pass neither measures nor counts them. `lm.encode.calls` still counts every call; it is in the
+probe's exact-accounting set (Q-EVAL-12).
+
 ## 6. What `tests/test_contract.py` checks
 
 | check | what it proves | how it can fail |
@@ -6643,7 +6903,7 @@ on existing rulings:** gate `fab.on` at `FAB_ON=0` (ruled a switch read false, `
 | K1 | every name this document declares exists in the tree **with the signature it claims** | rename a parameter; drop a function |
 | K2 | `spine.compose` imports and `compose()` raises **only `NotImplementedError`, from a stub** | a typo in the root surfaces as `AttributeError`/`TypeError`, not as a missing body |
 | K3 | no package imports another (O10 restated at the contract boundary) | add `from fabric import api` to `src/memory/` |
-| K4 | every one of the 269 declared levers is named `LEVERS READ:` by a stub, or is in the UNCONSUMED table above **with a reason** | declare a lever and give it no reader |
+| K4 | every one of the 272 declared levers is named `LEVERS READ:` by a stub, or is in the UNCONSUMED table above **with a reason** | declare a lever and give it no reader |
 | K5 | every `d_` field the ledger declares is read by a stub in its own package, and no stub reads an undeclared one | add a wire nobody consumes |
 | K6 | every entry point is **named by a row** in `ASSEMBLY_ORDER` or `LOOP_ORDER`, or is in `compose.DEFERRED_ENTRY_POINTS` with a reason | declare a mechanism the root never calls; or leave a deferral in place after a row starts naming it — the check reads that table **backwards** and reports the stale entry |
 | K7 | the root reads only names a package **declares** off a Config | `int(lm.depth)` where LM declares `layers` — a crash at whatever stage reaches it, invisible while an earlier stub raises first |
@@ -6699,7 +6959,7 @@ nobody has watched fail is indistinguishable from a check that cannot fail.
 
 ## 7. THE FROZEN SIGNATURE SET
 
-Everything above is prose about these 141 entry points — 121 until 2026-09-02, when Q-TOK-11 added
+Everything above is prose about these 147 entry points — 121 until 2026-09-02, when Q-TOK-11 added
 `LM.residual_ratios` (122) and Q-LM-12 added `LM.embed` (123); 133 from 2026-09-15, when P4 wrote
 `CAP.caps` and the `Caps` record it returns brought `Caps.headroom(n)` with it; **134 since
 2026-09-22, when `World.parameters(self)` closed the hole `spine/compose.py::_base_parameters` had
@@ -6712,8 +6972,13 @@ cadenced gate's schedule across a resume (Q-RUN-9); **137 since later that day**
 `OPT.remap_rows(opt, st, row_events)` gave AdamW's per-row moments a way to follow the expert rows
 FAB moves (Q-FAB-13); **140 on 2026-09-26**, when 03b's stage S0b added the mid-epoch act's
 three: `TOK.splice`, `RunClock.revise_epoch_length` and `OPT.revise_horizon` (Q-RUN-8 option (a),
-Q-OPT-10); **141 since later that day**, with `TOK.view_of`, the match-table view a segmentation
-records so a continuing resume can cut at it again (Q-TOK-15, Q-RUN-16). Neither of the two before them
+Q-OPT-10); 141 later that day, with `TOK.view_of`, the match-table view a segmentation
+records so a continuing resume can cut at it again (Q-TOK-15, Q-RUN-16); **147 since 2026-09-27**,
+when the retention probe (Proposal 04 SR0 and NEW-03) added six: `EVAL.retention_period`,
+`EVAL.pin_holdout` and `EVAL.blowup` (Q-EVAL-12), `DOM.nearest` (Q-DOM-6), `MEM.encode_queries`
+(Q-MEM-15) and `CKPT.Retention.note_saved` (Q-CKPT-6) -- and MOVED one, `EVAL.holdout_probe`, whose
+`rng` left for `pin_holdout` and which gained `tokenize_fn`, `step`, `boundary` and `previous`
+(Q-EVAL-12). Neither of the two before them
 is a new ruling: this document has said since the record was specified that "`Caps.headroom(n)`
 exists so the negative clamp (C30) **cannot be written** at a call site", and it became an ENTRY
 POINT the moment a body existed to carry it. A record's public method is public surface, which K1
@@ -6753,6 +7018,7 @@ CKPT: load(ckpt: Config)
 CKPT: check_geometry(ckpt: Config, snapshot, geometry)
 CKPT: new_retention(ckpt: Config, *, restored=None)
 CKPT: Retention.consider(self, curve_bpb, step)
+CKPT: Retention.note_saved(self, ok, slot=None)
 CKPT: Retention.state(self)
 CKPT: Retention.counters(self)
 DATA: open_areas(dat: Config, *, seed: int)
@@ -6762,6 +7028,7 @@ DATA: stream_state(dat: Config, areas)
 DATA: restore_stream_state(dat: Config, areas, state)
 DOM: open_partition(dom: Config, *, sig_dim, vocab_slots, device, rng, restored=None)
 DOM: observe(dom: Config, part, *, signature, sample_window, tokens, now)
+DOM: nearest(dom: Config, part, *, signature)
 DOM: rekey(dom: Config, part, *, encode)
 DOM: note_competence(dom: Config, part, *, did, bits)
 DOM: manage(dom: Config, part, *, now, memory_counts, mem_floor_entries)
@@ -6771,8 +7038,11 @@ DOM: census(dom: Config, part)
 DOM: state_dict(dom: Config, part)
 DOM: manage_period(dom: Config)
 EVAL: curve_period(ev: Config)
+EVAL: retention_period(ev: Config)
+EVAL: pin_holdout(ev: Config, *, blocks, seed, window_bytes, prefix_bytes)
 EVAL: curve_probe(ev: Config, *, units_by_domain, logits_fn, step, rng)
-EVAL: holdout_probe(ev: Config, *, units_by_domain, logits_fn, rng)
+EVAL: holdout_probe(ev: Config, *, units_by_domain, logits_fn, tokenize_fn, step, boundary=False, previous=None)
+EVAL: blowup(ev: Config, *, series)
 EVAL: null_excess(ev: Config, *, real, permute, rng)
 EVAL: generate(ev: Config, *, logits_fn, prompts_by_domain, rng)
 EVAL: coherence(ev: Config, *, logits_fn, units_by_domain, encode, rng)
@@ -6807,6 +7077,7 @@ LM: counters(lm: Config, model)
 MEM: open_store(mem: Config, *, key_dim, vocab_slots, device, rng, lm_kind, restored=None)
 MEM: write(mem: Config, store, *, contexts, tokens, surprise, sources, owners, positions, key_fn, now)
 MEM: read(mem: Config, store, *, queries, promote=True)
+MEM: encode_queries(mem: Config, *, contexts, key_fn)
 MEM: blend(mem: Config, model_probs, retrieval)
 MEM: maintain(mem: Config, store, *, now, key_fn, probe_contexts=None, resegment=None, remap=None)
 MEM: apply_domain_plan(mem: Config, store, *, folds, deletions, live_sources)

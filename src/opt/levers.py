@@ -35,25 +35,28 @@ WHY THESE ARE THE LEVERS, against the two goals and nothing else.
       nothing is training is nevertheless being erased. It is off by default and it is a lever precisely
       so that the erasure is a decision somebody made rather than AdamW's implicit 0.01.
 
-CENSUS ACCOUNTING (.rework/census.json, filtered on new_owner == "OPT"): 14 rows + 6 AMENDMENTS.
+CENSUS ACCOUNTING (.rework/census.json, filtered on new_owner == "OPT"): 14 rows + 7 AMENDMENTS.
     10 keep + 2 rename             -> 12 levers declared below
      1 merge                       -> LR_EPOCHS folds into `lr_wavelength`, which is LR_STEPS's own row
      1 drop                        -> RECON_W, not declared (CENSUS.md:241)
      0 promote-to-wire
-     6 amend                       -> OPT_GRAD_CLIP, minted 2026-09-02, and section 6's five --
+     7 amend                       -> OPT_GRAD_CLIP, minted 2026-09-02; section 6's five --
                                       OPT_HORIZON_REVISE, OPT_LR_CONTINUE, OPT_LR_PLATEAU,
                                       OPT_LR_REWARM, OPT_LR_CONT_WARM -- minted 2026-09-26 (Proposal
-                                      05 §8 1.4), every one of them with NO ANCESTOR KNOB
-   18 levers in total, from 14 old-tree rows plus six amendments. CENSUS.md:38 says "OPT 14" because it
+                                      05 §8 1.4); and OPT_DAMP_SOURCE, minted 2026-09-27 (Proposal 04
+                                      NEW-03, Q-OPT-13) -- every one of them with NO ANCESTOR KNOB
+   19 levers in total, from 14 old-tree rows plus seven amendments. CENSUS.md:38 says "OPT 14" because it
    counts ROWS assigned to this package, not declarations that survive them, and the amendments do NOT
    move that figure -- the 328 and every per-package total in CENSUS.md count knobs the old system had,
-   and none of the six is one. The two rows that do not become declarations are named above rather than
-   subtracted silently, so a reader who counts eighteen against a table that says fourteen does not have
-   to re-derive which two went where and where the other six came from. (This line said "13 levers
-   ... plus one amendment" until 2026-09-26, when section 6 landed.)
+   and none of the seven is one. The two rows that do not become declarations are named above rather than
+   subtracted silently, so a reader who counts nineteen against a table that says fourteen does not have
+   to re-derive which two went where and where the other seven came from. (This line said "13 levers
+   ... plus one amendment" until 2026-09-26, when section 6 landed, and "18 ... six" until
+   2026-09-27.)
 
-⚠ THIS PACKAGE HOLDS SIX OF THE TREE'S CENSUS AMENDMENTS, and this paragraph is about the first of them
-(section 6 below carries the other five, each with its reason at its declaration). `grad_clip` is
+⚠ THIS PACKAGE HOLDS SEVEN OF THE TREE'S CENSUS AMENDMENTS, and this paragraph is about the first of them
+(section 6 below carries five more, each with its reason at its declaration, and OPT_DAMP_SOURCE, the
+seventh, sits beside lr_restart_damp, the lever whose Reading it gates). `grad_clip` is
 declared in section 1 below with its full reason; `.rework/CENSUS.md` gained an `amendments` section and
 `.rework/census.json` an `amendments` group in the same edit, and `tests/test_census.py` N1 was widened
 to check `amend` rows so that deleting the lever fails a check instead of leaving an orphan row.
@@ -739,6 +742,30 @@ class OPTLevers(LeverSet):
     # on every cell, 0.0 and 1.0 build under either, and -1e-09 and 1.0000000000000002 are refused
     # under either. OPT_LR_RESTART_DAMP=1.5 does not reach the schedule, and now says so once.
     # See the header's guard table for what it would have done if it had.
+
+    damp_source = Lever("off", "Where lr_restart_damp's held-out Reading comes from: 'probe' hands it "
+                               "the held-out retention probe's control mean; 'off' hands it nothing, "
+                               "so no restart is judged.", U.NAME, choices=("off", "probe"))
+    # CENSUS AMENDMENT, 2026-09-27 (Proposal 04 SR0 / NEW-03, docs/04_CONTRACT.md Q-OPT-13), with NO
+    # ANCESTOR KNOB: the old tree read `_best_bpb` inside the schedule (:7137-7139) with no switch at
+    # all, and the port requirement two levers up -- the Reading "must arrive as the declared wire
+    # d_best_bpb from EVAL" and "must carry its seed count" -- is met at runtime, not as a wire,
+    # because a Config freezes before any reading exists. THE SOURCE IS A LEVER BECAUSE THE READING
+    # IS A MEASUREMENT CROSSING BACK INTO A TRAINING DECISION, the only one in the system, and
+    # whether it crosses is a decision somebody makes, not a consequence of turning the probe on.
+    #   'off' (SHIPPED): src/opt/api.py::maybe_step drops whatever Reading it is handed BEFORE
+    #     _reading reads it, so opt.restart.readings stays 0 and the damping gate says why in a
+    #     reason naming this lever. The probe can run -- CKPT's best-by-held-out and EVAL's blow-up
+    #     alarm consume it -- without moving a single training number.
+    #   'probe': the Reading is spine/loop.py's System.probe_reading, EVAL.holdout_probe's CONTROL
+    #     mean, Reading(value, seed_count=1, at=<window>). One run is one seed, so every losing
+    #     restart is REFUSED under PLAN 3.8 and counted in opt.restart.damp_refused_n1 rather than
+    #     damped: the lever makes the refusal visible and the cycle's result recorded, which is what a
+    #     single-seed run can honestly say. The same Reading is handed over on every flush until the
+    #     next read; a Reading whose `at` equals the last one is the same measurement re-delivered
+    #     and is counted once (the opt.shift.notifications rule).
+    #   'probe' WITH EVAL_RETENTION_EVERY=0 IS REFUSED AT STARTUP (spine/compose.py, RefusedRun): a
+    #     source that can never produce is the armed-but-inert state this tree refuses by name.
 
     lr_decay = Lever(1.0, "Strength of a monotone envelope over successive restart peaks, so each cycle "
                           "keeps its own high phase while the ceiling comes down.", U.FRACTION,

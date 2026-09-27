@@ -76,7 +76,7 @@ in the tree (DOM.manage_every = 100), so it can never be the reason a report has
 long run (94 MB, ~400k windows) it is ~4000 lines over hours, which is what an ETA meter is for.
 
 WHY units.Windows AND NOT A BARE int. Cadences.due states "period MUST be units.Windows. An int
-raises", and Config hands back a bare int for all 35 levers that declare a Clock unit -- ISSUES P1-H51,
+raises", and Config hands back a bare int for all 37 levers that declare a Clock unit -- ISSUES P1-H51,
 three of five gates were handed bare ints until 2026-08-30. The accessors (EVAL.curve_period and its
 three siblings) exist to re-attach the kind a lever declares and drops. A module constant has no
 Config to drop it, so it is written typed at its definition and needs no accessor and no new entry
@@ -87,10 +87,11 @@ PERIODIC gate goes through Cadences.due(key, period, clock) with a period its OW
 supplied, so the modulo form that fired zero times at every BATCH_W > 1 is not writable at a call
 site" -- and a progress line evaluated as `step % PROGRESS_WINDOWS == 0` below the batch early-out
 is that defect exactly. new_cadences adds the other half: "THE KEYS ARE THE ROOT'S", so the key must
-come from the root's mapping rather than be invented at the call site. Hence `_periods`' sixth key,
-'progress'. IT HAS NO LOOP_ORDER ROW and cannot have one: rows are entry-point calls and no entry
-point prints this line -- the loop driver does. Its DID IT FIRE is Cadences.ledger()['progress'],
-and cadence_audit covers it like the other five.
+come from the root's mapping rather than be invented at the call site. Hence `_periods`' key
+'progress' (its sixth, and its seventh since 'retention' joined on 2026-09-27). IT HAS NO LOOP_ORDER
+ROW and cannot have one: rows are entry-point calls and no entry point prints this line -- the loop
+driver does. Its DID IT FIRE is Cadences.ledger()['progress'], and cadence_audit covers it like the
+other six.
 """
 
 
@@ -888,7 +889,7 @@ def new_cadences(run: Config, *, periods):
     Reads NONE of RUN's levers. EVERY PERIOD IS AN ARGUMENT -- `periods` is {key: units.Windows},
     each supplied by the package that OWNS the threshold. RUN evaluates; RUN does not own a single
     threshold THAT DECIDES ANYTHING THE MODEL COMPUTES. The narrowing is 2026-09-02's and is exact:
-    one of the six periods, 'progress', is RUN's own PROGRESS_WINDOWS -- a log cadence, a module
+    one of the seven periods, 'progress', is RUN's own PROGRESS_WINDOWS -- a log cadence, a module
     constant, NOT a lever, and the exception is stated here rather than smuggled past a sentence
     that would otherwise be false (Q-RUN-1). `Reads NONE of RUN's levers` is unaffected: a module
     constant is not a lever and this function still reads no Config.
@@ -916,7 +917,7 @@ def new_cadences(run: Config, *, periods):
     because the alternative is `step % PROGRESS_WINDOWS == 0` at a call site -- the modulo form that
     fired 999 times at BATCH_W=1 and ZERO times at every BATCH_W in {2, 8, 15, 16, 32} -- and
     because a gate outside the ledger has no readable "0 fires" and no cadence_audit coverage. So
-    six keys, five of them rowed.
+    seven keys since 2026-09-27, when EVAL.retention_period's 'retention' joined, six of them rowed.
 
     THE KEYS ARE THE ROOT'S, NOT THIS FUNCTION'S. compose.py's cadence table is the authority on
     which key maps to which owner's period, and docs/04_CONTRACT.md prints it. This function
@@ -943,7 +944,7 @@ def new_cadences(run: Config, *, periods):
             raise U.UnitError(
                 f"RUN.new_cadences: the period for {key!r} is "
                 f"{type(period).__name__}({period!r}), not units.Windows. Config hands back a bare "
-                f"int for all 35 levers that declare a Clock unit, which is why each period comes "
+                f"int for all 37 levers that declare a Clock unit, which is why each period comes "
                 f"through its owning package's typed accessor (EVAL.curve_period and its "
                 f"siblings); a bare int here is that accessor bypassed.")
     return Cadences(periods)
@@ -990,8 +991,8 @@ class Cadences:
         this implements is named here rather than left for a reader to infer from a sentence that
         describes the other.
         WHY RATE WAS THE ONE TO KEEP: every period in the mapping is an operator-set "every N
-        windows", and all six consumers -- the checkpoint, the curve probe, two manage gates, the
-        rekey and the progress line -- are counted per run rather than depended on for a minimum
+        windows", and all seven consumers -- the checkpoint, the curve probe, two manage gates, the
+        rekey, the retention probe and the progress line -- are counted per run rather than depended on for a minimum
         separation. A systematic 28% shortfall in how often a checkpoint is written is a silent
         wrong answer to the number somebody typed; an occasional 64-window gap where 100 was asked
         is not. If a gate is ever added that NEEDS the minimum separation, it needs a different
@@ -1320,7 +1321,8 @@ def cadence_audit(run: Config, *, run_windows, periods):
     `run_windows` is units.Windows and every period is units.Windows; derive.cadences_that_cannot_fire
     refuses any other kind at both ends.
 
-    IT COVERS SIX GATES, NOT FIVE, SINCE 2026-09-02. The sixth is 'progress', whose period is this
+    IT COVERS SEVEN GATES SINCE 2026-09-27 ('retention', EVAL.retention_period, reported DISARMED at
+    the shipped 0), AND SIX, NOT FIVE, SINCE 2026-09-02. The sixth is 'progress', whose period is this
     module's PROGRESS_WINDOWS constant (Q-RUN-1). It is deliberately 100 Windows so that it FIRES at
     the shipped defaults and never joins the list above: a progress/ETA meter that prints zero times
     is a pure loss -- no measurement is confounded by it -- and the old RATE_EVERY default of 2000

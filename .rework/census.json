@@ -5526,6 +5526,52 @@
      "DATA_N_PROCESSES",
      "DATA_SEG_MAX"
     ]
+   },
+   {
+    "old_name": "(amendment: EVAL_RETENTION_EVERY)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "EVAL",
+    "new_name": "EVAL_RETENTION_EVERY",
+    "unit": "Windows",
+    "purpose": "Windows between in-run retention readings on the pinned held-out windows; 0 (the build default) turns the whole retention probe off -- no ProbeSet is pinned, no stream is minted, no reading is taken, no consumer is fed and nothing is generated. At a value above 0 each reading scores EVAL_RETENTION_N pinned windows per arrived area through the memory-off closure, a reading is also taken at the first window of every phase, and the control-half mean feeds CKPT's best-model policy, EVAL's blow-up alarm and, at OPT_DAMP_SOURCE='probe', OPT's damping.",
+    "reason": "AMENDMENT, 2026-09-27, Proposal 04's SR0 and NEW-03 (register 04-6.2; Proposal 05 \u00a78 3.1/3.2), ruled in docs/04_CONTRACT.md Q-EVAL-12. There is no ancestor knob: the old tree read held-out text only at the end of a run (holdout_bpb), never on a cadence, so there is no (family, old_name) key a DEPARTURES entry could be written under and N2 could only be satisfied by amending the census. IT DOES NOT CHANGE THE 328. WHY: goal B is decided on held-out readings taken DURING training -- the forgetting curve, the best-by-held-out snapshot, the blow-up alarm -- and none existed. BUILT 0, RULED 1000: the register's 04-6.2 flip lands in its own commit (C9), after SR0's bit-identity test proves the probe is telemetry (losses, parameters, optimizer state and every counter but the probe's own book equal with it on and off).",
+    "couples_with": [
+     "EVAL_RETENTION_N",
+     "EVAL_HOLDOUT_WINDOWS",
+     "DATA_SYNTH_HOLDOUT",
+     "OPT_DAMP_SOURCE",
+     "CKPT_DIR",
+     "CKPT_BEST_KEEP"
+    ]
+   },
+   {
+    "old_name": "(amendment: EVAL_RETENTION_N)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "EVAL",
+    "new_name": "EVAL_RETENTION_N",
+    "unit": "count",
+    "purpose": "Held-out windows per arrived area for each in-run retention reading, split between the area's control and report halves with the odd one to control (6: 3 + 3). A prefix of the one pinned draw per (area, half), so an in-run reading and a boundary reading (EVAL_HOLDOUT_WINDOWS) are paired on the items they share. Domain (1, None).",
+    "reason": "AMENDMENT, 2026-09-27, Proposal 04's SR0 (\u00a71 item 6), ruled in docs/04_CONTRACT.md Q-EVAL-12. There is no ancestor knob: with no in-run reading in the old tree there was nothing to size. IT DOES NOT CHANGE THE 328. WHY: the in-run reading's cost is this number of forwards per arrived area, and the proposal measured 4.3% of wall on the toy at 160 windows; EVAL_HOLDOUT_WINDOWS stays the boundary reading's size (32, Q-EVAL-9).",
+    "couples_with": [
+     "EVAL_RETENTION_EVERY",
+     "EVAL_HOLDOUT_WINDOWS"
+    ]
+   },
+   {
+    "old_name": "(amendment: OPT_DAMP_SOURCE)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "OPT",
+    "new_name": "OPT_DAMP_SOURCE",
+    "unit": "name",
+    "purpose": "Where OPT_LR_RESTART_DAMP's held-out Reading comes from. 'off' (the default): maybe_step drops whatever Reading it is handed before reading it, so no restart is judged. 'probe': the retention probe's control-half mean, Reading(value, seed_count=1, at) -- every losing restart is then REFUSED under PLAN 3.8 and counted in opt.restart.damp_refused_n1, never damped, and a Reading re-delivered with the same `at` is counted once. 'probe' with EVAL_RETENTION_EVERY=0 is refused at startup.",
+    "reason": "AMENDMENT, 2026-09-27, Proposal 04's NEW-03, ruled in docs/04_CONTRACT.md Q-OPT-13. There is no ancestor knob: the old tree read _best_bpb inside the schedule (:7137-7139) with no switch at all. IT DOES NOT CHANGE THE 328. WHY: the Reading is a held-out measurement crossing back into a training decision -- the only one in the system -- and whether it crosses must be a decision somebody makes rather than a consequence of turning the probe on; 'off' lets the probe feed CKPT and EVAL without moving a training number.",
+    "couples_with": [
+     "OPT_LR_RESTART_DAMP",
+     "EVAL_RETENTION_EVERY"
+    ]
    }
   ]
  }

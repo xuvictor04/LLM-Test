@@ -561,6 +561,8 @@ def forecast(world: Config, w, obs_emb):
     LEVERS READ: feedback
     WIRES READ: none
     DID IT FIRE: World.forecasts -- the count of flushes on which a forecast was actually APPLIED
+    (written under grad only since 2026-09-27, Q-WORLD-11, with world.forecast_rms and the lineage
+    flag: a no_grad call -- the held-out probe's -- returns the forecast and writes neither)
     FOUR MORE KEYS THE BODY WRITES, declared here the way fabric/api.py::grow_check declares its
     own additions: a key a report can read and the contract does not admit to producing is the same
     defect as a declared key nothing writes, and this entry point needs all four to say which of
@@ -736,6 +738,15 @@ def forecast(world: Config, w, obs_emb):
     # difference between a side head and a subsystem. It is also why the off arm above returns
     # before the encoder runs at all rather than after -- an unread forward would still build a
     # graph on the world model's parameters and still be paid for on the backward.
+    # THE THREE WRITES BELOW ARE A TRAINING PASS'S (2026-09-27, Q-WORLD-11). The held-out probe's
+    # closures (spine/compose.py::_logits_fn) call this entry point under no_grad beside training,
+    # on held-out text: the gauge would then report the probe's forecast as the flush's, the fire
+    # counter would break its pairing with lm.encode.extra_applied (which is written under grad
+    # alone for the same reason), and the lineage flag would claim a gradient no eval pass gives.
+    # world.forecast.calls and world.forecast.inert above still count every call, eval calls
+    # included; the eval book's own counts say how many were the probe's.
+    if not torch.is_grad_enabled():
+        return out
     with torch.no_grad():
         # THE MAGNITUDE OF WHAT IS ACTUALLY ADDED, AS A GAUGE. A fire counter cannot distinguish a
         # forecast that conditions the LM from one that is numerically absent, and the collapsed

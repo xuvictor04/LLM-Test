@@ -592,7 +592,11 @@ def encode(lm: Config, model, x, *, n_layers=None, extra=None):
                  clamp reaching the new tree), lm.encode.extra_applied; and two FLOAT GAUGES
                  written on the same arm, lm.encode.extra_ratio (the latest RMS(extra)/RMS(h),
                  h before the add) and lm.encode.extra_ratio_max (its running max) -- all three
-                 ABSENT when no `extra` is ever passed
+                 ABSENT when no `extra` is ever passed, and all three written ONLY UNDER GRAD
+                 (2026-09-27, Q-LM-14): a no_grad call -- the held-out probe's closures -- adds
+                 `extra` and writes none of them, so they stay the flushes' readings.
+                 lm.encode.calls and key_path_truncated still count every call, eval calls
+                 included; the eval book's own counts say how many were the probe's
     """
     lm = lm.owned_by("LM")
     _bump("lm.encode.calls")
@@ -698,15 +702,24 @@ def encode(lm: Config, model, x, *, n_layers=None, extra=None):
         # 0.74-3.08, so the max is the number that says whether the forecast has started to
         # dominate the readout. Both ABSENT
         # when no `extra` ever arrives (WORLD_FEEDBACK=0, the null world).
-        with torch.no_grad():
-            _ms = torch.stack([extra.detach().float().pow(2).mean(),
-                               h.detach().float().pow(2).mean()]).sqrt().tolist()
-        _ratio = _ms[0] / max(_ms[1], 1e-12)
-        _set("lm.encode.extra_ratio", round(_ratio, 6))
-        _set("lm.encode.extra_ratio_max",
-             round(max(_ratio, float(_COUNTS.get("lm.encode.extra_ratio_max", 0.0))), 6))
+        # ONLY UNDER GRAD, THE THREE OF THEM (2026-09-27, Q-LM-14). The held-out probe's closures
+        # (spine/compose.py::_logits_fn) run this entry point under no_grad beside training, with
+        # the same `extra`; a gauge written by them would report the probe's forecast as the flush's,
+        # and extra_applied would count eval forwards as conditioned flushes, breaking the pair
+        # world.forecasts == lm.encode.extra_applied that WORLD's docstring holds this key to. The
+        # add itself is unconditional: an eval pass scores the path training runs.
+        _train = torch.is_grad_enabled()
+        if _train:
+            with torch.no_grad():
+                _ms = torch.stack([extra.detach().float().pow(2).mean(),
+                                   h.detach().float().pow(2).mean()]).sqrt().tolist()
+            _ratio = _ms[0] / max(_ms[1], 1e-12)
+            _set("lm.encode.extra_ratio", round(_ratio, 6))
+            _set("lm.encode.extra_ratio_max",
+                 round(max(_ratio, float(_COUNTS.get("lm.encode.extra_ratio_max", 0.0))), 6))
         h = h + extra
-        _bump("lm.encode.extra_applied")
+        if _train:
+            _bump("lm.encode.extra_applied")
 
     # UNDROPPED ON THE WAY OUT. Three packages consume this -- MEM as keys, FAB as routing input,
     # LM as the readout source -- and a value three packages consume must not carry one consumer's

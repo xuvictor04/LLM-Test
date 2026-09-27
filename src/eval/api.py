@@ -9,27 +9,30 @@ only instrument that answers "did adding an area damage what was already known".
 is a sample size or a threshold, because both project goals are CLAIMS and a claim is only as good
 as the instrument under it.
 
-WHICH OF THESE ARE LIVE AT WHICH PHASE, STATED RATHER THAN IMPLIED. P3's exit criterion is "no
-report at all beyond loss", so at P3 exactly one function below is called by the composition root:
-curve_period, because the loop needs a cadence slot and CKPT's Retention needs a number to compare.
-curve_probe / holdout_probe / null_excess are P5. The five instruments at the bottom are P6. THEY
-ARE DECLARED HERE ANYWAY, and that is a deliberate choice this contract records: an instrument
-declared with a signature has a named reader for its levers, so `EVAL_GEN_TEMP` is a knob whose
-consumer is written down rather than one of the 57 armed-but-inert records. What P6 owns is the
-BODY, not the interface.
+WHICH OF THESE ARE LIVE AT WHICH PHASE, STATED RATHER THAN IMPLIED. At P3 exactly one function
+below was called by the composition root: curve_period, because the loop needs a cadence slot.
+SINCE 2026-09-27 (Proposal 04 SR0 and NEW-03, Q-EVAL-12) THE RETENTION PROBE IS BUILT, OFF at the
+shipped EVAL_RETENTION_EVERY=0: pin_holdout at the root's 'probe' row, retention_period in its
+cadence mapping, holdout_probe at stage B, at R and at a resume's start, blowup after each B
+reading, and generate after the final save. curve_probe and null_excess are still P5, and four of
+the five instruments at the bottom are P6. THEY ARE DECLARED HERE ANYWAY, and that is a deliberate
+choice this contract records: an instrument declared with a signature has a named reader for its
+levers, so `EVAL_COH_LEN` is a knob whose consumer is written down rather than one of the 57
+armed-but-inert records. What P6 owns is the BODY, not the interface.
 
-THE EIGHT STUB MARKERS BELOW SAY P5/P6 WHILE THE OTHER TWELVE PACKAGES SAY P4, AND THEY STAY THAT
+THE SIX STUB MARKERS BELOW SAY P5/P6 WHILE THE OTHER TWELVE PACKAGES SAY P4, AND THEY STAY THAT
 WAY. RE-CHECKED 2026-09-04 AND THE RULING STILL HOLDS: .rework/ISSUES.md P2-H11 rules that the
 PHASES renumber and the markers do not, that eval's markers move WITH the renumbering, and that the
 renumbering is deliberately NOT YET APPLIED because it touches every row below P2 while the phase
-in flight is P4 under the split numbering. Counted rather than assumed: three stub markers here
-name phase P5 -- curve_probe, holdout_probe, null_excess -- and five name P6 -- generate, coherence,
-verdicts, wrongness_probe, verification_fit -- against the P4 marker the other twelve api.py files
-carry, and docs/04_CONTRACT.md's EVAL section attributes the SAME P5/P6 phases to these same entry
-points. (The phase names are spelled without their parenthesised package here ON PURPOSE: the
+in flight is P4 under the split numbering. Counted rather than assumed: two stub markers here
+name phase P5 -- curve_probe, null_excess -- and four name P6 -- coherence, verdicts,
+wrongness_probe, verification_fit -- against the P4 marker the other twelve api.py files carry, and
+docs/04_CONTRACT.md's EVAL section attributes the SAME P5/P6 phases to these same entry points.
+(EIGHT until 2026-09-27, when holdout_probe and generate got bodies and their markers went with
+their stubs.) (The phase names are spelled without their parenthesised package here ON PURPOSE: the
 obvious way to check this paragraph is `grep -c` for the marker string, and a marker quoted inside
 the count that describes it is a claim that corrupts its own measurement -- which is this file's
-subject, one level up.) So rewriting these eight to P4 would apply half of a deferred renumbering and put this
+subject, one level up.) So rewriting these six to P4 would apply half of a deferred renumbering and put this
 file at odds with the document that declares it. THIS PARAGRAPH EXISTS SO THE NEXT READER DOES NOT
 "FIX" IT EITHER: the open item is the renumbering, and it belongs to whoever applies PLAN.md
 section 5's amendment, not to this package.
@@ -40,16 +43,27 @@ TWO RULES EVERY FUNCTION BELOW OBEYS, both from the survey:
       stream. Before c76dc74, changing the holdout n from 4 to 16 moved 48 report lines INCLUDING A
       VERDICT SIGN FLIP, because build_stream drew segment lengths from the same global RNG the
       diagnostics drew from -- how much you MEASURED decided what you TRAINED on.
-  ONE LOGITS PATH, RESTATED 2026-09-02 UNDER Q-MEM-10 AND STILL ONE PATH PER SYSTEM. `logits_fn`
-      is passed in, never constructed here. compose_test built `pm` from `model(X)[0]`, the plain LM
-      head, while the held-out path used _eval_logits, so with FABRIC=1 three report sections scored
-      a system the run never trained. The rule is therefore: ONE CLOSURE PER SCORED SYSTEM, formed
-      in the composition root, passed in, never constructed here -- AND EVERY READING NAMES WHICH
-      CLOSURE PRODUCED IT. There are two systems and not one: the trained path (memory off) and the
-      trained path plus retrieval (memory on), which has never entered training. The -0.097 -> +0.085
-      b/B price of retrieval IS the difference between them, so the PAIR is the deliverable and a
-      single unnamed number is the defect. NO SIGNATURE HERE MOVES FOR THIS: `blend_fn` is NOT added
-      to curve_probe, holdout_probe, generate or coherence -- see Q-MEM-10 in docs/04_CONTRACT.md,
+  ONE LOGITS PATH, RESTATED 2026-09-02 UNDER Q-MEM-10 AND BUILT 2026-09-27 UNDER Q-EVAL-12, STILL
+      ONE PATH PER SYSTEM. `logits_fn` is passed in, never constructed here. compose_test built `pm`
+      from `model(X)[0]`, the plain LM head, while the held-out path used _eval_logits, so with
+      FABRIC=1 three report sections scored a system the run never trained. The rule is therefore:
+      ONE CLOSURE PER SCORED SYSTEM, formed in the composition root, passed in, never constructed
+      here -- AND EVERY READING NAMES WHICH CLOSURE PRODUCED IT. There are two systems and not one:
+      the trained path (memory off) and the trained path plus retrieval (memory on), which has never
+      entered training. The -0.097 -> +0.085 b/B price of retrieval IS the difference between them,
+      so the PAIR is the deliverable and a single unnamed number is the defect.
+      THE TWO CLOSURES EXIST NOW, as spine/compose.py::_logits_fn(sysm, *, use_memory), each with a
+      `.name` ('memory-off', 'memory-on') every reading records. THE CONVENTION IS
+      fn(x, *, prefix_bytes) -> (B, L, V) logits: x is (B, L) token ids and prefix_bytes holds, per
+      row, the bytes BEFORE x's first byte -- the closure routes on them the way training routes on
+      the width_units units before each window (Q-FAB-7), so no reading routes on its own targets.
+      Inside it is the path the run trained: SIG.encode on the prefix, DOM.nearest (the domain the
+      window WOULD be routed to, written nowhere), LM.embed, WORLD.forecast, LM.encode(extra=),
+      FAB.forward(training=False) with the head and the NEXT window's routing clock, and the vote or
+      LM.decode -- all under no_grad in eval mode, the modes restored. The memory-on closure adds
+      softmax -> MEM.encode_queries -> MEM.read(promote=False) -> MEM.blend -> log, the one place
+      that mix is written. NO SIGNATURE HERE MOVED FOR THE MIX: `blend_fn` is NOT added to
+      curve_probe, holdout_probe, generate or coherence -- see Q-MEM-10 in docs/04_CONTRACT.md,
       which recommended exactly that and was overruled, because four bodies each doing
       softmax -> blend -> log is the ungated mix recomputed at a consumer site, i.e. C8 (prompt.py)
       and C9 (cl_bench.py) rebuilt inside the instrument line.
@@ -95,16 +109,32 @@ couplings as wires -- and the argument is still the wrong thing to spend one on.
 FIELD STAYED DECLARED THROUGHOUT. Deleting either to make this file self-consistent would have
 traded a recorded gap for a silently missing reading, which is the trade this package refuses.
 
-RECORD TYPES RETURNED (P4/P5 define them):
+RECORD TYPES RETURNED (P4/P5 define them; the five below the first are DECLARED as dataclasses in
+this file since 2026-09-27, Q-EVAL-12):
   CurveReading   per_domain_bpb, mean_bpb, windows_drawn, units_drawn (the total this probe spent:
                  windows_drawn summed across domains x LM.ctx -- Q-EVAL-5), step
-  Reading        value, seed_count -- PLAN 3.8 forbids a verdict on n=1, and OPT refuses to damp a
-                 restart on a Reading whose seed count is 1
+  Reading        value, seed_count, at -- PLAN 3.8 forbids a verdict on n=1, and OPT refuses to damp
+                 a restart on a Reading whose seed count is 1; `at` (2026-09-27) is the window it
+                 was taken at, so a consumer handed the same Reading twice can tell
+  ProbeSet       items, halves, window_bytes, prefix_bytes, shortfall, reason, rng_names -- the
+                 pinned held-out windows, per area and per half (control, report); probe_set is the
+                 root's name for it
+  HoldoutReading areas, control_mean, report_mean, paired, paired_sd, closure, boundary, windows,
+                 nonfinite, step
+  BlowupReading  name, fired, fires, since_best, best, n, horizon_windows, reason
   NullReading    real, null_mean, null_sd, draws, verdict_allowed
-  Sample         the measured population, its SIZE, and the rule that drew it
+  Sample         population, size, rule, per_domain, closure, temp, reason -- the measured
+                 population, its SIZE, and the rule that drew it
 """
+import dataclasses
+import math
+
+import torch
+
 from spine.lever import Config, LeverError
 from spine import units as U
+from spine import derive as _derive
+from spine import rng as _rng
 
 
 # ==================================================================================================
@@ -133,6 +163,127 @@ EVAL_REFUSE_NEGATIVE_PERIOD, no census row and no row in the generated lever doc
 because a lever per package would be five environment names for one decision and would make "some
 accessors refuse and some do not" a reachable configuration.
 """
+
+
+# ==================================================================================================
+# THE RECORDS THIS PACKAGE RETURNS, DECLARED (2026-09-27, Q-EVAL-12)
+# ==================================================================================================
+# FROZEN, all five, for the reason every record in this tree is: a caller that can write to a
+# reading can change what the run reported. The module docstring's RECORD TYPES block names them.
+
+@dataclasses.dataclass(frozen=True)
+class Reading:
+    """One held-out measurement a consumer may act on: (value, seed_count, at).
+
+    `seed_count` is PLAN 3.8's: a verdict on n=1 is forbidden, and OPT refuses to damp a restart on
+    a Reading whose seed count is 1. One run is one seed, so every Reading this package builds from
+    a single run carries 1. `at` is the window (RunClock.step, an int) the reading was taken at, so
+    a consumer handed the same Reading on every flush can tell a new measurement from the last one
+    re-delivered -- OPT counts one per distinct `at` (Q-OPT-13). None where no clock stamped it.
+    """
+    value: float
+    seed_count: int
+    at: object = None
+
+
+@dataclasses.dataclass(frozen=True)
+class ProbeSet:
+    """The pinned held-out windows, drawn ONCE per run and per resume, by pin_holdout.
+
+    items         {area: {"control": ((start, prefix, window), ...), "report": (...)}} -- `start`
+                  is the window's byte offset in the area's held-out BLOCK, `prefix` the
+                  prefix_bytes bytes before it, `window` the window_bytes bytes it scores; both
+                  inside the same half, so neither half ever reads the other's text
+    halves        {area: (mid, block_len)} -- control is block[:mid], report is block[mid:]
+    window_bytes  the scored window's width in bytes (LM.ctx + 1 when first pinned)
+    prefix_bytes  the routing prefix's width in bytes (the SIG width when first pinned)
+    shortfall     {area: {"control": n, "report": n}} -- items a half was too short to supply
+    reason        "" when pinned; otherwise why nothing was (the probe off, no block)
+    rng_names     the child streams drawn, in draw order
+    """
+    items: dict
+    halves: dict
+    window_bytes: int
+    prefix_bytes: int
+    shortfall: dict
+    reason: str
+    rng_names: tuple
+
+
+@dataclasses.dataclass(frozen=True)
+class HoldoutReading:
+    """One reading of the pinned windows through one closure. Returned by holdout_probe.
+
+    areas         {area: {"control": [bits/byte per window], "report": [...], "control_mean",
+                  "report_mean", "seen_by_parent"}}
+    control_mean  Reading(mean over areas of each area's control mean, 1, step) -- the number
+                  CKPT, EVAL's blow-up alarm and OPT consume; None when no window was scored
+    report_mean   Reading(the same over the report halves, 1, step) -- the number the run reports
+                  and nothing acts on; None when no window was scored
+    paired        {area: {half: (n, mean_diff, sd_diff)}} against `previous`, on the items both
+                  readings scored; {} with no previous
+    paired_sd     the SD of every paired per-window difference, both halves, all areas; None with
+                  fewer than two
+    closure       the name of the logits_fn that produced it ('memory-off' / 'memory-on')
+    boundary      True for the holdout_windows reading (R, a resume's start), False for the cadence
+    windows       windows scored
+    nonfinite     windows whose bits/byte was not finite (left out of every mean)
+    step          the window it was taken at (int)
+    """
+    areas: dict
+    control_mean: object
+    report_mean: object
+    paired: dict
+    paired_sd: object
+    closure: str
+    boundary: bool
+    windows: int
+    nonfinite: int
+    step: int
+
+
+@dataclasses.dataclass(frozen=True)
+class BlowupReading:
+    """The divergence alarm over one series of control means. Returned, per series, by blowup.
+
+    name             'all' for the all-area mean, else the area
+    fired            whether the alarm is fired in the current excursion (it re-arms on a new best)
+    fires            how many times it fired over the whole series
+    since_best       readings since the last new best -- a GAUGE, not a count
+    best             the best (lowest) value of the current excursion, or None
+    n                readings in the series
+    horizon_windows  how long the alarm waits, in windows, at this cadence (derive.blowup_horizon)
+    reason           "" when judged; otherwise why it cannot fire yet (fewer than three readings)
+    """
+    name: str
+    fired: bool
+    fires: int
+    since_best: int
+    best: object
+    n: int
+    horizon_windows: int
+    reason: str
+
+
+@dataclasses.dataclass(frozen=True)
+class Sample:
+    """What generate returns: the measured population, its SIZE, and the rule that drew it.
+
+    population  {area: [{"prompt": bytes, "ids": [prompt ids + generated ids], "generated": [ids]}]}
+    size        the number of continuations
+    rule        how the prompts were chosen and the tokens drawn, as a sentence
+    per_domain  {area: continuations}
+    closure     the logits_fn's name
+    temp        EVAL_GEN_TEMP as it was read
+    reason      "" when generated; otherwise why nothing was
+    """
+    population: dict
+    size: int
+    rule: str
+    per_domain: dict
+    closure: str
+    temp: float
+    reason: str
 
 
 def curve_period(ev: Config):
@@ -172,7 +323,7 @@ def curve_period(ev: Config):
     # THIS accessor really does read one, `curve_every`, which is what its LEVERS READ line above
     # says -- the correction is to the general sentence, not to this function's count.
     # Its whole job is that Cadences.due REFUSES a
-    # bare int while Config hands one back for all 35 levers that declare a Clock unit
+    # bare int while Config hands one back for all 37 levers that declare a Clock unit
     # (ISSUES P1-H51). Leaving it a stub kept spine.compose._periods -- and therefore
     # RUN.cadence_audit, the one statement that makes ISSUES P1-C11 visible -- unreachable
     # until P4, for no reason but symmetry with entry points that have real work to do.
@@ -215,6 +366,130 @@ def curve_period(ev: Config):
             f"lever declares no meaning for 0 either, and 0 is deliberately left alone by this "
             f"refusal rather than folded into it.")
     return U.Windows(every)
+
+
+def retention_period(ev: Config):
+    """The retention probe's cadence, AS units.Windows. Handed to RUN's Cadences.due.
+
+    ONE CONSTRUCTION OVER ONE DECLARED LEVER, for the reason curve_period gives: Cadences.due refuses
+    a bare int while Config hands one back for every Clock-unit lever, so the period arrives through
+    this package's typed accessor and spine/compose.py::_periods carries it under the key
+    'retention' (2026-09-27, Q-EVAL-12). 0 is the probe OFF: Cadences.due answers False for every
+    period <= 0, and the loop's arm test (EVAL_RETENTION_EVERY > 0 and a pinned ProbeSet) runs
+    before the gate is ever asked, so at 0 the ledger reads 'retention' with zero checks.
+
+    A NEGATIVE IS REFUSED, under this file's REFUSE_NEGATIVE_PERIOD, exactly as curve_period
+    refuses EVAL_CURVE_EVERY < 0: Cadences.due would DISARM the gate on it, which is an undeclared
+    second spelling of 0, and the owner's 2026-09-04 ruling refuses those by name. The switch is one
+    per package and governs this lever too.
+
+    LEVERS READ: retention_every
+    WIRES READ: none
+    DID IT FIRE: Cadences.ledger()["retention"]
+    """
+    ev = ev.owned_by("EVAL")
+    every = int(ev.retention_every)
+    if REFUSE_NEGATIVE_PERIOD and every < 0:
+        raise LeverError(
+            f"EVAL_RETENTION_EVERY={every}: a retention period is a count of windows ELAPSED "
+            f"since the last reading and may not be negative. RUN.Cadences.due (train/api.py) "
+            f"returns False for every period <= 0, so {every} would DISARM the retention gate -- "
+            f"an undeclared second spelling of the declared off switch, 0. Refused rather than "
+            f"read as off, under the owner's switch (REFUSE_NEGATIVE_PERIOD at the top of "
+            f"eval/api.py). EVAL_RETENTION_EVERY=0 turns the probe off; 1000 is the register's "
+            f"04-6.2 cadence.")
+    return U.Windows(every)
+
+
+def pin_holdout(ev: Config, *, blocks, seed, window_bytes, prefix_bytes):
+    """Pin the retention probe's held-out windows: ONE draw per run, per area and per half. -> ProbeSet.
+
+    THE PAIRING IS PINNED HERE, WHICH IS WHAT holdout_probe'S n=32 ARGUMENT RESTS ON (Q-EVAL-9).
+    Each area's held-out block (DATA's Areas.holdout) is split at its MIDPOINT into two halves --
+    CONTROL, block[:mid], and REPORT, block[mid:] -- and each (area, half) draws its window starts
+    sequentially, without repeats, from its own child stream
+    rng_for("eval.holdout.<key>.<half>", seed), <key> being derive.stream_key(area), under the
+    "eval" parent spine/compose.py::RNG_SUBSYSTEMS declares. The same seed and the same blocks give
+    the same starts in every process, so every reading of a run and of its resumes scores the SAME
+    byte windows and a difference between two readings is paired (Q-EVAL-12).
+
+    WHY TWO HALVES (Q-EVAL-12). The control half is what the run's consumers read -- CKPT's
+    best-model policy, EVAL's blow-up alarm and, at OPT_DAMP_SOURCE='probe', OPT's damping; the
+    report half is what the run reports and nothing acts on, so no consumer can be tuned against the
+    number the report prints. A window and its routing prefix stay inside ONE half: a start is drawn
+    in [prefix_bytes, half_len - window_bytes], so neither half ever reads the other's text.
+
+    HOW MANY. Each half draws the larger of its share of the in-run reading (EVAL_RETENTION_N, the
+    odd one to control) and its share of the boundary reading (EVAL_HOLDOUT_WINDOWS, likewise), and
+    both readings take the FIRST n of the one draw: the in-run items are a prefix of the boundary
+    items, so the two readings stay paired with each other too. The draw is SEQUENTIAL -- each start
+    one randint, a repeat redrawn -- because a prefix of a sequential draw is the draw at a smaller
+    n, which random.sample does not promise. A half too short to supply its n is recorded as
+    `shortfall` and read with what it has.
+
+    THE GEOMETRY IS AN ARGUMENT AND THE ROOT OWNS IT: window_bytes is LM.ctx + 1 when first pinned
+    (a window of ctx+1 bytes tokenizes to at most ctx+1 ids, so its inputs fit the model's context
+    whatever the vocabulary), prefix_bytes the SIG width; a resume passes the geometry its parent
+    recorded in LOOP.eval, so a child re-pins the SAME windows even where its own LM.ctx differs.
+
+    OFF MEANS NOTHING PINNED AND NOTHING DRAWN: at EVAL_RETENTION_EVERY=0 (the build default until
+    the register's C9 flip) or with no area holding a block (DATA_SYNTH_HOLDOUT=0 on the synthetic
+    source), the ProbeSet is empty, carries the reason, and no stream is minted -- so rng.issued()
+    reads exactly as it did before this entry point existed.
+
+    LEVERS READ: holdout_windows, retention_n, retention_every
+    WIRES READ: none
+    DID IT FIRE: ProbeSet.items per (area, half), ProbeSet.shortfall, ProbeSet.rng_names (and
+                 rng.issued(), where each child appears with its draw count); the root books
+                 eval.holdout.shortfall from it
+    """
+    ev = ev.owned_by("EVAL")
+    every = int(ev.retention_every)
+    hw, rn = int(ev.holdout_windows), int(ev.retention_n)
+    W, P = int(window_bytes), int(prefix_bytes)
+    if every <= 0:
+        return ProbeSet(items={}, halves={}, window_bytes=W, prefix_bytes=P, shortfall={},
+                        reason=(f"EVAL_RETENTION_EVERY={every}: the retention probe is off -- no "
+                                f"window is pinned, no stream is drawn and no reading is taken."),
+                        rng_names=())
+    have = {str(a): bytes(b) for a, b in dict(blocks or {}).items() if b}
+    if not have:
+        return ProbeSet(items={}, halves={}, window_bytes=W, prefix_bytes=P, shortfall={},
+                        reason=("no area holds a held-out block (DATA's Areas.holdout is empty -- "
+                                "on the synthetic source that is DATA_SYNTH_HOLDOUT=0), so there is "
+                                "nothing to pin and the probe reads nothing."),
+                        rng_names=())
+    if W < 2 or P < 0:
+        raise ValueError(
+            f"EVAL.pin_holdout: window_bytes={W}, prefix_bytes={P}. A scored window needs at least "
+            f"two bytes -- one input and one target -- and a prefix cannot be negative. The root "
+            f"passes LM.ctx + 1 and the SIG width, or the geometry a parent recorded.")
+    need = {"control": max(-(-rn // 2), -(-hw // 2)), "report": max(rn // 2, hw // 2)}
+    items, halves, shortfall, names = {}, {}, {}, []
+    for area in sorted(have):
+        blk = have[area]
+        mid = len(blk) // 2
+        halves[area] = (mid, len(blk))
+        items[area], shortfall[area] = {}, {}
+        for half, (h0, h1) in (("control", (0, mid)), ("report", (mid, len(blk)))):
+            lo, hi = P, (h1 - h0) - W
+            avail = max(0, hi - lo + 1)
+            k = min(need[half], avail)
+            name = f"eval.holdout.{_derive.stream_key(area)}.{half}"
+            stream = _rng.rng_for(name, seed)
+            names.append(name)
+            starts, seen = [], set()
+            while len(starts) < k:
+                s = stream.randint(lo, hi)
+                if s in seen:
+                    continue
+                seen.add(s)
+                starts.append(s)
+            items[area][half] = tuple(
+                (h0 + s, blk[h0 + s - P:h0 + s], blk[h0 + s:h0 + s + W]) for s in starts)
+            shortfall[area][half] = need[half] - k
+    return ProbeSet(items=items, halves=halves, window_bytes=W, prefix_bytes=P,
+                    shortfall=shortfall, reason="", rng_names=tuple(names))
 
 
 def curve_probe(ev: Config, *, units_by_domain, logits_fn, step, rng):
@@ -268,64 +543,207 @@ def curve_probe(ev: Config, *, units_by_domain, logits_fn, step, rng):
         "docs/04_CONTRACT.md, section EVAL.")
 
 
-def holdout_probe(ev: Config, *, units_by_domain, logits_fn, rng):
-    """The retention probe: held-out bits/byte per domain, KEYED BY DOMAIN NAME so adding a domain
+def _mean(xs):
+    return (sum(xs) / len(xs)) if xs else None
+
+
+def _sd(xs):
+    if len(xs) < 2:
+        return None
+    m = sum(xs) / len(xs)
+    return math.sqrt(sum((x - m) ** 2 for x in xs) / (len(xs) - 1))
+
+
+def holdout_probe(ev: Config, *, units_by_domain, logits_fn, tokenize_fn, step, boundary=False,
+                  previous=None):
+    """The retention probe: held-out bits/byte per area, KEYED BY AREA NAME so adding an area
     does not shift the comparison. This is the R matrix's resolution and the entire error bar on
     "did adding an area damage what was already known".
 
-    WINDOW STARTS ARE DRAWN IN BYTE COORDINATES from DATA's held-out block and tokenize() is
-    applied to the fixed byte windows. ISSUES P1-H20: :5087-5088 drew them as
-    `randint(0, len(_v) - WIN - 2)` where `_v` is the TOKENISED validation text, whose length
-    shrinks over a run under online minting and differs between parent and child -- so `prev` and
-    `now` were measured on DIFFERENT WINDOWS, on the one number the file calls "the ONLY number
-    that spans the run boundary". Segmentation.byte_pos exists precisely so every coordinate that
-    must survive a re-segmentation can be a byte offset.
+    THE SIGNATURE MOVED 2026-09-27 (Q-EVAL-12). `rng` LEFT: the pinned draw is pin_holdout's, made
+    once per run at the root's 'probe' row, so this function draws nothing and a stream handed to it
+    could only be a second, unpinned source of starts. `tokenize_fn` and `step` ARRIVED: EVAL may
+    not import TOK (O10), so the root hands it TOK.tokenize bound to the vocabulary at the view the
+    stream was last cut at (spine/compose.py::_holdout_tokenize); and EVAL owns no clock, so the
+    window the reading is taken at arrives as an argument, as curve_probe's `step` did under
+    Q-EVAL-11 -- the Readings it returns carry it as `at`. `boundary` and `previous` choose the
+    size and the pairing.
 
-    `units_by_domain` carries DATA's Areas.holdout_bytes with it, and the SIZE is recorded on the
-    Sample: ISSUES P1-M82 is precisely the case where two configurations covered different amounts of
-    text and neither report said so.
+    WINDOW STARTS ARE IN BYTE COORDINATES and tokenize_fn is applied to the fixed byte windows.
+    ISSUES P1-H20: :5087-5088 drew them as `randint(0, len(_v) - WIN - 2)` where `_v` is the
+    TOKENISED validation text, whose length shrinks over a run under online minting and differs
+    between parent and child -- so `prev` and `now` were measured on DIFFERENT WINDOWS, on the one
+    number the file calls "the ONLY number that spans the run boundary".
 
-    THE COMPARISON IS PAIRED, AND THE PAIRING IS PINNED HERE RATHER THAN LEFT TO P5 (Q-EVAL-9,
-    RESOLVED 2026-09-02: holdout_windows STAYS AT 32, and this clause is what earns that).
-    Each domain's window starts are drawn ONCE, from rng_for("eval.holdout." + domain_name, seed) --
-    the domain's stable NAME normalised to spine/rng.py's charset, exactly as DATA derives one
-    "data.holdout.<area>" child per area for the same reason -- and are IDENTICAL at every probe of
-    the run and across a resume. The 2-sigma verdict is then computed on the PAIRED per-window
-    differences and the Reading carries the paired SD.
-    WHY THAT IS THE WHOLE ARGUMENT FOR n=32. H20's repair above fixes WHICH windows are scored (byte
-    coordinates, so a re-segmentation cannot move them); pinning the DRAW fixes that `prev` and `now`
-    are the SAME windows, and on the same windows the per-window difficulty term CANCELS in the
-    difference. Window-to-window bpb spread in text is large (order 0.3-0.5 b/B); the spread of a
-    paired difference on fixed windows is far smaller. So n=32 PAIRED is a materially stronger
-    instrument than n=32 unpaired, and research_continual_memory.md:743-745's warning that the
-    2-sigma rule at n=32 reports "HELD (inside the noise)" for real effects -- and its 128-256
-    recommendation -- is calibrated for the UNPAIRED case.
-    NOTHING IN THE TREE PINS IT TODAY, WHICH IS WHY IT IS WRITTEN HERE: this function takes an `rng`,
-    and spine/rng.py's frozen_rng protects the GLOBAL streams and explicitly does not cover streams
-    handed out by rng_for(). If P5 lets that stream advance between probes the pairing is lost
-    SILENTLY, no check in the tree sees it, and the number reverts to the unpaired power the research
-    doc warns about.
-    THE ORDER OF OPERATIONS, so it cannot be got wrong: PIN THE PAIRING, then let G2 measure this
-    machine's noise floor, then decide n. Raising n before pairing buys the smaller of the two
-    available variance reductions at 8x the cost. And the DOMINANT error bar is neither: PLAN 3.8
-    records a between-seed spread of 0.066-0.131 b/B, which exceeds every architectural difference
-    this project has ever claimed, and the renderer already refuses a verdict on n=1.
-    THE HONEST CAVEAT, per C11: at the shipped defaults 32 windows x LM.ctx=128 is about 7.6 kB of
-    text per domain, a sample smaller than one splice segment, against a run of 506-937 windows. If
-    the owner raises DATA.stream_bytes, re-ask this question with the noise floor in hand.
+    `units_by_domain` IS THE ROOT'S ARRIVED SET, from pin_holdout's ProbeSet:
+        {area: {"control": [(prefix, window), ...], "report": [...], "seen_by_parent": bool}}
+    Only areas the run has reached are in it (spine/compose.py::_holdout_units): an area whose
+    phase has not begun has trained on nothing and its reading would be a measurement of nothing.
 
-    LEVERS READ: holdout_windows
+    WHAT ONE WINDOW IS WORTH. ids = tokenize_fn(window).ids; x = ids[:-1]; y = ids[1:];
+    logits = logits_fn(x[None], prefix_bytes=[prefix]); the window's bits/byte is the summed
+    cross-entropy of y in nats / ln 2 / the bytes y covers (len(window) - byte_pos[1], the targets'
+    span -- spine/loop.py::_window_bytes' definition, so a probe window and a training window are
+    scored per byte the same way). An area's mean is the mean of its windows; the reading's mean is
+    the MEAN OF AREA MEANS, so an area with more windows is not weighted up.
+
+    HOW MANY, per arrived area: the first n pinned items of each half, n = retention_n at a cadence
+    reading and holdout_windows at a boundary one (R, and a resume's start), split with the odd one
+    to control. Both are prefixes of one draw, so a cadence reading and a boundary reading are
+    paired on the items they share.
+
+    THE COMPARISON IS PAIRED (Q-EVAL-9): `previous`, when given, is an earlier HoldoutReading, and
+    `paired` carries each area's and half's (n, mean difference, SD of the differences) on the items
+    both readings scored; paired_sd pools every difference. On the same windows the per-window
+    difficulty term cancels, which is what makes n=32 paired a stronger instrument than n=32
+    unpaired (research_continual_memory.md:743-745 is calibrated for the unpaired case). And the
+    DOMINANT error bar is neither: PLAN 3.8 records a between-seed spread of 0.066-0.131 b/B, so
+    every Reading here carries seed_count 1.
+
+    A NON-FINITE WINDOW IS COUNTED AND LEFT OUT OF EVERY MEAN (HoldoutReading.nonfinite): a reading
+    that averaged a nan would hand a nan to three consumers, and CKPT.Retention.consider refuses one.
+
+    G7, BOTH HALVES. It runs under spine/rng.py::frozen_rng(strict=True) and refuses a body that
+    moved a global stream -- the closure computes under no_grad in eval mode, and a dropout left on
+    would move torch's global generator and edit the training run from inside an instrument. And it
+    moves nothing it measures: the root's closure routes with DOM.nearest, reads MEM with
+    promote=False and passes training=False to FAB.forward, none of which writes.
+
+    LEVERS READ: holdout_windows, retention_n
     WIRES READ: none
-    DID IT FIRE: windows drawn per domain, and the SEED COUNT carried on the Reading; plus the
-                 PAIRED SD and, per domain, whether its "eval.holdout.<name>" stream had already
-                 been drawn (rng.issued() makes "this domain's holdout stream was never drawn" a
-                 reportable state rather than a silence, and a probe whose starts moved between two
-                 calls is the one failure this whole clause exists to make visible)
+    DID IT FIRE: HoldoutReading.windows and .nonfinite, windows per area and half, and the SEED
+                 COUNT carried on each Reading; plus the PAIRED SD. The root books the rest --
+                 eval.holdout.calls and its three arms, and the closure's own forwards, decodes,
+                 cuts and SIG encodes -- in its eval book, because a count here would be a second
+                 ledger for the same event
     """
     ev = ev.owned_by("EVAL")
-    raise NotImplementedError(
-        "EVAL.holdout_probe: P5 (eval) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section EVAL.")
+    if not isinstance(step, U.Windows):
+        raise U.UnitError(
+            f"EVAL.holdout_probe: step is {type(step).__name__}({step!r}), not units.Windows. It "
+            f"is RunClock.step, stamped on every Reading this returns as `at`; a bare int carries "
+            f"no kind, so a Flushes count arriving here would be off by the batch width with "
+            f"nothing to raise on it.")
+    n = int(ev.holdout_windows) if boundary else int(ev.retention_n)
+    take = {"control": (n + 1) // 2, "report": n // 2}
+    closure = str(getattr(logits_fn, "name", getattr(logits_fn, "__name__", "logits_fn")))
+    areas, windows, nonfinite = {}, 0, 0
+    with _rng.frozen_rng(strict=True) as fr:
+        for area in sorted(units_by_domain):
+            row = units_by_domain[area]
+            got = {"seen_by_parent": bool(row.get("seen_by_parent", False))}
+            for half in ("control", "report"):
+                vals = []
+                for prefix, window in list(row.get(half) or ())[:take[half]]:
+                    seg = tokenize_fn(bytes(window))
+                    ids = list(seg.ids)
+                    if len(ids) < 2:
+                        continue
+                    span = len(window) - int(seg.byte_pos[1])
+                    x = torch.tensor([ids[:-1]], dtype=torch.long)
+                    y = torch.tensor(ids[1:], dtype=torch.long)
+                    lg = logits_fn(x, prefix_bytes=[bytes(prefix)])
+                    nats = float(torch.nn.functional.cross_entropy(
+                        lg[0].float(), y.to(lg.device), reduction="sum"))
+                    bpb = nats / math.log(2.0) / max(1, span)
+                    windows += 1
+                    if not math.isfinite(bpb):
+                        nonfinite += 1
+                        continue
+                    vals.append(bpb)
+                got[half] = vals
+                got[half + "_mean"] = _mean(vals)
+            areas[area] = got
+    if fr.moved:
+        raise _rng.RngError(
+            "EVAL.holdout_probe moved a global random stream while reading. The closure must run "
+            "under no_grad in eval mode -- a dropout left on draws from torch's global generator, "
+            "and an instrument that draws edits the training run it measures (G7). frozen_rng put "
+            "the stream back; the reading is refused rather than reported.")
+    at = int(step)
+    cms = [a["control_mean"] for a in areas.values() if a.get("control_mean") is not None]
+    rms = [a["report_mean"] for a in areas.values() if a.get("report_mean") is not None]
+    control = Reading(value=_mean(cms), seed_count=1, at=at) if cms else None
+    report = Reading(value=_mean(rms), seed_count=1, at=at) if rms else None
+    paired, diffs = {}, []
+    if previous is not None:
+        for area, got in areas.items():
+            was = previous.areas.get(area)
+            if was is None:
+                continue
+            paired[area] = {}
+            for half in ("control", "report"):
+                a, b = list(got.get(half) or ()), list(was.get(half) or ())
+                k = min(len(a), len(b))
+                d = [a[i] - b[i] for i in range(k)]
+                diffs += d
+                paired[area][half] = (k, _mean(d), _sd(d))
+    return HoldoutReading(areas=areas, control_mean=control, report_mean=report, paired=paired,
+                          paired_sd=_sd(diffs), closure=closure, boundary=bool(boundary),
+                          windows=windows, nonfinite=nonfinite, step=at)
+
+
+def blowup(ev: Config, *, series):
+    """The divergence alarm, over the retention probe's CONTROL means. -> {name: BlowupReading}.
+
+    THE ALARM THAT WAS NESTED IN A CHECKPOINT FLAG, MOVED TO THE INSTRUMENT (ckpt/api.py::
+    Retention.consider says why: "a run that was not SAVING got no warning it had stayed elevated --
+    the recorded case lost 4.6 b/B and then spent ~520,000 further steps never getting back"). It
+    REPORTS ONLY: nothing reads its verdict to change the run.
+
+    `series` IS THE ROOT'S, carried in LOOP.eval: {name: [entry, ...]}, one entry per reading, where
+    an entry is the control mean (a float) or (value, True) -- a reading at which the series
+    RE-ARMS. 'all' is the all-area mean; every other name is one area's control mean.
+
+    THE CALL-SITE PATTERN IS blowup_test.py's (:63-80), VERBATIM IN ITS RULE: the last five values
+    are the recent window, a new best (x < best - 1e-6) resets the staleness count and re-arms, and
+    the alarm fires ONCE PER EXCURSION through spine/derive.py::blowup_stale at its own defaults
+    (rise 0.5 b/B, stale 80 readings -- the constants measured across nine real runs).
+
+    THE ALL-AREA SERIES RE-ARMS AT EVERY ARRIVAL (Q-EVAL-12). The mean steps UP when an area
+    arrives -- a new area's held-out text is text the run has barely trained on -- so without a
+    re-arm the stale-80 rule would fire about 80 readings after every arrival on a healthy run. At a
+    re-arm entry the best, the staleness count and the recent window are reset and the arrival's
+    reading is the new best. The per-area series need no re-arm: an area's own mean does not jump
+    when another arrives.
+
+    ITS HORIZON IS A NAMED CONVERSION: "80 readings" is spine/derive.py::blowup_horizon's answer in
+    windows at EVAL_RETENTION_EVERY, because arithmetic on a Clock-unit lever at a call site is what
+    tests/test_ownership.py O11 refuses.
+
+    LEVERS READ: retention_every (for the horizon only)
+    WIRES READ: none
+    DID IT FIRE: BlowupReading.fires per series and .since_best (a gauge); the root books
+                 eval.blowup.fired (the total over every series) and eval.blowup.since_best
+    """
+    ev = ev.owned_by("EVAL")
+    stale, horizon = _derive.blowup_horizon(retention_period(ev))
+    out = {}
+    for name in sorted(series, key=lambda k: (k != "all", k)):
+        best, since, recent, fired, fires = None, 0, [], False, 0
+        entries = list(series[name])
+        for e in entries:
+            rearm = isinstance(e, (tuple, list))
+            x = float(e[0]) if rearm else float(e)
+            if rearm and bool(e[1]):
+                best, since, recent, fired = None, 0, [], False
+            recent.append(x)
+            del recent[:-5]
+            if best is None or x < best - 1e-6:
+                best, since, fired = x, 0, False
+                continue
+            since += 1
+            if not fired and _derive.blowup_stale(recent, best, since):
+                fired = True
+                fires += 1
+        reason = "" if len(entries) >= 3 else (
+            f"{len(entries)} reading(s): blowup_stale judges nothing below three, and the alarm "
+            f"waits {stale} readings without a new best ({int(horizon)} windows at "
+            f"EVAL_RETENTION_EVERY={int(ev.retention_every)}) before it can fire.")
+        out[name] = BlowupReading(name=str(name), fired=bool(fired), fires=int(fires),
+                                  since_best=int(since), best=best, n=len(entries),
+                                  horizon_windows=int(horizon), reason=reason)
+    return out
 
 
 def null_excess(ev: Config, *, real, permute, rng):
@@ -363,14 +781,73 @@ def generate(ev: Config, *, logits_fn, prompts_by_domain, rng):
     deliverable by hand, which is why prompt.py receives this frozen Config instead of re-reading
     the environment.
 
+    THE BODY, 2026-09-27 (Q-EVAL-12). `prompts_by_domain` is the root's (spine/compose.py::
+    _gen_prompts): {area: [{"prefix": bytes, "ids": [token ids]}, ...]} -- report-half held-out
+    windows of the arrived areas, tokenized at the view the stream was last cut at, so a prompt is
+    text the run never trained on. The FIRST gen_domains areas in sorted order each give their
+    first gen_samples prompts, and each prompt is continued by gen_len tokens: logits_fn over the
+    whole sequence so far, the last position's logits over gen_temp, and one draw by INVERSE CDF on
+    a uniform from rng.torch_generator() -- the stream the root minted once per System at the
+    'probe' row as rng_for('eval.generate', seed), so two runs of one seed generate the same text
+    and no training stream is touched. gen_temp <= 0 takes the argmax.
+    THE CLOSURE OWNS THE WINDOW AND THE PREFIX: this body hands it the whole sequence, and the root's
+    closure keeps the last LM.ctx tokens and rebuilds the routing prefix by decoding the dropped
+    ids (TOK.Vocabulary.decode), because EVAL can read neither LM's context nor TOK's vocabulary.
+    AND IT OWNS THE VOCABULARY BOUNDARY: the closures the root hands this body set every id at or
+    above TOK.Vocabulary.size() to -inf, so each draw is an id the vocabulary can print -- at the
+    shipped LM_MASK_DEAD_ROWS=0 a never-minted row keeps some mass, and one drawn has no bytes.
+
+    AFTER THE FINAL SAVE, ONCE PER CLOSURE: the root calls this after the final checkpoint is
+    written, so generation can cost the run nothing it keeps. Its caveat is recorded here rather
+    than printed as prose: the text comes from the LIVE model at the end of training, not from the
+    best one.
+
     LEVERS READ: generate, gen_samples, gen_domains, gen_len, gen_temp
     WIRES READ: none
-    DID IT FIRE: Sample.size and the per-domain counts; `generate` off is unreachable, not zero
+    DID IT FIRE: Sample.size and the per-domain counts; `generate` off is unreachable, not zero --
+                 the root books eval.generate.samples and eval.generate.tokens, ABSENT at
+                 EVAL_GENERATE=0 or with no ProbeSet
     """
     ev = ev.owned_by("EVAL")
-    raise NotImplementedError(
-        "EVAL.generate: P6 (eval) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section EVAL.")
+    closure = str(getattr(logits_fn, "name", getattr(logits_fn, "__name__", "logits_fn")))
+    temp = float(ev.gen_temp)
+    if not bool(ev.generate):
+        return Sample(population={}, size=0, rule="", per_domain={}, closure=closure, temp=temp,
+                      reason="EVAL_GENERATE=0: the generation section is off.")
+    n_dom, n_s, n_len = int(ev.gen_domains), int(ev.gen_samples), int(ev.gen_len)
+    gen = rng.torch_generator()
+    pop, per = {}, {}
+    for area in sorted(prompts_by_domain)[:max(0, n_dom)]:
+        rows = []
+        for p in list(prompts_by_domain[area])[:max(0, n_s)]:
+            seq = [int(t) for t in p["ids"]]
+            made = []
+            for _ in range(max(0, n_len)):
+                lg = logits_fn(torch.tensor([seq], dtype=torch.long),
+                               prefix_bytes=[bytes(p.get("prefix", b""))])
+                last = lg[0, -1].float()
+                if temp <= 0.0:
+                    t = int(last.argmax())
+                else:
+                    probs = torch.softmax(last / temp, dim=-1).cpu()
+                    u = float(torch.rand((), generator=gen))
+                    cdf = torch.cumsum(probs, dim=-1)
+                    # right=True: the first index whose cumulative mass EXCEEDS the draw, so a
+                    # token the closure masked to probability 0 can never be the answer.
+                    t = int(min(int(torch.searchsorted(cdf, torch.tensor(u * float(cdf[-1])),
+                                                       right=True)),
+                                int(probs.shape[0]) - 1))
+                seq.append(t)
+                made.append(t)
+            rows.append({"prompt": bytes(p.get("prefix", b"")), "ids": seq, "generated": made})
+        pop[area] = rows
+        per[area] = len(rows)
+    size = sum(per.values())
+    rule = (f"the first {n_s} report-half held-out window(s) of each of the first {n_dom} arrived "
+            f"area(s) in sorted order, each continued by {n_len} token(s) at temperature {temp} "
+            f"by inverse CDF on uniforms from rng_for('eval.generate', seed)")
+    return Sample(population=pop, size=size, rule=rule, per_domain=per, closure=closure,
+                  temp=temp, reason="" if size else "no arrived area holds a prompt")
 
 
 def coherence(ev: Config, *, logits_fn, units_by_domain, encode, rng):

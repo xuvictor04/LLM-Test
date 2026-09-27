@@ -673,7 +673,7 @@ def cadence_due(sig: Config, st, *, step_windows, windows_since_boundary):
     lever_idle = int(sig.train_every_idle)
     dense_for = U.Windows(int(sig.dense_window))
     # BOTH INCOMING CLOCKS ARE PUT THROUGH units.Windows, AND THAT IS THE ONLY REASON THIS FUNCTION
-    # CAN BE TRUSTED. Config hands back a bare int for all 36 clock-unit levers, so a kind is
+    # CAN BE TRUSTED. Config hands back a bare int for all 37 clock-unit levers, so a kind is
     # metadata at the read site (ISSUES P1-H51) -- but the two values that arrive as ARGUMENTS come
     # from the root, and spine/units.py::Clock refuses to build a Windows out of a Steps. That turns
     # "the caller handed us the optimizer's step counter" from a gate that is always open or always

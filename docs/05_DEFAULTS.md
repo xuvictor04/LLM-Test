@@ -59,6 +59,7 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `CKPT_BEST_KEEP` | count | How many recent local lows in held-out bits/byte to retain as rotating .best1..bestN checkpoints, on top of the single global .best. |
 | `CKPT_EVERY` | Windows | How often a mid-run checkpoint is written, in windows elapsed since the last one; 0 disables periodic saving, leaving the final save and SIGUSR1. |
 | `DATA_PHASE_LIVE` | count | How many areas are live in each phase of the GENERATED schedule; 0 derives it from the area count. |
+| `EVAL_RETENTION_EVERY` | Windows | Windows between in-run retention readings on the pinned held-out windows (0 = the probe is off: nothing is pinned, read or consumed). |
 | `FAB_EC_W` | fraction 0..1 | Expert-choice deficit bonus: nudge routing toward experts under their share, by construction rather than by a loss. |
 | `FAB_HOP_SUP` | fraction 0..1 | Weight on per-hop deep supervision: a cross-entropy at every hop, not only at the end of the walk. |
 | `FAB_RESCUE` | fraction 0..1 | Give an expert about to be culled one heavy mutation and a reset use-clock instead of deleting it. |
@@ -79,13 +80,13 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `TOK_MINT_PMIN` | probability | Minimum p(b\|a) for a merge to be accepted as a unit rather than a frequent collision across a boundary; 0 mints on frequency alone. |
 | `TOK_PROBATION_USES` | count | How many appearances a newly minted token must earn before it keeps its place in the match table; below it the merge is undone. |
 
-24 numeric levers ship 0.
+25 numeric levers ship 0.
 
 ---
 
 ## 2. Every lever, by package
 
-269 levers across 13 packages.
+272 levers across 13 packages.
 
 
 ### CAP (7 levers)
@@ -168,7 +169,7 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `DOM_SUSTAIN` | `2` | Windows |  | Consecutive over-threshold windows required before a boundary is declared; the pending signatures are then averaged into the assign query. |
 | `DOM_TOKC_DECAY` | `0.5` | fraction 0..1 | domain (0.0, 1.0) | What a domain's token histogram keeps when the tokenizer re-segments; applied once per retok. 1.0 restores cumulative-forever. |
 
-### EVAL (17 levers)
+### EVAL (19 levers)
 
 | lever | default | unit | accepts | what it is |
 |---|---|---|---|---|
@@ -183,8 +184,10 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `EVAL_GENERATE` | `True` | on/off |  | Run the GENERATION section: model alone versus model+memory, from the same real seeds. |
 | `EVAL_GENUINE_MIN` | `20` | count |  | Minimum member count before a discovered domain is reported as genuine rather than noise. |
 | `EVAL_GENUINE_SIL` | `0.1` | fraction 0..1 |  | Minimum silhouette (own-centroid similarity minus nearest-other) for a genuine domain. |
-| `EVAL_HOLDOUT_WINDOWS` | `32` | count |  | Held-out windows per domain for the retention probe -- the resolution of the R matrix. |
+| `EVAL_HOLDOUT_WINDOWS` | `32` | count |  | Held-out windows per area for the BOUNDARY reading of the retention probe (the end of the run and a resume's start) -- half from each area's control half, half from its report half. |
 | `EVAL_NULL_DRAWS` | `5` | count |  | Permutation draws used to build the null distribution every 2-sigma verdict is judged against. |
+| `EVAL_RETENTION_EVERY` | `0` | Windows |  | Windows between in-run retention readings on the pinned held-out windows (0 = the probe is off: nothing is pinned, read or consumed). |
+| `EVAL_RETENTION_N` | `6` | count | domain (1, ∞) | Held-out windows per arrived area for each in-run retention reading -- split between the area's control and report halves, the odd one to control. |
 | `EVAL_VERIFY_FIT_STEPS` | `3000` | Steps |  | Optimizer steps spent fitting the Reconstructor post hoc on the final settled store. |
 | `EVAL_WINDOWS` | `64` | count |  | Default number of windows an eval Sample draws when it does not declare its own. |
 | `EVAL_WRONG_INJECT` | `8` | entries |  | Synthetic cross-domain wrong entries planted so precision and recall have a denominator. |
@@ -325,12 +328,13 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `MEM_WRONG_READ` | `True` | on/off |  | Whether the wrong flag excludes an entry from every retrieval, or only from the sweep. |
 | `MEM_WRONG_SWEEP` | `False` | on/off |  | Whether the selected wrongness detector DELETES flagged entries or only flags them. |
 
-### OPT (18 levers)
+### OPT (19 levers)
 
 | lever | default | unit | accepts | what it is |
 |---|---|---|---|---|
 | `OPT_ACCUM` | `1` | Backwards |  | Backward passes accumulated before one optimizer step -- with batch_windows, the effective batch, and the only way to reach a large one on a small GPU. |
 | `OPT_BATCH_WINDOWS` | `1` | Windows |  | How many stream windows are accumulated into one forward/backward; this sets the flush cadence the whole loop body runs on. |
+| `OPT_DAMP_SOURCE` | `'off'` | name | choices `'off'`, `'probe'` | Where lr_restart_damp's held-out Reading comes from: 'probe' hands it the held-out retention probe's control mean; 'off' hands it nothing, so no restart is judged. |
 | `OPT_GRAD_CLIP` | `0.0` | fraction 0..1 |  | Global gradient-norm clip applied to the BASE parameter group before each optimizer step. 0.0 is OFF, which is what every recorded number in this project was measured under. |
 | `OPT_HORIZON_REVISE` | `True` | on/off |  | Whether the mid-epoch act re-maps the rest of the LR schedule to the re-measured run length, LR-continuously (Q-OPT-10). |
 | `OPT_LR` | `0.002` | fraction 0..1 |  | Peak learning rate; every rate the system applies is this times a schedule multiplier in 0..1. |

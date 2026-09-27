@@ -39,6 +39,7 @@ because the table is the only evidence of what the old system actually did. Wher
 reached into the environment from inside its body, the parameter arrives as an argument instead; that is
 the only intended behavioural difference, and it is noted on the function.
 """
+import inspect
 import re
 
 from .units import Backwards, Clock, Epochs, Flushes, Steps, UnitError, Windows
@@ -1403,6 +1404,66 @@ def blowup_stale(recent, best, since_best, rise=0.5, stale=80):
         return False
     mid = sorted(recent)[len(recent) // 2]
     return mid > best + rise
+
+
+def windows_for_readings(period, n):
+    """How many windows `n` readings span when one is taken every `period` windows.
+
+    UNIT IN: period = Windows (a reading cadence), n = readings (count). UNIT OUT: Windows.
+
+    A NAMED CONVERSION FROM A COUNT OF READINGS TO THE WINDOW CLOCK (2026-09-27, Q-EVAL-12), for the
+    retention probe's two sentences that need one: EVAL.blowup's "the alarm waits 80 readings --
+    N windows at EVAL_RETENTION_EVERY" and the root's startup notice. Both multiply a Clock-unit
+    lever, and tests/test_ownership.py O11 refuses that arithmetic anywhere but here. The period is
+    required to BE Windows: a Flushes cadence would put the answer batch_windows-fold wrong.
+
+    A PERIOD OF 0 OR LESS GIVES Windows(0): the probe is off and no reading is ever taken, so the
+    span of n readings is not a length at all -- the caller prints the off state, not a horizon.
+    """
+    if type(period) is not Windows:
+        raise UnitError(f"windows_for_readings: period must be Windows, got {type(period).__name__}. "
+                        f"A reading cadence is compared against the window clock by Cadences.due, "
+                        f"and its span must be counted on the same clock.")
+    if period.n <= 0:
+        return Windows(0)
+    return Windows(period.n * int(n))
+
+
+def readings_in(windows, period):
+    """How many cadence readings fall in a span of `windows` windows: floor(windows / period).
+
+    UNIT IN: windows = Windows (a span), period = Windows (a reading cadence). UNIT OUT: readings
+    (count). 0 when period <= 0 -- the probe is off and nothing is read.
+
+    THE PROJECTION THE ROOT PRINTS AT STARTUP (2026-09-27, Q-EVAL-12): a phase of the data plan
+    that the cadence would read fewer than five times is said before the first window, because a
+    focus signal with two readings in a phase is not a signal. The caller adds the phase-start read
+    itself (one event per phase, not a period), so this is the cadence's share alone. A lower bound
+    and not an exact count: Cadences.due carries its remainder across phases, so a phase can gain
+    one reading the floor does not show.
+    """
+    if type(windows) is not Windows or type(period) is not Windows:
+        raise UnitError(f"readings_in: both arguments must be Windows, got "
+                        f"{type(windows).__name__} and {type(period).__name__}.")
+    if period.n <= 0:
+        return 0
+    return max(0, windows.n) // period.n
+
+
+def blowup_horizon(period):
+    """How long the divergence alarm waits before it can fire: (readings, windows) at `period`.
+
+    UNIT IN: period = Windows (the cadence the readings arrive at). UNIT OUT: (readings (count),
+    Windows).
+
+    THE READING COUNT IS blowup_stale's OWN `stale` DEFAULT, READ OFF ITS SIGNATURE, SO THE 80 LIVES
+    IN ONE PLACE. This file keeps no module constant (its header says why), so the threshold that
+    separated nine measured runs stays the keyword default on blowup_stale and every sentence about
+    the alarm's horizon asks for it here rather than restating the literal (2026-09-27, Q-EVAL-12;
+    EVAL.blowup prints it).
+    """
+    stale = int(inspect.signature(blowup_stale).parameters["stale"].default)
+    return stale, windows_for_readings(period, stale)
 
 
 # === the continual-learning schedule shape =======================================================
