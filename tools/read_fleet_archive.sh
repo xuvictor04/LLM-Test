@@ -10,15 +10,20 @@
 #   DECISIONS-Q-CAP-2    the n_live trajectory: does the population settle from FAB_N0=2048, and where
 #   CONTRACT-Q-FAB-5     fab.experts_past_grace_ever and the cull / merge / rescue counts
 #   CONTRACT-Q-OPT-3     opt.grad_norm p50 / p99 at the end, per arm
-# and two more for O20 / NEW-20 (2026-09-27, Proposal 05 §8 1.5), one row per run and one pooled line:
+# and two more for O20 / NEW-20 (2026-09-27, Proposal 05 §8 1.5): one row per run and one pooled line,
+# all they add to the block. The '-- per run' header line names the row and what freed/pass is; the
+# pooled line says the lines off the ceiling read a pass's dip, and that the drops are a LOWER BOUND.
 #   AT THE CEILING       FAB_SLOTS (off the growth gate's text, else any FAB_SLOTS= in the log, else
-#                        SUMMARY.txt's EXTRA, else the lever's 4096), the first progress window with
-#                        n_live >= FAB_SLOTS, the windows from there to the run's end ('=== N windows')
-#                        as a share of the run, and how many progress lines from there on read n_live
-#                        at FAB_SLOTS. The lines are 100 windows apart and one lands a window after each
-#                        manage pass and reads its dip, so the count is a sample, not the time at it.
+#                        SUMMARY.txt's EXTRA, else the lever's 4096, labelled assumed; in that order,
+#                        as one fleet's arms can run at different ceilings), the first progress window
+#                        with n_live >= FAB_SLOTS, the windows from there to the run's end ('=== N
+#                        windows') as a share of the run, and how many progress lines from there on
+#                        read n_live at FAB_SLOTS. The lines are 100 windows apart and one lands a
+#                        window after each manage pass and reads its dip, so the count is a sample,
+#                        not the time at it.
 #   SLOTS FREED PER PASS the drops in n_live between consecutive progress lines whose earlier line is
-#                        within 2% of FAB_SLOTS (median, max, count): a LOWER BOUND, because spawns
+#                        within 2% of FAB_SLOTS (median, max, count; a dip from further below, as a
+#                        pass before the fill makes, is not counted): a LOWER BOUND, because spawns
 #                        refill between the lines and the logs carry no per-pass count; beside it the
 #                        whole run's fab.merged + fab.cull_fail + fab.cull_util (each frees one slot)
 #                        over fab.manage_passes. The pooled line leaves out arms named *_rerun
@@ -109,11 +114,8 @@ def pool_row(p):
                               f"{p['freed']}, passes absent" if p["freed"] is not None else "absent"))
     return f"{head}; {fr}; {mc}"
 POOL = {}
-print("-- per run: n_live at windows 0/2k/5k/10k/15k/20k (from progress lines); final counters; the pool at its ceiling")
-print("   3rd row (O20, NEW-20): windows from the first progress line at FAB_SLOTS to the end, and the lines there at it (the rest "
-      "read a pass's dip);")
-print("   freed/pass >= the n_live drops between progress lines from within 2% of FAB_SLOTS: a LOWER BOUND from the sampling, the "
-      "logs hold no per-pass count")
+print("-- per run: n_live at windows 0/2k/5k/10k/15k/20k (from progress lines); final counters; the pool at FAB_SLOTS "
+      "from its first line there (O20, NEW-20; freed/pass: n_live drops between lines from within 2% of it)")
 for l in logs:
     t = open(l, errors="replace").read()
     c = counters(t)
@@ -142,8 +144,9 @@ ev = sorted({p["every"] for p in P.values() if p["every"]}); gp = sorted({p["gap
 S = [share(p) for p in F]; A = [100 * p["at"] / p["after"] for p in F]
 print(f"-- pool, {len(P)} runs (*_rerun left out): {len(F)}/{len(P)} reach the ceiling"
       + (f"; fill to end {min(S):.1f}-{max(S):.1f}% of the run (median {statistics.median(S):.1f}%); at it on "
-         f"{min(A):.1f}-{max(A):.1f}% of the lines from the fill on" if F else "")
-      + (f"; freed/pass >= med {statistics.median(D):g} ({min(D)}-{max(D)}, {len(D)} drops)" if D else "; no drop near it")
+         f"{min(A):.1f}-{max(A):.1f}% of the lines from the fill on (the rest read a pass's dip)" if F else "")
+      + (f"; freed/pass >= med {statistics.median(D):g} ({min(D)}-{max(D)}, {len(D)} drops), a LOWER BOUND from the "
+         "sampling (no log holds the per-pass count)" if D else "; no drop near it")
       + f"; passes every {'/'.join(map(str, ev)) or '?'} w, lines every {'/'.join(map(str, gp)) or '?'} w"
       + (" (a drop can span passes)" if ev and gp and min(ev) < max(gp) else ""))
 print("==== END ====")

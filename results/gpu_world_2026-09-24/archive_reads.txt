@@ -10,9 +10,7 @@ archive read: gpu_world_2026-09-24.tgz (gpu_world_out/)  (21 run logs)
    Gate data.exposure_skew: armed, did not fire (3.0 vs 3.0)
    Gate data.splice_window: FIRED (6.495 vs 8.0)
 -- data protocol across all logs: ['generated']
--- per run: n_live at windows 0/2k/5k/10k/15k/20k (from progress lines); final counters; the pool at its ceiling
-   3rd row (O20, NEW-20): windows from the first progress line at FAB_SLOTS to the end, and the lines there at it (the rest read a pass's dip);
-   freed/pass >= the n_live drops between progress lines from within 2% of FAB_SLOTS: a LOWER BOUND from the sampling, the logs hold no per-pass count
+-- per run: n_live at windows 0/2k/5k/10k/15k/20k (from progress lines); final counters; the pool at FAB_SLOTS from its first line there (O20, NEW-20; freed/pass: n_live drops between lines from within 2% of it)
   fb_off.s0          n_live 101:2049 1901:2749 4901:2813 9901:4096 14901:4096 19901:4096
                      cull_fail=265 cull_util=63 experts_past_grace_ever=533 gn.p50=1.445 gn.p99=9.187 gn.samples=20000 merged=401 n_live=4096 p.n_cull_candidates=112 p.n_culled=6 p.n_merged=1385 rescued=0
                      ceiling 4096 from w8901: 11099 of 20000 w to the end (55.5%), at it on 89/111 lines; freed/pass >= med 25, max 50 (22 drops); merged+culled 729 in 39 passes (18.7/pass, whole run)
@@ -76,5 +74,5 @@ archive read: gpu_world_2026-09-24.tgz (gpu_world_out/)  (21 run logs)
   world_off.s4       n_live 101:2049 1901:2558 4901:2764 9901:4096 14901:4096 19901:4096
                      cull_fail=309 cull_util=76 experts_past_grace_ever=577 gn.p50=1.409 gn.p99=11.14 gn.samples=20000 merged=505 n_live=4096 p.n_cull_candidates=114 p.n_culled=8 p.n_merged=1238 rescued=0
                      ceiling 4096 from w8401: 11599 of 20000 w to the end (58.0%), at it on 93/116 lines; freed/pass >= med 31, max 48 (23 drops); merged+culled 890 in 39 passes (22.8/pass, whole run)
--- pool, 20 runs (*_rerun left out): 19/20 reach the ceiling; fill to end 34.0-78.5% of the run (median 68.0%); at it on 74.5-80.9% of the lines from the fill on; freed/pass >= med 27 (6-61, 460 drops); passes every 500 w, lines every 100 w
+-- pool, 20 runs (*_rerun left out): 19/20 reach the ceiling; fill to end 34.0-78.5% of the run (median 68.0%); at it on 74.5-80.9% of the lines from the fill on (the rest read a pass's dip); freed/pass >= med 27 (6-61, 460 drops), a LOWER BOUND from the sampling (no log holds the per-pass count); passes every 500 w, lines every 100 w
 ==== END ====

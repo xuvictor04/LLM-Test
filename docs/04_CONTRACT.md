@@ -4602,6 +4602,35 @@ estimate, and the alarm sounded on it, labelled an upper bound; 1bd51c5's script
 Without it the bound read 0.0% and nothing sounded, where 1bd51c5's script read 100.0% and alarmed both.
 The act arms' flushes grow after their first act: k40.s0's mean flush was 189.0 bytes over windows
 1-120 and 193.5 after, k0.s0's 189.0 and 189.4.
+**2026-09-27 (O20's review; §8 1.5): THE ARCHIVE READER'S 2% BAND, THE ORDER IT READS `FAB_SLOTS` IN
+AND ITS LINE COUNT ARE HELD.** Three findings on 5bffd3f. (1) No test held the band on the drops. Every
+synthetic drop started inside it, so a reader counting every drop in `n_live` passed F5. On the
+2026-09-24 archive that reader reads a median of 26 slots per pass (1-80, 567 drops) where the band
+reads 27 (6-61, 460). (2) No test held the order `FAB_SLOTS` is read in. The synthetic gate text and
+EXTRA both said 3000, and no log read the assumed 4096. (3) The block grew by 24 lines on the 21-run
+archive, not one per run, because the '-- per run' header had become three lines. **Ruling.** The
+arithmetic is unchanged. The row's legend moves into the '-- per run' header line, and the LOWER BOUND
+caveat and "the rest read a pass's dip" move into the pooled line. The reads now add one row per run
+and the pooled line: `archive_reads.txt` is 78 lines (56 before O20, 80 at 5bffd3f), and every number
+in it stands. **Driven:** F5's synthetic fleet has EXTRA `FAB_SLOTS=3500`. k0 reads 3000 off its gate
+text over a stray `FAB_SLOTS=3200` above it. k3000 has no gate text and reads the stray 3200, k1000
+reads EXTRA's 3500, and a fleet with an empty EXTRA reads "4096 (assumed)". k0's passes are every 500
+windows, and its dips sit on the lines one window after them (1001, 1501, 2001). Its dip from 2500 to
+2400 at 501, before the fill, is not counted. k1000's drop of 29 from 3429 is outside 3500's band and
+its drop of 30 from 3430 inside. A check holds the block to one row per run and the pooled line (20
+lines for 4 logs, 15 before O20). In a scratch copy F5 fails each of these mutants: every drop counted;
+the band's edge exclusive, or 3% wide; EXTRA read first with the gate text dropped (the review's); the
+gate text dropped; the log's `FAB_SLOTS=` skipped; "(assumed)" dropped; one more legend line.
+**On CPU (operation only),** from a scratch clone: `EXP=retok DEVICE=cpu WINDOWS=600 SEEDS=0 PAR=4
+FILL=0 KEEP_CKPT=0 EXTRA='TOK_GROW_EVERY=30 FAB_SLOTS=2100 FAB_MANAGE_EVERY=200 FAB_GRACE=1'
+RETOK_ARMS='40 20' RETOK_INCUMBENT=40` ran 5 runs, all rc=0. k40 and k20 acted 12 and 16 times (2 and
+12 of them no-ops), and the DECISION read "stays 40". Each run made two passes, at windows 200 and 400.
+The reader, run on the packed `.tgz`, took 2100 off the gate text. k0, k0_rerun, k40 and k20 were full
+at window 101, and k0_nuis peaked there at 2093, inside the band (2058 and up). The first pass's drop
+(299-363) is counted. The second pass's dip (166-391) starts at 1827-1898, below the band, and is not.
+Each row reads one drop, and the pooled line reads a median of 309 (299-363, 4 drops). Both dips
+together stay within each run's merged + culled (k0: 363 + 259 = 622 of 710), so the bound held. With
+the band dropped the same archive reads 8 drops, median 301 (166-391).
 
 **THE QUESTION AS IT STOOD.**
 
