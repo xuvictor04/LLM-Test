@@ -18,7 +18,9 @@ is pinned here, on a fleet whose every number is chosen.
   F2  THE BLOCK: stdout carries it between the two delimiters, it equals $OUT/PASTE_BACK.txt, it holds
       the commit, the dirty flag, the card, NCPU, PAR, MPS, every arm's bits/byte at every seed, the
       margin, the DECISION with its B-provisional label and a failed run with its last log line --
-      and it stays within 80 lines at 16 seeds with the cooldown arm, and at 60 seeds, where it cuts.
+      and it stays within 80 lines at 16 seeds with the cooldown arm, and at 60 and 72 seeds, where it
+      cuts: the per-seed rows are condensed to the ones the rule turns on, and the margin, the
+      DECISION and the alarms survive (build 1.5's review: they were truncated from the end).
   F3  THE RATES are arithmetic: windows/s per arm is the mean of N / X over the seeds' '=== N windows
       ... in Xs' lines, the aggregate is every run's windows over the fleet's recorded seconds, and the
       ETA against the wall is those seconds over the ETA line's windows / rate, which past 1.5x names
@@ -26,14 +28,19 @@ is pinned here, on a fleet whose every number is chosen.
   F4  THE SECONDARIES tolerate absence (one 'absent' line names §8 1.3's counters and every older
       counter is still read) and read them when present: fab.blackout_windows at 45% of k1000's
       windows sounds the BLACKOUT ALARM with the COOLDOWN_ARM follow-up, and the upper bound is
-      fab.shift_notifications x the cooldown / windows.
+      fab.shift_notifications x the cooldown / windows. "Not in this tree" is read off the tree record
+      SUMMARY.txt carries; a key the tree has and no log printed is "unreachable in these runs", and a
+      SUMMARY.txt without the record says it cannot tell the two apart (build 1.5's review). The act
+      arms' rates carry the act's own share of loop time and qualify their distance from a saving k0.
   F5  THE ARCHIVE: <name minus _out>_<launch date>.tgz beside OUT, with SUMMARY, the block, logs and
       curves, no member under ckpt/ and none ending .pt or .pt.*; tools/read_fleet_archive.sh reads it.
   F6  TODAY'S REFUSALS STAND: an act arm with no act at any seed is NO ACT FIRED and never ships; with
       no k0_nuis no cadence can ship, and the block is still written.
   F7  THE KEPT-CHECKPOINT INDEX, on torch-saved stand-ins: a copy is named for the step it holds and
       is coherent when its merge count equals its vocabulary's entries, INCOHERENT otherwise; the run's
-      final save is dropped; the act windows it covers are counted off the act arms' logs.
+      final save is dropped; the act windows it covers are counted off the act arms' logs; the resume
+      line carries the run's seed, device and stream. A keep directory stamped by another launch is
+      refused, with nothing indexed and nothing dropped, and the block says so.
   F8  THE WHOLE-EPOCH FLAGS: under EXP=world_epoch a run that read its epoch is not "RAN OUT OF
       STREAM" and one that hit the cap is "STOPPED AT THE WINDOW CAP"; EXP=world flags as it did.
   F9  THE REFUSALS: EXP=world_epoch without GO_WORLD_EPOCH=1 exits 2 having written nothing and prints
@@ -41,9 +48,19 @@ is pinned here, on a fleet whose every number is chosen.
   F10 A LAUNCH, WITH run.py STOOD IN: EXP=world with KEEP_CKPT off puts no CKPT_ variable and no
       --flush-bytes on any run and ends in the block and the archive; EXP=retok's default arms the
       k0 family's periodic saves and the act arms' final one, and a smoke whose k0 kept no copy stops
-      at the kept-checkpoint tripwire -- with a block, and an archive.
+      at the kept-checkpoint tripwire -- with a block, and an archive. With a stand-in that saves the
+      way CKPT and TOK do (a .tmp, the ring's rotation, the vocabulary after the checkpoint), the
+      watcher and the index keep every periodic save coherent, the tripwire passes, and a second
+      launch into the same OUT moves the first fleet aside whole and keeps its own copies (build
+      1.5's review: it used to delete them as duplicates of the first fleet's).
   F11 EXP=world's ANALYSIS.txt of the 2026-09-24 fleet archive is byte-identical to the one the script
       wrote before §8 1.5 (be2382a).
+  F12 THE WATCHER'S LOOK, keep_sweep, over staged ring states: a checkpoint whose vocabulary has not
+      landed is not taken, a .prev whose vocabulary has just rotated is, two missed saves leave the
+      ring's two whole, and a save landing between the look and the link removes the half-taken copy.
+      Every kept checkpoint sits beside its own vocabulary.
+  F13 THE WATCHER ENDS WITH ITS run_job: killed, the watcher takes a last look and exits (build 1.5's
+      review: it polled for ever).
 """
 import glob
 import json
@@ -102,9 +119,14 @@ def block_of(stdout):
 
 
 # ---- a synthetic fleet --------------------------------------------------------------------------
+NEW13 = ("fab.blackout_windows", "tok.mint_wait_windows", "loop.act_seconds", "tok.bpt_tail")
+
+
 def summary(out, *, exp="retok", seeds="0 1 2", windows=20000, stream=3780000, extra="", dirty=False,
             par=12, fin_s=16560, eta=("0.3", "420,000", "461.6"), cal="461.589", kept="ON",
-            levels="on (DOM_LEVELS declared, default on)", cap=60000, calw=600):
+            levels="on (DOM_LEVELS declared, default on)", cap=60000, calw=600, tree13=(), fbflag="no"):
+    """tree13: the §8 1.3 counters the launch found in the tree (None: a SUMMARY.txt from before the
+    record, which has no such line)."""
     arms = "k0 k3000 k1000 k0_nuis" if exp == "retok" else "fb_off fb_on skip world_off"
     lines = [
         f"=== gpu_world.sh  2026-10-01T12:00:00Z  commit abc1234{' (dirty)' if dirty else ''}",
@@ -119,6 +141,8 @@ def summary(out, *, exp="retok", seeds="0 1 2", windows=20000, stream=3780000, e
         f"hard-linked under {out}/ckpt/keep",
         "=== pins: none",
         f"=== DOM Levels: {levels}",
+    ] + ([] if tree13 is None else
+         [f"=== §8 1.3 in this tree: counters {' '.join(tree13) or 'none'}; run.py --flush-bytes {fbflag}"]) + [
         "",
         "=== CUDA MPS started (kernels from different runs execute concurrently)",
         f"=== calibration: PAR={par} (aggregate {cal} windows/s; the smallest k within 10% of the best measured)",
@@ -184,13 +208,13 @@ OLD13 = {"fab.grown_regression": 2, "fab.grown_stall": 0, "fab.births": 299,
          "store.n_opened": 8192, "tok.retok_noop": 0}
 
 
-def retok_fleet(out, *, seeds=(0, 1), k3000=None, k1000=None, nuis=True, cd=False, **kw):
+def retok_fleet(out, *, seeds=(0, 1), k3000=None, k1000=None, nuis=True, cd=False, nuisv=None, **kw):
     """k0 at 1.0, k0_nuis at 1.0001 (so M = 0.0001), k3000 and k1000 at the given per-seed values."""
     summary(out, seeds=" ".join(map(str, seeds)), **kw)
     for s in seeds:
         run(out, "k0", s, 1.0, secs=10.0 + s)
         if nuis:
-            run(out, "k0_nuis", s, 1.0001, secs=10.0)
+            run(out, "k0_nuis", s, (nuisv or {}).get(s, 1.0001), secs=10.0)
         run(out, "k3000", s, (k3000 or {}).get(s, 0.9998), acts=6, at=(3001,), counters=OLD13, secs=10.0)
         run(out, "k1000", s, (k1000 or {}).get(s, 1.00005), acts=19, at=(1001, 2001), counters=OLD13,
             secs=10.0)
@@ -251,13 +275,33 @@ try:
           "FAILED k0_rerun.s0 rc=1: RuntimeError: boom at window 1234" in t2)
     check("F2 the cooldown arm is reported beside the rule, never as a ship candidate",
           "(beside the rule)" in t2 and "ships 1000_cd100" not in t2)
-    o2b = os.path.join(TMP, "f2b", "gpu_retok_out")
-    retok_fleet(o2b, seeds=tuple(range(60)), cd=True)
-    p2b = gw("--analyze", EXP="retok", OUT=o2b)
-    b2b = block_of(p2b.stdout) or []
-    check("F2 at 60 seeds the block is cut to 80 lines, says what it cut, and still ends in the archive "
-          "line and END", p2b.returncode == 0 and len(b2b) == 80 and "cut to fit 80 lines" in "\n".join(b2b)
-          and b2b[-2].startswith("archive: ") and b2b[-1] == "==== END ====", f"{len(b2b)} lines")
+    # PAST ABOUT 60 SEEDS THE PER-SEED ROWS ARE CONDENSED, NOT THE VERDICT TRUNCATED (build 1.5's
+    # review). Seed 7's nuisance pair sets M (0.0003) and k1000 fails it at seed 11 (+0.0005): those
+    # two rows are what the rule turns on. Every other seed is within M at every act arm.
+    for nseeds in (60, 72):
+        o2b = os.path.join(TMP, f"f2b_{nseeds}", "gpu_retok_out")
+        retok_fleet(o2b, seeds=tuple(range(nseeds)), cd=True, nuisv={7: 1.0003}, k1000={11: 1.0005})
+        p2b = gw("--analyze", EXP="retok", OUT=o2b)
+        b2b = block_of(p2b.stdout) or []
+        t2b = "\n".join(b2b)
+        check(f"F2 at {nseeds} seeds the block is cut to at most 80 lines, says what it cut, and still ends in "
+              f"the archive line and END", p2b.returncode == 0 and 0 < len(b2b) <= 80
+              and "cut to fit 80 lines" in t2b and "per-seed rows (condensed)" in t2b
+              and b2b[-2].startswith("archive: ") and b2b[-1] == "==== END ====", f"{len(b2b)} lines")
+        seedrows = re.findall(r"^  s(\d+) ", t2b, re.M)
+        more = re.search(r"^  \.\.\. (\d+) more seed row\(s\), each within the margin at every act arm: in "
+                         r"ANALYSIS\.txt's RUNS$", t2b, re.M)
+        check(f"F2 at {nseeds} seeds the per-seed rows keep the one that sets M (s7) and the one that fails "
+              f"it (s11), and count the rest",
+              "7" in seedrows and "11" in seedrows and more is not None
+              and int(more.group(1)) + len(seedrows) == nseeds, f"{len(seedrows)} rows; {more and more.group(0)}")
+        check(f"F2 at {nseeds} seeds the margin, both verdicts, the DECISION, the absent line and both "
+              f"BLACKOUT ALARMs survive the cut",
+              "MARGIN M = 0.00030" in t2b and "k1000 - k0 mean" in t2b and "FAILS the margin" in t2b
+              and re.search(r"^DECISION: TOK_RETOK_EVERY ships 3000 .*\[B-provisional\]$", t2b, re.M) is not None
+              and "absent (§8 1.3 not in this tree)" in t2b
+              and "BLACKOUT ALARM (C13): k3000" in t2b and "BLACKOUT ALARM (C13): k1000" in t2b,
+              str([l for l in b2b if "DECISION" in l or "ALARM" in l]))
 
     # ---- F3: the rates --------------------------------------------------------------------------
     # k0: 100 windows in 10 s (s0) and 11 s (s1); every run's windows are 100; 9 runs; 16560 s of wall.
@@ -336,6 +380,52 @@ try:
           "(1, 2, 3 and 4 bits/byte by construction)",
           re.search(r"k0\s+bits/byte by phase: 1\.0000 2\.0000 3\.0000 4\.0000", a4) is not None,
           str([l for l in a4.splitlines() if "by phase" in l]))
+    # THE ACT'S COST IS ITS OWN SECONDS (build 1.5's review): k1000's loop.act_seconds 1.5 and
+    # act_remap_seconds 0.5 of its 100 s are 2.00%. Its per-byte time against k0 (10 s) is +900%, and
+    # with kept checkpoints ON that figure says it is against k0's time with its saves.
+    _r1000 = next((l for l in a4.splitlines() if l.startswith("  k1000 ") and "windows/s" in l), "")
+    check("F4 an act arm's rate carries the act's own share of loop time (loop.act_seconds + "
+          "act_remap_seconds), and qualifies its distance from a saving k0, in ANALYSIS and in the block",
+          "act + MEM re-cut 2.00% of loop time (loop.act_seconds + act_remap_seconds: the act's cost)" in _r1000
+          and "per-byte loop time vs k0 +900.0% (k0's time includes its periodic saves: not the act's cost)" in _r1000
+          and re.search(r"^  k1000 [\d.]+ w/s .*, act \+ MEM re-cut 2\.00% of loop, per-byte time vs k0 \+900\.0% \(k0 saves\)$",
+                        b4, re.M) is not None
+          and "the k0 family's loop time includes its periodic saves" in b4, _r1000)
+    # UNREACHABLE IS NOT MISSING (build 1.5's review). The tree record lists all four counters and
+    # run.py's --flush-bytes, but no act fired and nothing was stamped: tok.bpt_tail and
+    # fab.blackout_windows are in no log. The line read "§8 1.3 not in this tree" there.
+    o4b = os.path.join(TMP, "f4b", "gpu_retok_out")
+    summary(o4b, seeds="0", windows=1000, stream=189000, tree13=NEW13, fbflag="yes")
+    _quiet = {"fab.shift_notifications": 0, "tok.mint_wait_windows": 0, "tok.mint_waited": 0,
+              "loop.act_seconds": 0.0, "loop.act_remap_seconds": 0.0}
+    run(o4b, "k0", 0, 1.0, n=10, win=1000, nbytes=189000, fbytes=[18900] * 10,
+        counters={"fab.shift_notifications": 0})
+    run(o4b, "k0_nuis", 0, 1.0001, n=10, win=1000, nbytes=189000, fbytes=[18900] * 10,
+        counters={"fab.shift_notifications": 0})
+    for a in ("k3000", "k1000"):
+        run(o4b, a, 0, 1.0, n=10, win=1000, nbytes=189000, acts=0, fbytes=[18900] * 10, counters=_quiet)
+    gw("--analyze", EXP="retok", OUT=o4b)
+    a4b = open(os.path.join(o4b, "ANALYSIS.txt")).read()
+    b4b = open(os.path.join(o4b, "PASTE_BACK.txt")).read()
+    _un = ("unreachable in these runs (ABSENT from every log; the tree has them): fab.blackout_windows (no run "
+           "stamped, or FAB_COOLDOWN=0 / FAB_GROW=0), tok.bpt_tail (no act spliced)")
+    check("F4 a key the tree records and no log printed is 'unreachable in these runs', with its reason, and "
+          "never 'not in this tree', in ANALYSIS and in the block",
+          _un in a4b and _un in b4b and "not in this tree" not in a4b + b4b,
+          str([l for l in a4b.splitlines() if "absent" in l or "unreachable" in l]))
+    check("F4 ... and where the tree has fab.blackout_windows, a run with fab.shift_notifications 0 reads 0.0% "
+          "of windows blacked out even when no run in the fleet was stamped",
+          re.search(r"k1000 acts 0 .*; blackout 0\.0% \(<= 0\.0%\)", b4b) is not None,
+          str([l for l in b4b.splitlines() if "k1000 acts" in l]))
+    o4c = os.path.join(TMP, "f4c", "gpu_retok_out")
+    shutil.copytree(o4b, o4c)
+    summary(o4c, seeds="0", windows=1000, stream=189000, tree13=None)
+    gw("--analyze", EXP="retok", OUT=o4c)
+    a4c = open(os.path.join(o4c, "ANALYSIS.txt")).read()
+    check("F4 a SUMMARY.txt from before the tree record names the absent keys without claiming the tree lacks "
+          "them", "absent from every log (not in this tree, or unreachable here: SUMMARY.txt predates the tree "
+          "record): fab.blackout_windows, tok.bpt_tail" in a4c and "(§8 1.3 not in this tree)" not in a4c,
+          str([l for l in a4c.splitlines() if "absent" in l]))
 
     # ---- F5: the archive ------------------------------------------------------------------------
     for f in ("ckpt/k0.s0/ckpt.pt", "ckpt/k0.s0/ckpt.pt.prev", "ckpt/k0.s0.dyntok.json", "smoke/ckpt/x/ckpt.pt",
@@ -397,6 +487,7 @@ try:
         torch.save({"step": step, "epoch": 0, "reason": reason, "payload": {"TOK": {"merge_count": mc}}},
                    os.path.join(d, "ckpt.pt"))
         write(d + ".dyntok.json", json.dumps({"entries": [[0, 1]] * ent}))
+    write(os.path.join(kd, ".fleet"), "2026-10-01T12:00:00Z\n")        # this fleet's launch (summary())
     p7 = gw("--analyze", EXP="retok", OUT=o7)
     kept = open(os.path.join(kd, "k0.s0.kept.txt")).read() if os.path.exists(os.path.join(kd, "k0.s0.kept.txt")) else ""
     check("F7 a copy is named for the step it holds and is coherent when merges equal the vocabulary's entries",
@@ -413,6 +504,37 @@ try:
     check("F7 KEPT.txt gathers the index into the archive's reach",
           open(os.path.join(o7, "KEPT.txt")).read() == kept)
     check("F7 the kept files are read-only", not (os.stat(os.path.join(kd, "k0.s0.w1001", "ckpt.pt")).st_mode & 0o222))
+    # THE RESUME LINE IS THE RUN'S OWN (build 1.5's review): run_job sets RUN_SEED, RUN_DEVICE and
+    # DATA_STREAM_BYTES on every run and EXTRA carries none of them; without them the resume is refused.
+    _res = (f"CKPT_RESUME={kd}/k0.s0.w1001 CKPT_DIR=<NEW dir> OMP_NUM_THREADS=1 RUN_SEED=0 RUN_DEVICE=cuda "
+            f"DATA_STREAM_BYTES=3780000 TOK_RETOK_EVERY=0 python3 run.py")
+    check("F7 the resume line names the run's seed, device and stream, in ANALYSIS and in the block",
+          f"resume one: {_res} -- a NEW CKPT_DIR, never a kept copy" in a7
+          and f"  resume one: {_res}" in open(os.path.join(o7, "PASTE_BACK.txt")).read(),
+          str([l for l in a7.splitlines() if "resume one" in l]))
+    # A KEEP DIRECTORY STAMPED BY ANOTHER LAUNCH IS REFUSED (build 1.5's review): an index that took an
+    # existing w<step> for a duplicate deleted this fleet's own save. Here the directory carries another
+    # launch's stamp and that launch's w1001; this fleet's save at step 1001 is left, and so is theirs.
+    o7b = os.path.join(TMP, "f7b", "gpu_retok_out")
+    shutil.copytree(o7, o7b)
+    kdb = os.path.join(o7b, "ckpt", "keep")
+    write(os.path.join(kdb, ".fleet"), "2026-09-30T08:00:00Z\n")
+    _w = os.path.join(kdb, "k0.s0.w1001", "ckpt.pt")
+    _ino = os.stat(_w).st_ino
+    d = os.path.join(kdb, "k0.s0.save001")
+    os.makedirs(d)
+    torch.save({"step": 1001, "epoch": 0, "reason": "periodic", "payload": {"TOK": {"merge_count": 3}}},
+               os.path.join(d, "ckpt.pt"))
+    write(d + ".dyntok.json", json.dumps({"entries": [[0, 1]] * 3}))
+    p7b = gw("--analyze", EXP="retok", OUT=o7b)
+    ilog = open(os.path.join(kdb, "k0.s0.index.log")).read() if os.path.exists(os.path.join(kdb, "k0.s0.index.log")) else ""
+    check("F7 a keep directory stamped by another launch is refused: the save is left as save001, the other "
+          "launch's w1001 is untouched, and the index says why",
+          os.path.isfile(os.path.join(d, "ckpt.pt")) and os.stat(_w).st_ino == _ino
+          and "!! k0.s0: " in ilog and "is stamped by the fleet launched 2026-09-30T08:00:00Z, not by this one "
+          "(2026-10-01T12:00:00Z): nothing indexed and nothing dropped" in ilog, ilog[-300:])
+    check("F7 ... and the block carries the refusal",
+          "INDEX REFUSED: !! k0.s0: " in open(os.path.join(o7b, "PASTE_BACK.txt")).read())
 
     # ---- F8: the whole-epoch flags --------------------------------------------------------------
     for exp in ("world_epoch", "world"):
@@ -490,6 +612,26 @@ if os.environ.get("WORLD_ENABLED") == "0":
 elif os.environ.get("WORLD_FEEDBACK") == "1":
     print("       world.forecasts                              7")
     print("       lm.encode.extra_applied                      7")
+# STUB_SAVES=1: A PERIODIC RUN SAVES AS CKPT AND TOK DO -- a .tmp, the ring rotated onto .prev, the
+# .tmp moved in; the vocabulary after the checkpoint, rotating onto <dir>.prev.dyntok.json -- at
+# windows iP+1 and at the end, one more merge each time, and records its stream in the blob.
+if os.environ.get("STUB_SAVES") == "1" and os.environ.get("CKPT_DIR") and int(os.environ.get("CKPT_EVERY", "0")) > 0:
+    import time, torch
+    ck, P = os.environ["CKPT_DIR"], int(os.environ["CKPT_EVERY"])
+    os.makedirs(ck, exist_ok=True)
+    def rot(cur, prev):
+        if os.path.exists(cur):
+            os.replace(cur, prev)
+        os.replace(cur + ".tmp", cur)
+    saves = [(i * P + 1, "periodic") for i in range(1, n) if i * P + 1 <= n] + [(n, "final")]
+    for i, (step, reason) in enumerate(saves):
+        torch.save({"step": step, "epoch": 0, "reason": reason, "stream": int(os.environ["DATA_STREAM_BYTES"]),
+                    "payload": {"TOK": {"merge_count": 256 + i}}}, os.path.join(ck, "ckpt.pt.tmp"))
+        rot(os.path.join(ck, "ckpt.pt"), os.path.join(ck, "ckpt.pt.prev"))
+        with open(ck + ".dyntok.json.tmp", "w") as fh:
+            json.dump({"entries": [[0, 1]] * (256 + i)}, fh)
+        rot(ck + ".dyntok.json", ck + ".prev.dyntok.json")
+        time.sleep(float(os.environ.get("STUB_SAVE_SLEEP", "0")))
 ''')
     o10 = os.path.join(TMP, "f10", "gpu_world_out")
     book = os.path.join(TMP, "f10_book.jsonl")
@@ -532,6 +674,74 @@ elif os.environ.get("WORLD_FEEDBACK") == "1":
           and glob.glob(os.path.join(os.path.dirname(o10b), "gpu_retok_*.tgz")),
           f"rc {p10b.returncode}; {p10b.stderr[-400:]}")
 
+    # THE WATCHER'S SUCCESS PATH, END TO END (build 1.5's review: only the tripwire's failure was
+    # driven). The stand-in saves as CKPT and TOK do. RETOK_ARMS "10 20" makes KEEP_EVERY 10, so k0
+    # saves at 11, 21, 31 and 41 of its 50 windows and at the end; the smoke's k0 saves at 6 of 10.
+    o10c = os.path.join(TMP, "f10c", "gpu_retok_out")
+
+    def launch(windows, seeds, book_):
+        return subprocess.run(["bash", SCRIPT], cwd=ROOT, capture_output=True, text=True, timeout=300,
+                              env=clean_env(PATH=env10["PATH"], STUB_BOOK=book_, EXP="retok", DEVICE="cpu",
+                                            WINDOWS=windows, SEEDS=seeds, PAR=1, SMOKE_WINDOWS=10,
+                                            RETOK_ARMS="10 20", KEEP_POLL="0.2", STUB_SAVES=1,
+                                            STUB_SAVE_SLEEP="0.4", OUT=o10c))
+
+    def blob(path):
+        return torch.load(path, map_location="cpu", weights_only=False)
+
+    p10c = launch(20, "0 1", os.path.join(TMP, "f10c_book.jsonl"))
+    kd10 = os.path.join(o10c, "ckpt", "keep")
+    s10 = open(os.path.join(o10c, "SUMMARY.txt")).read() if os.path.exists(os.path.join(o10c, "SUMMARY.txt")) else ""
+    launch1 = (re.match(r"=== gpu_world\.sh  (\S+)  commit", s10) or [None, ""])[1]
+    kept10 = "".join(open(f).read() for f in sorted(glob.glob(os.path.join(kd10, "*.kept.txt"))))
+    want10 = [f"k0.s{s}.w{w} step={w} reason=periodic merges={256 + i} entries={256 + i} coherent"
+              for s in (0, 1) for i, w in enumerate((11, 21, 31, 41))]
+    check("F10 with a stand-in that saves like CKPT and TOK, EXP=retok runs through: the smoke's tripwire keeps "
+          "w6, and every periodic save of both k0 runs is kept beside its own vocabulary, the final save dropped",
+          p10c.returncode == 0 and "smoke kept: k0.s0.w6 step=6 reason=periodic merges=256 entries=256 coherent" in s10
+          and all(w in kept10 for w in want10) and kept10.count(" coherent ") == 8
+          and not glob.glob(os.path.join(kd10, "*.save[0-9]*")) and not glob.glob(os.path.join(kd10, "*.w50*")),
+          f"rc {p10c.returncode}; {kept10.count(' coherent ')} coherent; {p10c.stderr[-300:]!r}")
+    b10c = "\n".join(block_of(p10c.stdout) or [])
+    check("F10 ... the block counts them, its resume line carries RUN_SEED, RUN_DEVICE and the stream "
+          "(20 x 189 bytes), the keep directory is stamped with the launch, and SUMMARY records the tree",
+          "KEPT: 8 copies of 2 k0 run(s), all coherent" in b10c
+          and f"resume one: CKPT_RESUME={kd10}/k0.s0.w11 CKPT_DIR=<NEW dir> OMP_NUM_THREADS=1 RUN_SEED=0 "
+              f"RUN_DEVICE=cpu DATA_STREAM_BYTES=3780 TOK_RETOK_EVERY=0 python3 run.py" in b10c
+          and launch1 and open(os.path.join(kd10, ".fleet")).read().strip() == launch1
+          and "=== §8 1.3 in this tree: counters fab.blackout_windows tok.mint_wait_windows loop.act_seconds "
+              "tok.bpt_tail; run.py --flush-bytes yes" in s10,
+          str([l for l in b10c.splitlines() if "KEPT" in l or "resume" in l]))
+
+    # A SECOND LAUNCH INTO THE SAME OUT (build 1.5's review). It used to delete its own saves at 11, 21,
+    # 31 and 41 as "duplicate steps" of the first fleet's copies, keep those under the names, and read
+    # the first fleet's seed-1 logs as its own. At 24 windows its stream is 4536 bytes, not 3780.
+    w11 = os.path.join(kd10, "k0.s0.w11", "ckpt.pt")
+    id1 = (os.stat(w11).st_ino, os.stat(w11).st_mtime_ns) if os.path.exists(w11) else None
+    p10d = launch(24, "0", os.path.join(TMP, "f10d_book.jsonl"))
+    aside = os.path.realpath(o10c) + "." + launch1.replace(":", "")
+    s10d = open(os.path.join(o10c, "SUMMARY.txt")).read() if os.path.exists(os.path.join(o10c, "SUMMARY.txt")) else ""
+    a_w11 = os.path.join(aside, "ckpt", "keep", "k0.s0.w11", "ckpt.pt")
+    check("F10 a second launch into the same OUT moves the first fleet aside whole, as <OUT>.<its launch stamp>, "
+          "its copies untouched (same inode and mtime), and says so",
+          p10d.returncode == 0 and os.path.isfile(os.path.join(aside, "logs", "k0.s1.log"))
+          and open(os.path.join(aside, "SUMMARY.txt")).read().startswith(f"=== gpu_world.sh  {launch1}  ")
+          and id1 is not None and os.path.exists(a_w11) and (os.stat(a_w11).st_ino, os.stat(a_w11).st_mtime_ns) == id1
+          and f"=== the previous fleet in {o10c} was moved aside, whole, to {aside}" in s10d,
+          f"rc {p10d.returncode}; {os.path.basename(aside)}; {p10d.stderr[-300:]!r}")
+    idx = "".join(open(f).read() for f in glob.glob(os.path.join(kd10, "*.index.log")))
+    streams = [blob(os.path.join(kd10, f"k0.s0.w{w}", "ckpt.pt")).get("stream")
+               if os.path.exists(os.path.join(kd10, f"k0.s0.w{w}", "ckpt.pt")) else None for w in (11, 21, 31, 41)]
+    a10d = open(os.path.join(o10c, "ANALYSIS.txt")).read() if os.path.exists(os.path.join(o10c, "ANALYSIS.txt")) else ""
+    b10d = "\n".join(block_of(p10d.stdout) or [])
+    check("F10 ... and keeps its own copies: w11-w41 hold its 4536-byte stream, no save was dropped as a "
+          "duplicate, no first-fleet run is in its analysis, and its block and KEPT.txt are its own",
+          streams == [4536] * 4 and "duplicate" not in idx and not os.path.exists(os.path.join(o10c, "logs", "k0.s1.log"))
+          and not re.search(r"^\s+k0\s+s1 ", a10d, re.M) and "KEPT: 4 copies of 1 k0 run(s), all coherent" in b10d
+          and "DATA_STREAM_BYTES=4536" in b10d
+          and open(os.path.join(o10c, "KEPT.txt")).read().count(" coherent ") == 4,
+          f"{streams}; {'duplicate' in idx}")
+
     # ---- F11: EXP=world's analysis of the 2026-09-24 archive is unchanged -------------------------
     old = subprocess.run(["git", "show", "be2382a:gpu_world.sh"], cwd=ROOT, capture_output=True, text=True)
     if old.returncode != 0 or not os.path.exists(ARCHIVE_0924):
@@ -553,6 +763,132 @@ elif os.environ.get("WORLD_FEEDBACK") == "1":
             outs.append(open(os.path.join(d, "gpu_world_out", "ANALYSIS.txt"), "rb").read())
         check("F11 EXP=world's ANALYSIS.txt of the 2026-09-24 fleet is byte-identical to be2382a's",
               outs[0] == outs[1] and len(outs[0]) > 1000, f"{len(outs[0])} vs {len(outs[1])} bytes")
+
+    # ---- F12: the watcher's look over staged ring states ------------------------------------------
+    # THE SCRIPT'S OWN keep_sweep AND keep_watch, cut out of it and sourced. A generation g is a
+    # checkpoint "ckpt-g" and a vocabulary "vocab-g" (keep_sweep reads names, sizes and mtimes, never
+    # contents); each save goes through CKPT's and TOK's steps in their order, one step at a time.
+    text = open(SCRIPT).read()
+    fns = "\n".join(re.search(rf"^{f}\(\) \{{.*?^\}}$", text, re.M | re.S).group(0) for f in ("keep_sweep", "keep_watch"))
+    t12 = os.path.join(TMP, "f12")
+    ck, kd12 = os.path.join(t12, "ring", "k0.s0"), os.path.join(t12, "keep")
+    os.makedirs(ck)
+    os.makedirs(kd12)
+    stage = os.path.join(TMP, "stage.py")
+    write(stage, r'''import os, sys
+ck = sys.argv[1]
+T0 = 1_790_000_000_000_000_000
+def put(path, text, ns):
+    with open(path, "w") as fh:
+        fh.write(text)
+    os.utime(path, ns=(ns, ns))
+def rot(cur, prev):
+    if os.path.exists(cur):
+        os.replace(cur, prev)
+    os.replace(cur + ".tmp", cur)
+# one save's steps, in CKPT.save's and then TOK.save_vocabulary's order
+g, upto = int(sys.argv[2]), sys.argv[3]
+t = T0 + g * 1_000_000_000
+steps = {"c": lambda: (put(os.path.join(ck, "ckpt.pt.tmp"), f"ckpt-{g}", t),
+                       rot(os.path.join(ck, "ckpt.pt"), os.path.join(ck, "ckpt.pt.prev"))),
+         "v1": lambda: (put(ck + ".dyntok.json.tmp", f"vocab-{g}", t + 1000),
+                        os.path.exists(ck + ".dyntok.json") and os.replace(ck + ".dyntok.json", ck + ".prev.dyntok.json")),
+         "v2": lambda: os.replace(ck + ".dyntok.json.tmp", ck + ".dyntok.json")}
+for k in {"c": ["c"], "v1": ["v1"], "v2": ["v2"], "all": ["c", "v1", "v2"]}[upto]:
+    steps[k]()
+''')
+    harness = os.path.join(TMP, "sweep.sh")
+    # `ln` IS SHADOWED BY A FUNCTION so a save can land between the look and the link: when $RACE
+    # exists, the first link first runs a whole save of the generation it names.
+    write(harness, "KEEP_POLL=0.2\n" + fns + "\n" + f'''
+ln() {{ if [[ -n "${{RACE:-}}" && -e "$RACE" ]]; then g=$(cat "$RACE"); rm -f "$RACE"; "{sys.executable}" "{stage}" "{ck}" "$g" all; fi; command ln "$@"; }}
+case "$1" in
+  sweep) keep_sweep "{ck}" "{kd12}" k0.s0 ;;
+  watch) KEEP_POLL=2
+         ( me=$BASHPID; keep_watch "{ck}" "{kd12}" k0.s0 "$me" & echo $! > "{t12}/wpid"; sleep 60 >/dev/null 2>&1 ) &
+         owner=$!; sleep 1; "{sys.executable}" "{stage}" "{ck}" "$2" all; kill -9 $owner
+         for i in $(seq 1 40); do kill -0 "$(cat "{t12}/wpid")" 2>/dev/null || {{ echo WATCHER-GONE; exit 0; }}; sleep 0.2; done
+         echo WATCHER-ALIVE; kill "$(cat "{t12}/wpid")" ;;
+esac
+''')
+
+    def save(g, upto="all"):
+        subprocess.run([sys.executable, stage, ck, str(g), upto], check=True)
+
+    def sweep(**env):
+        return subprocess.run(["bash", harness, "sweep"], capture_output=True, text=True, timeout=60,
+                              env=clean_env(**env))
+
+    def kept_pairs():
+        """{ckpt content: vocab content} of every copy taken, and the count of copies."""
+        out = {}
+        for d in sorted(p for p in glob.glob(os.path.join(kd12, "k0.s0.save[0-9]*")) if os.path.isdir(p)):
+            out[open(os.path.join(d, "ckpt.pt")).read()] = (open(d + ".dyntok.json").read()
+                                                             if os.path.exists(d + ".dyntok.json") else None)
+        return out
+
+    save(1)
+    save(2)
+    sweep()
+    check("F12 two whole saves are both taken: ckpt.pt with its vocabulary, ckpt.pt.prev with the rotated one",
+          kept_pairs() == {"ckpt-1": "vocab-1", "ckpt-2": "vocab-2"}, str(kept_pairs()))
+    save(3, "c")
+    sweep()
+    check("F12 CKPT rotated and TOK not yet: the new checkpoint sits beside the older vocabulary and is not "
+          "taken (mid-save), and the .prev is not taken again", kept_pairs() == {"ckpt-1": "vocab-1", "ckpt-2": "vocab-2"},
+          str(kept_pairs()))
+    save(3, "v1")
+    sweep()
+    check("F12 TOK rotated with no new file yet: nothing new is taken, and no checkpoint is paired with another's "
+          "vocabulary", kept_pairs() == {"ckpt-1": "vocab-1", "ckpt-2": "vocab-2"}, str(kept_pairs()))
+    save(3, "v2")
+    sweep()
+    check("F12 the save completed: it is taken whole", kept_pairs().get("ckpt-3") == "vocab-3", str(kept_pairs()))
+    for g in (4, 5, 6):
+        save(g)
+    sweep()
+    check("F12 two saves missed (4 and 5 unseen, 6 landed): the ring's two, 5 and 6, are taken, each with its own "
+          "vocabulary; 4 is gone from the ring",
+          kept_pairs() == {f"ckpt-{g}": f"vocab-{g}" for g in (1, 2, 3, 5, 6)}, str(kept_pairs()))
+    # A FRESH LOOK AT A MID-SAVE RING: ckpt.pt is 8 beside vocab-7, ckpt.pt.prev is 7 beside vocab-6. Nothing
+    # is whole, so nothing is taken; once TOK rotates, 7's .prev pair is.
+    save(7)
+    save(8, "c")
+    shutil.rmtree(kd12)
+    os.makedirs(kd12)
+    sweep()
+    none_yet = kept_pairs()
+    save(8, "v1")
+    sweep()
+    check("F12 a first look at a ring mid-save takes nothing, and after TOK's rotation takes 7 from .prev beside "
+          "its own vocabulary", none_yet == {} and kept_pairs() == {"ckpt-7": "vocab-7"}, f"{none_yet} {kept_pairs()}")
+    save(8, "v2")
+    sweep()
+    # THE RACE: 9 is on disk and unseen; as the look links it, save 10 lands, so the link takes 10 under
+    # 9's identity. The half-taken copy is removed, 9 is taken from .prev, and the next look takes 10.
+    save(9)
+    race = os.path.join(t12, "race")
+    write(race, "10")
+    r = sweep(RACE=race)
+    after_race = kept_pairs()
+    sweep()
+    check("F12 a save that lands between the look and the link leaves no half-taken copy: 9 is taken from .prev, "
+          "10 at the next look, every checkpoint beside its own vocabulary",
+          not os.path.exists(race) and after_race == {f"ckpt-{g}": f"vocab-{g}" for g in (7, 8, 9)}
+          and kept_pairs() == {f"ckpt-{g}": f"vocab-{g}" for g in (7, 8, 9, 10)}
+          and len([p for p in glob.glob(os.path.join(kd12, "k0.s0.save[0-9]*")) if os.path.isdir(p)]) == 4,
+          f"{after_race} {kept_pairs()} {r.stderr[-200:]}")
+
+    # ---- F13: the watcher ends with its run_job --------------------------------------------------
+    # run_job's stand-in starts the watcher with its own pid (KEEP_POLL 2 s here). A second later save 11
+    # lands and the stand-in is killed as an OOM kill would (-9), before it can drop the stop file. The
+    # watcher's next look is its last: it must take 11 there, and exit.
+    shutil.rmtree(kd12)
+    os.makedirs(kd12)
+    r13 = subprocess.run(["bash", harness, "watch", "11"], capture_output=True, text=True, timeout=60, env=clean_env())
+    check("F13 a watcher whose run_job was killed takes a last look and exits (it used to poll for ever)",
+          "WATCHER-GONE" in r13.stdout and kept_pairs().get("ckpt-11") == "vocab-11",
+          f"{r13.stdout.strip()}; {kept_pairs()}")
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
 

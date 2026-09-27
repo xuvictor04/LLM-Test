@@ -3715,12 +3715,15 @@ pass at window 501. `EXP=world` keeps 150 until the retok fleet's ETA-against-wa
 otherwise: its paste-back block prints the ratio and, past 1.5x, names this item. The post-fix rate
 is measured inside that fleet and labelled "post-fix rate at the retok shape": windows/s and bytes/s
 per arm off each log's own loop time, the act's per-byte cost against k0 (whose rate includes its
-periodic saves, and says so), and the aggregate as every run's windows over the fleet's recorded wall
-at the chosen PAR, beside the GPU model, PAR, MPS and NCPU. `EXP=world_epoch` is the WORLD re-run's
-shape (register note WORLD 3): one whole WINDOWS x 189-byte epoch with the window cap out of reach,
-"RAN OUT OF STREAM" replaced by a window-cap flag, and `TOK_RETOK_EVERY` and `DATA_DRAW` pinned; it
-refuses to launch before SR0. `EXP=world`'s analysis of this fleet's archive is byte-identical to the
-script's before the change (`tests/test_gpu_world.py` F11).
+periodic saves, and says so; corrected 2026-09-27, build 1.5's review, under Q-RUN-8: that figure is
+mostly k0's saves, so no arm is the plain-text rate and the act's cost is its own `loop.act_seconds` +
+`loop.act_remap_seconds` over the arm's loop time, with the k0 figure printed qualified), and the
+aggregate as every run's windows over the fleet's recorded wall at the chosen PAR, beside the GPU
+model, PAR, MPS and NCPU. `EXP=world_epoch` is the WORLD re-run's shape (register note WORLD 3): one
+whole WINDOWS x 189-byte epoch with the window cap out of reach, "RAN OUT OF STREAM" replaced by a
+window-cap flag, and `TOK_RETOK_EVERY` and `DATA_DRAW` pinned; it refuses to launch before SR0.
+`EXP=world`'s analysis of this fleet's archive is byte-identical to the script's before the change
+(`tests/test_gpu_world.py` F11).
 
 **`WORLD_FEEDBACK` stayed `True` pending the GPU experiment in `sweep_world.sh`** (history, as written before the run) (5 seeds per arm,
 paired by seed, mean of loss_curve differences over the last half; flip the default if the gain is
@@ -4387,7 +4390,8 @@ windows, by default the gcd of the act cadences (1000); and k0's saves are hard-
 `$OUT/ckpt/keep/k0.s<seed>.w<step>`, with the vocabulary beside each as `<that base>.dyntok.json`,
 because CKPT's ring keeps only `ckpt.pt` and `.prev` (`ckpt/api.py::save`). That is the layout
 `derive.checkpoint_base` resolves, so `CKPT_RESUME=<keep>/k0.s0.w3001` resumes directly (into a new
-`CKPT_DIR`). A generation is taken once its vocabulary is no older than its checkpoint -- the root
+`CKPT_DIR`, with the run's own `RUN_SEED`, `RUN_DEVICE` and `DATA_STREAM_BYTES`: corrected 2026-09-27,
+below). A generation is taken once its vocabulary is no older than its checkpoint -- the root
 writes the vocabulary only after `CKPT.save` returned True (§3 stage `C`) -- and each copy is named
 for the step read off the file and checked coherent, its TOK merge count against its vocabulary's
 entries. A periodic save of period P lands at window iP+1 and an act of cadence K at jK+1, so at
@@ -4399,12 +4403,81 @@ windows, and the ring's older generation is the periodic save at window 121 -- t
 -- beside its own vocabulary. So arm − k0 pairs a saving control with arms that save only at the end
 without bias, and M and the run-to-run check compare like with like as well (k0_nuis and k0_rerun
 save at k0's cadence): both remedies note retok fleet (1) offered. Driven:
-`tests/test_continuation.py` S11. On CPU (`WINDOWS=80`, `RETOK_ARMS='40 20'`, operation only) k0 kept
-w21, w41 and w61, all coherent, covering k40's one act and k20's three, and a resume from w41 into a
-new directory reproduced k0's own losses for windows 42-51 exactly. The verdict, the rates, the
-secondaries and the kept copies come back as the script's paste-back block, and
-`tests/test_gpu_world.py` holds the analysis, the block and the archive to known answers on
-synthetic fleets.
+`tests/test_continuation.py` S11. On CPU (`WINDOWS=200`, `EXTRA="TOK_GROW_EVERY=30"`,
+`RETOK_ARMS='40 20'`, operation only; corrected 2026-09-27, below: the `WINDOWS=80` run first recorded
+here fired no act) k40 acted at windows 121 and 161 and k20 at 101, 121, 161 and 181; k0 kept w21 to
+w181, all nine coherent, their merge counts rising from 256 to 273, covering k40's acts 2/2 and k20's
+4/4; and a resume from w121 into a new directory, by the block's resume line, reproduced k0's own
+losses for windows 122-131 exactly. The verdict, the rates, the secondaries and the kept copies come
+back as the script's paste-back block, and `tests/test_gpu_world.py` holds the analysis, the block and
+the archive to known answers on synthetic fleets.
+**CORRECTED 2026-09-27 (build 1.5's review) — a fleet launched into a used OUT keeps its own copies,
+the CPU record above is one where acts fire, and the resume line carries the run's seed, device and
+stream.** (i) *A reused OUT.* A launch truncated `SUMMARY.txt` and left the rest of the previous fleet
+where it was, and the index dropped a save as "a duplicate step" whenever its `k0.s<seed>.w<step>`
+name was taken. The default `gpu_retok_out` is reused between fleets (a `WINDOWS=5000` look before the
+full fleet; C12's re-run of the k0 vs chosen-cadence pair after Levels), so a second fleet deleted its
+own save at every step the first had kept, and the first fleet's read-only copy stayed under the
+name, trained on another stream and perhaps at another commit. KEPT.txt and the block called those
+copies coherent and counted them against the new fleet's act windows: the spike test's
+maturity-matched control was replaced without a word. The watcher also took the old ring's final
+`ckpt.pt` as a save of the new run, and the analysis read the logs of seeds or arms the new fleet did
+not run as its own. Driven by the review: `WINDOWS=80` and then `WINDOWS=100` (streams of 15120 and
+18900 bytes) into one OUT left the first fleet's w21, w41 and w61 in place, inodes and mtimes
+unchanged, and one new copy. **Ruling: a launch never writes into a previous fleet.** One found in OUT
+(`SUMMARY.txt`, `logs/` or `ckpt/`) is moved aside whole, beside it, as `<OUT>.<its launch stamp>`.
+Nothing is deleted, and `OUT=<that name> bash gpu_world.sh --analyze` still reads it. OUT's own
+directory moves, so a symlinked OUT keeps its link and its disk; an OUT that is the checkout or holds
+it is refused. Each keep directory is stamped with its launch (`.fleet`), and `keep_index` refuses one
+stamped by another launch: it indexes nothing and drops nothing there, and the block prints INDEX
+REFUSED. A repeated step is dropped as a duplicate only within one launch; a keep directory with no
+stamp (a fleet launched at 5560342) is indexed as before. On CPU at this commit, `WINDOWS=80` and then
+`WINDOWS=200` into one OUT: the first fleet moved aside with its three copies' inodes and mtimes
+unchanged, and the second kept its own nine, none dropped. (ii) *The CPU record fired no act.* At
+`WINDOWS=80`, `RETOK_ARMS='40 20'`, k40 read `acts 0 noop 1` and k20 `acts 0 noop 3`: each Due was
+refused as a no-op, because nothing had been minted yet (minting starts near window 120-200). The
+analysis printed NO ACT FIRED for both and DECISION: UNDECIDED, k0's copies covered 0/0 act windows,
+and every copy held 256 merges, so the coherence check compared nothing that could differ. The
+"k40's one act and k20's three" first written above were those no-op acts. Reproduced at this commit.
+The record above is now `WINDOWS=200` with `TOK_GROW_EVERY=30`, the size the review found to act,
+driven here. (iii) *The resume line.* `run_job` sets `RUN_SEED`, `RUN_DEVICE` and
+`DATA_STREAM_BYTES` on every run and EXTRA carries none of them, so the resume the script printed
+(`CKPT_RESUME=... CKPT_DIR=... TOK_RETOK_EVERY=0` plus EXTRA) was refused when followed literally:
+from w121 of the 200-window fleet, "the segmentation rebuilt from the checkpoint's log holds 635
+windows, and the parent's epoch held 199". The block's "resume one" line and the script's header now
+carry `OMP_NUM_THREADS=1 RUN_SEED=<seed> RUN_DEVICE=<device> DATA_STREAM_BYTES=<the fleet's>` and
+EXTRA, and that line is the one that reproduced windows 122-131 above. (iv) *"Not in this tree."* The
+secondaries named every §8 1.3 key no log printed as missing from the tree, but under DID IT FIRE an
+ABSENT key is unreachable: `tok.bpt_tail` is written only when an act splices, and
+`fab.blackout_windows` is seeded only at a stamp and at `FAB_COOLDOWN` > 0. The `WINDOWS=80` fleet,
+on a tree that holds both, printed "absent (§8 1.3 not in this tree): tok.bpt_tail". The launch now
+records in `SUMMARY.txt` which of the four the tree's Python names and whether `run.py` has
+`--flush-bytes`; a key the tree lacks is "not in this tree", and one it has that no log printed is
+"unreachable in these runs", with the reason its seeding gives. A `SUMMARY.txt` without the record
+says it cannot tell the two apart. Where the tree has `fab.blackout_windows`, a run with
+`fab.shift_notifications` 0 reads 0 windows blacked out even when no run in the fleet was stamped.
+(v) *The act's cost.* Every k0-family run saves every `KEEP_EVERY` windows inside its loop time and
+the act arms only after it, so no arm of the fleet is the plain-text rate, and an act arm's per-byte
+time against k0 is mostly k0's saves: k40 read -19.6% at 200 windows while its acts and their MEM
+re-cuts took 0.15% of its loop time. The act lines now carry that share, `loop.act_seconds` +
+`loop.act_remap_seconds` over the arm's own loop time, and the figure against k0 is still printed,
+qualified. Register row PENDING-GPU-THROUGHPUT-REBASELINE records that k0's rate includes its saves.
+(vi) *The block's cut.* It said rank 0 is never cut, but the per-seed rows were rank 0 and came first,
+so past about 60 seeds the truncation from the end took the alarms, then the margin, the verdicts and
+the DECISION, while every seed's row survived. The rows are now fitted into the room the rest leaves:
+the ones that set M, fail the margin or miss a reading first, then the others in seed order, and one
+line counting what was left out. (vii) *The watcher.* Its only exit was the stop file `run_job`
+writes after its run, so a `run_job` killed by a signal or the OOM killer left it polling for ever.
+It is given `run_job`'s pid, and when that is gone it takes a last look and returns. **Driven:**
+`tests/test_gpu_world.py` F2 (60 and 72 seeds: the margin, the verdicts, the DECISION and both alarms
+survive, and the rows that set M and fail it are kept), F4 (the tree record, the unreachable line,
+the act's share), F7 (the resume line; a keep directory stamped by another launch), F10 (a stand-in
+`run.py` that saves as CKPT and TOK do: the tripwire passes, every periodic save is kept beside its
+own vocabulary, and a second launch into the same OUT moves the first aside and keeps its own copies),
+F12 (`keep_sweep` over staged rings: a checkpoint whose vocabulary has not landed, a vocabulary just
+rotated, two missed saves, a save landing between the look and the link) and F13 (a killed
+`run_job`'s watcher exits). Run against the script before this correction, F2, F4, F7, F10 and F13
+fail and F12 passes: the sweep was right and had no known answer.
 
 **THE QUESTION AS IT STOOD.**
 

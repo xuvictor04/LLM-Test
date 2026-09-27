@@ -56,6 +56,11 @@
 #     bash gpu_world.sh --analyze                         # re-analyse what is on disk, paste back, pack
 #     cat gpu_world_out/SUMMARY.txt
 #
+# A LAUNCH INTO AN OUT THAT HOLDS A PREVIOUS FLEET MOVES THAT FLEET ASIDE, WHOLE, beside it as
+# <OUT>.<its launch stamp> (2026-09-27, build 1.5's review; the reason is at the move, below). Nothing
+# is deleted: OUT=<that name> bash gpu_world.sh --analyze still reads it, and its checkpoints stay on
+# the disk until you delete it.
+#
 # CHECKPOINTS ARE OFF BY DEFAULT AND ON AT EXP=retok (KEEP_CKPT; Proposal 05 §8 1.5, register note
 # retok fleet (1)). Saving is the most expensive operation in the loop and nothing EXP=world measures
 # needs a resume, so there CKPT_DIR stays unset unless KEEP_CKPT=1 asks for one final checkpoint per
@@ -68,8 +73,12 @@
 # S11), so arm - k0 pairs a saving control with arms that save only at the end. The kept copies are
 # the spike test's maturity-matched control (register note retok fleet (4)) and parents for
 # continuations:
-#     CKPT_RESUME=gpu_retok_out/ckpt/keep/k0.s0.w3001 CKPT_DIR=<a NEW directory> TOK_RETOK_EVERY=0 \
-#         <the fleet's EXTRA> python3 run.py ...
+#     CKPT_RESUME=gpu_retok_out/ckpt/keep/k0.s0.w3001 CKPT_DIR=<a NEW directory> OMP_NUM_THREADS=1 \
+#         RUN_SEED=0 RUN_DEVICE=cuda DATA_STREAM_BYTES=3780000 TOK_RETOK_EVERY=0 <the fleet's EXTRA> python3 run.py
+# WITH THE RUN'S OWN SEED, DEVICE AND STREAM (2026-09-27, build 1.5's review): the script sets them on
+# every run and EXTRA does not carry them, and a resume without them is refused -- the segmentation
+# rebuilt from the checkpoint's log disagrees with the parent's epoch. DATA_STREAM_BYTES is WINDOWS x
+# 189 at EXP=retok (3780000 at 20,000 windows); the block's "resume one" line prints them filled in.
 # RESUME INTO A NEW CKPT_DIR, NEVER THE KEPT ONE: a save there rotates the kept copy away, and the
 # read-only bit the index sets on kept files stops no rename. Nothing is written under runs/, and a
 # SIGUSR1 save lands in the run's own CKPT_DIR (at EXP=world by default there is none, so it saves
@@ -247,6 +256,17 @@ LEVELS="on (DOM_LEVELS declared, default on)"
 grep -q "levels = Lever" src/domains/levers.py 2>/dev/null || LEVELS="pre-Levels (this tree declares no DOM_LEVELS)"
 _dl=$(echo " $EXTRA " | sed -n 's/.* DOM_LEVELS=\([^ ]*\) .*/\1/p'); _dl=${_dl:-${DOM_LEVELS:-}}
 case "$(echo "$_dl" | tr 'A-Z' 'a-z')" in 0|off|no|none|false) LEVELS="pre-Levels (DOM_LEVELS=$_dl)" ;; esac
+# §8 1.3's COUNTERS AND run.py's --flush-bytes, READ OFF THE TREE AT LAUNCH as LEVELS is (2026-09-27,
+# build 1.5's review). Under DID IT FIRE an ABSENT key is UNREACHABLE, not missing: tok.bpt_tail is
+# written only when an act splices, and fab.blackout_windows is seeded only at a stamp and only at
+# FAB_COOLDOWN > 0, so the analysis read "not in this tree" off a fleet where no act fired. Only the
+# tree can say a key is missing; each name is looked for as a quoted string in src's Python.
+TREE13=""
+for _k in fab.blackout_windows tok.mint_wait_windows loop.act_seconds tok.bpt_tail; do
+  grep -rqF --include='*.py' "\"$_k\"" src 2>/dev/null && TREE13="$TREE13${TREE13:+ }$_k"
+done
+FB_FLAG=no
+grep -q -- '--flush-bytes' run.py 2>/dev/null && FB_FLAG=yes
 
 # THE CHECKPOINT SETTINGS OF ONE RUN, '' AT KEEP_CKPT=0 -- so every default command line is the one
 # this script ran before the option existed. Appended AFTER the arm's settings, so they win over EXTRA.
@@ -284,6 +304,7 @@ plan_banner() {  # the fleet's shape, as SUMMARY records it and the EXP=world_ep
   for w in $EXP_ENV; do p="$p${p:+, }$w pinned"; done
   echo "=== pins: ${p:-none}"
   echo "=== DOM Levels: $LEVELS"
+  echo "=== §8 1.3 in this tree: counters ${TREE13:-none}; run.py --flush-bytes $FB_FLAG"
 }
 
 # bash gpu_world.sh --status : progress and time left of a fleet that is running (or finished),
@@ -550,22 +571,42 @@ def archive_line(archive):
 
 def emit(sections):
     """Write the block, at most CAP lines. sections: (name, lines, rank) in order, the LAST one the
-    archive line, which always closes the block. When the block is too long the highest rank goes
-    first and rank 0 is never cut; if it is still too long the body is truncated. One line says what
-    was cut, all of which is in ANALYSIS.txt and the archive."""
+    archive line, which always closes the block. `lines` may instead be a function fit(n) returning
+    at most n lines (the per-seed table), and fit(None) its whole. When the block is too long the
+    highest rank goes first; if it is still too long, each fitted section gets the room the rest
+    leaves, so its rows go before any other line of rank 0. Only rank-0 lines that alone outgrow the
+    cap, which no fleet's do, would still be truncated from the end. One line says what was cut, all
+    of which is in ANALYSIS.txt and the archive.
+    RANK 0 WAS CUT BEFORE (2026-09-27, build 1.5's review): the per-seed rows were rank 0 and came
+    first, so past about 60 seeds the truncation from the end took the alarms, the margin and the
+    DECISION while every seed's row survived."""
     budget = CAP - 2
     tail = sections[-1][1]
-    sections = list(sections[:-1])
+    sections = [(n, l if callable(l) else list(l), r) for n, l, r in sections[:-1]]
     cut = []
 
+    def lines(l, n=None):
+        return l(n) if callable(l) else l
+
     def size():
-        return sum(len(l) for _, l, _ in sections) + len(tail) + (1 if cut else 0)
+        return sum(len(lines(l)) for _, l, _ in sections) + len(tail) + (1 if cut else 0)
 
     for rank in sorted({r for _, _, r in sections if r}, reverse=True):
         for i, (name, l, r) in enumerate(sections):
-            if r == rank and l and size() > budget:
+            if r == rank and lines(l) and size() > budget:
                 cut.append(name)
                 sections[i] = (name, [], r)
+    for i, (name, l, r) in enumerate(sections):
+        if callable(l):
+            whole = l(None)
+            if size() > budget:
+                rest = size() - len(whole) + (0 if cut else 1)
+                fitted = l(max(0, budget - rest))
+                if len(fitted) < len(whole):
+                    cut.append(f"{name} (condensed)")
+                sections[i] = (name, fitted, r)
+            else:
+                sections[i] = (name, whole, r)
     body = [x for _, l, _ in sections for x in l]
     room = budget - len(tail)
     if cut or len(body) > room:
@@ -741,6 +782,14 @@ def retok(ctx_arg, archive):
         return [(s, v) for (n, s), v in sorted(runs.items()) if n == arm]
 
     k0x = {s: v["secs"] / v["bytes"] for s, v in per_arm("k0") if v["secs"] and v["bytes"]}
+    # THE ACT'S COST IS ITS OWN SECONDS, NOT ITS DISTANCE FROM k0 (2026-09-27, build 1.5's review). With
+    # kept checkpoints the k0 family saves every KEEP_EVERY windows INSIDE its loop time, and the act
+    # arms only after it (the final save), so no arm here is the plain-text rate and an act arm's
+    # per-byte time against k0 is mostly k0's saves: on CPU at 200 windows k40 read -19.6% against k0
+    # while its acts and their MEM re-cuts took 0.15% of its loop time. The act's cost is
+    # loop.act_seconds + loop.act_remap_seconds over the arm's own loop time; the k0 figure is kept,
+    # and qualified wherever k0 saved.
+    saves = KEPT_ON == "ON"
     rate_rows, rate_short = [], []
     for arm in ORDER + (["k0_rerun"] if "k0_rerun" in names else []):
         rs = per_arm(arm)
@@ -749,18 +798,25 @@ def retok(ctx_arg, archive):
         wall = [done[f"{arm}.s{s}"][1] for s, _ in rs if f"{arm}.s{s}" in done]
         cost = [v["secs"] / v["bytes"] / k0x[s] - 1.0 for s, v in rs
                 if arm not in ("k0", "k0_nuis", "k0_rerun") and s in k0x and v["secs"] and v["bytes"]]
+        own = [((fnum(v["r"].get("loop.act_seconds")) or 0.0) + (fnum(v["r"].get("loop.act_remap_seconds")) or 0.0))
+               / v["secs"] for _, v in rs if fnum(v["r"].get("loop.act_seconds")) is not None and v["secs"]]
         if not wps:
             rate_rows.append(f"  {arm:<12} no '=== N windows ... in Xs' line in any log")
             rate_short.append(f"  {arm}: no rate")
             continue
-        fam = arm in ("k0", "k0_nuis", "k0_rerun") and KEPT_ON == "ON"
+        fam = arm in ("k0", "k0_nuis", "k0_rerun") and saves
         rate_rows.append(
             f"  {arm:<12} windows/s {mean(wps):.2f} [{min(wps):.2f}-{max(wps):.2f}]  bytes/s {mean(bps) or 0:.0f}  "
             f"wall {fmt(mean(wall), '.0f')} s  n={len(wps)}"
-            + (f"  per-byte loop time vs k0 {100 * mean(cost):+.1f}%" if cost else "")
+            + (f"  act + MEM re-cut {100 * mean(own):.2f}% of loop time (loop.act_seconds + act_remap_seconds: "
+               f"the act's cost)" if own else "")
+            + (f"  per-byte loop time vs k0 {100 * mean(cost):+.1f}%"
+               + (" (k0's time includes its periodic saves: not the act's cost)" if saves else "") if cost else "")
             + ("  (includes its periodic saves)" if fam else ""))
         rate_short.append(f"  {arm} {mean(wps):.2f} w/s [{min(wps):.2f}-{max(wps):.2f}] {mean(bps) or 0:.0f} B/s"
-                          + (f", per-byte time vs k0 {100 * mean(cost):+.1f}%" if cost else "")
+                          + (f", act + MEM re-cut {100 * mean(own):.2f}% of loop" if own else "")
+                          + (f", per-byte time vs k0 {100 * mean(cost):+.1f}%" + (" (k0 saves)" if saves else "")
+                             if cost else "")
                           + (" (with saves)" if fam else ""))
     tw = sum(v["win"] for v in runs.values() if v["win"])
     fin = re.search(r"^---- fleet finished in \d+ min \((\d+) s\)", S, re.M)
@@ -795,6 +851,9 @@ def retok(ctx_arg, archive):
     print("=== RATES (post-fix rate at the retok shape; PENDING-GPU-THROUGHPUT-REBASELINE) ===")
     print("  per run: windows/s = N / X and bytes/s = loop.bytes_scored / X from each log's '=== N windows ... "
           "in Xs' (the loop's own time, startup excluded); wall = _done.txt secs; mean [min-max] over seeds")
+    if saves:
+        print("  k0, k0_nuis and k0_rerun save every KEEP_EVERY windows inside X, the act arms only after it: no arm "
+              "is the plain-text rate, and the act's cost is its own seconds, not its distance from k0")
     for l in rate_rows + agg + [card]:
         print(l)
 
@@ -802,16 +861,40 @@ def retok(ctx_arg, archive):
     NEW13 = ("fab.blackout_windows", "tok.mint_wait_windows", "loop.act_seconds", "tok.bpt_tail")
     have13 = {k for v in runs.values() for k in v["r"] if k in NEW13}
     have_fb = any(v["fbytes"] for v in runs.values())
+    # WHAT THE TREE HAS IS RECORDED AT LAUNCH, AND ONLY THE TREE CAN SAY A KEY IS MISSING (2026-09-27,
+    # build 1.5's review). Under DID IT FIRE an ABSENT key is UNREACHABLE: tok.bpt_tail on a fleet where
+    # no act fired, fab.blackout_windows with no stamp or at FAB_COOLDOWN=0. This line read every such
+    # absence as "§8 1.3 not in this tree", on a tree that holds it. A key the tree has and no log
+    # printed is now "unreachable in these runs", with the reason its seeding gives.
+    rec = re.search(r"^=== §8 1\.3 in this tree: counters (.*?); run\.py --flush-bytes (yes|no)\s*$", S, re.M)
+    tree13 = None if rec is None else set(rec.group(1).split()) & set(NEW13)
+    missing = [k for k in NEW13 if k not in have13]
+    WHY = {"fab.blackout_windows": "no run stamped, or FAB_COOLDOWN=0 / FAB_GROW=0",
+           "tok.mint_wait_windows": "no run both mints and acts",
+           "loop.act_seconds": "no run acts at TOK_MODE=online",
+           "tok.bpt_tail": "no act spliced"}
+    unreach = []
+    if tree13 is None:
+        # A SUMMARY.txt FROM BEFORE THE RECORD: the logs alone cannot tell missing from unreachable.
+        absent_head = "absent from every log (not in this tree, or unreachable here: SUMMARY.txt predates the tree record)"
+        absent = missing + ([] if have_fb else ["per-flush bytes (run.py --flush-bytes)"])
+    else:
+        absent_head = "absent (§8 1.3 not in this tree)"
+        absent = ([k for k in missing if k not in tree13]
+                  + ([] if have_fb or rec.group(2) == "yes" else ["per-flush bytes (run.py --flush-bytes)"]))
+        unreach = ([f"{k} ({WHY[k]})" for k in missing if k in tree13]
+                   + (["per-flush bytes (no run wrote its --flush-bytes file)"] if not have_fb and rec.group(2) == "yes"
+                      else []))
+
     # fab.blackout_windows IS ABSENT ON A RUN NO STAMP REACHED (2026-09-27, build 1.3's review,
-    # Q-RUN-17): FAB seeds it at the first stamp. So its absence says the tree lacks it only where a
-    # run was stamped, and beside a present fab.shift_notifications of 0 it is 0 windows blacked out.
-    stamped = any((fnum(v["r"].get("fab.shift_notifications")) or 0) > 0 for v in runs.values())
-    absent = ([k for k in NEW13 if k not in have13 and (k != "fab.blackout_windows" or stamped)]
-              + ([] if have_fb else ["per-flush bytes (run.py --flush-bytes)"]))
+    # Q-RUN-17): FAB seeds it at the first stamp. So beside a present fab.shift_notifications of 0 it
+    # is 0 windows blacked out, wherever the tree has the key -- by the record, or failing that
+    # because some run printed it.
+    bw_known = "fab.blackout_windows" in have13 or "fab.blackout_windows" in (tree13 or ())
 
     def blackout(v):
         x = fnum(v["r"].get("fab.blackout_windows"))
-        if x is None and "fab.blackout_windows" in have13 and fnum(v["r"].get("fab.shift_notifications")) == 0:
+        if x is None and bw_known and fnum(v["r"].get("fab.shift_notifications")) == 0:
             return 0.0
         return x
 
@@ -908,9 +991,10 @@ def retok(ctx_arg, archive):
               f"bounds), each flush placed by its first byte:")
         for arm, vals, n in phase_rows:
             print(f"  {arm:<12} bits/byte by phase: {vals}  ({n} seed(s))")
-    if absent:
-        print(f"  absent (§8 1.3 not in this tree): {', '.join(absent)}")
-    for l in alarms:
+    absent_lines = (([f"  {absent_head}: {', '.join(absent)}"] if absent else [])
+                    + ([f"  unreachable in these runs (ABSENT from every log; the tree has them): {', '.join(unreach)}"]
+                       if unreach else []))
+    for l in absent_lines + alarms:
         print(l)
 
     # ---------------------------------------------------------------- kept checkpoints
@@ -922,6 +1006,12 @@ def retok(ctx_arg, archive):
     if kfiles:
         with open(os.path.join(OUT, "KEPT.txt"), "w") as fh:
             fh.write("\n".join(rows) + "\n")
+    elif os.path.exists(os.path.join(OUT, "KEPT.txt")):
+        os.remove(os.path.join(OUT, "KEPT.txt"))          # never one this ckpt/keep does not hold
+    # AN INDEX THAT REFUSED says so in its log's "!!" line (keep_index: a keep directory stamped by
+    # another launch), and the block carries it: those saves were left unindexed, never dropped.
+    refused = [l.strip() for f in sorted(glob.glob(os.path.join(kd, "*.index.log")))
+               for l in rd(f).splitlines() if l.startswith("!!")]
     kept_rows, kept_short = [], []
     if not os.path.isdir(os.path.join(OUT, "ckpt")):
         kept_rows.append("  none: no ckpt/ directory (KEEP_CKPT was off)")
@@ -964,17 +1054,27 @@ def retok(ctx_arg, archive):
         nk = sum(len(v) for v in ks.values())
         ninc = sum(1 for v in ks.values() for _, ok in v if not ok)
         kept_rows.append(f"  disk: {du / 1e9:.2f} GB under {os.path.join(OUT, 'ckpt')} (hard links counted once)")
-        first = next((f"k0.s{s}.w{st}" for s in sorted(ks) for st, ok in sorted(ks[s]) if ok), None)
+        kept_rows += [f"  INDEX REFUSED: {l}" for l in refused]
+        first = next(((s, st) for s in sorted(ks) for st, ok in sorted(ks[s]) if ok), None)
+        # THE RESUME LINE CARRIES THE RUN'S OWN SEED, DEVICE AND STREAM (2026-09-27, build 1.5's review):
+        # run_job sets RUN_SEED, RUN_DEVICE and DATA_STREAM_BYTES on every run and EXTRA carries none of
+        # them, so the line without them was refused -- on CPU at 200 windows the segmentation rebuilt
+        # from the checkpoint's log held 635 windows where the parent's epoch held 199.
+        dev = cores.group(3) if cores else "cuda"
+        resume = (f"CKPT_RESUME={os.path.join(kd, f'k0.s{first[0]}.w{first[1]}')} CKPT_DIR=<NEW dir> "
+                  f"OMP_NUM_THREADS=1 RUN_SEED={first[0]} RUN_DEVICE={dev} DATA_STREAM_BYTES={total or '?'} "
+                  f"TOK_RETOK_EVERY=0" + (f" {EXTRA}" if EXTRA.strip() else "") + " python3 run.py") if first else None
         if first:
-            kept_rows.append(f"  resume one: CKPT_RESUME={os.path.join(kd, first)} CKPT_DIR=<a NEW directory> "
-                             f"TOK_RETOK_EVERY=0 plus the fleet's EXTRA -- never CKPT_DIR=<a kept copy>")
+            kept_rows.append(f"  resume one: {resume} -- a NEW CKPT_DIR, never a kept copy")
         kept_short.append(f"KEPT: {nk} copies of {len(ks)} k0 run(s)"
                           + (", all coherent" if nk and not ninc else f", {ninc} INCOHERENT" if ninc else "")
                           + (", act windows covered " + ", ".join(f"{a} {h}/{n}" for a, (h, n) in cov_tot.items())
                              if cov_tot else "") + f"; ckpt/ {du / 1e9:.2f} GB")
         kept_short += short_bad[:4] + ([f"  ... {len(short_bad) - 4} more k0 run(s): KEPT.txt"] if len(short_bad) > 4 else [])
+        kept_short += [f"  INDEX REFUSED: {l}" for l in refused[:2]] + (
+            [f"  ... {len(refused) - 2} more refused index(es): ckpt/keep/*.index.log"] if len(refused) > 2 else [])
         if first:
-            kept_short.append(f"  resume one: CKPT_RESUME={os.path.join(kd, first)} CKPT_DIR=<NEW dir> TOK_RETOK_EVERY=0")
+            kept_short.append(f"  resume one: {resume}")
     print()
     print("=== KEPT CHECKPOINTS (k0's periodic saves, hard-linked aside: the spike test's maturity-matched "
           "control, note retok fleet (1), (4)) ===")
@@ -986,27 +1086,51 @@ def retok(ctx_arg, archive):
     allseeds = sorted({s for (n, s) in runs if n in arms_t})
     wd = {a: max(9, len(a)) for a in arms_t}
     diffs = ACT + CD
-    table = ["bits/byte per seed  " + " ".join(f"{a:>{wd[a]}}" for a in arms_t) + "  |k0-nuis|"
-             + "".join(f" {a + '-k0':>{max(10, len(a) + 3)}}" for a in diffs)]
+    t_head = ("bits/byte per seed  " + " ".join(f"{a:>{wd[a]}}" for a in arms_t) + "  |k0-nuis|"
+              + "".join(f" {a + '-k0':>{max(10, len(a) + 3)}}" for a in diffs))
+    t_rows = []                                   # (seed, row, flagged)
     for s in allseeds:
         g = lambda a: runs.get((a, s), {}).get("bpb")
         cells = " ".join(f"{fmt(g(a), '.5f'):>{wd[a]}}" for a in arms_t)
         nu = abs(g("k0") - g("k0_nuis")) if g("k0") is not None and g("k0_nuis") is not None else None
         ds = "".join(f" {fmt(g(a) - g('k0') if g(a) is not None and g('k0') is not None else None, '+.5f'):>{max(10, len(a) + 3)}}"
                      for a in diffs)
-        table.append(f"  s{s:<16} {cells}  {fmt(nu, '.5f'):>9}{ds}")
+        # A FLAGGED ROW is one the rule turns on: it sets M, an act arm fails the margin there, or a
+        # reading is missing. The condensed table keeps these first.
+        flag = (any(g(a) is None for a in arms_t)
+                or (margin is not None and (nu == margin
+                                            or any(g(a) - g("k0") > margin for a in ACT if g(a) is not None))))
+        t_rows.append((s, f"  s{s:<16} {cells}  {fmt(nu, '.5f'):>9}{ds}", flag))
+
+    def table(n=None):
+        """The header and every seed's row; given n lines, the flagged rows first, then the others in
+        seed order, and one line counting the rows left out (every value is in ANALYSIS.txt's RUNS)."""
+        if n is None or len(t_rows) + 1 <= n:
+            return [t_head] + [row for _, row, _ in t_rows]
+        room = max(0, n - 2)
+        keep = [s for s, _, f in t_rows if f][:room]
+        keep += [s for s, _, f in t_rows if not f][:room - len(keep)]
+        hid = [f for s, _, f in t_rows if s not in keep]
+        nf = sum(hid)
+        return ([t_head] + [row for s, row, _ in t_rows if s in keep]
+                + [f"  ... {len(hid)} more seed row(s)"
+                   + (f", {nf} of them flagged (setting M, failing the margin or missing a reading)" if nf else
+                      ", each within the margin at every act arm" if margin is not None else "")
+                   + ": in ANALYSIS.txt's RUNS"])
     rr = [f"k0_rerun: k0 seed 0 twice, |diff| {rerun:.3g} bits/byte" + (" (BIT-EXACT)" if rerun == 0 else "")
           if rerun is not None else "k0_rerun: no pair (k0.s0 or k0_rerun.s0 has no reading)"]
     verdict = ([f"MARGIN M = {margin:.5f} bits/byte (max over {len(M)} seed(s) |k0 - k0_nuis|)"] if margin is not None else [])
     verdict += verdicts + [f"DECISION: {decision}  [{', '.join(labels)}]"]
-    rates = ["RATES (post-fix rate at the retok shape; mean [min-max] over seeds):"]
+    rates = ["RATES (post-fix rate at the retok shape; mean [min-max] over seeds"
+             + ("; the k0 family's loop time includes its periodic saves" if saves else "") + "):"]
     agg_short = [l for l in agg] + [card]
     sec_head = ["SECONDARIES (mean over seeds; beside the rule):"]
-    sec_tail = ([f"  absent (§8 1.3 not in this tree): {', '.join(absent)}"] if absent else []) + alarms
+    sec_tail = absent_lines + alarms
     ph_short = [f"  bits/byte by phase ({nph} equal byte ranges), {arm}: {vals}" for arm, vals, _ in phase_rows]
     emit([
         ("head", head("retok", labels) + failures(runs, done), 0),
-        ("verdict", table + rr + verdict, 0),
+        ("per-seed rows", table, 0),
+        ("verdict", rr + verdict, 0),
         ("rates", rates, 0), ("per-arm rates", rate_short, 2), ("aggregate", agg_short, 0),
         ("secondaries", sec_head, 0), ("per-arm secondaries", sec_short, 3), ("phases", ph_short, 4),
         ("absent and alarm", sec_tail, 0),
@@ -1091,12 +1215,17 @@ keep_sweep() {  # ckdir keepdir tag
 }
 # THE WATCHER: a look every KEEP_POLL seconds until run_job drops the stop file, then a last look. At
 # the fleet's cadence (1000 windows) saves are tens of seconds to minutes apart, and a 1 s poll costs
-# a few stat calls.
-keep_watch() {  # ckdir keepdir tag
-  local stop="$2/.$3.stop"
+# a few stat calls. IT ALSO ENDS WHEN ITS run_job DOES (2026-09-27, build 1.5's review): the stop file
+# was its only exit, and run_job writes it after its run returns, so a run_job that was killed (the
+# fleet stopped by a signal, an OOM kill) left the watcher polling for ever. It is given run_job's pid,
+# and when that is gone it takes a last look and returns; the copies it took are indexed by --analyze.
+keep_watch() {  # ckdir keepdir tag [owner-pid]
+  local stop="$2/.$3.stop" own="${4:-}"
   while :; do
-    if [[ -e "$stop" ]]; then keep_sweep "$@"; rm -f "$stop"; return 0; fi
-    keep_sweep "$@"
+    if [[ -e "$stop" ]] || { [[ -n "$own" ]] && ! kill -0 "$own" 2>/dev/null; }; then
+      keep_sweep "$1" "$2" "$3"; rm -f "$stop"; return 0
+    fi
+    keep_sweep "$1" "$2" "$3"
     sleep "$KEEP_POLL"
   done
 }
@@ -1106,12 +1235,28 @@ keep_watch() {  # ckdir keepdir tag
 # the ring's ckpt.pt and a repeated step duplicates a copy, so both are dropped. Kept files are made
 # read-only, and <tag>.kept.txt lists every copy. Python from inside the keep directory with src/
 # first on its path, as run.py arranges it: the repository root's memory.py shadows src/memory.
-keep_index() {  # keepdir tag
-  ( cd "$1" && python3 - "$PWD" "$2" "$ROOT_DIR" <<'PY'
+# A REPEATED STEP IS A DUPLICATE ONLY WITHIN ONE LAUNCH (2026-09-27, build 1.5's review). A fleet
+# launched into an OUT that still held a previous fleet's copies found that fleet's k0.s0.w21 and
+# deleted its own save at step 21 as "a duplicate step", keeping the old copy -- trained on another
+# stream, perhaps another commit -- under the name. A launch now moves a previous fleet aside whole
+# (below), and stamps each keep directory with its launch time in .fleet; given that stamp, the index
+# refuses a directory stamped by another launch, and indexes nothing and drops nothing there. A keep
+# directory with no .fleet (a fleet launched before the stamp) is indexed as before.
+keep_index() {  # keepdir tag [launch stamp]
+  ( cd "$1" && python3 - "$PWD" "$2" "$ROOT_DIR" "${3:-}" <<'PY'
 import glob, json, os, stat, sys
-kd, tag, root = sys.argv[1], sys.argv[2], sys.argv[3]
+kd, tag, root, stamp = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 sys.path[:] = [p for p in sys.path if p and os.path.abspath(p) != os.path.abspath(root)]
 sys.path.insert(0, os.path.join(root, "src"))
+try:
+    with open(os.path.join(kd, ".fleet")) as fh:
+        owner = fh.read().strip()
+except OSError:
+    owner = ""
+if stamp and owner and owner != stamp:
+    print(f"!! {tag}: {kd} is stamped by the fleet launched {owner}, not by this one ({stamp}): nothing "
+          f"indexed and nothing dropped; this run's saves are left as {tag}.saveNNN")
+    sys.exit(1)
 import torch
 
 
@@ -1220,8 +1365,9 @@ if [[ "${1:-}" == --analyze ]]; then
   _par=$(sed -n 's/^=== [0-9]* run(s), \([0-9]*\) at a time.*/\1/p' "$OUT/SUMMARY.txt" 2>/dev/null | tail -1)
   _mps=0; grep -q "CUDA MPS started" "$OUT/SUMMARY.txt" 2>/dev/null && _mps=1
   _dev=cuda; [[ -f "$OUT/smi.csv" ]] || _dev=cpu
+  _launch=$(sed -n '1s/^=== gpu_world\.sh  \([0-9][0-9T:-]*Z\).*/\1/p' "$OUT/SUMMARY.txt")
   for _t in $(ls -d "$OUT"/ckpt/keep/*.save[0-9]*/ 2>/dev/null | sed 's#/$##; s#.*/##; s/\.save[0-9]*$//' | sort -u); do
-    keep_index "$OUT/ckpt/keep" "$_t" > "$OUT/ckpt/keep/$_t.index.log" 2>&1
+    keep_index "$OUT/ckpt/keep" "$_t" "$_launch" > "$OUT/ckpt/keep/$_t.index.log" 2>&1
   done
   analyze "$OUT" "$_dev" "$_mps" "${_par:-1}" "$(nproc)" | tee "$OUT/ANALYSIS.txt"
   echo "=== wrote $OUT/ANALYSIS.txt"
@@ -1286,6 +1432,35 @@ if [[ "$KEEP_CKPT" == 1 && "$OUT" =~ [[:space:]] ]]; then
   echo "   split on whitespace. Choose an OUT without spaces. Nothing was started."; exit 2
 fi
 
+# A LAUNCH NEVER WRITES INTO A PREVIOUS FLEET (2026-09-27, build 1.5's review). A launch truncated
+# SUMMARY.txt and left the rest: the logs and curves of seeds or arms it does not run, which its
+# analysis then read as its own; KEPT.txt, PASTE_BACK.txt and ANALYSIS.txt; and at EXP=retok the
+# rings and kept copies under ckpt/. The default OUT is reused between fleets (a WINDOWS=5000 look
+# before the full fleet, C12's re-run of the k0 vs chosen-cadence pair after Levels), and a re-run
+# there lost its own k0 copies: the index read the previous fleet's k0.s0.w21 as "a duplicate step"
+# and deleted the new save at step 21, the watcher took the old ring's final checkpoint as a save of
+# the new run, and the block called the old copies coherent. So a previous fleet in OUT is MOVED
+# ASIDE WHOLE, beside it, as <OUT>.<its launch stamp>: nothing is deleted, and
+# OUT=<that name> bash gpu_world.sh --analyze still reads it. The move is of OUT's own directory (a
+# symlinked OUT keeps its link and its disk); OUT is recreated empty. A checkout or its parent is
+# never moved: such an OUT is refused.
+MOVED_ASIDE=""
+if [[ -e "$OUT/SUMMARY.txt" || -e "$OUT/logs" || -e "$OUT/ckpt" ]]; then
+  _od=$(cd "$OUT" && pwd -P); _od=${_od%/}
+  case "$(pwd -P)/" in
+    "$_od"/*) echo "!! OUT='$OUT' holds a previous fleet, and it is this checkout or holds it, so it cannot be moved"
+              echo "   aside. Choose another OUT. Nothing was started."; exit 2 ;;
+  esac
+  _st=$(sed -n '1s/^=== gpu_world\.sh  \([0-9][0-9T:-]*Z\).*/\1/p' "$OUT/SUMMARY.txt" 2>/dev/null | tr -d ':')
+  [[ -n "$_st" ]] || _st=$(date -u -r "$_od" +%Y-%m-%dT%H%M%SZ)
+  MOVED_ASIDE="$_od.$_st"; _i=2
+  while [[ -e "$MOVED_ASIDE" ]]; do MOVED_ASIDE="$_od.$_st.$_i"; _i=$(( _i + 1 )); done
+  if ! mv "$_od" "$MOVED_ASIDE" || ! mkdir -p "$_od"; then
+    echo "!! could not move the previous fleet in $OUT aside to $MOVED_ASIDE. Move or delete it, or choose another"
+    echo "   OUT. Nothing was started."; exit 2
+  fi
+fi
+
 mkdir -p "$OUT/logs" "$OUT/curves" "$OUT/smoke" "$OUT/cal"
 S="$OUT/SUMMARY.txt"
 : > "$S"
@@ -1297,7 +1472,12 @@ say() { echo "$*" | tee -a "$S"; }
 COMMIT=$(git rev-parse --short HEAD 2>/dev/null)
 DIRTY=""
 [[ -n "$COMMIT" ]] && ! git diff --quiet HEAD -- src run.py gpu_world.sh 2>/dev/null && DIRTY=" (dirty)"
-say "=== gpu_world.sh  $(date -u +%Y-%m-%dT%H:%M:%SZ)  commit $COMMIT$DIRTY"
+# THE LAUNCH STAMP: SUMMARY's first line, the name a later launch moves this fleet aside under, and
+# the .fleet stamp of its keep directories.
+LAUNCH=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+say "=== gpu_world.sh  $LAUNCH  commit $COMMIT$DIRTY"
+[[ -n "$MOVED_ASIDE" ]] && say "=== the previous fleet in $OUT was moved aside, whole, to $MOVED_ASIDE" \
+  "(nothing was deleted: its checkpoints are still on this disk)"
 NCPU=$(nproc)
 # nproc READS THE CPU AFFINITY MASK, AND IN A CONTAINER THAT IS USUALLY THE HOST'S CORES. The cgroup
 # QUOTA is what this container may actually use. The first version of this script sized its
@@ -1345,7 +1525,7 @@ plan_banner | tee -a "$S"
 # run.py --flush-bytes (§8 1.3) writes the bytes behind each loss, which the per-phase bits/byte
 # needs. Passed at the whole-epoch shapes only, and only where this tree's run.py has the flag.
 FLUSH_BYTES=0
-[[ "$EXP" != world ]] && grep -q -- '--flush-bytes' run.py && FLUSH_BYTES=1
+[[ "$EXP" != world && "$FB_FLAG" == yes ]] && FLUSH_BYTES=1
 say ""
 
 # ---------------------------------------------------------------- 0. MPS, before anything is measured
@@ -1389,7 +1569,10 @@ run_job() {  # name seed windows gpu arm-env...
   fi
   if [[ -n "$ck" ]]; then
     kd="$(dirname "$ck")/keep"; mkdir -p "$kd"; rm -f "$kd/.$tag.stop"
-    keep_watch "$ck" "$kd" "$tag" &
+    # THIS run_job's PID, TAKEN HERE: an argument of a command started with & is expanded in the
+    # child, where $BASHPID is the watcher's own.
+    local me=$BASHPID
+    keep_watch "$ck" "$kd" "$tag" "$me" &
     w=$!
   fi
   env "${vis[@]}" OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 RUN_DEVICE="$DEVICE" RUN_SEED="$seed" \
@@ -1400,7 +1583,7 @@ run_job() {  # name seed windows gpu arm-env...
   if [[ -n "$w" ]]; then
     : > "$kd/.$tag.stop"
     wait "$w"
-    keep_index "$kd" "$tag" > "$kd/$tag.index.log" 2>&1
+    keep_index "$kd" "$tag" "$LAUNCH" > "$kd/$tag.index.log" 2>&1
   fi
   echo "$tag rc=$rc secs=$(( $(date +%s) - t0 ))" >> "${JOB_DIR:-$OUT/logs}/_done.txt"
   return $rc
@@ -1436,6 +1619,12 @@ run_fleet() {  # runs JOBS with $1 slots, round-robin over GPUs
   done
   for p in "${pids[@]}"; do wait "$p"; done
 }
+
+# EACH KEEP DIRECTORY IS STAMPED WITH THIS LAUNCH before any run can save into it (keep_index refuses
+# one stamped by another launch).
+if [[ "$KEEP_CKPT" == 1 && "$EXP" == retok ]]; then
+  for _k in "$OUT/smoke/ckpt/keep" "$OUT/ckpt/keep"; do mkdir -p "$_k" && echo "$LAUNCH" > "$_k/.fleet"; done
+fi
 
 # ---------------------------------------------------------------- 1. smoke every arm
 say "---- 1. smoke: every arm, seed 0, $SMOKE_WINDOWS windows, all at once"
@@ -1605,6 +1794,7 @@ if [[ "$KEEP_CKPT" == 1 ]]; then
   if [[ "$NEED_B" -gt "$FREE_B" ]]; then
     say "!! disk: the kept checkpoints may need $(gb $NEED_B) GB and $OUT has $(gb $FREE_B) GB free."
     say "!! Free space, run fewer SEEDS, or KEEP_CKPT=0 (which leaves the spike test without its control)."
+    [[ -n "$MOVED_ASIDE" ]] && say "!! The previous fleet, moved aside to $MOVED_ASIDE, still holds its checkpoints."
     fail_back "disk: checkpoints may need $(gb $NEED_B) GB, $(gb $FREE_B) GB free (free space, fewer SEEDS, or KEEP_CKPT=0)"
     exit 1
   fi
