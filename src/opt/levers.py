@@ -35,21 +35,26 @@ WHY THESE ARE THE LEVERS, against the two goals and nothing else.
       nothing is training is nevertheless being erased. It is off by default and it is a lever precisely
       so that the erasure is a decision somebody made rather than AdamW's implicit 0.01.
 
-CENSUS ACCOUNTING (.rework/census.json, filtered on new_owner == "OPT"): 14 rows + 1 AMENDMENT.
+CENSUS ACCOUNTING (.rework/census.json, filtered on new_owner == "OPT"): 14 rows + 6 AMENDMENTS.
     10 keep + 2 rename             -> 12 levers declared below
      1 merge                       -> LR_EPOCHS folds into `lr_wavelength`, which is LR_STEPS's own row
      1 drop                        -> RECON_W, not declared (CENSUS.md:241)
      0 promote-to-wire
-     1 amend                       -> OPT_GRAD_CLIP, minted 2026-09-02, NO ANCESTOR KNOB
-   13 levers in total, from 14 old-tree rows plus one amendment. CENSUS.md:38 says "OPT 14" because it
-   counts ROWS assigned to this package, not declarations that survive them, and the amendment does NOT
+     6 amend                       -> OPT_GRAD_CLIP, minted 2026-09-02, and section 6's five --
+                                      OPT_HORIZON_REVISE, OPT_LR_CONTINUE, OPT_LR_PLATEAU,
+                                      OPT_LR_REWARM, OPT_LR_CONT_WARM -- minted 2026-09-26 (Proposal
+                                      05 §8 1.4), every one of them with NO ANCESTOR KNOB
+   18 levers in total, from 14 old-tree rows plus six amendments. CENSUS.md:38 says "OPT 14" because it
+   counts ROWS assigned to this package, not declarations that survive them, and the amendments do NOT
    move that figure -- the 328 and every per-package total in CENSUS.md count knobs the old system had,
-   and this is not one. The two rows that do not become declarations are named above rather than
-   subtracted silently, so a reader who counts thirteen against a table that says fourteen does not have
-   to re-derive which two went where and where the thirteenth came from.
+   and none of the six is one. The two rows that do not become declarations are named above rather than
+   subtracted silently, so a reader who counts eighteen against a table that says fourteen does not have
+   to re-derive which two went where and where the other six came from. (This line said "13 levers
+   ... plus one amendment" until 2026-09-26, when section 6 landed.)
 
-⚠ THIS PACKAGE HOLDS ONE OF THE TREE'S TWO CENSUS AMENDMENTS. `grad_clip` is declared in section 1
-below with its full reason; `.rework/CENSUS.md` gained an `amendments` section and
+⚠ THIS PACKAGE HOLDS SIX OF THE TREE'S CENSUS AMENDMENTS, and this paragraph is about the first of them
+(section 6 below carries the other five, each with its reason at its declaration). `grad_clip` is
+declared in section 1 below with its full reason; `.rework/CENSUS.md` gained an `amendments` section and
 `.rework/census.json` an `amendments` group in the same edit, and `tests/test_census.py` N1 was widened
 to check `amend` rows so that deleting the lever fails a check instead of leaving an orphan row.
 
@@ -134,6 +139,12 @@ because "nothing to fix here" is only useful if a reader can see that it was loo
     pure function of the step number (`_lr_at`), and a horizon is what units.Steps is reserved for. The
     cadences that DO belong to that example are FAB.manage_every and CAP's pin clock, and both are
     already recorded as Windows in their own files.
+
+    A SIXTH CLOCK-TYPED LEVER ARRIVED ON 2026-09-26 AND THE CLAIM SURVIVES IT. Section 6's
+    `lr_cont_warm` is Steps, and it is a RAMP LENGTH inside the same pure schedule function -- the
+    number of optimizer steps a continuation regime takes to climb from the parent's rate to its
+    target -- not a cadence: nothing is of the form `step % lr_cont_warm == 0`. It joins (a)'s three
+    for (a)'s reason, and the five above are still the five the census typed.
 
   DEFECT 3 -- NO UNRESOLVED MERGE, AND IT WAS CHECKED. The single merge names a target that has a row of
   its own in the same family: LR_EPOCHS -> OPT_LR_WAVELENGTH is LR_STEPS's row (verdict rename,
@@ -385,7 +396,8 @@ class OPTLevers(LeverSet):
     grad_clip = Lever(0.0, "Global gradient-norm clip applied to the BASE parameter group before "
                            "each optimizer step. 0.0 is OFF, which is what every recorded number "
                            "in this project was measured under.", U.FRACTION)
-    # CENSUS AMENDMENT, 2026-09-02, AND IT IS THE ONLY ONE IN THIS FILE. There is no old-tree knob
+    # CENSUS AMENDMENT, 2026-09-02, AND IT WAS THE ONLY ONE IN THIS FILE UNTIL SECTION 6's FIVE
+    # (2026-09-26). There is no old-tree knob
     # behind this lever: `grep -c clip self_organize.py` returns 2 and both are prose about the
     # forgetting measure F (:920, :5203). Across self_organize.py, memory.py, tokenizer.py,
     # vocab.py, datastream.py and world_model.py there is no clip_grad_norm_, no clip_grad_value_
@@ -895,6 +907,130 @@ class OPTLevers(LeverSet):
     # exactly the same way.
 
     # ==============================================================================================
+    # 6. THE HORIZON AFTER AN ACT, AND THE RATE A CONTINUATION STARTS AT (Proposal 05 §8 1.4)
+    #
+    # Five levers, all census AMENDMENTS minted 2026-09-26 (register rows TREE-OPT_HORIZON_REVISE-
+    # LEVER, NEW-05 and C01, and Appendix B's defaults). They answer two different questions that
+    # the register found tangled into one, which is why they are declared together and why each
+    # declaration says which of the two it governs.
+    #
+    #   IN-RUN: does the mid-epoch act re-map the rest of the schedule (Q-OPT-10)? `horizon_revise`.
+    #   AT A RESUME: what rate does a continued run -- a resume whose horizon differs from its
+    #   parent's, the post-training session of NEW-05 -- start at? `lr_continue`, with its three
+    #   shape levers.
+    #
+    # C01 IS THE REASON THEY ARE TWO LEVERS AND NOT ONE. The first draft gated load_state's resume
+    # revision on the in-run flag, and the register measured what that would do: an act-parent whose
+    # log is suppressed resumes at the NO-LOG re-pricing -- the cosine for its act-shortened step
+    # against the new horizon, about 0.37-0.45 of peak at 3.78 MB against the floor it resumes at
+    # today. Flipping an ablation of the in-run mechanism would silently move every continued run it
+    # touched. So `horizon_revise` never reaches load_state, and `lr_continue` is the only lever that
+    # prices a resume. Its default, 'as_logged', IS today's pricing, bit-identical and labelled.
+    # ==============================================================================================
+
+    horizon_revise = Lever(True, "Whether the mid-epoch act re-maps the rest of the LR schedule to "
+                                 "the re-measured run length, LR-continuously (Q-OPT-10). Default "
+                                 "True, today's behaviour. False (OFF) keeps the horizon as built for "
+                                 "the rest of the run and counts each revision it declines; it never "
+                                 "changes how a resume is priced, which OPT_LR_CONTINUE governs.",
+                           U.FLAG)
+    # CENSUS AMENDMENT, 2026-09-26 (TREE-OPT_HORIZON_REVISE-LEVER). No ancestor: the old tree never
+    # revised a horizon mid-run -- it re-PROJECTED one every epoch through `_project`, the machinery
+    # Q-OPT-5 refused -- so there is no (family, old_name) key and N2 is satisfied by an amendment.
+    # IT IS AN OFF ARM FOR AN ON MECHANISM, AND THE REGISTER STATES THE COST OF THE ARM: a run
+    # shortened by a fraction f ends at 0.05 + 0.95 x (1 - cos(pi f)) / 2 of peak instead of the floor,
+    # about 0.06 / 0.07-0.08 / 0.10-0.11 at f = 0.05 / 0.10 / 0.15 (with the tree's 1000-step warmup
+    # at a 20,000-step horizon, 0.057 / 0.076 / 0.107). That under-anneal is Q-OPT-5's, returned on
+    # purpose so the revision becomes MEASURABLE (a k3000 True/False pair, §8 6.8) rather than assumed.
+    # IN-RUN ONLY, AND src/opt/api.py READS IT IN EXACTLY TWO PLACES: revise_horizon, which returns
+    # None and counts opt.horizon.revise_inert / opt.horizon.revise_declined when it is False, and
+    # build(), which seeds opt.horizon.revise_declined at 0 on the OFF arm only (DID IT FIRE: absent
+    # where no revision can be declined). load_state's resume revision does NOT read it (C01), and
+    # counters() prints it on Gate opt.horizon.revise.
+    # A BOOL, WITH THE BOOL BRANCH'S KNOWN HAZARD: any spelling outside ("0", "", "off", "no", "none",
+    # "false") reads as True, so OPT_HORIZON_REVISE=flase is silently ON -- the same caveat
+    # lr_restarts carries above.
+
+    lr_continue = Lever("as_logged", "The rate a continued run starts from: a resume whose horizon "
+                                     "differs from its parent's (a new run length -- the "
+                                     "post-training session). 'as_logged' (default, OFF: no regime) "
+                                     "is today's pricing: a finished parent resumes at the floor "
+                                     "for good after a revision log, and otherwise at the cosine "
+                                     "for its step on the new horizon. 'floor' holds lr x lr_min_frac. 'plateau' ramps "
+                                     "linearly from the parent's rate to OPT_LR_PLATEAU x lr over "
+                                     "OPT_LR_CONT_WARM steps and holds. 'rewarm' ramps the same way "
+                                     "to OPT_LR_REWARM x lr and then re-decays by a cosine to the "
+                                     "floor at the run's end. 'regulated' is declared and NOT BUILT "
+                                     "(it needs the NEW-04 session gate) and is refused at startup. "
+                                     "A resume at the parent's horizon continues the recorded "
+                                     "regime and does not re-read this lever.",
+                        U.NAME, choices=("as_logged", "floor", "rewarm", "plateau", "regulated"))
+    # CENSUS AMENDMENT, 2026-09-26 (NEW-05, C01). No ancestor: the old tree priced a resume by
+    # whatever its projection machinery produced (ISSUES P1-H17), with no switch over it.
+    # 'as_logged' IS NOT A FIFTH SHAPE, IT IS THE ABSENCE OF ONE, which is why it is the OFF value.
+    # Today's pricing is a function of the parent's shape and not a choice: a FINISHED parent carrying
+    # a revision log resumes at the floor FOR GOOD (its log's last end is at or behind the resumed
+    # step, so _effective_step pins every later step at the horizon's end -- a logged parent stopped
+    # before its revised end instead continues its cosine LR-continuously to the new end); a no-log
+    # parent resumes,
+    # with no ramp, at the cosine for its step E against the resumed build's horizon -- about 0.48 of
+    # peak at the 756 KB CPU shape and 0.22 at the 3.78 MB whole-epoch shape the register runs
+    # (verify/emp3/k0_epoch_child.py). The register refuses to pick a regime without the GPU arms
+    # (§8 5.2, [OWNER] O6), so the default keeps every recorded number and every continuation
+    # anyone has taken reproducible, and counters() labels the regime in force on every resume as
+    # opt.continue.regime so a measurement-protocol resume states it (CONTRACT-Q-DATA-7).
+    # WHEN A REGIME APPLIES IS NOT A NEW PREDICATE. src/opt/api.py::load_state already re-prices on
+    # exactly two resumes -- a horizon that differs from the checkpoint's (opt.ckpt.horizon_changed)
+    # and a new revision appended to a logged parent -- and those are the continuation sessions. At
+    # that boundary a non-default regime is ANCHORED: frozen into a checkpointed record on OptState
+    # (anchor step, the parent's current rate, the target, the ramp and the session end), so a
+    # same-length resume of the session continues it bit-exactly and never re-reads this lever. An
+    # operator who changes the regime without changing the run length gets the recorded session, and
+    # the opt.continue report line says so in words.
+    # 'regulated' STAYS IN choices= AND IS REFUSED AT src/opt/api.py::build WITH
+    # spine/gate.py::NotBuilt, the tree's shape for a declared-and-unbuilt arm (FAB_HOP_MODE=
+    # 'transition', LM_COMPOSE=1, MEM_KEY_SRC='frozen'). It sets each session's plateau from the
+    # previous session gate's margin, and that gate (NEW-04, §8 4.4) does not exist -- falling back
+    # to another regime would be the silent-default class this rebuild exists to end.
+    # INERT, AND COUNTED, AT OPT_LR_SCHED=none (opt.continue.inert): the ablation's rate is flat and
+    # every regime is downstream of _schedule's first return, the revise_horizon precedent.
+
+    lr_plateau = Lever(0.25, "The rate OPT_LR_CONTINUE='plateau' ramps to and holds, as a fraction "
+                             "of peak. Default 0.25, provisional until the GPU arms (§8 5.2) read. "
+                             "Read only at a continuation boundary under 'plateau'; at the default "
+                             "'as_logged' it is not read.", U.FRACTION, domain=(0.0, 1.0))
+    # CENSUS AMENDMENT, 2026-09-26 (FRAME-POST-TRAINING (1), Appendix B). DOMAIN (0.0, 1.0) FROM THE
+    # ARITHMETIC: every rate in this package is lr times a multiplier in 0..1, and this number IS the
+    # multiplier the session holds. Below 0.0 is a negative rate; above 1.0 is a plateau above the
+    # peak the operator set. A plateau below lr_min_frac is admitted and CLAMPED at the floor by
+    # _schedule's last line -- the floor is a floor for every regime -- and the report prints both.
+    # The register's arms are 0.1 and 0.25.
+
+    lr_rewarm = Lever(0.5, "The rate OPT_LR_CONTINUE='rewarm' ramps to before it re-decays to the "
+                           "floor, as a fraction of peak. Default 0.5, provisional until the GPU "
+                           "arms (§8 5.2) read. Read only at a continuation boundary under "
+                           "'rewarm'; at the default 'as_logged' it is not read.",
+                      U.FRACTION, domain=(0.0, 1.0))
+    # CENSUS AMENDMENT, 2026-09-26 (NEW-05, Appendix B). DOMAIN (0.0, 1.0) ON THE SAME ARITHMETIC
+    # AS lr_plateau, and the closed top end is not decoration: the register's second arm is 1.0, a
+    # re-warm to full peak, so an exclusive end would refuse a value the arm table names.
+
+    lr_cont_warm = Lever(1000, "Steps over which OPT_LR_CONTINUE='plateau' and 'rewarm' ramp "
+                               "linearly from the parent's current rate to their target. Default "
+                               "1000, the tree's warmup. 0 means no ramp: the target applies from "
+                               "the first resumed step.", U.Steps)
+    # CENSUS AMENDMENT, 2026-09-26 (FRAME-POST-TRAINING (1), Appendix B: "the tree's warmup",
+    # lr_warmup above). A RAMP LENGTH IN OPTIMIZER STEPS, NOT A CADENCE, which is why it is Steps
+    # and why DEFECT 2's "not one of these levers is a cadence" survives it (see the header). It is
+    # a ramp FROM THE PARENT'S RATE and not from zero, so unlike lr_warmup it cannot start the
+    # session below the rate the parent ended at, and a session boundary is LR-continuous whenever
+    # it is > 0 -- the no-jump principle Q-OPT-5 and Q-OPT-10 are both about. NOT CLAMPED to a tenth
+    # of the session the way lr_warmup is clamped to a tenth of the run: a ramp longer than the
+    # session ends the session mid-ramp, and 'rewarm' then has no decay phase at all, which the
+    # opt.continue report line states rather than a clamp hiding it. Refused below 0 in
+    # src/opt/api.py::build, beside OPT_LR_WARMUP and for the same reason: a ramp is a length.
+
+    # ==============================================================================================
     # WHAT IS DELIBERATELY ABSENT, one line each, because a reader who finds them missing will otherwise
     # go looking for a mistake. Full reasons are in the header.
     #
@@ -918,4 +1054,9 @@ class OPTLevers(LeverSet):
     #                    which is why fp16 is refused there rather than accepted here.
     #   BAL_FLOOR / BAL_WARM / PONDER_WARM   filed under `optim` in _SPEC and owned by FAB: they shape the
     #                    router's balance term, not the optimiser.
+    #   OPT_BORN_CLOCK   deferred to Proposal 05 §8 4.2 (C02); see docs/04_CONTRACT.md Q-OPT-12. A
+    #                    per-group warm-up clock for capacity born after a continuation's anchor needs
+    #                    a born-row signal OPT may not import (O10) and no wire carries, a per-ROW rate
+    #                    inside one tensor that AdamW's per-group lr cannot express, and checkpointed
+    #                    per-group clocks -- a mechanism, not a lever, so it is not declared as one.
     # ==============================================================================================

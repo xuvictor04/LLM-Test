@@ -66,6 +66,11 @@ RECORD TYPES RETURNED (P4 defines them):
                a scalar. Both travel in state_dict for the same reason restart_amp does: a re-warm
                that spans a run boundary, or a norm distribution that restarts empty, is the
                "came back at FULL AMPLITUDE" defect in a second and third place;
+               horizon_revisions (Q-OPT-10's append-only log) and continuation -- the regime a
+               continued run was anchored under at its session boundary, or None (Proposal 05 §8
+               1.4, Q-OPT-12): a dict of regime, anchor, start_frac, target_frac, warm, end and
+               rev_base, frozen at load_state and checkpointed, so a session's pricing never
+               re-reads the OPT_LR_CONTINUE levers once it has begun;
   Horizon      run_steps, warmup, wavelength, n_cycles
   StepOutcome  stepped, lr, restart, damped
   LoadReport   restored, refused, reason
@@ -83,7 +88,7 @@ import torch
 from spine.lever import Config, LeverError
 from spine import derive
 from spine import units as U
-from spine.gate import Gate, NonFinite
+from spine.gate import Gate, NonFinite, NotBuilt
 
 
 # ==================================================================================================
@@ -150,6 +155,21 @@ _NONFINITE_MEASURED = {
         "function's two inverted chains, until that clause was RETIRED on 2026-09-14 into this "
         "lever's `domain=(0.0, 1.0)`, which refuses the same three at the first read; in this block "
         "for the same reason as lr_min_frac",
+    "OPT_LR_PLATEAU":
+        "the rate OPT_LR_CONTINUE='plateau' holds a continued run at, as a fraction of peak, "
+        "frozen into the session record at the boundary (Q-OPT-12). It has never reached this "
+        "loop: measured 2026-09-26, one fresh subprocess per cell through a real "
+        "spine.assemble.build, nan, inf and -inf are each refused at the first read by "
+        "spine/lever.py::REFUSE_NON_FINITE_FLOAT ('is not finite') and, with that constant "
+        "switched off, by this lever's `domain=(0.0, 1.0)` ('outside its declared domain') -- a "
+        "NaN fails the domain's inverted chain. In this block for the same reason as lr_min_frac",
+    "OPT_LR_REWARM":
+        "the rate OPT_LR_CONTINUE='rewarm' ramps a continued run to before its cosine re-decay, as "
+        "a fraction of peak, frozen into the session record at the boundary (Q-OPT-12). Measured "
+        "as OPT_LR_PLATEAU was, 2026-09-26: nan, inf and -inf refused at the first read by "
+        "spine/lever.py::REFUSE_NON_FINITE_FLOAT and, with it off, by this lever's "
+        "`domain=(0.0, 1.0)`; it has never reached this loop. In this block for the same reason "
+        "as lr_min_frac",
 }
 
 
@@ -207,6 +227,15 @@ class OptState:
     # piecewise-linear map _effective_step builds from this log, so lr is continuous at every
     # revision and the cosine still ends at the floor at the revised end.
     horizon_revisions: list = dataclasses.field(default_factory=list)
+    # THE CONTINUATION REGIME THIS RUN WAS ANCHORED UNDER (OPT_LR_CONTINUE, Proposal 05 §8 1.4,
+    # Q-OPT-12), or None -- None on every fresh run and under the default 'as_logged', where the
+    # schedule above is the whole of the pricing. load_state writes it once, at a session boundary
+    # (a resume it re-prices), as {regime, anchor (opt_step at the boundary), start_frac (the
+    # parent's applied rate over peak), target_frac, warm, end (the resumed build's run_steps),
+    # rev_base (the revision-log length after load_state's own revision)}; checkpointed, so the
+    # session's closed form is FROZEN there and a same-length resume continues it exactly without
+    # re-reading a lever. _schedule prices every step past `anchor` through it.
+    continuation: dict = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -384,8 +413,127 @@ def _cycle_index(horizon, step, restarts):
     return max(0, int((step - w) / per_c))
 
 
+def _continues(cont, step):
+    """Whether a continuation regime prices `step`: a record exists and `step` is past its anchor.
+
+    ONE PREDICATE, TWO READERS -- _schedule branches on it and maybe_step counts
+    opt.continue.priced and silences the restart detector on it -- written once so the step the
+    rate was priced by the regime and the step the ledger says it was can never be two numbers.
+    The anchor itself is the parent's last step and is never re-priced: a resume re-prices from the
+    NEXT step, which is the first one this process takes.
+    """
+    return cont is not None and int(step) > int(cont["anchor"])
+
+
+def _rewarm_span(cont):
+    """(d0, end) of a 'rewarm' session's decay: from the end of its ramp to the session's end.
+
+    THE END IS AT LEAST ONE STEP PAST THE RAMP, and that is the degenerate session this regime can
+    genuinely be handed: the resumed build's horizon is this epoch's length times RUN_EPOCHS, so a
+    parent whose epochs were longer than the child's can leave `end` at or before anchor + warm
+    (counters() says so on the opt.continue line). Taking `end` raw would put the decay's
+    denominator through max(1, <= 0), under which positions between `end` and d0 price BACKWARDS --
+    a revision that re-measured the run would then climb the rate from the floor back to the
+    target. At d0 + 1 the decay is one step long, the rate is at the floor from the step after the
+    ramp (what every schedule in this file prices past its horizon's end), and an in-run revision
+    maps it LR-continuously like any other: one taken during the ramp gets a real decay to its
+    revised end, one taken after it stays at the floor.
+    """
+    d0 = int(cont["anchor"]) + int(cont["warm"])
+    return d0, max(int(cont["end"]), d0 + 1)
+
+
+def _continued(cont, step, min_frac, pos):
+    """The schedule MULTIPLIER a continuation regime puts on `step` (> anchor). PURE.
+
+    With j = step - anchor and W = warm, the closed forms (Proposal 05 §8 1.4, Q-OPT-12):
+      floor    min_frac, from the first resumed step;
+      plateau  start + (target - start) * j / W while j < W, then target, held;
+      rewarm   the same ramp, then min_frac + (target - min_frac) * (1 + cos(pi p)) / 2, where p runs
+               0 -> 1 from the end of the ramp to the session's end (_rewarm_span) and `pos` is the
+               step on that decay, re-mapped by the child's own in-run revisions exactly as
+               _effective_step re-maps the as-built cosine -- LR-continuous at each one.
+    `start` is the rate the parent's optimizer held at the boundary, so a ramp with W > 0 begins
+    where the parent left off and the boundary is LR-continuous; W = 0 applies the target at once.
+    """
+    regime = str(cont["regime"])
+    if regime == "floor":
+        return min_frac
+    j = int(step) - int(cont["anchor"])
+    w = int(cont["warm"])
+    start, target = float(cont["start_frac"]), float(cont["target_frac"])
+    if j < w:
+        return start + (target - start) * j / w
+    if regime == "plateau":
+        return target
+    if regime == "rewarm":
+        d0, end = _rewarm_span(cont)
+        p = min(1.0, max(0.0, (pos - d0) / (end - d0)))
+        return min_frac + (target - min_frac) * 0.5 * (1.0 + math.cos(math.pi * p))
+    raise ValueError(
+        f"OPT: continuation record carries regime {regime!r}, which has no closed form here. "
+        f"load_state writes only 'floor', 'plateau' and 'rewarm', and OPT.build refuses "
+        f"'regulated' by name (NEW-04), so a record holding anything else was not written by this "
+        f"package; pricing it as a guess would move every rate of the session.")
+
+
+def _continue_at_load(st, *, regime, sched, peak, plateau, rewarm, warm, end):
+    """Anchor (or clear) the continuation record at a session boundary. Values, never a Config.
+
+    THE FOUR OUTCOMES, and each one says what it did in the ledger:
+      * 'as_logged' (the default): the record is CLEARED and nothing else happens -- the rate from
+        here is exactly today's function of the horizon and the revision log, which the lines above
+        this call already set up. A parent that was itself a regime session does not carry its
+        regime into a child that asked for none; opt.continue.priced goes ABSENT with it.
+      * another regime at OPT_LR_SCHED=none: INERT, AND COUNTED (opt.continue.inert = 1). The
+        ablation's rate is the flat peak and every regime is downstream of _schedule's first
+        return, the revise_horizon precedent -- not refused, because the ablation is legitimate and
+        so is asking what it does to a continued run.
+      * 'floor', 'plateau' or 'rewarm': the record is written and FROZEN -- anchor = the resumed
+        step, start_frac = the rate the restored base optimizer holds over the live peak (the
+        parent's last applied rate: _applied_lr reads the param group load_state_dict just
+        restored), target_frac = OPT_LR_PLATEAU or OPT_LR_REWARM (None under 'floor', whose target
+        is lr_min_frac read live like every floor in this file), warm = OPT_LR_CONT_WARM (0 under
+        'floor'), end = the resumed build's run_steps, rev_base = the revision-log length now. The
+        session's step counter opt.continue.priced is seeded at 0.
+      * AND lr_prev IS CLEARED WHEN A REGIME IS ANCHORED, counted in opt.ckpt.lr_prev_cleared --
+        load_state's horizon-changed branch already does it for its own boundary, and a logged
+        parent's boundary did not need it until a regime could move the rate there: 'rewarm' at
+        OPT_LR_CONT_WARM=0 from a parent at the floor jumps to half the peak on the first resumed
+        step, and against a live lr_prev that is `lr > 1.5 * lr_prev and lr > 0.5 * peak` -- a
+        phantom restart fed to FAB.grow_check, the P1-H17 shape this function closes for the
+        horizon route.
+    'regulated' never arrives here: OPT.build refuses it with NotBuilt before this state exists.
+    """
+    # WHAT DESCRIBED THE PARENT'S SESSION IS NOT A READING OF THIS ONE.
+    st.counters.pop("opt.continue.priced", None)
+    st.counters.pop("opt.continue.inert", None)
+    if regime == "as_logged":
+        st.continuation = None
+        return
+    if sched == "none":
+        st.continuation = None
+        st.counters["opt.continue.inert"] = 1
+        return
+    ramp = 0 if regime == "floor" else int(warm)
+    st.continuation = {
+        "regime": regime,
+        "anchor": int(st.opt_step),
+        "start_frac": float(_applied_lr(st)) / float(peak),
+        "target_frac": (None if regime == "floor" else
+                        float(plateau) if regime == "plateau" else float(rewarm)),
+        "warm": ramp,
+        "end": int(end),
+        "rev_base": len(st.horizon_revisions),
+    }
+    st.counters["opt.continue.priced"] = 0
+    if st.lr_prev:
+        st.counters["opt.ckpt.lr_prev_cleared"] += 1
+        st.lr_prev = 0.0
+
+
 def _schedule(*, lr, sched, min_frac, restarts, decay, shift_warm, restart_amp, shift_at,
-              horizon, step, eff_step=None):
+              horizon, step, eff_step=None, cont=None, cont_pos=None):
     """The rate at `step`, plus the five gate observations. PURE: every input is an argument.
 
     Returns (rate, flags) where flags is
@@ -412,6 +560,18 @@ def _schedule(*, lr, sched, min_frac, restarts, decay, shift_warm, restart_amp, 
     optimizer steps resolves to it -- so counters() carries a Gate opt.lr.warmup that declares it
     UNREACHABLE with the two numbers, instead of leaving opt.lr.in_warmup to print a bare 0 that a
     reader cannot tell from "it ran and never triggered".
+
+    A CONTINUATION REGIME (`cont`, OptState.continuation) PRICES EVERY STEP PAST ITS ANCHOR, and
+    only then (Proposal 05 §8 1.4, Q-OPT-12). The branch sits after the ablation's return, so
+    OPT_LR_SCHED=none stays flat under every regime, and before the warmup, because a continued
+    run's warmup was paid by its parent. Its multiplier is _continued's closed form; the shift
+    re-warm still ATTENUATES it (§8 4.2 runs OPT_LR_SHIFT_WARM arms inside the continuation harness)
+    and the floor clamp still bounds it, because the floor is a floor under every regime. The
+    restart damping and the envelope do NOT apply: both are properties of the as-built cosine's
+    cycles, and after the anchor no cycle is priced. `cont_pos` is 'rewarm''s decay position once
+    the session's own acts have re-mapped it (_priced builds it); None prices the decay at `step`.
+    WITH cont=None -- every fresh run, and every resume under the default 'as_logged' -- the branch
+    is skipped and not one float operation below it moves.
     """
     if sched == "none":
         # THE ONE-FLAG ABLATION, and it returns the peak flat -- "none" restores the pre-schedule
@@ -420,6 +580,18 @@ def _schedule(*, lr, sched, min_frac, restarts, decay, shift_warm, restart_amp, 
         # counters() must render the mechanisms they feed as UNREACHABLE and not as "armed, did not
         # fire" -- see the sched arm of every gate there.
         return float(lr), (False, False, False, False, False)
+
+    if _continues(cont, step):
+        # THE SESSION'S OWN CLOSED FORM, anchored at the boundary load_state re-priced. The two
+        # modifiers kept are the two that are not about the as-built cycles: the shift re-warm (an
+        # attenuation, exactly as below) and the floor clamp.
+        cyc = _continued(cont, step, min_frac, step if cont_pos is None else cont_pos)
+        warmed = bool(shift_warm) and shift_at is not None and 0 <= step - int(shift_at) < shift_warm
+        if warmed:
+            cyc *= max(min_frac, (step - int(shift_at) + 1) / shift_warm)
+        floored = cyc < min_frac
+        cyc = max(min_frac, cyc)
+        return float(lr) * cyc, (False, False, warmed, False, floored)
 
     w = int(horizon.warmup)
     if step < w:
@@ -690,6 +862,11 @@ def _priced(opt, st, opt_step):
     observations and stay pure, and lets maybe_step record them where a step actually happened,
     WITHOUT a second call site for _schedule -- two computations of one number is the defect
     _cycle_index's own docstring is about, one function up.
+
+    IT ALSO HANDS OVER st.continuation (2026-09-26, Q-OPT-12), and for a 'rewarm' session whose own
+    acts have revised the run, the decay position those revisions map the step to -- built here,
+    beside the as-built cosine's eff_step, from the same _effective_step, so the one continuous
+    re-map this file has is not written twice.
     """
     if type(opt_step) is not U.Steps:
         raise U.UnitError(
@@ -707,13 +884,30 @@ def _priced(opt, st, opt_step):
     # this one without inventing a kind for "fraction of a re-warm".
     shift_warm = int(opt.lr_shift_warm)
 
+    # A 'rewarm' SESSION'S OWN ACTS RE-MAP ITS DECAY THROUGH THE SAME MAP THE AS-BUILT COSINE USES.
+    # The revisions past rev_base are the ones this session's mid-epoch acts appended (load_state's
+    # own boundary revision is behind it, and `end` already is that revision's length); each is
+    # applied to a one-cycle horizon whose "warmup" is the ramp and whose run_steps is the session
+    # end, so the decay reaches the floor at the revised end with the rate unchanged at the act.
+    # 'floor' and 'plateau' have no end to re-map: their revisions are logged and move nothing.
+    cont = st.continuation
+    cont_pos = None
+    if cont is not None and str(cont["regime"]) == "rewarm" \
+            and len(st.horizon_revisions) > int(cont["rev_base"]):
+        d0, end = _rewarm_span(cont)
+        cont_pos = _effective_step(
+            Horizon(run_steps=U.Steps(end), warmup=U.Steps(d0), wavelength=U.Steps(end),
+                    n_cycles=1),
+            st.horizon_revisions[int(cont["rev_base"]):], int(opt_step))
+
     return _schedule(
         lr=float(opt.lr), sched=str(opt.lr_sched), min_frac=float(opt.lr_min_frac),
         restarts=bool(opt.lr_restarts), decay=float(opt.lr_decay), shift_warm=shift_warm,
         restart_amp=float(st.restart_amp), shift_at=st.shift_at,
         horizon=st.horizon, step=int(opt_step),
         eff_step=(_effective_step(st.horizon, st.horizon_revisions, int(opt_step))
-                  if st.horizon_revisions else None))
+                  if st.horizon_revisions else None),
+        cont=cont, cont_pos=cont_pos)
 
 
 # ==================================================================================================
@@ -777,19 +971,29 @@ def build(opt: Config, *, param_groups, run_windows):
     throughout, which reads as the schedule hurting when it is the schedule never having run.
 
     REFUSES AT STARTUP, because every one of these was a clamp at the old read site:
-      * ANY OF THIS PACKAGE'S SIX FLOAT LEVERS NON-FINITE -- lr, weight_decay, grad_clip,
-        lr_min_frac, lr_restart_damp, lr_decay -- enumerated through spine/lever.py::Config.keys and
+      * ANY OF THIS PACKAGE'S EIGHT FLOAT LEVERS NON-FINITE -- lr, weight_decay, grad_clip,
+        lr_min_frac, lr_restart_damp, lr_decay, and since 2026-09-26 lr_plateau and lr_rewarm (no
+        list here had to change for those two: the scan covered them the day they were declared)
+        -- enumerated through spine/lever.py::Config.keys and
         ::Config.lever rather than by name, so the env name in the message is generated and a float
         lever added tomorrow is covered. This is FIRST because the eight below cannot see what it
         sees: seven of them are one-sided order comparisons and NaN is ordered against nothing, so it
-        was False for all seven while +inf additionally passed every lower bound. It closes FOUR
+        was False for all seven while +inf additionally passed every lower bound. (Ten below since
+        2026-09-26; the body's block says why the two new ones change nothing here.) It closes FOUR
         VALUES per lever and BOUNDS NOTHING -- OPT_LR=1e30 still builds, still steps, still reports a
         healthy ledger, and leaves the base parameters at -5.999999901390138e+28. The body carries
-        the measurement for each of the six and the statement of what is left open, including the
+        the measurement for each of the eight and the statement of what is left open, including the
         fact that spine/lever.py::REFUSE_NON_FINITE_FLOAT now refuses all four spellings one layer
         ahead of it -- so this loop is armed for the arm in which that constant is switched off.
       * lr <= 0; weight_decay < 0; lr_min_frac outside [0.0, 1.0); lr_warmup < 0;
-        lr_wavelength < 0.
+        lr_wavelength < 0; lr_cont_warm < 0 (2026-09-26, beside lr_warmup and for its reason: a
+        ramp is a length).
+      * lr_continue == 'regulated' -- WITH spine/gate.py::NotBuilt, NOT ValueError (2026-09-26,
+        Q-OPT-12). The arm is declared and not built: it sets each session's plateau from the NEW-04
+        session gate's margin, and that gate does not exist. Refused here, before either AdamW is
+        constructed, on EVERY run and not only on a resume, which is the FAB_HOP_MODE /
+        LM_COMPOSE / MEM_KEY_SRC precedent -- an arm that could be typed and silently priced as
+        another regime is the silent-default class this rebuild exists to end.
       * NOT lr_restart_damp OUTSIDE [0.0, 1.0] AND NOT lr_decay OUTSIDE [0.0, 1.0] -- RETIRED
         2026-09-14 and refused one layer earlier instead: both declarations carry
         `domain=(0.0, 1.0)` (opt/levers.py::OPTLevers), which refuses the same set at the first
@@ -841,7 +1045,11 @@ def build(opt: Config, *, param_groups, run_windows):
                  and is why the name stays on this line rather than becoming the false entry the
                  lr_sched correction below is about),
                  lr_decay (the same, for its one retired clause),
-                 lr_min_frac, accum, batch_windows, grad_clip
+                 lr_min_frac, accum, batch_windows, grad_clip,
+                 lr_continue (the 'regulated' refusal), lr_cont_warm (its < 0 refusal),
+                 horizon_revise (which arm seeds opt.horizon.revise_declined),
+                 lr_plateau, lr_rewarm (the non-finite scan's getattr, as lr_decay above -- their
+                 closed forms are read by load_state, at a continuation boundary)
     WIRES READ: d_effective_batch_windows
     DID IT FIRE: opt.build.calls (exactly 1), opt.build.wavelength_from_sentinel,
                  opt.build.warmup_clamped with opt.build.warmup_asked and opt.build.warmup (the two
@@ -865,6 +1073,10 @@ def build(opt: Config, *, param_groups, run_windows):
                  the parameter side rather than from the optimizer side. It was written by this
                  function and printed by counters() while being named in no docstring anywhere, so
                  a nonzero value was a number the report printed with no stated meaning),
+                 opt.horizon.revise_declined (seeded 0 ON THE OFF ARM ONLY,
+                 OPT_HORIZON_REVISE=False, where revise_horizon can decline a revision; ABSENT at
+                 the default, where nothing can be declined -- the DID IT FIRE convention, and the
+                 reason a default run's ledger gains no key from §8 1.4),
                  Gate opt.build.grad_clip -- "off (<the resolved value>)" or the resolved
                  max-norm, printed either way, because "no clipping" is a run-level fact the report
                  must state rather than leave to be inferred from a missing line. THE VALUE IS
@@ -883,7 +1095,11 @@ def build(opt: Config, *, param_groups, run_windows):
     # `n_batch_windows < 1`, `grad_clip < 0.0` -- each naming ONE side of a boundary. ONE is an
     # INVERTED CHAIN naming an interval at both ends: `not 0.0 <= min_frac < 1.0`. NaN is ordered
     # against nothing, so it is False for every one of the seven and True for the one; +inf passes
-    # every lower bound.
+    # every lower bound. (2026-09-26, §8 1.4: TEN raises below now, and neither new one changes what
+    # this loop sees. `cont_warm < 0` is an eighth one-sided comparison, over an INT lever that
+    # spine/lever.py::Lever.coerce already refuses at nan and both infinities; and
+    # `continue_regime == "regulated"` raises NotBuilt -- an equality on a str lever that carries
+    # `choices=`, a declared-and-unbuilt arm and not a bound.)
     #
     # THEY WERE ELEVEN UNTIL 2026-09-14, when three were retired into two `domain=(0.0, 1.0)` pairs
     # on the declarations they were arguing about -- `damp > 1.0`, `damp < 0.0` and
@@ -908,7 +1124,8 @@ def build(opt: Config, *, param_groups, run_windows):
     # lever this loop scans can carry one and the loop is armed over a set it can no longer be
     # handed. It stays because THAT CONSTANT IS A SWITCH: set it False -- which its own docstring
     # tells an operator how to do -- and all four spellings resolve into the frozen Config again,
-    # and this loop is the only thing standing over OPT's six floats.
+    # and this loop is the only thing standing over OPT's floats -- six when this was written, eight
+    # since 2026-09-26, and the five that carry a `domain=` still refuse nan there (see below).
     # THAT IS EXACTLY THE ARGUMENT THE THREE RETIRED CLAUSES DID NOT HAVE, and the difference is the
     # switch. `domain=` carries none by design (spine/lever.py's declaration comment: its blast
     # radius is one lever and deleting the kwarg is the switch), so a clause the pair covers has
@@ -921,11 +1138,14 @@ def build(opt: Config, *, param_groups, run_windows):
     # ::Config.lever), so the OWNED env name in the message is GENERATED, never typed, and a float
     # lever added to opt/levers.py tomorrow is covered with no second list to go stale. The precedent
     # is src/fabric/api.py::build, which made the same widening for the same measured reason.
-    # THE OTHER SEVEN DECLARATIONS ARE ACCOUNTED FOR AND NOT DECLINED: the five int levers
-    # (lr_warmup, lr_wavelength, lr_shift_warm, batch_windows, accum) are refused at nan by
-    # `int(float(raw))`'s ValueError and at +/-inf by its OverflowError inside
-    # spine/lever.py::Lever.coerce, under their own owned names; lr_restarts is a bool, which coerces
-    # every spelling; lr_sched is a str carrying `choices=`. 6 + 5 + 1 + 1 = 13, the whole set.
+    # THE OTHER TEN DECLARATIONS ARE ACCOUNTED FOR AND NOT DECLINED: the six int levers
+    # (lr_warmup, lr_wavelength, lr_shift_warm, batch_windows, accum, lr_cont_warm) are refused at
+    # nan by `int(float(raw))`'s ValueError and at +/-inf by its OverflowError inside
+    # spine/lever.py::Lever.coerce, under their own owned names; lr_restarts and horizon_revise are
+    # bools, which coerce every spelling; lr_sched and lr_continue are strs carrying `choices=`.
+    # 8 + 6 + 2 + 2 = 18, the whole set. (It read 6 + 5 + 1 + 1 = 13 until §8 1.4's five levers
+    # landed on 2026-09-26; the two new floats, lr_plateau and lr_rewarm, are in the eight this loop
+    # scans and each carries a `domain=(0.0, 1.0)` that refuses nan and both infinities first.)
     #
     # WHAT THIS REFUSAL DOES NOT CLAIM, AND NOTHING BELOW SAYS OTHERWISE. It closes FOUR VALUES per
     # float lever. It BOUNDS NOTHING and this package is not thereby validated, safe or ranged.
@@ -934,12 +1154,14 @@ def build(opt: Config, *, param_groups, run_windows):
     # anywhere, and the base parameters read -5.999999901390138e+28 -- finite, so every isfinite
     # check in the tree passes over a run that is already destroyed. OPT_WEIGHT_DECAY=1e30 reaches
     # non-finite parameters on step 2 THROUGH a finite step 1 of -1.9999999124047052e+25. A declared
-    # per-lever domain was named here as the general answer to that, and THREE of the six now carry
-    # one -- lr_restart_damp, lr_decay and lr_min_frac, each a ratio whose two ends are readable off
-    # its own arithmetic. IT IS NOT THE ANSWER FOR THE OTHER THREE AND SAYING SO IS THE POINT: lr,
+    # per-lever domain was named here as the general answer to that, and FIVE of the eight now carry
+    # one -- lr_restart_damp, lr_decay and lr_min_frac, and since 2026-09-26 lr_plateau and
+    # lr_rewarm, each a ratio whose two ends are readable off its own arithmetic. IT IS NOT THE
+    # ANSWER FOR THE OTHER THREE AND SAYING SO IS THE POINT: lr,
     # weight_decay and grad_clip have no derivable ceiling, which is the condition 131 of the tree's
-    # 207 numeric levers are in, and 1e30 above is what a pair would have had to exclude. Three
-    # ratios bounded is three ratios bounded; it is not this package covered.
+    # 207 numeric levers were in when this was counted (2026-09-14), and 1e30 above is what a pair
+    # would have had to exclude. Five ratios bounded is five ratios bounded; it is not this package
+    # covered.
     # ==============================================================================================
     _nonfinite = []
     for _field in opt.keys():
@@ -971,9 +1193,10 @@ def build(opt: Config, *, param_groups, run_windows):
               "steps six times reporting stepped=True with no alarm in the ledger, and leaves the "
               "base parameters at -5.999999901390138e+28 -- a number every isfinite check in this "
               "tree passes. Set the lever to a finite value. A declared per-lever domain closes "
-              "more than this does and OPT_LR_RESTART_DAMP, OPT_LR_DECAY and OPT_LR_MIN_FRAC each "
-              "carry one; OPT_LR, OPT_WEIGHT_DECAY and OPT_GRAD_CLIP do not, because no honest "
-              "reading of those three declarations produces a ceiling.")
+              "more than this does and OPT_LR_RESTART_DAMP, OPT_LR_DECAY, OPT_LR_MIN_FRAC, "
+              "OPT_LR_PLATEAU and OPT_LR_REWARM each carry one; OPT_LR, OPT_WEIGHT_DECAY and "
+              "OPT_GRAD_CLIP do not, because no honest reading of those three declarations "
+              "produces a ceiling.")
 
     effective = opt.d_effective_batch_windows    # WIRE READ HERE -- the horizon's divisor
 
@@ -986,6 +1209,8 @@ def build(opt: Config, *, param_groups, run_windows):
     wavelength_asked = int(opt.lr_wavelength)
     n_accum = int(opt.accum)
     n_batch_windows = int(opt.batch_windows)
+    cont_warm = int(opt.lr_cont_warm)
+    continue_regime = str(opt.lr_continue)
 
     # ==============================================================================================
     # THREE REFUSALS LEFT THIS BLOCK ON 2026-09-14 AND THIS IS WHERE THEY WENT. Nothing that was
@@ -1056,6 +1281,10 @@ def build(opt: Config, *, param_groups, run_windows):
                          f"peak and 1.0 would make the cosine a constant.")
     if warmup_asked < 0:
         raise ValueError(f"OPT_LR_WARMUP={warmup_asked!r} is negative; a warmup is a length.")
+    if cont_warm < 0:
+        raise ValueError(f"OPT_LR_CONT_WARM={cont_warm!r} is negative; a ramp is a length. 0 is "
+                         f"no ramp -- a continuation regime's target applies from the first "
+                         f"resumed step.")
     if wavelength_asked < 0:
         raise ValueError(
             f"OPT_LR_WAVELENGTH={wavelength_asked!r} is negative. 0 is the sentinel for 'one "
@@ -1076,6 +1305,20 @@ def build(opt: Config, *, param_groups, run_windows):
         raise ValueError(
             f"OPT_GRAD_CLIP={grad_clip!r} is negative. 0.0 is OFF and is the shipped default; a "
             f"negative max-norm is a typo that would clip every step to nothing.")
+    # THE DECLARED-AND-NOT-BUILT CONTINUATION ARM, REFUSED ON EVERY RUN (Q-OPT-12). A fresh run at
+    # 'regulated' would price nothing differently -- no boundary exists to anchor at -- and that is
+    # exactly why it is refused here rather than at load_state: the operator asked for a mechanism
+    # this tree does not have, and a run that reports success under that setting is a run whose
+    # label names something that never happened.
+    if continue_regime == "regulated":
+        raise NotBuilt(
+            f"OPT_LR_CONTINUE='regulated' is declared and NOT BUILT (Proposal 05 §8 1.4, NEW-05; "
+            f"Q-OPT-12). It sets each session's plateau from the previous session gate's margin "
+            f"against epsilon, and that gate -- NEW-04, built at §8 4.4 -- does not exist in this "
+            f"tree, so there is no margin to read. Refused rather than silently priced as another "
+            f"regime. The built choices are 'as_logged' (today's pricing, the default), 'floor', "
+            f"'plateau' (OPT_LR_PLATEAU, OPT_LR_CONT_WARM) and 'rewarm' (OPT_LR_REWARM, "
+            f"OPT_LR_CONT_WARM).")
 
     # -- the groups, in a declared order, with nothing dropped ------------------------------------
     groups = dict(param_groups)
@@ -1177,6 +1420,12 @@ def build(opt: Config, *, param_groups, run_windows):
     # G4's word for unreachable on this arm, and counters() says why beside the line.
     if len(ordered[1][1]) > 0:
         counters["opt.lr.writes.encoder"] = 0
+    # THE DECLINED-REVISION COUNTER IS SEEDED ONLY ON THE ARM THAT CAN DECLINE ONE (2026-09-26,
+    # §8 1.4), for the reason the line above gives: at the shipped OPT_HORIZON_REVISE=True
+    # revise_horizon never declines, so the key is ABSENT there -- unreachable, and not a default
+    # run's ledger growing a zero that means nothing.
+    if not bool(opt.horizon_revise):
+        counters["opt.horizon.revise_declined"] = 0
 
     return OptState(
         base=base_opt, encoder=enc_opt,
@@ -1221,6 +1470,14 @@ def lr_at(opt: Config, st, opt_step):
         at lr_min_frac ended at lr_min_frac SQUARED -- 0.0025 of peak. That is why LR_DECAY sat at
         0.0 from the day it was written, and three documents still say it is inert after the
         default flipped 0.0 -> 1.0.
+    AND ONE OVERLAY THAT REPLACES THE CYCLE RATHER THAN MODIFYING IT (2026-09-26, Q-OPT-12): past
+    the anchor of st.continuation -- the regime a continued run was anchored under by load_state --
+    the multiplier is that regime's closed form ('floor', 'plateau' or 'rewarm'; _continued), still
+    attenuated by the shift re-warm and still floored, and neither the damping nor the envelope
+    applies. st.continuation is None on every fresh run and under the default 'as_logged', so this
+    function is then exactly what the paragraphs above describe. The record is state, frozen at the
+    boundary, so this function reads no OPT_LR_CONTINUE lever and stays a pure price: a probe at
+    step `anchor + 1` is the first resumed step's rate.
 
     THE PROPERTY THE TEST MUST ASSERT, which the compounding defect above makes non-obvious: the
     schedule's minimum over a whole run, TAKEN POST-WARMUP AND WITH THE WAVELENGTH AT ITS SENTINEL,
@@ -1325,10 +1582,24 @@ def revise_horizon(opt: Config, st, *, run_windows):
     fitted (opt.build.cycles_fitted > 1), or lr_sched == 'none'. Then the horizon stays as built and
     opt.horizon.revisions stays ABSENT, with the reason in opt.horizon.revise_inert.
 
-    LEVERS READ: lr_sched
+    AND INERT, AND COUNTED, WHERE THE OPERATOR SWITCHED IT OFF (2026-09-26, Proposal 05 §8 1.4,
+    TREE-OPT_HORIZON_REVISE-LEVER): at OPT_HORIZON_REVISE=False the horizon stays as built for the
+    rest of the run -- the run then ends above the floor by the under-anneal Q-OPT-5 names, which is
+    the arm's measured cost and the reason it exists as an arm -- opt.horizon.revise_inert is 1 and
+    opt.horizon.revise_declined counts every revision declined (seeded 0 by build on this arm
+    only). THE LEVER IS IN-RUN ONLY, AND THIS IS THE ONLY PLACE IT IS OBEYED: load_state's resume
+    revision on a logged parent is NOT gated by it (C01), because gating it would switch a continued
+    run from the floor to the no-log re-pricing without anyone asking for a new rate -- the rate a
+    resume starts at is OPT_LR_CONTINUE's (Q-OPT-12). The two structural inert arms above are
+    checked first, so a decline is counted only where a revision was otherwise possible, and
+    counters() prints the lever and the count on Gate opt.horizon.revise.
+
+    LEVERS READ: lr_sched, horizon_revise
     WIRES READ: d_effective_batch_windows
     DID IT FIRE: opt.horizon.revisions (ABSENT until a revision), opt.horizon.revised_run_steps,
-                 opt.horizon.revise_inert (1 when asked and inert; ABSENT otherwise)
+                 opt.horizon.revise_inert (1 when asked and inert; ABSENT otherwise),
+                 opt.horizon.revise_declined (revisions declined at OPT_HORIZON_REVISE=False;
+                 ABSENT at True, where none can be)
     """
     opt = opt.owned_by("OPT")
     if isinstance(run_windows, U.Clock) and type(run_windows) is not U.Windows:
@@ -1343,6 +1614,14 @@ def revise_horizon(opt: Config, st, *, run_windows):
         # 1 = asked and inert: more than one restart cycle was fitted, so "the remaining cosine" is
         # undefined and the horizon stays as built. counters() prints the reason beside it.
         st.counters["opt.horizon.revise_inert"] = 1
+        return None
+    if not bool(opt.horizon_revise):
+        # 1 = asked and inert (OPT_HORIZON_REVISE=False), and the decline itself is counted, because
+        # "an act re-measured the run and the schedule kept its old end" happened once per call and
+        # a flag cannot say how often.
+        st.counters["opt.horizon.revise_inert"] = 1
+        st.counters["opt.horizon.revise_declined"] = \
+            st.counters.get("opt.horizon.revise_declined", 0) + 1
         return None
     new_steps = derive.opt_steps_from_windows(run_windows, opt.d_effective_batch_windows)
     last = int(st.horizon_revisions[-1][1]) if st.horizon_revisions else int(st.horizon.run_steps)
@@ -1475,6 +1754,14 @@ def maybe_step(opt: Config, st, *, best_bpb=None, shift_at=None):
     the line below until 2026-09-04: lr_restarts by the cycle-index stamp, and lr_sched by the wrap
     counter, which must not count wraps in a schedule that has no cosine.
 
+    UNDER A CONTINUATION REGIME (st.continuation, anchored by load_state; Q-OPT-12) the rate past
+    the anchor is the regime's closed form, and three consequences are stated here because they are
+    this function's: opt.continue.priced counts those steps; the restart detector is not consulted
+    on them (clause 3's comment says why), so the closed loop in clause 4 cannot damp a session;
+    and opt.restart.wraps STILL counts the as-built horizon's cycle-index advances on a
+    multi-cycle horizon, a structural fact about a horizon the rate no longer follows -- read it
+    that way on a continued run, not as restarts that happened.
+
     LEVERS READ: accum, lr, lr_restart_damp, lr_restarts, lr_sched, grad_clip (plus everything the
                  schedule reads, through the shared unpack in _priced)
     WIRES READ: none
@@ -1529,7 +1816,9 @@ def maybe_step(opt: Config, st, *, best_bpb=None, shift_at=None):
                  -- a DIFFERENT statement from grad_clip == 0, and the report must make both),
                  opt.shift.notifications (DISTINCT shift stamps received -- one per event, however
                  many flushes re-deliver it; 0 means no shift has been stamped in this run, which
-                 at RUN_EPOCHS=1 is every run: the root stamps one at each epoch roll)
+                 at RUN_EPOCHS=1 is every run: the root stamps one at each epoch roll),
+                 opt.continue.priced (steps a continuation regime priced; seeded 0 by load_state
+                 at the boundary that anchored one, ABSENT on a fresh run and under 'as_logged')
     """
     opt = opt.owned_by("OPT")
     schedule_live = str(opt.lr_sched) != "none"
@@ -1648,6 +1937,12 @@ def maybe_step(opt: Config, st, *, best_bpb=None, shift_at=None):
         st.counters["opt.lr.envelope_applied"] += 1
     if floored:
         st.counters["opt.lr.floor_applied"] += 1
+    # A STEP A CONTINUATION REGIME PRICED (Q-OPT-12), counted where the step happens for the reason
+    # the four above are. The key is seeded at 0 by load_state when it anchors a regime and is
+    # ABSENT otherwise -- every fresh run and every 'as_logged' resume -- so no default ledger grows.
+    continued = schedule_live and _continues(st.continuation, int(st.opt_step))
+    if continued and "opt.continue.priced" in st.counters:
+        st.counters["opt.continue.priced"] += 1
 
     # THE INDEX OF THE STEP JUST PRICED. _schedule computes the same number from the same horizon
     # and the same step, so st.cycle_index and the index the damping gate used are equal by
@@ -1666,8 +1961,15 @@ def maybe_step(opt: Config, st, *, best_bpb=None, shift_at=None):
 
     # 3. the restart detector. BOTH conditions: the warmup ramp climbs from zero, so the ratio bar
     #    alone reported a restart at steps 15 and 31 of an 18-epoch run, at 2% and 3% of peak.
+    #    NOT CONSULTED ON A STEP A CONTINUATION REGIME PRICED (2026-09-26): the detector exists to
+    #    see a cosine WRAP, and past the anchor no cycle is priced -- a ratio jump there is the
+    #    regime's own ramp (OPT_LR_CONT_WARM of 2 or 3 steps from a low parent rate to a target of
+    #    1.0 doubles the rate above half the peak), and stamping it restart=True would tell
+    #    FAB.grow_check a loss jump was a self-inflicted wrap. load_state clears lr_prev at the
+    #    anchor for the same reason; this closes the steps after it. `continued` is False on every
+    #    step of a fresh run and of an 'as_logged' resume, so the expression is then unchanged.
     peak = float(opt.lr)
-    jumped = bool(st.lr_prev > 0 and lr > 1.5 * st.lr_prev)
+    jumped = bool(not continued and st.lr_prev > 0 and lr > 1.5 * st.lr_prev)
     restart = bool(jumped and lr > 0.5 * peak)
     if jumped and not restart and not in_warmup:
         # THE JUMP THE SECOND CONDITION REJECTED, WHICH HAD NO COUNTER AT ALL. Without it "no
@@ -1899,10 +2201,22 @@ def counters(opt: Config, st):
     THIS ENUMERATION 2026-09-04, when its live arm was found not to read the `< 1.0` its own
     unreachable arms already print), weight_decay > 0, grad_clip > 0 (twice: opt.build.grad_clip for
     the setting and opt.clip.applied for the steps that hit it), lr_decay > 0 and n_cycles > 1,
-    lr_shift_warm > 0 and a shift_at ever supplied, and opt.ckpt.horizon_changed. Three more Gates
-    are not lever-gated and are argued for elsewhere: opt.accum.invariant (the paragraph above),
-    opt.grad_norm (the RENDERS paragraph below) and opt.encoder_steps_here (maybe_step's Q-OPT-6
-    tripwire, read backwards -- 0 is the passing state). FOURTEEN in all, counted from the tree.
+    lr_shift_warm > 0 and a shift_at ever supplied, opt.ckpt.horizon_changed, and -- since
+    2026-09-26 -- opt.horizon.revise (horizon_revise, with the two structural arms revise_horizon
+    was already inert on). Three more Gates are not lever-gated and are argued for elsewhere:
+    opt.accum.invariant (the paragraph above), opt.grad_norm (the RENDERS paragraph below) and
+    opt.encoder_steps_here (maybe_step's Q-OPT-6 tripwire, read backwards -- 0 is the passing
+    state). FIFTEEN in all, counted from the tree. (FOURTEEN until opt.horizon.revise landed:
+    revise_horizon's own docstring said counters() "prints the reason beside" opt.horizon.
+    revise_inert, and no line here did.)
+
+    AND ON EVERY RESUME, THE CONTINUATION REGIME (2026-09-26, Proposal 05 §8 1.4, Q-OPT-12): the
+    ledger carries `opt.continue.regime`, a string LABEL and not a counter -- the regime in force,
+    the anchored record's or 'as_logged' -- and one report line prints what was asked against what
+    is in force, the boundary, the record's anchor, start, target, ramp and end, the steps priced,
+    and the first resumed step's rate as a fraction of peak (a pure probe through _priced). The
+    label is ABSENT on a fresh run, where no resume was priced, and it is never written into
+    st.counters, so no string crosses a checkpoint as though it were a count.
 
     EVERY ONE OF THEM TESTS `sched` FIRST, and until 2026-09-04 not one of them did. _schedule's
     first statement returns the peak flat at OPT_LR_SCHED=none, so the warmup, the wavelength, the
@@ -2008,7 +2322,9 @@ def counters(opt: Config, st):
     floor gate.
 
     LEVERS READ: accum, batch_windows, lr_sched, lr_restarts, lr_decay, lr_shift_warm,
-                 weight_decay, lr_restart_damp, grad_clip, lr_wavelength, lr_min_frac
+                 weight_decay, lr_restart_damp, grad_clip, lr_wavelength, lr_min_frac,
+                 horizon_revise (Gate opt.horizon.revise), lr_continue (the asked regime, printed
+                 beside the one in force on a resume), lr (the first resumed step's fraction of peak)
     WIRES READ: d_effective_batch_windows
     DID IT FIRE: this call IS the DID IT FIRE surface for the package
     """
@@ -2510,6 +2826,50 @@ def counters(opt: Config, st):
                           st.counters["opt.lr.shift_warm_applied"],
                           f"{notifications} notification(s) x {shift_warm} steps"))
 
+    # THE IN-RUN HORIZON REVISION (Q-OPT-10) HAD NO GATE, WHILE revise_horizon'S OWN COMMENT
+    # PROMISED "counters() prints the reason beside it" on its multi-cycle arm: opt.horizon.
+    # revise_inert was a bare 1 in a dict on every inert arm there was. Four arms, in
+    # revise_horizon's own order (2026-09-26, with OPT_HORIZON_REVISE's off arm). THE COUNT IS NOT
+    # THIS MECHANISM'S ALONE, and every arm says so where it is nonzero: opt.horizon.revisions also
+    # counts a logged parent's revisions and load_state's resume revision, which is ungated by
+    # design (C01) -- the lever is in-run only.
+    revise_on = bool(opt.horizon_revise)
+    revisions = int(st.counters.get("opt.horizon.revisions", 0) or 0)
+    declined = int(st.counters.get("opt.horizon.revise_declined", 0) or 0)
+    not_mine = (f" opt.horizon.revisions={revisions} is not a reading of this mechanism on this "
+                f"configuration: it counts any revision a parent logged and load_state's resume "
+                f"revision, which no lever gates (C01)." if revisions else "")
+    if not sched_live:
+        gates.append(Gate("opt.horizon.revise", False, revisions, "an act that re-measured the run",
+                          reachable=False,
+                          reason=f"{sched_off} revise_horizon returns None before reading the "
+                                 f"length and counts opt.horizon.revise_inert.{not_mine}"))
+    elif n_cycles > 1:
+        gates.append(Gate("opt.horizon.revise", False, revisions, "an act that re-measured the run",
+                          reachable=False,
+                          reason=f"{n_cycles} restart cycles were fitted (opt.build.cycles_fitted "
+                                 f"> 1), so 'the remaining cosine' a revision would re-map is "
+                                 f"undefined and revise_horizon keeps the horizon as built -- "
+                                 f"inert, not refused (Q-OPT-10).{not_mine}"))
+    elif not revise_on:
+        gates.append(Gate("opt.horizon.revise", False, declined, "OPT_HORIZON_REVISE=True",
+                          reachable=False,
+                          reason=f"OPT_HORIZON_REVISE={revise_on}: revise_horizon keeps the horizon "
+                                 f"as built and declined {declined} revision(s) a mid-epoch act "
+                                 f"asked for (opt.horizon.revise_declined), so a run the acts "
+                                 f"shortened ends above the floor by the under-anneal Q-OPT-5 "
+                                 f"names -- the arm's cost, and the reason it is an arm. IN-RUN "
+                                 f"ONLY: a resume is priced by OPT_LR_CONTINUE, never by this "
+                                 f"lever.{not_mine}"))
+    else:
+        gates.append(Gate("opt.horizon.revise", revisions > 0, revisions,
+                          "an act that re-measured the run",
+                          reason=("the log also holds any revision a parent logged and "
+                                  "load_state's resume revision, which no lever gates (C01)"
+                                  if revisions else
+                                  "the mid-epoch act calls revise_horizon only when it changed the "
+                                  "epoch's length, so 0 means no act re-measured this run")))
+
     gates.append(Gate("opt.weight_decay", wd > 0.0, wd, "> 0.0",
                       reachable=wd > 0.0,
                       reason="" if wd > 0.0 else
@@ -2617,6 +2977,51 @@ def counters(opt: Config, st):
         f"encoder={st.counters['opt.build.params.encoder']} tensor(s), "
         f"overlap={st.counters['opt.build.group_overlap']}",
     ]
+
+    # THE CONTINUATION REGIME, LABELLED ON EVERY RESUME (NEW-05: "the regime printed on every resume
+    # as opt.continue.regime"; CONTRACT-Q-DATA-7: a measurement-protocol resume states its regime).
+    # A LABEL, NOT A COUNTER: written into the returned ledger only, never into st.counters, so it
+    # does not cross a checkpoint and no integer reader meets a string. ABSENT on a fresh run.
+    if ckpt_loaded:
+        cont = st.continuation
+        asked = str(opt.lr_continue)
+        in_force = str(cont["regime"]) if cont else "as_logged"
+        ledger["opt.continue.regime"] = in_force
+        at_load = int(st.counters.get("opt.ckpt.step_at_load", 0) or 0)
+        at_boundary = int(st.counters.get("opt.continue.boundary", 0) or 0)
+        peak = float(opt.lr)
+        # A PURE PROBE, the tool lr_at's docstring invites: _priced writes nothing.
+        first = _priced(opt, st, U.Steps(at_load + 1))[0] / peak
+        notes = []
+        if asked != in_force and not at_boundary:
+            notes.append(f"the asked OPT_LR_CONTINUE={asked!r} was NOT applied: this resume is at "
+                         f"the parent's horizon, so it continues the session the checkpoint "
+                         f"recorded and does not re-read the lever -- change the run length to "
+                         f"start a new session")
+        elif asked != in_force and "opt.continue.inert" in st.counters:
+            notes.append(f"the asked OPT_LR_CONTINUE={asked!r} is INERT at OPT_LR_SCHED=none "
+                         f"(opt.continue.inert): the ablation's rate is the flat peak")
+        if cont is None:
+            shape = ("today's pricing -- a logged parent's schedule re-mapped LR-continuously to "
+                     "the new end (the floor for good once the parent had reached its revised "
+                     "end), otherwise the cosine at the resumed step on the live horizon")
+        else:
+            anchor, ramp, end = int(cont["anchor"]), int(cont["warm"]), int(cont["end"])
+            target = cont["target_frac"]
+            shape = (f"anchor={anchor} start={float(cont['start_frac']):.4g} "
+                     f"target={'floor' if target is None else f'{float(target):.4g}'} "
+                     f"warm={ramp} end={end} priced="
+                     f"{int(st.counters.get('opt.continue.priced', 0) or 0)} step(s)")
+            if in_force == "rewarm" and end <= anchor + ramp:
+                notes.append(f"the session end {end} is at or before the ramp's end "
+                             f"{anchor + ramp}, so this rewarm has NO DECAY PHASE: the rate is at "
+                             f"the floor from the step after the ramp unless an in-run act revises "
+                             f"the end (the resumed build's horizon is this epoch's length x "
+                             f"RUN_EPOCHS, which a longer parent epoch can overrun)")
+        lines.append(f"opt.continue: regime in force {in_force!r} (asked OPT_LR_CONTINUE={asked!r}); "
+                     f"session boundary at this resume={at_boundary}; {shape}; first resumed step "
+                     f"{at_load + 1} priced at {first:.4g} of peak"
+                     + ("".join(f" -- {n}" for n in notes)))
     lines.extend(g.line() for g in gates)
 
     for g in gates:
@@ -2628,7 +3033,10 @@ def counters(opt: Config, st):
 def state_dict(opt: Config, st):
     """Both optimizers' state, plus everything the closed loop needs to survive a run boundary:
     opt_step, n_backward, lr_prev, restart_amp, cycle_best, cycle_index, the resolved horizon,
-    param_group_shape, and the counters.
+    param_group_shape, the counters, shift_at, grad_norms, the horizon's revision log, the accum
+    this run stepped at, and the continuation record (the regime a continued run was anchored
+    under, or None -- Q-OPT-12; without it a same-length resume of a 'plateau' session would find
+    no anchor, and re-anchoring there would restart the ramp from wherever the rate had got to).
 
     param_group_shape WAS MISSING FROM THIS ENUMERATION UNTIL 2026-09-02 (Q-OPT-4) AND load_state
     REFUSES ON IT. A refusal armed against a value nothing writes is untrippable: the L50 guard --
@@ -2691,6 +3099,9 @@ def state_dict(opt: Config, st):
         # passes this run leaves un-stepped: the pending partial group is n_backward % THIS accum,
         # and OPT_ACCUM may legitimately change at the boundary, so the child's live value is not it.
         "accum": int(opt.accum),
+        # THE CONTINUATION SESSION'S FROZEN CLOSED FORM (2026-09-26, Q-OPT-12), or None. A copy, so
+        # a later edit to the live record cannot reach into a payload already handed over.
+        "continuation": dict(st.continuation) if st.continuation else None,
     }
 
 
@@ -2723,8 +3134,21 @@ def load_state(opt: Config, st, saved):
     (opt.ckpt.backward_at_load, opt.ckpt.step_at_load) so the invariant is a statement about this
     process's passes against this process's steps.
 
+    A SESSION BOUNDARY ANCHORS THE CONTINUATION REGIME (2026-09-26, Proposal 05 §8 1.4, NEW-05,
+    C01; Q-OPT-12). The two resumes this function re-prices -- a horizon that differs from the
+    checkpoint's, and a new revision appended to a logged parent -- are the sessions a continued
+    run starts, and at exactly those OPT_LR_CONTINUE is read. 'as_logged', the default, is the
+    pricing above and nothing else, and every LoadReport reason is the one this function returned
+    before the regime existed. 'floor', 'plateau' and 'rewarm' write st.continuation, a record
+    frozen here and checkpointed; a resume at the parent's horizon is not a boundary, so it keeps
+    the record it restored and continues the session exactly under every regime, whatever the live
+    lever says (counters() prints the asked and the in-force regime side by side). The resume
+    revision on a logged parent is NOT gated by OPT_HORIZON_REVISE, which is in-run only (C01).
+
     LEVERS READ: accum (only to stamp opt.ckpt.first_step_short_by at the live phase, and
-                 opt.ckpt.partial_accum_dropped on a checkpoint that predates the saved accum)
+                 opt.ckpt.partial_accum_dropped on a checkpoint that predates the saved accum),
+                 lr_continue, lr, lr_sched, lr_plateau, lr_rewarm, lr_cont_warm (at a session
+                 boundary only, and only to anchor the continuation record -- see above)
     WIRES READ: none
     DID IT FIRE: opt.ckpt.loaded, opt.ckpt.refused (with the reason),
                  opt.ckpt.moments_widened (how many tensors' moments were zero-padded for a dim-0
@@ -2748,7 +3172,13 @@ def load_state(opt: Config, st, saved):
                  the live fallback; 0 on an aligned boundary, ABSENT on a process that restored
                  nothing), opt.ckpt.first_step_short_by (n_backward % the LIVE accum: the passes
                  the child's first step lacks, because its group began before the resume; equal
-                 to the dropped count when accum did not change, ABSENT likewise)
+                 to the dropped count when accum did not change, ABSENT likewise),
+                 opt.continue.boundary (1 when this resume is a session boundary, 0 when it
+                 continues the parent's schedule; stamped on every restore, ABSENT on a process
+                 that restored nothing), opt.continue.priced (seeded 0 when a regime is anchored;
+                 maybe_step counts the steps it prices; ABSENT under 'as_logged'),
+                 opt.continue.inert (1 when a regime was asked at OPT_LR_SCHED=none and could not
+                 apply; ABSENT otherwise), and opt.ckpt.lr_prev_cleared gains the anchoring
     """
     opt = opt.owned_by("OPT")
 
@@ -2805,6 +3235,10 @@ def load_state(opt: Config, st, saved):
     st.shift_at = saved.get("shift_at")
     st.grad_norms = list(saved.get("grad_norms", ()))
     st.horizon_revisions = [tuple(int(v) for v in r) for r in saved.get("horizon_revisions", ())]
+    # THE CONTINUATION RECORD COMES BACK VERBATIM (Q-OPT-12). A checkpoint written before it existed
+    # carries no key and restores None, which is today's pricing. Whether it stays in force is
+    # decided below, once the boundary is known: a resume at the parent's horizon continues it.
+    st.continuation = dict(saved["continuation"]) if saved.get("continuation") else None
 
     # THE COUNTERS COME BACK, EXCEPT THE ONES THAT DESCRIBE THIS PROCESS'S CONSTRUCTION. A mechanism
     # that fired 4,000 times before the boundary must not read "armed but 0" after it; but
@@ -2816,6 +3250,10 @@ def load_state(opt: Config, st, saved):
         # THE ENCODER'S RATE-WRITE TALLY RETURNS ONLY TO A BUILD THAT SEEDED IT: a parent with an
         # encoder must not make the key present on a child whose encoder group is empty.
         if key == "opt.lr.writes.encoder" and key not in st.counters:
+            continue
+        # THE SAME RULE FOR THE DECLINED-REVISION TALLY (2026-09-26): an OPT_HORIZON_REVISE=False
+        # parent must not make it present on a child at True, where revise_horizon cannot decline.
+        if key == "opt.horizon.revise_declined" and key not in st.counters:
             continue
         st.counters[key] = value
     st.counters["opt.ckpt.loaded"] += 1
@@ -2855,6 +3293,14 @@ def load_state(opt: Config, st, saved):
     saved_h = dict(saved.get("horizon", {}))
     live_h = {"run_steps": int(st.horizon.run_steps), "warmup": int(st.horizon.warmup),
               "wavelength": int(st.horizon.wavelength), "n_cycles": int(st.horizon.n_cycles)}
+    # THE RESUMED BUILD'S RUN LENGTH, TAKEN BEFORE ANYTHING BELOW REASSIGNS st.horizon: it is the end
+    # of the session a continuation regime anchors (Q-OPT-12), in the log branch and outside it.
+    live_run_steps = int(live_h["run_steps"])
+    # THE SESSION BOUNDARY IS WHERE THIS FUNCTION ALREADY RE-PRICES, AND NOWHERE ELSE: a new
+    # revision appended to a logged parent, or a horizon that differs from the checkpoint's. Those
+    # are the two resumes whose rate today's pricing moves; every other resume continues the
+    # parent's schedule exactly, and must go on doing so under every regime.
+    boundary = False
     # A CHECKPOINT CARRYING A REVISION LOG IS PRICED ON ITS OWN BASE (Q-OPT-10). The resumed build
     # fitted its horizon to the post-act segmentation, which already reflects the acts the log
     # records; taking it as the base would apply every revision twice. The saved build-time horizon
@@ -2866,12 +3312,22 @@ def load_state(opt: Config, st, saved):
                              warmup=U.Steps(int(saved_h["warmup"])),
                              wavelength=U.Steps(int(saved_h["wavelength"])),
                              n_cycles=int(saved_h["n_cycles"]))
+        # NOT GATED BY OPT_HORIZON_REVISE, AND THAT IS THE RULING (C01, Q-OPT-12): the lever is
+        # in-run only. Gating this append would move a continued run from the floor to the no-log
+        # re-pricing without anyone asking for a new rate; OPT_LR_CONTINUE is the lever for that.
         if int(live_h["run_steps"]) != int(st.horizon_revisions[-1][1]):
             st.horizon_revisions.append((int(st.opt_step), int(live_h["run_steps"])))
             st.counters["opt.horizon.revisions"] = st.counters.get("opt.horizon.revisions", 0) + 1
             st.counters["opt.horizon.revised_run_steps"] = int(live_h["run_steps"])
+            boundary = True
         live_h = dict(saved_h)
+    # THE 'as_logged' VERDICT, BYTE-IDENTICAL TO THE TWO RETURNS THIS FUNCTION ENDED IN UNTIL
+    # 2026-09-26. The horizon-changed branch below returned its own report; it now assigns it and
+    # falls through, every statement kept in its order, so the continuation step after it runs on
+    # both kinds of resume.
+    report = LoadReport(restored=True, refused=False, reason="")
     if saved_h and saved_h != live_h:
+        boundary = True
         # REPORTED, NEVER REFUSED: resuming at a different run length is legitimate, and the LIVE
         # horizon is the one this run's run_windows resolved. Re-projecting mid-run is the
         # `_project`/`_lr_total`/`_proj_lr` machinery (:6335-6376) that produced E8 p=0.760.
@@ -2894,7 +3350,7 @@ def load_state(opt: Config, st, saved):
         if st.lr_prev:
             st.counters["opt.ckpt.lr_prev_cleared"] += 1
             st.lr_prev = 0.0
-        return LoadReport(
+        report = LoadReport(
             restored=True, refused=False,
             reason=f"the horizon changed across the boundary and the LIVE one is in force. "
                    f"Checkpoint: {saved_h}; live: {live_h}. The schedule now prices "
@@ -2905,4 +3361,17 @@ def load_state(opt: Config, st, saved):
                    f"priced under a different horizon; and the accumulation invariant is measured "
                    f"from backward={int(st.n_backward)}, step={int(st.opt_step)}, so a resume at a "
                    f"changed OPT_ACCUM does not read as P3-H29.")
-    return LoadReport(restored=True, refused=False, reason="")
+
+    # THE CONTINUATION REGIME (OPT_LR_CONTINUE, Proposal 05 §8 1.4, Q-OPT-12). Stamped on EVERY
+    # restore, after the counter restore so a parent's value cannot stand in for this process's:
+    # 1 = this resume is a session boundary, 0 = it continues the parent's schedule. The regime
+    # levers are read at a boundary and nowhere else -- a same-length resume keeps the record the
+    # checkpoint carried, so a session saved and resumed continues its closed form exactly.
+    st.counters["opt.continue.boundary"] = 1 if boundary else 0
+    if boundary:
+        _continue_at_load(
+            st, regime=str(opt.lr_continue), sched=str(opt.lr_sched), peak=float(opt.lr),
+            plateau=float(opt.lr_plateau), rewarm=float(opt.lr_rewarm),
+            warm=int(opt.lr_cont_warm), end=live_run_steps)
+    return report
+

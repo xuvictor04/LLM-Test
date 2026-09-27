@@ -19,11 +19,13 @@ WIRES READ:  <comma-separated d_ fields, or "none">
 DID IT FIRE: <the counters that prove the mechanism executed, in G4's three states>
 ```
 
-`tests/test_contract.py` parses those blocks. **All 262** of the declared levers are named by at
+`tests/test_contract.py` parses those blocks. **All 267** of the declared levers are named by at
 least one stub as read by it — **261, not 259, since 2026-09-02: there are now TWO CENSUS
 AMENDMENTS, `OPT_GRAD_CLIP` under Q-OPT-3 and `MEM_JUDGE_FRAC` under Q-MEM-8** (see
 `.rework/CENSUS.md`, section `amendments`, which holds both and states that the census's 328 is
-unchanged by either) — and
+unchanged by either; *2026-09-26: that section now holds eight — `DATA_DRAW` (P1-H58) and
+§8 1.4's five OPT levers, `OPT_HORIZON_REVISE`, `OPT_LR_CONTINUE`, `OPT_LR_PLATEAU`,
+`OPT_LR_REWARM` and `OPT_LR_CONT_WARM`, under Q-OPT-12, each with a reader*) — and
 **261 read, not 258, also since 2026-09-02**: Q-FAB-1 and Q-FAB-2 gave the last two unread levers
 (`FAB.hop_mode`, `FAB.merge_dist`) readers rather than dropping either, so **UNCONSUMED LEVERS**
 below is now an empty table with the two rulings under it. K4 reads that table, so a future lever
@@ -588,7 +590,7 @@ A resume across a `compose` flip is **refused in both directions** and named —
 `emb`/`head` are not constructed at all. That is a real operational restriction and P7's add-area
 entry point must know it before planning an arm table.
 
-### OPT — `src/opt/api.py` (13 levers, one of them a census amendment — there are two in the tree)
+### OPT — `src/opt/api.py` (18 levers, six of them census amendments — `OPT_GRAD_CLIP` and §8 1.4's five)
 
 Owns every rate and the size of the batch it acts on. **OPT maintains its own optimizer-step
 counter**, so `units.Steps` becomes literally true — and the horizon's `Windows→Steps` division is
@@ -602,6 +604,17 @@ adopted.)*
 `load_state`. `revise_horizon` (03b S0b, Q-OPT-10) re-maps the rest of the schedule when the
 mid-epoch act re-measures the run: LR-continuous, logged in `st.horizon_revisions`, checkpointed.
 
+**Two §8 1.4 mechanisms, kept apart on purpose (Q-OPT-12, 2026-09-26; C01).** `OPT_HORIZON_REVISE`
+(default `True`) is the in-run revision's off arm: at `False` `revise_horizon` is inert and counts
+every declined revision (`opt.horizon.revise_inert`, `opt.horizon.revise_declined`), and it never
+gates `load_state`'s resume revision. `OPT_LR_CONTINUE` (default `'as_logged'`) is the rate a
+continued run starts at: at a **session boundary** — a resume `load_state` re-prices, i.e. a horizon
+that differs from the checkpoint's or a new revision on a logged parent — `'floor'`, `'plateau'`
+(`OPT_LR_PLATEAU`, `OPT_LR_CONT_WARM`) and `'rewarm'` (`OPT_LR_REWARM`, `OPT_LR_CONT_WARM`) are
+anchored into the checkpointed record `st.continuation` and priced by their closed forms;
+`'as_logged'` is today's pricing, bit-identical; `'regulated'` is refused at `build` with `NotBuilt`
+(NEW-04). Every resume prints the regime in force as the ledger label `opt.continue.regime`.
+
 **`OptState` names its two optimizers `base` and `encoder`** (Q-OPT-7) — the same words as `build`'s
 `param_groups` keys. `maybe_step` writes `lr` into **both** and steps **`base` only**; the encoder is
 stepped by `SIG.train_step`, on SIG's cadence, behind SIG's InfoNCE floor gate (Q-OPT-6).
@@ -611,7 +624,8 @@ stepped by `SIG.train_step`, on SIG's cadence, behind SIG's InfoNCE floor gate (
 `run_windows`, `best_bpb` (a Reading carrying its seed count), `shift_at`, `saved`. **`build` no
 longer takes `resume`** — `load_state` is the whole restore path (Q-OPT-4, a frozen signature moved).
 **Checkpointed:** both AdamW states, `n_backward`, `opt_step`, `lr_prev`, `restart_amp`,
-`cycle_best`, `cycle_index`, the resolved `Horizon`, **`param_group_shape`**, the counters. The old
+`cycle_best`, `cycle_index`, the resolved `Horizon`, **`param_group_shape`**, the counters,
+`horizon_revisions` (Q-OPT-10) and the **continuation record** `continuation` (Q-OPT-12). The old
 checkpoint saved `opt_m`/`opt_e` and *nothing else from this package*. `param_group_shape` was
 missing from `state_dict`'s enumeration while `load_state` refused on it — an untrippable L50 guard,
 repaired 2026-09-02 with Q-OPT-4. A **dim-0 widening** (FAB_SLOTS, LM_VOCAB_SLOTS) is restored with
@@ -621,8 +635,10 @@ zero-padded moments rather than refused (Q-OPT-8), and a remaining refusal stops
 **read in `maybe_step`**, between the gradient's last use and the `zero_grad`; taken in `counters` it
 would be a norm over zeroed gradients — 0.0 for a whole run with every check green (Q-OPT-3).
 **Defaults, stated because they change what a run is:** `grad_clip = 0.0` (**OFF** — a new lever and
-one of the tree's two census amendments; see Q-OPT-3), `weight_decay = 0.0`, `lr_sched` on, `lr_restarts`
-fitting exactly one cycle at the shipped run length.
+a census amendment; see Q-OPT-3), `weight_decay = 0.0`, `lr_sched` on, `lr_restarts`
+fitting exactly one cycle at the shipped run length, `OPT_HORIZON_REVISE = True` (the in-run revision
+on, as before it had a lever) and `OPT_LR_CONTINUE = 'as_logged'` (today's resume pricing, labelled on
+every resume as `opt.continue.regime`; Q-OPT-12).
 
 ### SIG — `src/sig/api.py` (18 levers)
 
@@ -1454,7 +1470,7 @@ defects hide behind has moved.)*
    `System.warnings`; an **empty** list is a real result and must be printed as one.
 3. **`_run_windows` returned a bare `int`** into two functions that refuse one:
    `derive.cadences_that_cannot_fire` and `derive.opt_steps_from_windows` both raise `UnitError` on
-   a non-`Windows` (ISSUES P1-H51: all 35 Clock-unit levers resolve to bare ints and the typing is real
+   a non-`Windows` (ISSUES P1-H51: all 36 Clock-unit levers resolve to bare ints and the typing is real
    only where `derive` puts it back). It now returns `units.Windows`.
 4. **`_run_windows`' row said `run_windows=Plan's measured length`.** `Plan` has no such field
    (`data/api.py:22`) — the same wrong fact the helper's own docstring had already caught once, in
@@ -1605,7 +1621,7 @@ been fixed is a real outcome and acting on it writes a second wrong sentence. **
 The union of the five `levers_unconsumed` lists was **15**. Thirteen of them were EVAL's, and all
 thirteen were given a declared reader by writing the P6 instrument signatures into
 `src/eval/api.py`. **The last two were FAB's, and as of 2026-09-02 this table is EMPTY: every one of
-the 262 declared levers is named `LEVERS READ:` by a stub.** Neither of the two was dropped, and
+the 267 declared levers is named `LEVERS READ:` by a stub.** Neither of the two was dropped, and
 neither was given a fake reader; each was ruled, and the ruling is what produced the reader.
 
 | lever | env name | why it has no reader | disposition |
@@ -2735,7 +2751,7 @@ prints rather than a claim in a docstring.
 **What it does NOT need, and this is why nothing was minted.** No typed accessor and therefore **no
 new entry point**. The **five** accessors — `EVAL.curve_period`, `DOM.manage_period`,
 `FAB.manage_period`, `MEM.rekey_period`, `CKPT.save_period` — exist because `Config` hands back a
-bare `int` for all 35 Clock-unit *levers* (ISSUES P1-H51, three of five gates handed bare ints until
+bare `int` for all 36 Clock-unit *levers* (ISSUES P1-H51, three of five gates handed bare ints until
 2026-08-30); a module constant has no `Config` to drop its kind, so it is written `units.Windows` at
 its definition. That is a **construction, not a conversion** — it re-attaches a kind, it does not
 cross one. *(This sentence said "four" until 2026-09-03. It is the sixth count this document has got
@@ -5012,7 +5028,100 @@ the same map from the same base. **History (the old `_project` jumped and latche
 one continuous re-map anchored at the current step -- `_effective_step` prices step s at
 e0 + (s − a)·(R − e0)/(R' − a) on the build-time horizon -- so lr(now) is unchanged and the cosine ends
 at the floor at the revised end. Inert, with `opt.horizon.revise_inert`, when more than one restart
-cycle was fitted or `lr_sched` is 'none'. Driven: `tests/test_continuation.py` S2.
+cycle was fitted or `lr_sched` is 'none', or `OPT_HORIZON_REVISE` is False. Driven:
+`tests/test_continuation.py` S2.
+*2026-09-26 (Proposal 05 §8 1.4, Q-OPT-12):* the revision has an off arm, `OPT_HORIZON_REVISE`
+(default `True`). At `False` `revise_horizon` is inert in-run and counts it twice over —
+`opt.horizon.revise_inert` = 1 and `opt.horizon.revise_declined`, one per declined revision, seeded
+at 0 by `build` on that arm only — and the run ends above the floor by Q-OPT-5's under-anneal, which
+is the arm's measured cost. **`load_state`'s resume revision on a logged parent is not gated by the
+lever** (C01): the rate a resume starts at is `OPT_LR_CONTINUE`'s. `counters()` now carries Gate
+`opt.horizon.revise`, which prints the inert reason this entry promised and nothing printed. Driven:
+`tests/test_continuation.py` S2b and S8, `tests/test_lr_continue.py` L4.
+
+### Q-OPT-12 — the rate a continued run starts at, and an off arm for the in-run horizon revision — **RESOLVED 2026-09-26 (Proposal 05 §8 1.4; NEW-05, C01, TREE-OPT_HORIZON_REVISE-LEVER): `OPT_LR_CONTINUE` ∈ {as_logged, floor, plateau, rewarm, regulated}, DEFAULT 'as_logged' = TODAY'S PRICING, BIT-IDENTICAL; `OPT_HORIZON_REVISE` (DEFAULT True) IS IN-RUN ONLY. ⚠ FIVE NEW LEVERS, FIVE CENSUS AMENDMENTS; 'regulated' REFUSED (NotBuilt, NEW-04); `OPT_BORN_CLOCK` DEFERRED (C02, §8 4.2). NO SIGNATURE MOVES, NO WIRE**
+The number is Q-OPT-12 because 03b and the register already reserve Q-OPT-11 for the AUD
+codec-schedule ruling. **What was asked.** A continued run — a resume whose horizon differs from its
+parent's, the post-training session of NEW-05 — started at a rate the parent's SHAPE set: a parent
+with a revision log resumed at the floor for good once it had finished its run, and a no-log parent
+resumed with no ramp at the cosine for its step E against the resumed build's horizon (about 0.48 of
+peak at the 756 KB CPU shape, 0.22 at the 3.78 MB whole-epoch shape, the floor only for a full 20 MB
+epoch;
+`verify/emp3/k0_epoch_child.py`). And the in-run revision (Q-OPT-10) had no off arm, while the draft
+that added one gated `load_state`'s resume revision as well — which would have switched a continued
+act-parent from the floor to the no-log re-pricing, about 0.37-0.45 of peak at 3.78 MB, without anyone
+asking for a new rate (C01).
+
+**The ruling, as built.** Two levers for two questions, in `src/opt/levers.py` section 6.
+* **`OPT_HORIZON_REVISE`** (U.FLAG, default `True`): in-run only; see the dated note on Q-OPT-10.
+* **`OPT_LR_CONTINUE`** (U.NAME, default `'as_logged'`). **The session boundary is where `load_state`
+  already re-prices, and nowhere else:** a horizon that differs from the checkpoint's
+  (`opt.ckpt.horizon_changed`), or a new revision appended to a logged parent. Every other resume
+  continues the parent's schedule exactly, under every regime. At a boundary, with j = step − anchor
+  (the anchor is the resumed step, so the first step re-priced is anchor + 1), W = `OPT_LR_CONT_WARM`
+  (default 1000, the tree's warmup; refused below 0), s0 = the rate the restored base optimizer holds
+  over peak (the parent's last applied rate) and f = `lr_min_frac`:
+  - `'as_logged'`: no regime. The rate is today's function of the horizon and the log, bit-identical,
+    and every `LoadReport` reason is the one `load_state` returned before this entry.
+  - `'floor'`: f from the first resumed step.
+  - `'plateau'`: s0 + (t − s0)·j/W while j < W, then t, held; t = `OPT_LR_PLATEAU` (default 0.25,
+    provisional; domain [0, 1]).
+  - `'rewarm'`: the same ramp to t = `OPT_LR_REWARM` (default 0.5, provisional; domain [0, 1], which
+    admits the 1.0 arm), then f + (t − f)·(1 + cos πp)/2 with p running 0 → 1 from anchor + W to the
+    session end — the resumed build's run_steps, at least anchor + W + 1. The session's own mid-epoch
+    acts re-map that decay LR-continuously through the same `_effective_step` map Q-OPT-10 uses; under
+    'floor' and 'plateau' they are logged and move nothing.
+  - `'regulated'`: declared and **not built** — it sets each session's plateau from the previous
+    session gate's margin, and that gate (NEW-04, §8 4.4) does not exist. `OPT.build` refuses it on
+    every run with `spine/gate.py::NotBuilt`, message starting `OPT_LR_CONTINUE='regulated'` and naming
+    NEW-04 — the `FAB_HOP_MODE` / `LM_COMPOSE` / `MEM_KEY_SRC` precedent, never a silent fallback.
+  The shift re-warm still attenuates a regime (§8 4.2 runs its arms in the continuation harness) and
+  the floor clamp still bounds it; the restart damping and the envelope do not apply, because past the
+  anchor no as-built cycle is priced. At `OPT_LR_SCHED=none` a regime is inert and counted
+  (`opt.continue.inert`), the revise_horizon precedent.
+* **Frozen at the boundary, checkpointed.** A regime is written into `OptState.continuation` — regime,
+  anchor, start_frac, target_frac, warm, end, rev_base — which `state_dict` carries and `load_state`
+  restores (an older checkpoint restores None). A resume at the parent's horizon keeps it, so a
+  session saved and resumed continues its closed form exactly and never re-reads the lever; an
+  operator who asks for another regime there gets the recorded one, and the report says so in words.
+  A boundary under `'as_logged'` clears any record a parent carried.
+* **No phantom restart.** Anchoring a regime clears `lr_prev` (counted in `opt.ckpt.lr_prev_cleared`),
+  as the horizon-changed branch already did for its own boundary, and `maybe_step` does not consult
+  the restart detector on a step a regime priced: a regime's ramp is not a cosine wrap, and stamping it
+  `restart=True` would feed `FAB.grow_check` a self-inflicted shift. `opt.restart.wraps` still counts
+  the as-built horizon's cycle-index advances under a regime; on a continued run read it as a fact
+  about a horizon the rate no longer follows.
+* **Said on every resume.** The returned ledger carries `opt.continue.regime` — a string label, the
+  anchored record's regime or `'as_logged'`, ABSENT on a fresh run and never written into
+  `st.counters` — and one `opt.continue:` report line: the asked and the in-force regime, the boundary,
+  the anchor, start, target, ramp and end, the steps priced, and the first resumed step's rate as a
+  fraction of peak. Counters: `opt.continue.boundary` (1 or 0 on every restore), `opt.continue.priced`
+  (seeded 0 when a regime is anchored) and `opt.continue.inert` — ABSENT on a fresh run, so a default
+  run's ledger gains no key. **The session end is a projection:** the resumed build's horizon is this
+  epoch's length × `RUN_EPOCHS`, the same projection 'as_logged' prices against, so a parent whose
+  epochs were longer than the child's can leave it at or before anchor + W; 'rewarm' then has no decay
+  phase until a child act revises the end, and the report line says so. Which session length the
+  arms should use is a GPU question (§8 5.2), not a CPU one.
+* **`OPT_BORN_CLOCK` is deferred to §8 4.2 (C02) and is not declared.** A per-group warm-up clock for
+  capacity born after the anchor needs a born-row signal OPT may not import (O10) and no wire carries,
+  a per-ROW rate inside one tensor that AdamW's per-group lr cannot express, and checkpointed per-group
+  clocks; §8 4.2 builds it with `FAB_LR_OWN` scope 'newborn'. A refuse-only lever would have cost a
+  census amendment for nothing.
+**Bit-identity.** `st.continuation` is None on every fresh run and under 'as_logged', and `_schedule`
+enters the regime branch only when it is not, so no float operation on the existing path moved;
+`build` seeds no new counter at the defaults. `tests/test_baseline.py` reproduces the d32e2ce fixture
+(80 losses, 244 integer counters, no new counter on a fresh run). The fixture has no resume, so the
+continued run was compared against the tree before this entry (148786f), in-process at the test base
+(`DATA_STREAM_BYTES=60000`), for four children at `RUN_EPOCHS=2 DATA_RESAMPLE=1` over 40 windows each —
+a 12-window no-log parent's boundary child, a whole-epoch no-log parent's, a whole-epoch act parent's
+(`TOK_GROW_EVERY=30 TOK_RETOK_EVERY=40`, which resumes at the floor: 1.0e-4), and a 135-window act
+parent resumed mid-epoch (the log branch's append): loss curves, `lr_at` over every child step,
+`lr_prev`, the `LoadReport` reason, the revision log and every integer OPT counter other than the new
+`opt.continue.*` are identical.
+**What CPU establishes:** operation only — each regime starts at and follows its closed form, the
+counters fire, a session resumes exactly. Which regime a post-training session should use is §8 5.2's
+GPU question ([OWNER] O6). Driven: `tests/test_lr_continue.py` L1-L8, `tests/test_continuation.py` S2b,
+S8 and S5's regime case, `tests/test_prose_guards.py` G2.
 
 ### Q-RUN-11 — a resume drew epoch 0's stream whatever epoch it resumed in — **RESOLVED 2026-09-24: THE `stream` ROW DRAWS `Snapshot.epoch`**
 The `stream` row passed `epoch=0` unconditionally. Driven at `RUN_EPOCHS=2 DATA_RESAMPLE=1`: the
@@ -5441,7 +5550,7 @@ on existing rulings:** gate `fab.on` at `FAB_ON=0` (ruled a switch read false, `
 | K1 | every name this document declares exists in the tree **with the signature it claims** | rename a parameter; drop a function |
 | K2 | `spine.compose` imports and `compose()` raises **only `NotImplementedError`, from a stub** | a typo in the root surfaces as `AttributeError`/`TypeError`, not as a missing body |
 | K3 | no package imports another (O10 restated at the contract boundary) | add `from fabric import api` to `src/memory/` |
-| K4 | every one of the 262 declared levers is named `LEVERS READ:` by a stub, or is in the UNCONSUMED table above **with a reason** | declare a lever and give it no reader |
+| K4 | every one of the 267 declared levers is named `LEVERS READ:` by a stub, or is in the UNCONSUMED table above **with a reason** | declare a lever and give it no reader |
 | K5 | every `d_` field the ledger declares is read by a stub in its own package, and no stub reads an undeclared one | add a wire nobody consumes |
 | K6 | every entry point is **named by a row** in `ASSEMBLY_ORDER` or `LOOP_ORDER`, or is in `compose.DEFERRED_ENTRY_POINTS` with a reason | declare a mechanism the root never calls; or leave a deferral in place after a row starts naming it — the check reads that table **backwards** and reports the stale entry |
 | K7 | the root reads only names a package **declares** off a Config | `int(lm.depth)` where LM declares `layers` — a crash at whatever stage reaches it, invisible while an earlier stub raises first |

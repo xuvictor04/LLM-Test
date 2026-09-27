@@ -11,6 +11,8 @@ docs/04_CONTRACT.md). Each of these was driven on the tree before the repair:
       the SIG warm-up; compose() now raises RefusedRun at the `refuse` stage, before any model.
   G2  A DECLARED-AND-NOT-BUILT ARM IS REFUSED AT STARTUP. LM_COMPOSE=1 and MEM_KEY_SRC=frozen
       composed with 0 refusals and raised NotBuilt at the first flush, after the whole warm-up.
+      OPT_LR_CONTINUE='regulated' (Proposal 05 §8 1.4, Q-OPT-12) joined them on the day it was
+      declared: OPT.build refuses it, before the SIG warm-up, naming the lever and NEW-04.
   G3  A NEGATIVE PERIOD IS DESCRIBED AS WHAT RUN.Cadences.due DOES WITH IT -- DISARMED -- and not
       as a fire on EVERY window, which is what four refusals and a Gate reason said while the
       ledger beside them read fires=0.
@@ -94,7 +96,8 @@ def g1_refusal_stops_compose():
 
 def g2_not_built_arms_refused_at_startup():
     for env, lever in (({"LM_COMPOSE": "1"}, "LM_COMPOSE=1"),
-                       ({"MEM_KEY_SRC": "frozen"}, "MEM_KEY_SRC='frozen'")):
+                       ({"MEM_KEY_SRC": "frozen"}, "MEM_KEY_SRC='frozen'"),
+                       ({"OPT_LR_CONTINUE": "regulated"}, "OPT_LR_CONTINUE='regulated'")):
         try:
             build(**env)
             check(f"G2 {lever} is refused at compose", False, "compose returned")

@@ -84,7 +84,7 @@ DISARMED — which the cadence audit reports as a different state from starved.
 
 ## 2. Every lever, by package
 
-262 levers across 13 packages.
+267 levers across 13 packages.
 
 
 ### CAP (7 levers)
@@ -322,18 +322,23 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `MEM_WRONG_READ` | `True` | on/off |  | Whether the wrong flag excludes an entry from every retrieval, or only from the sweep. |
 | `MEM_WRONG_SWEEP` | `False` | on/off |  | Whether the selected wrongness detector DELETES flagged entries or only flags them. |
 
-### OPT (13 levers)
+### OPT (18 levers)
 
 | lever | default | unit | accepts | what it is |
 |---|---|---|---|---|
 | `OPT_ACCUM` | `1` | Backwards |  | Backward passes accumulated before one optimizer step -- with batch_windows, the effective batch, and the only way to reach a large one on a small GPU. |
 | `OPT_BATCH_WINDOWS` | `1` | Windows |  | How many stream windows are accumulated into one forward/backward; this sets the flush cadence the whole loop body runs on. |
 | `OPT_GRAD_CLIP` | `0.0` | fraction 0..1 |  | Global gradient-norm clip applied to the BASE parameter group before each optimizer step. 0.0 is OFF, which is what every recorded number in this project was measured under. |
+| `OPT_HORIZON_REVISE` | `True` | on/off |  | Whether the mid-epoch act re-maps the rest of the LR schedule to the re-measured run length, LR-continuously (Q-OPT-10). |
 | `OPT_LR` | `0.002` | fraction 0..1 |  | Peak learning rate; every rate the system applies is this times a schedule multiplier in 0..1. |
+| `OPT_LR_CONT_WARM` | `1000` | Steps |  | Steps over which OPT_LR_CONTINUE='plateau' and 'rewarm' ramp linearly from the parent's current rate to their target. |
+| `OPT_LR_CONTINUE` | `'as_logged'` | name | choices `'as_logged'`, `'floor'`, `'rewarm'`, `'plateau'`, `'regulated'` | The rate a continued run starts from: a resume whose horizon differs from its parent's (a new run length -- the post-training session). 'as_logged' (default, OFF: no regime) is today's pricing: a finished parent resumes at the floor for good after a revision log, and otherwise at the cosine for its step on the new horizon. 'floor' holds lr x lr_min_frac. 'plateau' ramps linearly from the parent's rate to OPT_LR_PLATEAU x lr over OPT_LR_CONT_WARM steps and holds. 'rewarm' ramps the same way to OPT_LR_REWARM x lr and then re-decays by a cosine to the floor at the run's end. 'regulated' is declared and NOT BUILT (it needs the NEW-04 session gate) and is refused at startup. |
 | `OPT_LR_DECAY` | `1.0` | fraction 0..1 | domain (0.0, 1.0) | Strength of a monotone envelope over successive restart peaks, so each cycle keeps its own high phase while the ceiling comes down. |
 | `OPT_LR_MIN_FRAC` | `0.05` | fraction 0..1 | domain (0.0, 1.0) | Floor of the cosine as a fraction of peak -- the schedule never returns zero. |
+| `OPT_LR_PLATEAU` | `0.25` | fraction 0..1 | domain (0.0, 1.0) | The rate OPT_LR_CONTINUE='plateau' ramps to and holds, as a fraction of peak. |
 | `OPT_LR_RESTART_DAMP` | `0.5` | fraction 0..1 | domain (0.0, 1.0) | Multiplier on the next restart's swing when the cycle that just ended failed to beat the best held-out it inherited; cumulative. |
 | `OPT_LR_RESTARTS` | `True` | on/off |  | Whether the cosine wraps into repeated warm restarts, with a whole number of cycles fitted to the run, instead of holding at the floor. |
+| `OPT_LR_REWARM` | `0.5` | fraction 0..1 | domain (0.0, 1.0) | The rate OPT_LR_CONTINUE='rewarm' ramps to before it re-decays to the floor, as a fraction of peak. |
 | `OPT_LR_SCHED` | `'cosine'` | name | choices `'cosine'`, `'none'` | Selects the rate schedule: the warmup-then-cosine shape, or a constant peak rate for the whole run. |
 | `OPT_LR_SHIFT_WARM` | `0` | Steps |  | Re-warm length after a distribution shift the system caused itself, applied as an attenuation of the current cycle. |
 | `OPT_LR_WARMUP` | `1000` | Steps |  | Linear ramp from zero to the peak rate at the start of a run, paid once. |

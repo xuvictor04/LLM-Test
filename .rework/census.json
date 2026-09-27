@@ -5404,6 +5404,91 @@
      "DATA_EXPOSURE_MAX",
      "DATA_EXPOSURE_SKEW"
     ]
+   },
+   {
+    "old_name": "(amendment: OPT_HORIZON_REVISE)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "OPT",
+    "new_name": "OPT_HORIZON_REVISE",
+    "unit": "on/off",
+    "purpose": "Whether the mid-epoch act's OPT.revise_horizon re-maps the rest of the LR schedule to the re-measured run length, LR-continuously (Q-OPT-10). True (the shipped default) is today's behaviour; False keeps the horizon as built for the rest of the run and counts each declined revision (opt.horizon.revise_inert, opt.horizon.revise_declined). IN-RUN ONLY: it never gates OPT.load_state's resume revision.",
+    "reason": "AMENDMENT, 2026-09-26, Proposal 05 \u00a78 1.4 (register rows TREE-OPT_HORIZON_REVISE-LEVER, NEW-05 and C01; the default from Appendix B), ruled in docs/04_CONTRACT.md Q-OPT-12. There is no ancestor knob: the old tree never revised a horizon mid-run, it re-projected one every epoch through `_project`/`_lr_total`/`_proj_lr`, which Q-OPT-5 refused; so there is no (family, old_name) key a DEPARTURES entry could be written under and N2 could only be satisfied by amending the census. IT DOES NOT CHANGE THE 328: that figure counts the old _SPEC's knobs and this was never one. WHY: revise_horizon shipped ON with no off arm, so its effect on a run could not be measured; the register prices the OFF arm's cost (a run shortened by a fraction f ends at 0.05 + 0.95 x (1 - cos pi f) / 2 of peak, 0.057 / 0.076 / 0.107 at f = 0.05 / 0.10 / 0.15 with the tree's warmup) and schedules the True/False pair on GPU (\u00a78 6.8). IN-RUN ONLY BY RULING (C01): gating load_state's resume revision too would silently switch a continued act-parent from the floor to the no-log re-pricing (about 0.37-0.45 of peak at 3.78 MB); OPT_LR_CONTINUE owns resume pricing.",
+    "couples_with": [
+     "OPT_LR_SCHED",
+     "OPT_LR_WAVELENGTH",
+     "OPT_LR_RESTARTS",
+     "OPT_LR_CONTINUE",
+     "TOK_RETOK_EVERY"
+    ]
+   },
+   {
+    "old_name": "(amendment: OPT_LR_CONTINUE)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "OPT",
+    "new_name": "OPT_LR_CONTINUE",
+    "unit": "name",
+    "purpose": "The rate a continued run starts from: a resume whose horizon differs from its parent's (the post-training session). 'as_logged' (the shipped default, no regime) is today's pricing -- for a finished parent, the floor for good after a revision log, otherwise the cosine at the resumed step on the new horizon -- labelled on every resume as opt.continue.regime. 'floor', 'plateau' (OPT_LR_PLATEAU, OPT_LR_CONT_WARM) and 'rewarm' (OPT_LR_REWARM, OPT_LR_CONT_WARM) are anchored at the boundary into a checkpointed record; 'regulated' is declared and refused (NotBuilt) until the NEW-04 session gate exists.",
+    "reason": "AMENDMENT, 2026-09-26, Proposal 05 \u00a78 1.4 (register rows TREE-OPT_HORIZON_REVISE-LEVER, NEW-05 and C01; the default from Appendix B), ruled in docs/04_CONTRACT.md Q-OPT-12. There is no ancestor knob: the old tree priced a resume by whatever its projection machinery produced (ISSUES P1-H17) and had no switch over it, so there is no (family, old_name) key and N2 could only be satisfied by amending the census. IT DOES NOT CHANGE THE 328. WHY: today's continuation rate is an accident of the parent's shape rather than a choice -- the floor for good for an act-parent, about 0.48 of peak at 756 KB and 0.22 at 3.78 MB for a no-log parent (verify/emp3/k0_epoch_child.py) -- and goal B's post-training sessions need it chosen. The register refuses to pick a regime before the GPU arms (\u00a78 5.2, [OWNER] O6), so the default 'as_logged' keeps today's pricing bit-identical and states it; 'plateau' absorbs the draft's 'trunk' (C01).",
+    "couples_with": [
+     "OPT_LR",
+     "OPT_LR_MIN_FRAC",
+     "OPT_LR_SCHED",
+     "OPT_LR_PLATEAU",
+     "OPT_LR_REWARM",
+     "OPT_LR_CONT_WARM",
+     "OPT_HORIZON_REVISE",
+     "RUN_EPOCHS"
+    ]
+   },
+   {
+    "old_name": "(amendment: OPT_LR_PLATEAU)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "OPT",
+    "new_name": "OPT_LR_PLATEAU",
+    "unit": "fraction 0..1",
+    "purpose": "The rate OPT_LR_CONTINUE='plateau' ramps to and holds, as a fraction of peak. Default 0.25, provisional; read only at a continuation boundary under 'plateau'. domain (0.0, 1.0); a value below OPT_LR_MIN_FRAC is clamped at the floor.",
+    "reason": "AMENDMENT, 2026-09-26, Proposal 05 \u00a78 1.4 (register rows TREE-OPT_HORIZON_REVISE-LEVER, NEW-05 and C01; the default from Appendix B), ruled in docs/04_CONTRACT.md Q-OPT-12. There is no ancestor knob (the old tree had no continuation regime at all), so N2 could only be satisfied by amending the census. IT DOES NOT CHANGE THE 328. WHY: FRAME-POST-TRAINING (1) specifies the plateau as a ramp from the parent's current rate to this fraction of peak over OPT_LR_CONT_WARM steps, then a hold (the WSD / infinite-schedule pattern); the register's arms are 0.1 and 0.25, decided on GPU (\u00a78 5.2).",
+    "couples_with": [
+     "OPT_LR_CONTINUE",
+     "OPT_LR_CONT_WARM",
+     "OPT_LR",
+     "OPT_LR_MIN_FRAC"
+    ]
+   },
+   {
+    "old_name": "(amendment: OPT_LR_REWARM)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "OPT",
+    "new_name": "OPT_LR_REWARM",
+    "unit": "fraction 0..1",
+    "purpose": "The rate OPT_LR_CONTINUE='rewarm' ramps to, as a fraction of peak, before a cosine re-decay to the floor at the session's end. Default 0.5, provisional; read only at a continuation boundary under 'rewarm'. domain (0.0, 1.0), which admits the register's 1.0 arm.",
+    "reason": "AMENDMENT, 2026-09-26, Proposal 05 \u00a78 1.4 (register rows TREE-OPT_HORIZON_REVISE-LEVER, NEW-05 and C01; the default from Appendix B), ruled in docs/04_CONTRACT.md Q-OPT-12. There is no ancestor knob (the old tree had no continuation regime at all), so N2 could only be satisfied by amending the census. IT DOES NOT CHANGE THE 328. WHY: NEW-05's 'rewarm' arm ramps to OPT_LR_REWARM x peak and re-decays over the session; the arms are 0.5 and 1.0, decided on GPU (\u00a78 5.2).",
+    "couples_with": [
+     "OPT_LR_CONTINUE",
+     "OPT_LR_CONT_WARM",
+     "OPT_LR",
+     "OPT_LR_MIN_FRAC"
+    ]
+   },
+   {
+    "old_name": "(amendment: OPT_LR_CONT_WARM)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "OPT",
+    "new_name": "OPT_LR_CONT_WARM",
+    "unit": "Steps",
+    "purpose": "Optimizer steps over which OPT_LR_CONTINUE='plateau' and 'rewarm' ramp linearly from the parent's current rate to their target. Default 1000 (the tree's warmup); 0 applies the target from the first resumed step. A ramp length, not a cadence; refused below 0.",
+    "reason": "AMENDMENT, 2026-09-26, Proposal 05 \u00a78 1.4 (register rows TREE-OPT_HORIZON_REVISE-LEVER, NEW-05 and C01; the default from Appendix B), ruled in docs/04_CONTRACT.md Q-OPT-12. There is no ancestor knob (the old tree had no continuation regime at all), so N2 could only be satisfied by amending the census. IT DOES NOT CHANGE THE 328. WHY: a ramp from the parent's rate keeps a session boundary LR-continuous -- the no-jump principle of Q-OPT-5 and Q-OPT-10 -- and FRAME-POST-TRAINING (1) names 1000 steps, the tree's own OPT_LR_WARMUP, as its length.",
+    "couples_with": [
+     "OPT_LR_CONTINUE",
+     "OPT_LR_PLATEAU",
+     "OPT_LR_REWARM",
+     "OPT_LR_WARMUP"
+    ]
    }
   ]
  }

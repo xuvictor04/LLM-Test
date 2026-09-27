@@ -1338,7 +1338,8 @@ LOOP_ORDER = (
                                       "the clock's epoch length"),
     ("X", "OPT",   "revise_horizon",  "(st, run_windows=clock.step + the rest of this epoch at "
                                       "its new length + later epochs at that length) -- only if "
-                                      "the length changed; LR-continuous (Q-OPT-10)",
+                                      "the length changed; LR-continuous (Q-OPT-10); inert and "
+                                      "counted at OPT_HORIZON_REVISE=False (Q-OPT-12)",
                                       "st.horizon_revisions"),
     ("X", "DOM",   "on_retokenize",   "(dom, part) -- when the match table moved since the last "
                                       "segmentation, as at the roll; the act also stamps "
@@ -3068,7 +3069,7 @@ def _run_windows(sysm):
     nothing. Measured, not inferred: `compose.compose(environ={})` raises NotImplementedError from
     compose.py's `refuse` stage into capacity/api.py::startup_refusals, and docs/04_CONTRACT.md
     says the same in as many words ("halts on the 29th of the 40 rows in ASSEMBLY_ORDER, at
-    CAP.startup_refusals"). ISSUES P1-H51 is the general case: all 35 Clock-unit levers resolve to bare
+    CAP.startup_refusals"). ISSUES P1-H51 is the general case: all 36 Clock-unit levers resolve to bare
     ints and the typing is real only where derive or assemble puts it back, which for this quantity
     is here, at the one place it is computed.
 
@@ -3080,7 +3081,7 @@ def _run_windows(sysm):
     number was right at every configuration, which is the point of the rule and not an argument
     against it. It is now spine/derive.py::run_windows_from_epochs, which refuses anything but an
     Epochs at the count end and any Clock at the rate end, and the kind is put on HERE -- at the
-    call, where P1-H51 says it has to be, because RUN.epochs resolves to a bare int like all 35
+    call, where P1-H51 says it has to be, because RUN.epochs resolves to a bare int like all 36
     Clock-unit levers.
 
     WHY O11 DID NOT SEE IT, WHICH MATTERS MORE THAN THE LINE DID. Three independent reasons, each

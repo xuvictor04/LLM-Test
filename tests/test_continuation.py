@@ -13,6 +13,8 @@ parent's exact stream and continue. Each check below pins one promise of that pa
       rolls on the next advance WITHOUT counting a window.
   S2  OPT.revise_horizon is LR-continuous (lr(now) unchanged), ends at the floor at the revised end,
       and leaves the warmup untouched.
+  S2b AT OPT_HORIZON_REVISE=False (Proposal 05 §8 1.4, Q-OPT-12) revise_horizon returns None, logs
+      nothing, and counts opt.horizon.revise_inert and opt.horizon.revise_declined.
   S3  TOK.splice keeps every unit up to and including the one under the cursor; tokenize(view=) at a
       recorded view rebuilds the segmentation cut then, after later mints and a retirement.
   S4  the act fires after a mint and changes the stream; TOK_RETOK_EVERY=0 arms no act.
@@ -22,13 +24,18 @@ parent's exact stream and continue. Each check below pins one promise of that pa
   S5  THE CONTINUATION IS BIT-EXACT: a run saved at window n1 and resumed for n2 windows produces the
       uninterrupted run's losses for those n2 windows exactly -- with no act, with a save between a
       mint and the next act (the critic's blocking case), with a save after an act, and at
-      TOK_DROPOUT > 0.
+      TOK_DROPOUT > 0 -- and under a non-default OPT_LR_CONTINUE, which a same-length resume never
+      anchors (Q-OPT-12).
   S7  THE OLDER GENERATION RESUMES TOO (register LOW-Q-TOK-13-PREV, Proposal 05 §8 1.1): a parent
       that saved twice, with a mint between the saves, is resumed from '<dir>/ckpt.pt.prev' and its
       continuation equals the uninterrupted run's losses exactly, because TOK.save_vocabulary
       rotated the vocabulary with the checkpoint. The wrong pairings are still refused both ways,
       a missing file is still refused, a failed rotation keeps the new generation and says so, and
       an in-place resume from .prev never rotates onto the parent's file.
+  S8  THE IN-RUN REVISION'S OFF ARM IN A RUN (Proposal 05 §8 1.4): S4's shape at
+      OPT_HORIZON_REVISE=False still acts, and every revision an act asked for is declined and
+      counted -- no revision logged, opt.horizon.revise_inert 1, opt.horizon.revise_declined equal to
+      the acts that changed the epoch's length -- while S4's default run did log them.
 
 WHAT THIS FILE CANNOT SEE: whether live retokenization helps a long run. That is the owner-scale
 ship-rule measurement 03b S0b names (prequential bits/byte, 3 paired seeds).
@@ -128,6 +135,24 @@ check("S2 a second revision is continuous too and ends at the floor",
       abs(_lr(600, revs) - _lr(600, revs2)) < 1e-12 and abs(_lr(850, revs2) - 0.05) < 1e-12)
 check("S2 the warmup is untouched", _lr(50, revs2) == _lr(50, []))
 
+# ---- S2b: the in-run revision's off arm (Proposal 05 §8 1.4, Q-OPT-12) --------------------------
+from spine import assemble                                         # noqa: E402
+_lever._reopen_assembly()
+_off = assemble.build(environ={"OPT_HORIZON_REVISE": "False"})[0]["OPT"]
+_p = torch.nn.Parameter(torch.ones(3))
+_st = opt_api.build(_off, param_groups={"base": [_p], "encoder": []}, run_windows=U.Windows(1000))
+_seeded = _st.counters.get("opt.horizon.revise_declined")
+for _ in range(10):
+    opt_api.scaled_backward(_off, _st, (_p * _p).sum())
+    opt_api.maybe_step(_off, _st)
+_got = opt_api.revise_horizon(_off, _st, run_windows=U.Windows(900))
+check("S2b at OPT_HORIZON_REVISE=False revise_horizon returns None, logs nothing, and counts "
+      "revise_inert = 1 and revise_declined 0 -> 1",
+      _got is None and _st.horizon_revisions == [] and "opt.horizon.revisions" not in _st.counters
+      and _st.counters.get("opt.horizon.revise_inert") == 1 and _seeded == 0
+      and _st.counters.get("opt.horizon.revise_declined") == 1,
+      {k: _st.counters.get(k) for k in ("opt.horizon.revise_inert", "opt.horizon.revise_declined")})
+
 # ---- S3: splice and views -----------------------------------------------------------------------
 v = tok_api.Vocabulary(ceiling=600)
 v._add(b"ab", prov="t")
@@ -173,6 +198,12 @@ r = loop.run(s, max_windows=130, progress=False)
 check("S4 the act fires after a mint and splices the stream",
       int(books(r).get("loop.acts", 0)) >= 1 and int(s.vocab.counters.get("tok.retok_mid_epoch", 0)) >= 1
       and any("mid-epoch act" in w for w in r.warnings), str(books(r)))
+_s4_len_changes = int(s.clock.counters().get("epoch_revisions", 0))
+check("S4 ... at the default OPT_HORIZON_REVISE=True an act that changed the epoch's length logged a "
+      "horizon revision (the control S8's off arm is read against)",
+      _s4_len_changes >= 1 and int(s.optimizer.counters.get("opt.horizon.revisions", 0)) >= 1
+      and "opt.horizon.revise_declined" not in s.optimizer.counters,
+      f"length changes {_s4_len_changes}, revisions {s.optimizer.counters.get('opt.horizon.revisions')}")
 s0 = build(TOK_GROW_EVERY=30, TOK_RETOK_EVERY=0)
 r0 = loop.run(s0, max_windows=130, progress=False)
 check("S4 TOK_RETOK_EVERY=0 arms no act (loop.acts ABSENT)", "loop.acts" not in books(r0),
@@ -220,6 +251,11 @@ try:
                                                TOK_RETOK_EVERY=40, TOK_DROPOUT=0.1)
     check("S5 at TOK_DROPOUT > 0 the continuation is exact (the dropout stream crosses the save)",
           same and int(bp.get("loop.acts", 0)) >= 1, f"first differing {diff}")
+    # A NON-DEFAULT CONTINUATION REGIME (Q-OPT-12): a resume at the parent's horizon is not a session
+    # boundary, so no regime is anchored and the continuation stays bit-exact.
+    same, cont, diff, bu, bp, bc = continuation("regime", 60, 40, OPT_LR_CONTINUE="rewarm")
+    check("S5 under OPT_LR_CONTINUE=rewarm a same-length resume continues exactly (no boundary, so "
+          "nothing is anchored)", same and len(cont) == 1, f"first differing window {diff}")
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
 
@@ -371,6 +407,25 @@ try:
           kind == "LeverError" and "TOK resume refused" in msg, f"{kind}: {msg[:140]}")
 finally:
     shutil.rmtree(TMP7, ignore_errors=True)
+
+# ---- S8: the in-run revision's off arm in a run -------------------------------------------------
+s8 = build(TOK_GROW_EVERY=30, TOK_RETOK_EVERY=40, OPT_HORIZON_REVISE="False")
+r8 = loop.run(s8, max_windows=130, progress=False)
+_k8 = s8.optimizer.counters
+_len8 = int(s8.clock.counters().get("epoch_revisions", 0))
+check("S8 at OPT_HORIZON_REVISE=False the act still fires, and every revision it asked for is declined "
+      "and counted: no revision logged, revise_inert 1, revise_declined = the acts that changed the "
+      "epoch's length",
+      int(books(r8).get("loop.acts", 0)) >= 1 and _len8 >= 1 and s8.optimizer.horizon_revisions == []
+      and "opt.horizon.revisions" not in _k8 and _k8.get("opt.horizon.revise_inert") == 1
+      and _k8.get("opt.horizon.revise_declined") == _len8,
+      f"acts {books(r8).get('loop.acts')}, length changes {_len8}, "
+      f"declined {_k8.get('opt.horizon.revise_declined')}")
+_g8 = r8.report.get("OPT.counters", {}).get("opt.horizon.revise") \
+    if isinstance(r8.report.get("OPT.counters"), dict) else None
+check("S8 ... and the report's Gate opt.horizon.revise says UNREACHABLE and names the lever",
+      _g8 is not None and not _g8.reachable and "OPT_HORIZON_REVISE=False" in _g8.reason,
+      _g8.line()[:160] if _g8 is not None else sorted(r8.report)[:8])
 
 print(f"\n=== {len(FAILS)} failing ===")
 sys.exit(1 if FAILS else 0)

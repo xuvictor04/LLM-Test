@@ -35,7 +35,8 @@ text while every check here stayed green.
 
 WHAT A `domain=` ON A DECLARATION DOES TO THIS FILE, WHICH IS NOTHING, AND THAT IS A MEASUREMENT
 RATHER THAN AN ASSUMPTION. `domain=(lo, hi)` landed on 33 levers on 2026-09-14. A census row has
-exactly nine fields and all 331 rows carry all nine -- old_name, old_default, verdict, new_owner,
+exactly nine fields and all 336 rows carry all nine (331 until §8 1.4's five OPT amendments landed
+on 2026-09-26) -- old_name, old_default, verdict, new_owner,
 new_name, unit, purpose, reason, couples_with -- and not one of them is a range, a bound, an
 interval, a minimum or a maximum. The checks below read fewer than that: family, old_name, verdict,
 new_owner and new_name, plus the DEPARTURES table. `unit`, `purpose`, `reason`, `old_default` and

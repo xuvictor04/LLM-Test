@@ -170,7 +170,7 @@ def packages():
     answers depending on which file you read.
 
     THESE ARE STAND-INS AND NOT THE REAL PACKAGES, WHICH NOW EXIST -- and the reason is A3, not inertia.
-    src/*/levers.py declares 262 levers across thirteen packages; A3 requires a stated reach for EVERY
+    src/*/levers.py declares 267 levers across thirteen packages; A3 requires a stated reach for EVERY
     declared lever, because an oracle checked only where somebody remembered to check it is not an
     oracle. Nine stand-ins carrying the fourteen fields the coupling table actually names keep that
     requirement meetable and keep the fixture readable. What the stand-ins may NOT do is drift from the
