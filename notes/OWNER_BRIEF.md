@@ -4,7 +4,7 @@ The one page for the owner. Everything else — how decisions were made, the evi
 rules — is in the repo for reference (`docs/proposals/05_DECISIONS.md`, `docs/04_CONTRACT.md`,
 `results/`, `notes/AGENT_STATE.md`) and is not brought up here.
 
-Updated 2026-09-27 (cd70ed1).
+Updated 2026-09-27 (8144701).
 
 ## How we work
 - **Owner:** leads and monitors, keeps the goals from drifting, adds ideas, expands the project, and
@@ -45,7 +45,7 @@ Updated 2026-09-27 (cd70ed1).
 | 2 | Retokenization fleet (`EXP=retok bash tools/gpu_launch.sh --go`) | **ready to relaunch**: the 2026-09-27 attempt was stopped because nothing showed it was alive. The fleet now prints a heartbeat, refuses a second launch, writes its block on any stop, and has a dashboard; the block below replaces the old one | which re-segmentation cadence ships; post-fix GPU speed; checkpoints for the first post-training test |
 
 ### Test 2: the retokenization fleet
-Nothing from the 2026-09-27 attempt needs keeping, and nothing is running. On the GPU box, in the repo
+Nothing from the 2026-09-27 attempts needs keeping, and nothing is running. On the GPU box, in the repo
 checkout:
 ```bash
 cd /workspace/LLM-Test
@@ -59,27 +59,31 @@ EXP=retok bash tools/gpu_launch.sh --go
   matters only on aarch64. The fleet then runs detached, so closing the terminal or losing the
   connection does not stop it. After 20 s the launcher prints `RUNNING: pid N`, or the end of the log
   if the fleet died.
-- **Watch it in a second terminal:** `bash tools/fleet_dash.sh`. The top line says RUNNING, STALLED,
-  FINISHED, STOPPED (with the reason) or DEAD. Below it are the stage and every run (starting on CPU,
-  training, done, failed) with its windows and speed, then the GPU, the CPU, the disk, the ETA and the
-  log's last lines. It redraws every 5 s; Ctrl-C closes the dashboard, not the fleet. For a browser,
-  `bash tools/fleet_dash.sh --html` writes `gpu_retok_out/dashboard.html`, which reloads itself, and
-  `--serve 8080` serves that page on port 8080 if your platform exposes ports. For one look from any
-  terminal: `EXP=retok bash gpu_world.sh --status`.
+- **Watch it in a second terminal:** `bash /workspace/LLM-Test/tools/fleet_dash.sh`. Every command in
+  this block names the checkout by its full path, so it works from whatever directory a new terminal
+  opens in. The top line says RUNNING, STALLED, FINISHED, STOPPED (with the reason) or DEAD. Below it
+  are the stage and every run (starting on CPU, training, finishing, done, failed) with its windows
+  and speed, then the GPU, this container's CPU in cores, the disk, the ETA and the log's last lines.
+  It redraws every 5 s; Ctrl-C closes the dashboard, not the fleet. For a browser, add `--html`: it
+  writes `/workspace/LLM-Test/gpu_retok_out/dashboard.html`, which reloads itself; `--serve 8080`
+  serves that page on port 8080 if your platform exposes ports. For one look from any terminal:
+  `EXP=retok bash /workspace/LLM-Test/gpu_world.sh --status`.
 - **In the first minutes nvidia-smi looks idle, and that is normal.** Each smoke and calibration run
-  spends about 15 s on the CPU first (python and torch, corpus, tokenizer, stream, model). That was
-  measured at 15.4-16.1 s at this fleet's shape on the 4-core CPU box, and is estimated at about 13 s
-  on the H200. The card therefore reads 0% for about half of each 25-33 s calibration step. The smoke
-  takes about 20 s and the calibration about 3 minutes; then `---- 2. fleet started` and the ETA
-  appear. `retok_fleet.log` gets a heartbeat line every 30 s. Judge progress by the dashboard or
-  `--status`, never by nvidia-smi.
+  spends 15-30 s on the CPU first (python and torch, corpus, tokenizer, stream, model), longer when the
+  CPU is shared: at this fleet's shape on the 4-core CPU box it took 15-16 s, one run alone or four at
+  once, and 66-71 s each while another job shared that CPU. The smoke prints the figure measured on
+  your box. The card reads 0% for that part of every step, while the dashboard shows the runs
+  "starting on CPU" and the CPU busy. The smoke takes about half a minute to a minute and the
+  calibration about 3-5 minutes; then `---- 2. fleet started` and the ETA appear. `retok_fleet.log`
+  gets a heartbeat line every 30 s. Judge progress by the dashboard or `--status`, never by nvidia-smi.
 - **Do not launch it again while it runs** (a second launch is refused now in any case), and do not
-  `git pull` while it runs. **To stop it:** `EXP=retok bash gpu_world.sh --stop`, which writes its
-  block. Please do not stop the container to stop the fleet.
-- **When the dashboard says FINISHED or STOPPED, paste back** the output of `cat gpu_retok_out/PASTE_BACK.txt`:
-  everything from `==== PASTE THIS BACK ====` to `==== END ====`. Keep the `.tgz` it packs beside
-  `gpu_retok_out/` and upload it as before. If the dashboard says DEAD, paste the output of
-  `bash tools/fleet_dash.sh --once` instead.
+  `git pull` while it runs. **To stop it:** `EXP=retok bash /workspace/LLM-Test/gpu_world.sh --stop`,
+  which writes its block. Please do not stop the container to stop the fleet.
+- **When the dashboard says FINISHED or STOPPED, paste back** the output of
+  `cat /workspace/LLM-Test/gpu_retok_out/PASTE_BACK.txt`: everything from `==== PASTE THIS BACK ====`
+  to `==== END ====`. Keep the `.tgz` it packs beside `gpu_retok_out/` and upload it as before. If the
+  dashboard says DEAD, paste the output of `bash /workspace/LLM-Test/tools/fleet_dash.sh --once`
+  instead.
 - The launch moves the earlier attempts' `gpu_retok_out` aside as `gpu_retok_out.<stamp>`. Nothing in
   those directories is needed, and they can be deleted.
 

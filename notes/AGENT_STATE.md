@@ -156,6 +156,25 @@ Updated 2026-09-26 (the decision register, Proposal 05) on `rm-predict-DC` (the 
   every stop (`--stop`), a private code copy in $OUT/code, tools/fleet_dash.sh (the dashboard) and
   tools/gpu_launch.sh (checks, then `--go`). The brief's test 2 block now uses the launcher, and the
   fleet waits on the owner's relaunch.
+- 2026-09-27, review of cd70ed1/39a351e (14 findings, 12 distinct; each reproduced, then fixed in
+  8144701): a Ctrl-C reaches the whole process group, and killed each run_job while its run.py
+  (ignoring INT) trained on as an orphan holding the lock under a STOPPED fleet. run_job now ignores INT
+  and HUP, the stop also finds runs by GW_FLEET_OUT, and it polls the heartbeat watcher instead of
+  `wait`ing for it (bash's wait in the trap blocked until a run ended once the watcher had died of the
+  same signal); F20 sends INT and HUP to the group. An analysis that died still ended FINISHED with no
+  block; it now ends STOPPED ("STOPPED AT THE ANALYSIS: the analysis failed"). A dead `| tee` pipe cut a
+  stop short at rc 0; SIGPIPE is ignored and say writes SUMMARY first. A stop in the analysis waits for
+  it and ends FINISHED. The fleet sizes itself by the cores, not by an exported OMP_NUM_THREADS (the
+  launcher only says it). Every printed command is absolute (a new terminal opens in /workspace or
+  /root). The dashboard: rates never count the startup, "finishing" instead of VANISHED while k0 is
+  indexed, this container's CPU (cgroup) instead of the host's load, no colour codes in --html, and a
+  pre-STATE fleet analysed afterwards reads DEAD; the launcher FAILs on an ended fleet's orphans.
+  Startup is quoted as 15-30 s, longer when the CPU is shared: at the retok shape on this 4-core box
+  15-16 s, one alone or four at once when the box was idle (the smoke: 16.2 s, median of 4), and 66-71 s
+  each while another job's tests shared the CPU; the review's ~28 s for four at once did not reproduce
+  on the idle box, so the texts blame a shared CPU, not the count of runs. The owner stopped the
+  container because the GPU showed no sign of work: nothing runs, and the relaunch block (test 2)
+  stands, its commands now by absolute path.
 0. Proposal 05 §8 orders everything: Stage 0 (owner rulings O1-O20; the fleet-archive reads; the
    k0_nuis pair; phase-traversal resizing), then Stage 1's small builds (vocab `.prev` rotation, DOM
    Levels, counters, OPT_LR_CONTINUE 'as_logged', gpu_world.sh kept checkpoints) before the owner's
