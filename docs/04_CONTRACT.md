@@ -549,14 +549,16 @@ per-process and deliberately not carried. A save/load round trip **used to undo 
 `save_vocabulary` moves `<base><suffix>.dyntok.json` to `<base><suffix>.prev.dyntok.json` — the path
 `derive.checkpoint_base` resolves for `CKPT_RESUME=<dir>/ckpt.pt<suffix>.prev` — before the new file
 lands, by CKPT's own rule (rotate iff the current file exists). A failed rotation still writes the
-new generation. It never rotates onto `d_vocab_read_path` (a run resumed from `<dir>/ckpt.pt.prev`
-that saves into `<dir>`). See Q-TOK-13's closing note.
+new generation. A run resumed from `<dir>/ckpt.pt.prev` that saves into `<dir>` rotates onto
+`d_vocab_read_path` too, counted as `vocab_rotated_in_place` (corrected 2026-09-27; it skipped,
+and the parent's newer generation lost its vocabulary). See Q-TOK-13's closing note.
 **Counters:** `tok.build_pass/build_mint/v0`, `load_reconciled`, `bpt_adopted`/`bpt_mismatch`,
 `tally_restored`, `mint` + eight mint-outcome counters, `retok`/`retok_noop`, `dropout_skip`,
 `mint_frozen_at`, `probation_*`, `cap_lift`, `vocab_saved` (lineage) with `vocab_saved_here`
 (process, Q-CKPT-4),
-`vocab_rotated`/`vocab_rotate_failed`/`vocab_rotate_refused` (per process; `vocab_rotate_refused`
-is present only on the in-place arm), `state_*`, and Gates `mint_pmin` and `probation_embed`.
+`vocab_rotated`/`vocab_rotate_failed`/`vocab_rotated_in_place` (per process, and read by the
+report after the final save; `vocab_rotated_in_place` is present only on the in-place arm), `state_*`,
+and Gates `mint_pmin` and `probation_embed`.
 
 ### LM — `src/lm/api.py` (12 levers)
 
@@ -817,6 +819,15 @@ manifest's key set, so `if recorded and recorded != live` is not writable here.
 `<base><suffix>.prev.dyntok.json`, rotated by TOK, which owns the file, inside `save_vocabulary`.
 The root calls that only when `save` returned True, so the two rotations happen in one save or not
 at all. CKPT's own failed rotation is still uncounted (`_SAVES` has no reader in the report).
+**A run directory named for another run's snapshot is refused** (2026-09-27, build 1.1's review):
+`saving_on`, which stands where a per-lever parse hook would, raises `LeverError` at compose for a
+`CKPT_DIR` whose last component ends in `.prev`, `.best` or `.best<N>`. A run base is the one name a
+checkpoint and its vocabulary share, so `<X>.prev` saved its own vocabulary to the file TOK moves run
+`<X>`'s previous generation onto (driven: a 190-entry file held 183 entries after `<X>` saved twice,
+uncounted), and `resume_source` loaded `<X>.prev/ckpt.pt` for `CKPT_RESUME=<X>/ckpt.pt.prev` once
+that directory existed. Any other name saves the same run; `CKPT_RESUME` is not refused, so a
+directory with such a name made before this date can still be resumed from, and its ambiguity against
+`<X>/ckpt.pt.prev` is stated, not closed.
 **`best_state` is checkpoint state** (M45), and the blow-up alarm **moves out** to EVAL: gating an
 instrument on a checkpoint flag is what this rebuild exists to end.
 **Where they are called (§3):** `resume_source` → `load` → `check_geometry` are `ASSEMBLY_ORDER`
@@ -4612,32 +4623,73 @@ calls `save_vocabulary` only when `CKPT.save` returned True, and every CKPT refu
 CKPT touches a file, so the two rotations happen in one save or not at all (§3 stage `C`). **DID IT
 FIRE:** `tok.vocab_rotated` and `tok.vocab_rotate_failed` are seeded at 0 on every save with saving
 on and are ABSENT with saving off; `tok.vocab_rotate_failed_detail` names the paths and the error of
-the last failure; `tok.vocab_rotate_refused` is seeded only on the in-place arm below. All four are
+the last failure; the in-place arm below has a row of its own (`tok.vocab_rotate_refused` as ruled
+here, `tok.vocab_rotated_in_place` since the correction). All four are
 per process (`restore_vocab` drops a parent's copies, as it does the replay rows), while
 `tok.vocab_saved` stays lineage-cumulative — §8 1.6 (LOW-RESUME-SAVED-COUNTERS) rules on `saved`
-counters and does not cover these. **Never onto the parent's file:** a run resumed from
-`<dir>/ckpt.pt.prev` that saves into `<dir>` would rotate onto `d_vocab_read_path`, which the C row
-and `save_vocabulary` both say is never written. The rotation is skipped there, counted and warned;
-the new file lands as usual. Skipping never destroys a consistent parent pair (a rollback that
-deleted `ckpt.pt` keeps `ckpt.pt.prev` and its vocabulary), where rotating could; the cost is that
-CKPT's own rotation of an existing `ckpt.pt` leaves that `.prev` pair mismatched, and
-`restore_vocab`'s merge-count check refuses it by name whenever a mint separates the two. In-place
-rollback policy is §8 4.4 (C09). **The root warns** after the final save whenever a rotation failed
-or was skipped, because the report's `TOK(vocab.counters)` is snapshotted before that save.
+counters and does not cover these. **In place — ruled here as a skip, CORRECTED 2026-09-27 to a
+rotation (see the correction below):** a run resumed from `<dir>/ckpt.pt.prev` that saves into
+`<dir>` has `d_vocab_read_path` as its rotation target. This ruling skipped the rotation there, on
+the claim that skipping never destroys a consistent parent pair where rotating could; that claim was
+false in the common case, where `ckpt.pt` is present. In-place rollback policy is §8 4.4 (C09).
+**The root warns** after the final save whenever a rotation failed or ran in place, because the
+report's `TOK(vocab.counters)` is snapshotted before that save (the report's rotation rows are
+re-read there too since the correction, (ii) below).
 **Driven:** `tests/test_continuation.py` S7 — a parent saved twice (a periodic save at step 101, the
 final at 135, with 256 and 259 merges), resumed from `ckpt.pt.prev`, continues for 34 windows equal
 to the uninterrupted run's losses exactly, minting three tokens on the way; either checkpoint beside
 the other generation's vocabulary is refused by the merge count (256 against 259, both directions);
 the older checkpoint with no vocabulary is still refused by name; a failed rotation keeps the new
-generation; and an in-place resume leaves the parent's file byte-unchanged.
+generation; and the in-place case as corrected below.
 `tests/test_tok_persist.py` P5 drives the same through the entry points alone (byte-equal rotation,
-which proves the order; the suffixed form; the failure; the in-place skip; saving off; the rows
+which proves the order; the suffixed form; the failure; the in-place rotation; saving off; the rows
 staying per process), and `tests/test_couplings.py` C5 pins the two read-side spellings. **Residual,
 stated and not closed:** a pairing that slips (either side's rotation failing, a crash between the
 two calls) is caught only when a mint separates the two generations. On one lineage the merge list
 is append-only, so equal counts there mean equal files; across two lineages (a reused `CKPT_DIR`)
 equal merge counts are not proof of equal vocabularies. CKPT's own failed rotation is still
 uncounted.
+**CORRECTED 2026-09-27 (build 1.1's review) — the in-place arm rotates, the report reads the rows
+after the final save, and a run directory named for a snapshot is refused.** (i) *In place.* `CKPT.save`
+runs first in the same save and moves `ckpt.pt` onto `ckpt.pt.prev`, so the checkpoint the file at
+`d_vocab_read_path` paired with is gone before `save_vocabulary` runs, and the file at
+`<dir>.dyntok.json` is the vocabulary of the checkpoint CKPT just moved. The skip left that file where
+the new one replaced it, and the in-place condition holds for the whole run, so every later save
+skipped too. Driven on the tree that skipped: S7's parent (steps 101 and 135, 256 and 259 merges)
+and an in-place child that saved once left `ckpt.pt.prev` at step 135 beside the 256-merge file,
+refused at resume by the merge count, with the 259-merge vocabulary nowhere on disk; S7 pinned that
+refusal as expected. **Ruling: the in-place arm rotates like every other**, counted as
+`tok.vocab_rotated` and `tok.vocab_rotated_in_place` (seeded only on that arm; it replaces
+`tok.vocab_rotate_refused`, which `restore_vocab` still drops from a blob that carries it), and the
+root warns. Nothing is lost to the running process: `build_vocabulary` replayed `d_vocab_read_path`
+at compose and nothing reads it again. The new file is still never written onto
+`d_vocab_read_path`. What an in-place save costs is CKPT's one-generation ring: the generation the run
+resumed from is gone from disk in both halves. Refusing the configuration at compose was the other
+fix offered, and it was not taken because it would remove in-place rollback, a configuration that
+runs. **Residual, stated:** the rotation follows CKPT's rule, rotate iff the current file exists, so
+it keeps the pair only while a checkpoint and its vocabulary exist together. A rollback that deleted
+`ckpt.pt` but kept `<dir>.dyntok.json` has split them; CKPT then rotates nothing, TOK rotates the kept
+file onto the one the run resumed from, and `restore_vocab`'s merge count refuses that `.prev` pair
+whenever a mint separates the two. (ii) *The report.* The rotation rows are seeded inside
+`save_vocabulary`, and `_report` snapshots `TOK(vocab.counters)` before the final save, so a saving
+run whose only save is the final one printed them ABSENT, the unreachable reading, and a final-save
+rotation reached no output line. `spine/loop.py::run` now copies the live rotation rows into the
+report after the final save; they stay ABSENT when no vocabulary save ran in the process. TOK could
+not seed them at build: its one view of saving is `d_vocab_save_path`, which is `off.dyntok.json`
+at `CKPT_DIR=off`, a spelling CKPT reads as saving off. On these rows alone the report is one save
+ahead of the final blob, which `restore_vocab` never reads them from; the save counts keep the
+snapshot (Q-CKPT-4). (iii) *A directory named for a snapshot* — see the CKPT section: `saving_on`
+refuses a `CKPT_DIR` ending in `.prev`, `.best` or `.best<N>`, whose vocabulary is the file this
+ruling rotates run `<X>`'s previous generation onto. **Driven:** S7 now asserts that `ckpt.pt.prev`
+is the parent's step-135 checkpoint beside its own vocabulary after an in-place save, and that it
+resumes; that the report counts the final save's rotation and failure and prints no row with saving
+off; that a child resumed from the failed-rotation run's final blob, which carries
+`tok.vocab_rotate_failed` and its detail, holds no rotation row before it saves (the check it
+replaces resumed from the step-101 blob, which carries none, so it could not fail); and that
+`CKPT_DIR=<X>.prev` and `<X>.best3/` are refused at compose. P5 asserts the in-place rotation byte
+for byte on two successive saves. **Not changed, and stated:** a resume from `<dir>/ckpt.pt` that
+saves into `<dir>` makes `save_vocabulary`'s own destination `d_vocab_read_path`, and the older rule
+still raises there at the first save, after CKPT has written.
 
 **Not in this ruling, and OPEN — the tally round-trips exactly, the mint bursts after a mid-epoch
 resume still do not match the uninterrupted run.** (2) makes the pair tally the parent's to the count,

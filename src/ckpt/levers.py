@@ -141,7 +141,14 @@ class CKPTLevers(LeverSet):
     # ==============================================================================================
 
     dir = Lever("", "Directory this run writes its checkpoint into -- model, tokenizer, memory store, "
-                    "optimizer moments, domain centroids; empty turns saving off entirely.", U.PATH)
+                    "optimizer moments, domain centroids; empty turns saving off entirely. A name "
+                    "ending in .prev, .best or .best<N> is refused: those are the snapshot names of "
+                    "the run without that ending.", U.PATH)
+    # THE RESERVED ENDINGS (2026-09-27, build 1.1's review) are refused in ckpt/api.py::saving_on,
+    # which stands where a per-lever parse hook would (Lever.coerce for a str is str(raw)). A run
+    # base is the one name a checkpoint and its vocabulary share, and a directory '<X>.prev' has the
+    # base of run <X>'s kept previous generation, whose vocabulary TOK moves onto that directory's own
+    # file on every save of <X>. The argument and the measurement are at saving_on.
     # Census: SAVE_CKPT -> CKPT.CKPT_DIR, verdict rename, unit path, default "". Field corrected from
     # `CKPT_DIR` to `dir` (DEFECT 1); the env name is CKPT_DIR either way, which is what the census meant.
     # THE RENAME IS THE FIX, NOT COSMETICS. Calling a path SAVE_CKPT invited it to be read as a flag, and

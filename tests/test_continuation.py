@@ -35,7 +35,11 @@ parent's exact stream and continue. Each check below pins one promise of that pa
       continuation equals the uninterrupted run's losses exactly, because TOK.save_vocabulary
       rotated the vocabulary with the checkpoint. The wrong pairings are still refused both ways,
       a missing file is still refused, a failed rotation keeps the new generation and says so, and
-      an in-place resume from .prev never rotates onto the parent's file.
+      an in-place resume from .prev rotates onto the file it read, so ckpt.pt.prev -- the parent's
+      newer generation -- resumes after the in-place save (corrected 2026-09-27: that arm skipped,
+      and the newer generation's vocabulary was lost). The report prints the rotation rows after
+      the final save, ABSENT only with saving off, and a parent's rows do not cross a resume from a
+      blob that carries them.
   S8  THE IN-RUN REVISION'S OFF ARM IN A RUN (Proposal 05 §8 1.4): S4's shape at
       OPT_HORIZON_REVISE=False still acts, and every revision an act asked for is declined and
       counted -- no revision logged, opt.horizon.revise_inert 1, opt.horizon.revise_declined equal to
@@ -426,12 +430,20 @@ try:
           _entries(prev_v) == mc_prev and _entries(cur_v) == mc_cur,
           f"{_entries(prev_v)}/{mc_prev}, {_entries(cur_v)}/{mc_cur}")
     pc = p.vocab.counters
+    _rows = ("tok.vocab_rotated", "tok.vocab_rotate_failed", "tok.vocab_rotated_in_place")
     check("S7 the parent's rotation rows: tok.vocab_rotated = saves - 1, tok.vocab_rotate_failed "
-          "= 0, tok.vocab_rotate_refused ABSENT (not the in-place arm)",
+          "= 0, tok.vocab_rotated_in_place ABSENT (not the in-place arm)",
           pc.get("tok.vocab_rotated") == _saves(rp) - 1 and pc.get("tok.vocab_rotate_failed") == 0
-          and "tok.vocab_rotate_refused" not in pc,
-          str({k: pc.get(k) for k in ("tok.vocab_rotated", "tok.vocab_rotate_failed",
-                                      "tok.vocab_rotate_refused")}))
+          and "tok.vocab_rotated_in_place" not in pc, str({k: pc.get(k) for k in _rows}))
+    # THE REPORT READS THE ROWS AFTER THE FINAL SAVE (2026-09-27): its TOK snapshot is taken before
+    # that save, and the final save is the one that rotated here. The uninterrupted run saves
+    # nothing, so it is the ABSENT arm.
+    rpt = rp.report["TOK(vocab.counters)"]
+    check("S7 the report counts the final save's rotation (tok.vocab_rotated = saves - 1, though "
+          "its snapshot was taken before that save), and a run with saving off prints no rotation row",
+          rpt.get("tok.vocab_rotated") == _saves(rp) - 1 and rpt.get("tok.vocab_rotate_failed") == 0
+          and not any(k.startswith("tok.vocab_rot") for k in ru.report["TOK(vocab.counters)"]),
+          str({k: rpt.get(k, "ABSENT") for k in _rows}))
 
     c = build(CKPT_RESUME=prev_ck, CKPT_DIR=d7 + "/c", **E7)
     cont = [w for w in c.warnings if w.startswith("MID-EPOCH RESUME CONTINUES")]
@@ -447,12 +459,21 @@ try:
     cc = c.vocab.counters
     check("S7 the child minted on the way (the continuation crossed a mint)",
           int(cc.get("tok.mint", 0)) > mint0, f"tok.mint {mint0} -> {cc.get('tok.mint')}")
-    check("S7 the child's rotation rows are its own: tok.vocab_rotated PRESENT at 0 (one save into "
-          "an empty directory), the parent's tok.vocab_rotated not carried, no refused row",
+    # WHAT THIS CHILD CAN SHOW ABOUT ITS ROWS, AND NO MORE. It resumed from the step-101 blob, which
+    # vocab_state copied before the parent's first vocabulary save, so that blob carries no rotation
+    # row and "not carried" is not measurable here (it is below, from a blob that carries them). Its
+    # only save is the final one, which is the report's DID IT FIRE case: the rows used to print
+    # ABSENT, the "unreachable" reading, on a run where the rotation was armed.
+    crpt = rc.report["TOK(vocab.counters)"]
+    check("S7 the child's rotation rows: tok.vocab_rotated PRESENT at 0 (one save into an empty "
+          "directory), no in-place row, and its report prints them PRESENT though its only save "
+          "followed the report's snapshot",
           cc.get("tok.vocab_rotated") == 0 and cc.get("tok.vocab_rotate_failed") == 0
-          and "tok.vocab_rotate_refused" not in cc,
-          str({k: cc.get(k) for k in ("tok.vocab_rotated", "tok.vocab_rotate_failed",
-                                      "tok.vocab_rotate_refused")}))
+          and "tok.vocab_rotated_in_place" not in cc
+          and crpt.get("tok.vocab_rotated") == 0 and crpt.get("tok.vocab_rotate_failed") == 0
+          and "tok.vocab_rotated_in_place" not in crpt,
+          f"live {({k: cc.get(k, 'ABSENT') for k in _rows})}; "
+          f"report {({k: crpt.get(k, 'ABSENT') for k in _rows})}")
 
     # THE MISMATCH REFUSALS STILL FIRE: each generation's checkpoint beside the OTHER generation's
     # vocabulary, and the older checkpoint with none.
@@ -491,31 +512,72 @@ try:
     check("S7 ... the run completes, the loop warns after the final save, and the new generation "
           "landed", len(fw) == 1 and _entries(d7 + "/f.dyntok.json") == f.vocab.size() - 256
           and os.path.isdir(d7 + "/f.prev.dyntok.json"), f"{len(fw)} warning(s)")
-    kind, msg = _refusal(CKPT_RESUME=d7 + "/f", CKPT_DIR=d7 + "/f2")
-    check("S7 ... and the current generation it wrote resumes", kind is None, f"{kind}: {msg[:140]}")
+    check("S7 ... and the report counts the final save's failure too",
+          rf.report["TOK(vocab.counters)"].get("tok.vocab_rotate_failed") == _saves(rf) - 1,
+          str(rf.report["TOK(vocab.counters)"].get("tok.vocab_rotate_failed", "ABSENT")))
+    # PER PROCESS, FROM A BLOB THAT CARRIES THE ROWS (2026-09-27). This run's final blob was taken
+    # after its second save failed, so it holds tok.vocab_rotate_failed > 0 and the detail; a child
+    # that has not saved yet must hold none of the rotation rows.
+    fblob = torch.load(d7 + "/f/ckpt.pt", map_location="cpu", weights_only=False)
+    fbc = fblob["payload"]["TOK"]["counters"]
+    try:
+        f2 = build(CKPT_RESUME=d7 + "/f", CKPT_DIR=d7 + "/f2")
+        kind, msg, f2rows = None, "", sorted(k for k in f2.vocab.counters
+                                             if k.startswith("tok.vocab_rot"))
+    except Exception as e:                                         # noqa: BLE001 -- reported
+        kind, msg, f2rows = type(e).__name__, str(e), None
+    check("S7 ... the current generation it wrote resumes, and the parent's rotation rows do not "
+          "cross: its blob carries tok.vocab_rotate_failed > 0 with the detail, and the child, "
+          "which has not saved, carries no tok.vocab_rot* row",
+          kind is None and int(fbc.get("tok.vocab_rotate_failed", 0)) > 0
+          and "tok.vocab_rotate_failed_detail" in fbc and f2rows == [],
+          f"{kind}: {msg[:140]}; blob tok.vocab_rotate_failed {fbc.get('tok.vocab_rotate_failed')}; "
+          f"child rows {f2rows}")
 
-    # IN PLACE: a resume from .prev that saves back into the same directory never rotates onto the
-    # file it read, and the .prev pair CKPT then leaves mismatched is refused by name.
+    # IN PLACE: a resume from .prev that saves back into the same directory. CKPT.save moves the
+    # parent's ckpt.pt (step 135) onto ckpt.pt.prev in that save, so TOK must move the parent's
+    # newer vocabulary onto <dir>.prev.dyntok.json -- the file this run replayed -- or that
+    # generation loses its only vocabulary. Until 2026-09-27 the rotation was skipped here, and this
+    # check pinned the resulting ckpt.pt.prev refusal as expected behaviour.
     shutil.copytree(d7 + "/p", d7 + "/ip")
     shutil.copy(cur_v, d7 + "/ip.dyntok.json")
     shutil.copy(prev_v, d7 + "/ip.prev.dyntok.json")
-    with open(d7 + "/ip.prev.dyntok.json", "rb") as fh:
-        parent_bytes = fh.read()
+    with open(d7 + "/ip.dyntok.json", "rb") as fh:
+        newer_bytes = fh.read()
     ip = build(CKPT_RESUME=d7 + "/ip/ckpt.pt.prev", CKPT_DIR=d7 + "/ip", **E7)
     rip = loop.run(ip, max_windows=10, progress=False)
     with open(d7 + "/ip.prev.dyntok.json", "rb") as fh:
         after_bytes = fh.read()
     ipc = ip.vocab.counters
-    check("S7 in place: the parent's .prev vocabulary is byte-unchanged, the skip is counted and "
-          "warned, and the new generation landed",
-          after_bytes == parent_bytes and ipc.get("tok.vocab_rotate_refused") == 1
-          and ipc.get("tok.vocab_rotated") == 0
-          and any("vocabulary was NOT rotated" in w for w in rip.warnings)
+    ipb = torch.load(d7 + "/ip/ckpt.pt.prev", map_location="cpu", weights_only=False)
+    check("S7 in place: ckpt.pt.prev is now the parent's newer generation, its vocabulary moved "
+          "beside it byte for byte, the rotation counted and said, and the new generation landed",
+          int(ipb["step"]) == 135 and ipb["payload"]["TOK"]["merge_count"] == mc_cur
+          and after_bytes == newer_bytes and _saves(rip) == 1
+          and ipc.get("tok.vocab_rotated_in_place") == 1 and ipc.get("tok.vocab_rotated") == 1
+          and rip.report["TOK(vocab.counters)"].get("tok.vocab_rotated_in_place") == 1
+          and sum("rotated onto the file this run resumed from" in w for w in rip.warnings) == 1
           and _entries(d7 + "/ip.dyntok.json") == ip.vocab.size() - 256,
-          str({k: ipc.get(k) for k in ("tok.vocab_rotated", "tok.vocab_rotate_refused")}))
+          f"ckpt.pt.prev step {ipb['step']}, merges {ipb['payload']['TOK']['merge_count']}; "
+          + str({k: ipc.get(k) for k in _rows}))
     kind, msg = _refusal(CKPT_RESUME=d7 + "/ip/ckpt.pt.prev", CKPT_DIR=d7 + "/ipc", **E7)
-    check("S7 in place: the .prev pair CKPT's rotation left mismatched is refused by the merge count",
-          kind == "LeverError" and "TOK resume refused" in msg, f"{kind}: {msg[:140]}")
+    check("S7 in place: ckpt.pt.prev RESUMES after the in-place save -- the parent's newer "
+          "generation, which the skip left beside the older vocabulary and refused",
+          kind is None, f"{kind}: {msg[:140]}")
+    kind, msg = _refusal(CKPT_RESUME=d7 + "/ip/ckpt.pt", CKPT_DIR=d7 + "/ipc2", **E7)
+    check("S7 in place: ... and the child's own ckpt.pt resumes", kind is None, f"{kind}: {msg[:140]}")
+
+    # A DIRECTORY NAMED FOR ANOTHER RUN'S SNAPSHOT IS REFUSED AT COMPOSE (2026-09-27): '<X>.prev'
+    # would save its vocabulary to the file run <X> rotates its previous generation onto.
+    kind, msg = _refusal(CKPT_DIR=d7 + "/p.prev", **E7)
+    kind_b, msg_b = _refusal(CKPT_DIR=d7 + "/p.best3/", **E7)
+    kind_ok, msg_ok = _refusal(CKPT_DIR=d7 + "/p.prev2", **E7)
+    check("S7 CKPT_DIR ending in .prev or .best<N> is refused at compose, naming the run it would "
+          "collide with, before anything is written; a name that merely contains it composes",
+          kind == "LeverError" and "reserved" in msg and repr(d7 + "/p") in msg
+          and kind_b == "LeverError" and "'.best3'" in msg_b
+          and not os.path.exists(d7 + "/p.prev") and not os.path.exists(d7 + "/p.best3")
+          and kind_ok is None, f"{kind}: {msg[:120]} | {kind_b} | {kind_ok}: {msg_ok[:120]}")
 finally:
     shutil.rmtree(TMP7, ignore_errors=True)
 

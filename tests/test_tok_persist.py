@@ -29,9 +29,11 @@ because nothing here saved and replayed a vocabulary:
       ckpt.pt.prev and save_vocabulary kept nothing, so CKPT_RESUME=<dir>/ckpt.pt.prev resolved a
       file nothing wrote. A second save must move the first generation's file, byte for byte, to
       the path that resume reads -- under a snapshot suffix too -- and count it; a failed rotation
-      must keep the new generation and count the failure; an in-place resume from .prev must never
-      rotate onto the file it read; saving off must leave the rows ABSENT; and the rows must not
-      cross restore_vocab while tok.vocab_saved does.
+      must keep the new generation and count the failure; an in-place resume from .prev must rotate
+      onto the file it read, on every save, moving the newer generation there byte for byte and
+      counting it (corrected 2026-09-27: it skipped, and the newer generation's vocabulary was
+      lost); saving off must leave the rows ABSENT; and the rows must not cross restore_vocab while
+      tok.vocab_saved does.
 
 WHAT IT CANNOT SEE: whether a resumed LOOP feeds on_window the same windows the uninterrupted run
 would have. That is a stream-position property of the loop and DATA, not of this package's state.
@@ -267,14 +269,14 @@ def main():
         cur_f, prev_f = rot + ".dyntok.json", rot + ".prev.dyntok.json"
         tok_r = tok_cfg(CKPT_DIR=rot)
         vr = build(tok_r)
-        rows = ("tok.vocab_rotated", "tok.vocab_rotate_failed", "tok.vocab_rotate_refused")
+        rows = ("tok.vocab_rotated", "tok.vocab_rotate_failed", "tok.vocab_rotated_in_place")
         first = t.save_vocabulary(tok_r, vr)
         rc = vr.counters
         check("P5 a first save: the file lands, nothing is rotated, tok.vocab_rotated and "
-              "tok.vocab_rotate_failed PRESENT at 0, tok.vocab_rotate_refused ABSENT",
+              "tok.vocab_rotate_failed PRESENT at 0, tok.vocab_rotated_in_place ABSENT",
               first == cur_f and os.path.isfile(cur_f) and not os.path.exists(prev_f)
               and rc.get("tok.vocab_rotated") == 0 and rc.get("tok.vocab_rotate_failed") == 0
-              and "tok.vocab_rotate_refused" not in rc, str({k: rc.get(k) for k in rows}))
+              and "tok.vocab_rotated_in_place" not in rc, str({k: rc.get(k) for k in rows}))
         gen1, size1 = open(cur_f, "rb").read(), vr.size()
         grow(vr, 5)
         t.save_vocabulary(tok_r, vr)
@@ -333,20 +335,35 @@ def main():
               and not os.path.exists(rotf + ".dyntok.json.tmp"))
 
         # IN PLACE: resumed from <dir>/ckpt.pt.prev and saving into <dir>, the rotation target IS
-        # the file this run read, and it is never written.
+        # the file this run replayed. CKPT.save has just moved ckpt.pt onto ckpt.pt.prev in the
+        # same save, so the rotation must move ckpt.pt's vocabulary -- the file at the base -- onto
+        # it, or that generation loses its only vocabulary (corrected 2026-09-27; this arm skipped).
         st_r = t.vocab_state(tok_r, vr)
-        prev_bytes = open(prev_f, "rb").read()
+        newer = open(cur_f, "rb").read()
         tok_ip = tok_cfg(CKPT_RESUME=os.path.join(rot, "ckpt.pt.prev"), CKPT_DIR=rot)
         vi = build(tok_ip)
+        size_ip = vi.size()
         grow(vi, 2)
         t.save_vocabulary(tok_ip, vi)
         ic = vi.counters
-        check("P5 in place: the parent's .prev file is byte-unchanged and the skip is counted "
-              "(tok.vocab_rotate_refused = 1, tok.vocab_rotated = 0)",
-              open(prev_f, "rb").read() == prev_bytes and ic.get("tok.vocab_rotate_refused") == 1
-              and ic.get("tok.vocab_rotated") == 0, str({k: ic.get(k) for k in rows}))
+        check("P5 in place: the file this run replayed now holds the newer generation byte for "
+              "byte, and the rotation is counted (tok.vocab_rotated = tok.vocab_rotated_in_place = 1)",
+              open(prev_f, "rb").read() == newer and ic.get("tok.vocab_rotated_in_place") == 1
+              and ic.get("tok.vocab_rotated") == 1 and ic.get("tok.vocab_rotate_failed") == 0,
+              str({k: ic.get(k) for k in rows}))
         check("P5 ... and the new generation landed at the base",
-              len(json.load(open(cur_f))["entries"]) == vi.size() - 256)
+              len(json.load(open(cur_f))["entries"]) == vi.size() - 256 and vi.size() > size_ip)
+        # EVERY LATER SAVE ROTATES TOO: the in-place condition holds for the whole run, and the skip
+        # it replaced therefore held for every save the run made.
+        own1 = open(cur_f, "rb").read()
+        grow(vi, 2)
+        t.save_vocabulary(tok_ip, vi)
+        check("P5 in place, a second save: this run's first file moves to .prev byte for byte, and "
+              "tok.vocab_rotated_in_place = 2",
+              open(prev_f, "rb").read() == own1 and ic.get("tok.vocab_rotated_in_place") == 2
+              and ic.get("tok.vocab_rotated") == 2
+              and len(json.load(open(cur_f))["entries"]) == vi.size() - 256,
+              str({k: ic.get(k) for k in rows}))
 
         # SAVING OFF: no file, and none of the rows -- ABSENT is the unreachable arm.
         tok_off = tok_cfg()
@@ -356,10 +373,15 @@ def main():
               and not any(k.startswith("tok.vocab_rot") for k in vo.counters))
 
         # PER PROCESS: a parent's rotation rows do not cross restore_vocab; tok.vocab_saved does.
+        # A blob written while the in-place arm skipped can carry tok.vocab_rotate_refused, and it
+        # must be dropped too: the last case plants it beside the rows the in-place parent carries.
+        st_ip = t.vocab_state(tok_ip, vi)
+        st_ip = dict(st_ip, counters=dict(st_ip["counters"], **{"tok.vocab_rotate_refused": 3}))
         for label, state, src in (("rotated", st_r, os.path.join(rot, "ckpt.pt.best3")),
                                   ("failed", t.vocab_state(tok_f, vf2), rotf),
-                                  ("refused", t.vocab_state(tok_ip, vi), rot)):
-            tok_ch = tok_cfg(CKPT_RESUME=src, CKPT_DIR=os.path.join(work, "ch_" + label))
+                                  ("rotated in place", st_ip, rot)):
+            tok_ch = tok_cfg(CKPT_RESUME=src,
+                             CKPT_DIR=os.path.join(work, "ch_" + label.replace(" ", "_")))
             ch = build(tok_ch)
             had = sorted(k for k in state["counters"] if k.startswith("tok.vocab_rot"))
             t.restore_vocab(tok_ch, state, ch)

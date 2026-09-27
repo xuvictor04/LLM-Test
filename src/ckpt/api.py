@@ -24,6 +24,7 @@ RECORD TYPES RETURNED (P4 defines them):
 """
 import dataclasses
 import os
+import re
 # THE HANDLER INSTALL LIVES IN install_save_signal BELOW, AND THIS IS THE ONLY IMPORT
 # THIS PACKAGE GROWS FOR IT. tests/test_ownership.py::check_o10_no_backdoor_imports judges
 # an import by the HEAD of its dotted name: head "spine" is an ALLOWLIST over
@@ -52,6 +53,17 @@ from spine import derive
 # os.makedirs("0") ran, and the run wrote its checkpoint into a directory literally named `0` in the
 # repository root. One tuple, one predicate, one call site per question.
 _OFF = ("0", "", "off", "no", "none", "false")
+
+# THE RUN-DIRECTORY ENDINGS RESERVED FOR SNAPSHOT NAMES (2026-09-27, build 1.1's review). A run base
+# is the one name a checkpoint and its vocabulary share: spine/derive.py::checkpoint_base maps
+# '<X>/ckpt.pt<suffix>' to '<X><suffix>', and TOK.save_vocabulary writes '<X><suffix>.dyntok.json'.
+# So a run DIRECTORY named '<X>.prev' has the base of run <X>'s kept previous generation, and '<X>.best'
+# / '<X>.best3' that of its best-by-held-out snapshots (ckpt/levers.py::CKPTLevers.best_keep's
+# '.best1..bestN ... on top of the single global .best'). saving_on refuses them; see its docstring.
+# Matched without regard to case, because whether two names collide is the filesystem's question and a
+# refusal must not depend on which machine composes the run. The group takes the WHOLE trailing chain,
+# so '<X>.best3.prev' names run <X> (its best snapshot's previous generation) and not '<X>.best3'.
+_RESERVED_DIR_END = re.compile(r".+?((?:\.(?:prev|best[0-9]*))+)", re.IGNORECASE)
 
 
 # ==================================================================================================
@@ -206,12 +218,52 @@ def saving_on(ckpt: Config):
     every site, never re-typed at a call site. The rename SAVE_CKPT -> CKPT_DIR is the other half:
     a name that says DIR cannot be typed as a flag by reflex.
 
+    AND IT REFUSES A DIRECTORY NAMED FOR ANOTHER RUN'S SNAPSHOT (2026-09-27, build 1.1's review).
+    This function stands where a per-lever parse hook would, so the one rule about `dir`'s spelling
+    that is not "off" lives here too. A CKPT_DIR whose last component ends in '.prev', '.best' or
+    '.best<N>' (_RESERVED_DIR_END) shares its run base with a snapshot of the run at the name without
+    that ending, and two things then read or write the wrong run's file. TOK.save_vocabulary moves
+    run <X>'s vocabulary to '<X>.prev.dyntok.json' on every save since 2026-09-26, which is the file a
+    run saving into '<X>.prev' writes as its own. Driven through the entry points with CKPT_DIR
+    '<w>/x.prev' saving a 190-entry vocabulary and CKPT_DIR '<w>/x' then saving twice: the first
+    run's file held 183 entries afterwards, with nothing counted and nothing said. And resume_source
+    prefers a directory that exists, so CKPT_RESUME='<w>/x/ckpt.pt.prev' loaded
+    '<w>/x.prev/ckpt.pt' once that directory existed. The '.best' endings are the same collision
+    for the retention snapshots, whose saves the root does not make yet. REFUSED AT THE FIRST READ,
+    at compose (save_period calls this, and the `persist` row records it), before any file is
+    written. IT REMOVES NO CONFIGURATION: any other name saves the same run, and CKPT_RESUME is not
+    touched -- a directory with such a name that already exists can still be resumed from. Its
+    ambiguity against '<X>/ckpt.pt.prev' is not closed by this for a directory made before the
+    refusal existed.
+
     LEVERS READ: dir
     WIRES READ: none
     DID IT FIRE: the returned bool is recorded once; every save records refused_off when it is False
     """
     ckpt = ckpt.owned_by("CKPT")
-    return str(ckpt.dir).strip().lower() not in _OFF
+    raw = str(ckpt.dir).strip()
+    if raw.lower() in _OFF:
+        return False
+    # THE LAST COMPONENT OF THE RUN BASE, which is the name the vocabulary is spliced onto: trailing
+    # separators go first, by the same rule the CKPT.dir -> TOK.d_vocab_save_path coupling applies.
+    leaf = derive.checkpoint_base(raw, file_form=False).replace("\\", "/").rpartition("/")[2]
+    m = _RESERVED_DIR_END.fullmatch(leaf)
+    if m:
+        end = m.group(1)
+        sibling = derive.checkpoint_base(raw, file_form=False)[:-len(end)]
+        raise LeverError(
+            f"CKPT_DIR={raw!r} ends in {end!r}, a name reserved for the snapshots of the run that "
+            f"saves into {sibling!r}. A checkpoint and its vocabulary share one run base "
+            f"(spine/derive.py::checkpoint_base maps '<X>/ckpt.pt<suffix>' to '<X><suffix>'), so "
+            f"this directory's vocabulary would be {sibling + end + '.dyntok.json'!r} -- the file "
+            f"TOK.save_vocabulary moves that run's previous generation to on every save (for "
+            f"'.prev'), or writes its best snapshot's vocabulary to (for '.best' and '.best<N>') -- "
+            f"and CKPT_RESUME={sibling + '/ckpt.pt' + end!r} would load from this directory once it "
+            f"exists, because resume_source prefers a directory. Driven before this refusal: a "
+            f"190-entry vocabulary saved under '<w>/x.prev' held 183 entries after a run under "
+            f"'<w>/x' saved twice, with nothing counted or said. Nothing is lost: any other name "
+            f"saves the same run.")
+    return True
 
 
 def save_period(ckpt: Config):

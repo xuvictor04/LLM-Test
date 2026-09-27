@@ -1742,11 +1742,29 @@ def run(sysm, *, max_windows=None, progress=True):
         warnings.append(
             "loop: no final checkpoint was written -- CKPT_DIR names no directory, so saving is "
             "off and this run's weights end with the process. Set CKPT_DIR to keep them.")
-    # THE VOCABULARY ROTATION'S TWO BAD OUTCOMES ARE READ HERE, AFTER THE FINAL SAVE (2026-09-26,
-    # LOW-Q-TOK-13-PREV), BECAUSE THE REPORT CANNOT SEE THE LAST ONE. _report snapshotted
-    # TOK(vocab.counters) above, before this save ran, so a rotation that failed at the final save
-    # would be in no line the run prints. The rows are per process (TOK.restore_vocab drops a
-    # parent's copies), so the counts are this run's own and need no start value to subtract.
+    # THE VOCABULARY ROTATION IS READ HERE, AFTER THE FINAL SAVE (2026-09-26, LOW-Q-TOK-13-PREV),
+    # BECAUSE THE REPORT WAS TAKEN BEFORE IT. _report snapshotted TOK(vocab.counters) above, before
+    # this save ran. The rows are per process (TOK.restore_vocab drops a parent's copies), so the
+    # counts are this run's own and need no start value to subtract.
+    # THE REPORT'S ROTATION ROWS ARE RE-READ HERE TOO (2026-09-27, build 1.1's review). The rows are
+    # seeded inside TOK.save_vocabulary, so on a saving run whose only save is the final one
+    # (CKPT_EVERY=0, the default) the snapshot held none and printed them ABSENT -- the
+    # "unreachable" reading, on a run where the rotation was armed and may have fired at that very
+    # save, which then appeared in no line at all. TOK could not seed them earlier: its one view of
+    # saving is d_vocab_save_path, which is non-empty for CKPT_DIR=off ('off.dyntok.json'), while
+    # CKPT's own predicate reads that spelling as off. So the root copies whatever the live rows hold
+    # now: present after any vocabulary save of this process, the final one included, and still
+    # ABSENT when no vocabulary save ran (saving off, or every CKPT.save refused -- said above).
+    # THIS IS AN EXCEPTION TO THE R STAGE'S ORDER, AND A NARROW ONE. The final blob's TOK counters
+    # were taken before this save's rotation, so on these rows alone the report is one save ahead of
+    # the blob; restore_vocab drops them from every blob, so no resume reads the difference. The save
+    # counts (tok.vocab_saved and its `_here` twin) keep the report's snapshot, as ruled above.
+    _tok_row = report.get("TOK(vocab.counters)")
+    if isinstance(_tok_row, dict):
+        for _k in ("tok.vocab_rotated", "tok.vocab_rotate_failed", "tok.vocab_rotate_failed_detail",
+                   "tok.vocab_rotated_in_place"):
+            if _k in vocab.counters:
+                _tok_row[_k] = vocab.counters[_k]
     _rot_failed = int(vocab.counters.get("tok.vocab_rotate_failed", 0))
     if _rot_failed:
         warnings.append(
@@ -1756,15 +1774,19 @@ def run(sysm, *, max_windows=None, progress=True):
             f"vocabulary is stale or missing until a later save rotates cleanly, and a resume "
             f"from ckpt.pt.prev meanwhile is refused by TOK's merge-count check (whenever a mint "
             f"separates the two generations) or by its missing-file refusal.")
-    _rot_refused = int(vocab.counters.get("tok.vocab_rotate_refused", 0))
-    if _rot_refused:
+    # IN PLACE, THE ROTATION RUNS AND IS SAID (corrected 2026-09-27; until then TOK skipped it here
+    # and this line warned of the skip, whose cost was the parent's newer generation's vocabulary).
+    _rot_in_place = int(vocab.counters.get("tok.vocab_rotated_in_place", 0))
+    if _rot_in_place:
         warnings.append(
-            f"loop: the vocabulary was NOT rotated {_rot_refused} time(s), because its .prev path "
-            f"is the file this run resumed from (CKPT_RESUME names a ckpt.pt.prev inside CKPT_DIR), "
-            f"and TOK never writes onto the parent's file. Where a ckpt.pt stood in CKPT_DIR, "
-            f"CKPT.save rotated it onto ckpt.pt.prev, so that .prev pair no longer matches and a "
-            f"resume from it is refused by TOK's merge-count check whenever a mint separates the "
-            f"two. Save a rolled-back run into a directory of its own to keep both generations.")
+            f"loop: the vocabulary was rotated onto the file this run resumed from "
+            f"{_rot_in_place} time(s) (CKPT_RESUME names a ckpt.pt.prev inside CKPT_DIR). CKPT.save "
+            f"moved ckpt.pt onto ckpt.pt.prev in the same saves, so ckpt.pt.prev and its vocabulary "
+            f"are one generation and resume, but the generation this run resumed from is no longer "
+            f"on disk in either half. Resume a rolled-back run into a directory of its own to keep "
+            f"it. If ckpt.pt had been deleted and its vocabulary kept, CKPT rotated nothing and the "
+            f"kept file now stands beside the older checkpoint: TOK's merge-count check refuses that "
+            f"pair whenever a mint separates the two.")
 
     c = clock.counters()
     # THE SAVE LINE COUNTS THIS PROCESS (2026-09-27, register LOW-RESUME-SAVED-COUNTERS): on a
