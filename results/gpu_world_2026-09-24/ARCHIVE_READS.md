@@ -20,9 +20,13 @@ The card was one NVIDIA H200 (143,771 MiB), 20 CPU cores by cgroup quota, 12 run
 2. **The expert population (DECISIONS-Q-CAP-2): it does not settle; it fills the slot ceiling.**
    `n_live` climbs from 2,049 and reaches `FAB_SLOTS` = 4,096 in 20 of 21 runs, first between window
    4,301 and 13,201 (median 6,501), and stays there. The exception, `skip.s1` (the unstable
-   capacity-control arm), ends at 3,927. Spawning fills the pool (2,664-3,207 spawned per run); once
-   it is full, 2,508-16,933 spawns per run are declined, and `gate:fab.spawn` reads "the pool is full
-   at cap=4096: growth never reallocates". No run's population comes near the cull's settling point
+   capacity-control arm), ends at 3,927. Spawning fills the pool (2,664-3,207 spawned per run), and at
+   the end `gate:fab.spawn` reads "the pool is full at cap=4096: growth never reallocates". Once the
+   pool is full the spawn test does not run at all, so the time spent at the ceiling (from the
+   median window 6,501 to 20,000) is the measure of a full pool. *(Corrected 2026-09-27: the
+   2,508-16,933 `fab.spawn_declined` per run are novelty tests that said no while a slot was still
+   free, not spawns refused by a full pool; `fabric/api.py` credits a decline only when the test
+   ran.)* No run's population comes near the cull's settling point
    of 1,844 that Q-CAP-2 asked about.
 3. **Grace and culls (CONTRACT-Q-FAB-5): reachable, as ruled.** `fab.experts_past_grace_ever`
    481-1,002; `fab.merged` 336-648; FAB's cull verdicts `cull_fail` 203-810 and `cull_util` 31-99;
