@@ -37,7 +37,10 @@ repository root as `python3 tests/test_fabric_internals.py`; exit 0 = every chec
       long it held growth off (2026-09-26, Q-RUN-17). fab.blackout_windows credits the windows each
       check that finds it open covers -- one per check at batch 1, the whole flush above it, never
       a window before the stamp, counted from the stamp when a checkpoint carries no previous
-      check -- and is ABSENT at FAB_GROW=0 and FAB_COOLDOWN=0, where no stamp can block growth.
+      check -- and is ABSENT at FAB_GROW=0 and FAB_COOLDOWN=0, where no stamp can block growth, and
+      until the first stamp arrives, where FAB's own fab.growth_blackout Gate reads UNREACHABLE
+      (corrected 2026-09-27, build 1.3's review: it read armed and 0 there). PRESENT-and-0 is a stamp
+      no later check inside its cooldown reached.
   I12 FAB_NORM_ONLY=1 merged, culled and grew (Proposal 05 §8 1.6, register LOW-FAB_NORM_ONLY-GROWS):
       manage and grow_check tested fab.on alone. On inputs that merge one pair and grow one expert
       at FAB_NORM_ONLY=0, the norm-only arm now does neither, both families are ABSENT, the build
@@ -414,7 +417,8 @@ def check_i11_blackout_windows_counts_windows():
     """fab.blackout_windows credits (max(previous check, stamp), this check] on each check that finds
     the blackout open (Q-RUN-17): one per check at batch 1, the whole flush above it, never a window
     before the stamp; counted from the stamp when no previous check is on record; ABSENT where no
-    stamp can block growth; and `checked_at` crosses a state_dict round trip."""
+    stamp can block growth and before the first stamp; PRESENT-and-0 at a stamp no later check
+    reached; and `checked_at` crosses a state_dict round trip."""
     findings, seen = [], []
     caps = type("Caps", (), {"experts": 10**6, "headroom": lambda self, n: 10**6})()
     sig = torch.zeros(SIG_D)
@@ -427,12 +431,22 @@ def check_i11_blackout_windows_counts_windows():
 
     c = cfg(FAB_COOLDOWN=40)
     pop = population(c)
-    # (1) ARMED, NOTHING STAMPED: present-and-0, and shift_notifications says why.
+    # (1) NOTHING STAMPED: ABSENT, where the Gate beside it reads UNREACHABLE (corrected 2026-09-27;
+    # this read present-and-0, "armed, did not fire", on a blackout that cannot open at all).
     for w in (1, 2, 3):
         got = at(c, pop, w, None)
-    if got != 0 or pop.counters.get("fab.shift_notifications") != 0:
-        findings.append(f"armed with no stamp: fab.blackout_windows {got!r}, notifications "
-                        f"{pop.counters.get('fab.shift_notifications')!r}; want 0 and 0")
+    if got != "ABSENT" or pop.counters.get("fab.shift_notifications") != 0:
+        findings.append(f"no stamp: fab.blackout_windows {got!r}, notifications "
+                        f"{pop.counters.get('fab.shift_notifications')!r}; want ABSENT and 0")
+    seen.append(f"no stamp: {got}")
+    # (1b) PRESENT-AND-0 IS REACHABLE: a stamp first seen by a check at its own window seeds the key,
+    # and the interval (stamp, stamp] holds no window to credit.
+    p1 = population(c)
+    got = at(c, p1, 10, 10)
+    if got != 0 or p1.counters.get("fab.shift_notifications") != 1:
+        findings.append(f"stamp 10 seen at 10: {got!r}, notifications "
+                        f"{p1.counters.get('fab.shift_notifications')!r}; want 0 and 1")
+    seen.append(f"stamp at its own check: {got}")
     # (2) ONE PER CHECK AT BATCH 1: a stamp at 10, checks at 11..15.
     for w in range(11, 16):
         got = at(c, pop, w, 10)

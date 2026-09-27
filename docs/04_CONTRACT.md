@@ -5351,9 +5351,11 @@ bits/byte can be split by phase. Each is now read where its owner sees it:
   check found the stamp's cooldown open, credited as (max(previous check, stamp), this check], so a
   flush of several windows counts all of them and a window before the stamp never counts.
   `fab.growth_blackout_suppressed.*` still count the refused ASKS. ABSENT at `FAB_ON=0`, `FAB_GROW=0`
-  or `FAB_COOLDOWN` ≤ 0, where no stamp can block growth; PRESENT-and-0 otherwise, read beside
-  `fab.shift_notifications`. `state_dict` carries the previous check's step (`checked_at`); a
-  checkpoint written before the key existed counts from the stamp. **This is 03b's
+  or `FAB_COOLDOWN` ≤ 0, where no stamp can block growth, and until the first stamp arrives, where
+  the `fab.growth_blackout` Gate reads UNREACHABLE; PRESENT-and-0 is a stamp no later check inside
+  its cooldown reached (corrected 2026-09-27, below: it was seeded on every check and read
+  PRESENT-and-0 beside that UNREACHABLE). `state_dict` carries the previous check's step
+  (`checked_at`); a checkpoint written before the key existed counts from the stamp. **This is 03b's
   `fab.cooldown_windows`, under the one name the register uses; that name is retired.**
 - **`tok.mint_wait_windows` and `tok.mint_waited`** (in `vocab.counters`, seeded and written by the
   ROOT, the only place that sees both an id's birth in `TOK.mint_burst` and the act or epoch roll
@@ -5365,7 +5367,8 @@ bits/byte can be split by phase. Each is now read where its owner sees it:
 - **`loop.act_seconds` and `loop.act_remap_seconds`** (the loop's flush books, beside `loop.acts`):
   wall seconds spent in mid-epoch acts, and the part spent re-cutting MEM's stored contexts inside
   `_mem_remap_fn`. FLOATS, so `tests/test_baseline.py`'s integer channel never compares them; ABSENT
-  wherever `loop.acts` is (`TOK_RETOK_EVERY=0`).
+  wherever `loop.acts` is: at `TOK_RETOK_EVERY=0`, and off `TOK_MODE=online`, where TOK raises no
+  retok Due (corrected 2026-09-27, below: the mode test was missing).
 - **`tok.bpt_tail`** (TOK, `TOK.splice`): A READING, not a count: bytes per token over the tail the
   last splice cut, at the vocabulary as it then stood (`derive.bytes_per_token`, six places). ABSENT
   until an act cuts a tail; a resume's log replay splices again and writes the same value. The act's
@@ -5383,6 +5386,52 @@ identical losses and parameter hashes. Known answers: `tests/test_continuation.p
 the blackout split across a save) and S9 (each reading fires, equals its recomputation, and is ABSENT
 where disarmed), `tests/test_tok_dom_cap.py` T4-T5, `tests/test_fabric_internals.py` I11. What the
 readings say about retok cadences is the GPU fleet's question (§8 2.1).
+**CORRECTED 2026-09-27 (build 1.3's review) — the act's books and the blackout count are ABSENT
+where they cannot fire, and a continuing resume's double count is recorded.** (i) *The act's books.*
+`spine/loop.py::run` seeded `loop.acts`, `loop.acts_noop`, `loop.act_seconds` and
+`loop.act_remap_seconds` on `TOK_RETOK_EVERY` > 0 alone. `TOK.on_window` raises a retok Due only at
+`TOK_MODE=online` (`retok = bool(online and _due(...))`) and seeds `tok.due_retok` on that arm alone,
+so at `TOK_MODE=fixed` or `bytes`, with the shipped `TOK_RETOK_EVERY=3000`, all four read
+PRESENT-and-0 ("armed, did not fire") beside `tok.due_retok` ABSENT. Driven: 60 windows at
+`tests/test_continuation.py`'s base, on both modes. They are now seeded on TOK's own predicate,
+`TOK_MODE=online` and `TOK_RETOK_EVERY` > 0, which is the mode test the mint wait already made. The
+shipped arm is online at 3000, so a default run seeds the same keys, and none of them is in the
+baseline fixture. (ii) *The blackout count.* `fab.blackout_windows` was seeded on every check at
+`FAB_GROW` on and `FAB_COOLDOWN` > 0. A run that no stamp reached (the retok fleet's k0 control, and
+`TOK_MODE=fixed` or `bytes`, at `RUN_EPOCHS=1`) therefore read it PRESENT-and-0, while the
+`fab.growth_blackout` Gate beside it printed UNREACHABLE ("0 notifications means the blackout cannot
+open at all"). The ruling above answered that with `fab.shift_notifications`; DID IT FIRE puts the
+answer in the key itself. The key is now seeded at the first check that holds a stamp
+(`pop.growth['shift_seen']`), which is where the Gate turns reachable. `state_dict` carries the stamp
+and the counters carry the key, so a resumed child agrees with its parent. `gpu_world.sh` reads an
+ABSENT key beside a present `fab.shift_notifications` of 0 as 0 blacked-out windows, so an arm's
+blackout share still averages every seed, and a seed that never stamped reads the 0 it read before.
+(iii) *A continuing resume counts the replayed acts twice. Recorded here, not repaired.*
+`spine/compose.py` runs `TOK.restore_vocab`, which puts the parent's counters back, before
+`_replay_segmentation` rebuilds the epoch's segmentation from the log. The replay's `TOK.tokenize` at
+the recorded view counts only in `tok.segment_view` (Q-TOK-15). Its `TOK.splice` at a view counts
+as a live act does: `tok.retok` and `tok.retok_mid_epoch` +1 per replayed act, `tok.byte_fallback`
+plus the replayed tail's fallbacks, and at `TOK_DROPOUT` > 0 `tok.dropout_skip` plus the replayed
+draws' skips. By the same code path, not driven, `tok.retok_empty_tail` also counts again for an act
+that found no tail. So every act the parent took before its save is counted twice in the child. Driven
+on `tests/test_continuation.py` S5's shapes (the uninterrupted run against the child):
+`after_act` (`TOK_GROW_EVERY=30`, `TOK_RETOK_EVERY=40`, saved at 135, resumed for 25) reads
+`tok.retok` 1 against 2, `tok.retok_mid_epoch` 1 against 2 and `tok.byte_fallback` 33900 against
+46596. The same shape at `OPT_BATCH_WINDOWS=4` (saved at 136) reads 1 against 2 and 33699 against
+46194. `dropout` (`TOK_DROPOUT=0.1`, three acts before the save) reads 3 against 6, 76346 against
+129084, and `tok.dropout_skip` 6475 against 11003. A save before the first act (`mint_then_act`)
+reads equal, because nothing is spliced in the replay. The losses, the segmentation, every reading
+this ruling added, and `tok.bpt_tail` (a reading the replay rewrites with the same value) are exact.
+No decision reads the doubled keys. Two repairs are possible: `TOK.splice` at a view could count
+apart, as `tokenize` does since Q-TOK-15, or the replay could run before the restore. Either one
+changes TOK's counter contract, which this build does not take on.
+(iv) Q-RUN-15 (a) had an undated sentence on `RunResult.flush_bytes` inside its 2026-09-24 ruling.
+It is removed, and this ruling is where the field is documented. 03b's six other mentions of
+`fab.cooldown_windows` now name `fab.blackout_windows`. **Driven:** `tests/test_tok_dom_cap.py` T2
+(the four books ABSENT at `TOK_MODE=fixed` and `bytes`), `tests/test_fabric_internals.py` I11 (ABSENT
+with no stamp; PRESENT-and-0 at a stamp that no later check reached), `tests/test_continuation.py` S9
+(ABSENT at `TOK_RETOK_EVERY=0`, beside `fab.shift_notifications` 0 and the Gate's UNREACHABLE), and
+`tests/test_gpu_world.py` F4 (a k0 seed with the key ABSENT reads 0.0%).
 
 ### Q-DOM-5 — DOM's competence was a per-token level, so every act moved it — **RESOLVED 2026-09-26 (Proposal 05 §8 1.2; register TREE-S0b-LEVELS, C12; 03b 0b.5): `DOM_LEVELS`, DEFAULT ON — THE ROOT HANDS `note_competence` BITS PER BUILD-TIME TOKEN; OFF IS TODAY'S PER-TOKEN UNIT, BIT FOR BIT. ⚠ ONE NEW LEVER, A CENSUS AMENDMENT; A DEFAULT RUN'S COMPETENCE VALUES CHANGE. NO SIGNATURE MOVES, NO WIRE**
 **What was asked.** `DOM.note_competence` folds each window's mean cross-entropy / ln 2 into the
@@ -5870,7 +5919,7 @@ pass (`n_backward`, `opt.backward`) and drops its gradients before the save: sav
 but `finished` is tested before `rolled`, so the mid-run roll's warning was unreachable; a
 `max_windows` stop leaves one no roll counts (driven: `OPT_BATCH_WINDOWS=16`, 157 windows, 13 never
 reached a backward, and nothing said so). **Ruling:** one check after the loop covers both exits;
-`RunResult.flush_bytes` (Q-RUN-17) is the bytes behind each loss. `RunResult.never_backward` = `dropped_windows` + the batch a `max_windows` stop left; run.py prints
+`RunResult.never_backward` = `dropped_windows` + the batch a `max_windows` stop left; run.py prints
 it on its own line when non-zero, so the `=== N windows, …` line keeps the shape `sweep_gpu.sh`
 parses; `RUN.RunClock.counters` is rendered at R (it was in `_CALLS` and rendered nowhere).
 (b) **`RUN_PROFILE=1` was inert:** no span was opened and `bench_summary` got no Timing. **Ruling:**

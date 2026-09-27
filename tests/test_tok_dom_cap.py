@@ -18,7 +18,10 @@ measured wrong, or not delivered at all, and nothing in tests/ could see it:
       performed by the mid-epoch act (tok.retok_mid_epoch) or refused as a no-op because the table
       had not moved (loop.acts_noop), and none is dropped (tok.due_dropped ABSENT or 0).
   T2  TOK SEEDED ITS CADENCE COUNTERS ON ARMS THAT CANNOT MINT (fixed, bytes), and tok.due_merged at
-      batch_windows=1. Both are ABSENT there now.
+      batch_windows=1. Both are ABSENT there now. So are the loop's four act books (loop.acts,
+      loop.acts_noop, loop.act_seconds, loop.act_remap_seconds) at the shipped TOK_RETOK_EVERY=3000:
+      no retok is raised off the online arm, and they read armed and 0 there until 2026-09-27 (build
+      1.3's review, Q-RUN-17).
   T3  THE GATED REPORT COUNTED DUES, NOT CALLS, and printed a static "(TOK_PROBATION_USES=0 ...)".
   T4  THE MINT WAIT (2026-09-26, Q-RUN-17) IS CLOSED BY EVERY RE-SEGMENTATION, acts and the roll
       alike, exactly once per id: on the two-epoch run tok.mint_waited plus the stranded count is
@@ -179,16 +182,38 @@ _off = [k for k in ("tok.tally", "tok.due_mint", "tok.due_retok", "tok.due_proba
                     "tok.probation_calls", "tok.mint_wait_windows", "tok.mint_waited",
                     "tok.bpt_tail") if k in tc]
 check("T2 TOK_MODE=fixed seeds none of the online arm's cadence counters", not _off, str(_off))
+# THE ACT'S FOUR BOOKS FOLLOW TOK'S PREDICATE (corrected 2026-09-27, Q-RUN-17): TOK_RETOK_EVERY is the
+# shipped 3000 here, and the loop seeded them on the cadence alone, "armed, did not fire" on an arm
+# where TOK.on_window raises no retok Due at all.
+_ACT_BOOKS = ("loop.acts", "loop.acts_noop", "loop.act_seconds", "loop.act_remap_seconds")
+_bk = res.report.get("LOOP(flush books)")
+_on = [k for k in _ACT_BOOKS if isinstance(_bk, dict) and k in _bk]
+check("T2 TOK_MODE=fixed arms no act: loop.acts, loop.acts_noop, loop.act_seconds and "
+      "loop.act_remap_seconds ABSENT beside tok.due_retok ABSENT",
+      isinstance(_bk, dict) and not _on and int(sysm.configs["TOK"].retok_every) > 0,
+      f"present {_on}; books {sorted(_bk) if isinstance(_bk, dict) else _bk!r}")
 check("T2 TOK_MODE=fixed reports TOK.mint_burst and judge_probation UNREACHABLE",
       "UNREACHABLE" in gated_line(res, "TOK.mint_burst")
       and "UNREACHABLE" in gated_line(res, "TOK.judge_probation"))
 check("T3 no gated line states a lever value it cannot know",
       not any("USES=0 makes it" in g for g in res.gated))
+sysm = build(TOK_MODE="bytes")
+res = loop.run(sysm, max_windows=10, progress=False)
+_bk = res.report.get("LOOP(flush books)")
+_on = [k for k in _ACT_BOOKS + ("tok.due_retok",)
+       if (isinstance(_bk, dict) and k in _bk) or k in sysm.vocab.counters]
+check("T2 ... and TOK_MODE=bytes likewise", isinstance(_bk, dict) and not _on, f"present {_on}")
 
 sysm = build()
-loop.run(sysm, max_windows=5, progress=False)
+_r_def = loop.run(sysm, max_windows=5, progress=False)
 check("T2 tok.due_merged is ABSENT at the shipped OPT_BATCH_WINDOWS=1",
       "tok.due_merged" not in sysm.vocab.counters)
+_bk = _r_def.report.get("LOOP(flush books)")
+check("T2 the shipped arm (TOK_MODE=online, TOK_RETOK_EVERY=3000) still arms all four act books, "
+      "PRESENT-and-0 before its first act",
+      isinstance(_bk, dict) and all(_bk.get(k) == 0 for k in _ACT_BOOKS)
+      and "tok.due_retok" in sysm.vocab.counters,
+      f"{ {k: _bk.get(k, 'ABSENT') for k in _ACT_BOOKS} if isinstance(_bk, dict) else _bk!r}")
 
 sysm = build(OPT_BATCH_WINDOWS="4", TOK_GROW_EVERY="2")
 with _Log((tok_api, "mint_burst")) as spy:

@@ -802,7 +802,18 @@ def retok(ctx_arg, archive):
     NEW13 = ("fab.blackout_windows", "tok.mint_wait_windows", "loop.act_seconds", "tok.bpt_tail")
     have13 = {k for v in runs.values() for k in v["r"] if k in NEW13}
     have_fb = any(v["fbytes"] for v in runs.values())
-    absent = [k for k in NEW13 if k not in have13] + ([] if have_fb else ["per-flush bytes (run.py --flush-bytes)"])
+    # fab.blackout_windows IS ABSENT ON A RUN NO STAMP REACHED (2026-09-27, build 1.3's review,
+    # Q-RUN-17): FAB seeds it at the first stamp. So its absence says the tree lacks it only where a
+    # run was stamped, and beside a present fab.shift_notifications of 0 it is 0 windows blacked out.
+    stamped = any((fnum(v["r"].get("fab.shift_notifications")) or 0) > 0 for v in runs.values())
+    absent = ([k for k in NEW13 if k not in have13 and (k != "fab.blackout_windows" or stamped)]
+              + ([] if have_fb else ["per-flush bytes (run.py --flush-bytes)"]))
+
+    def blackout(v):
+        x = fnum(v["r"].get("fab.blackout_windows"))
+        if x is None and "fab.blackout_windows" in have13 and fnum(v["r"].get("fab.shift_notifications")) == 0:
+            return 0.0
+        return x
 
     def cm(arm, key):
         return mean([fnum(v["r"].get(key)) for _, v in per_arm(arm)])
@@ -834,7 +845,8 @@ def retok(ctx_arg, archive):
     for arm in ORDER:
         rs = per_arm(arm)
         acts = cm(arm, "loop.acts")
-        bw = share(arm, "fab.blackout_windows")
+        # EVERY SEED, the unstamped ones at 0 (blackout above), so the share is not over the stamped alone.
+        bw = mean([blackout(v) / v["win"] for _, v in rs if blackout(v) is not None and v["win"]])
         cdv = mean([v["cooldown"] for _, v in rs])
         # AN UPPER BOUND: each notification can black out at most one cooldown, and never more than
         # the whole run (a short run's cooldowns overlap and overrun its end).

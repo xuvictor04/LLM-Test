@@ -51,7 +51,8 @@ parent's exact stream and continue. Each check below pins one promise of that pa
       tests/test_baseline.py::COUNTER can never read as an integer counter; tok.bpt_tail from the
       final segmentation, and on the act's own line; RunResult.flush_bytes summing to
       loop.bytes_scored; and run.py --flush-bytes beside --loss-curve. On the TOK_RETOK_EVERY=0 run
-      each is ABSENT, or armed and 0 where the ledger says so.
+      each counter is ABSENT -- fab.blackout_windows too since 2026-09-27 (build 1.3's review), which
+      read armed and 0 there beside FAB's UNREACHABLE Gate and now waits for the first stamp.
   S10 THE SAVE COUNTERS ARE THE LINEAGE'S, BESIDE A PROCESS TWIN (Proposal 05 §8 1.6, register
       LOW-RESUME-SAVED-COUNTERS): a parent that saved k times and a child that saved j times before
       its report read (k + j, j) on all ten save counts -- where the unfixed tree read k - 1 + j,
@@ -301,9 +302,11 @@ def continuation(tag, n1, n2, **env):
 
 
 # THE S0b SECONDARIES CROSS THE SAVE (Q-RUN-17). Only the new readings are compared between the
-# child and the uninterrupted run: tok.retok_mid_epoch, tok.retok and tok.byte_fallback already
-# differ across a continuing resume, because the log replay splices again after restore_vocab put
-# the parent's counts back (recorded in Q-RUN-17, not repaired here).
+# child and the uninterrupted run: tok.retok_mid_epoch, tok.retok and tok.byte_fallback (and
+# tok.dropout_skip at TOK_DROPOUT > 0) already differ across a continuing resume whose parent acted
+# before its save, because the log replay splices again after restore_vocab put the parent's counts
+# back (recorded in Q-RUN-17's 2026-09-27 correction (iii), with this file's numbers; not repaired
+# here).
 _SECONDARY = ("tok.mint_wait_windows", "tok.mint_waited", "tok.bpt_tail")
 
 
@@ -602,22 +605,27 @@ check("S8 ... and the report's Gate opt.horizon.revise says UNREACHABLE and name
 
 # ---- S9: the S0b secondaries (Proposal 05 §8 1.3, Q-RUN-17) --------------------------------------
 # S4's two runs again: s/r act (TOK_GROW_EVERY=30 TOK_RETOK_EVERY=40), s0/r0 cannot. Each reading is
-# checked against a number computed here from something else the run left behind, and ABSENT (or 0
-# where the ledger says 'armed') on the arm that cannot reach it.
+# checked against a number computed here from something else the run left behind, and ABSENT on the
+# arm that cannot reach it.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from test_baseline import COUNTER                                  # noqa: E402
 
 _acts = act_windows(r)
 _fc, _fc0 = s.fabric.counters, s0.fabric.counters
 _bw = blackout_expected(_acts, int(r.windows), int(s.configs["FAB"].cooldown))
+# THE GATE BESIDE IT (corrected 2026-09-27, build 1.3's review): this run's key was armed and 0 while
+# FAB's own fab.growth_blackout Gate printed UNREACHABLE; the key now waits for the first stamp.
+_g0 = r0.report.get("FAB.grow_check(last call's gates)")
+_g0 = _g0.get("gate:fab.growth_blackout") if isinstance(_g0, dict) else None
 check("S9 fab.blackout_windows counts the windows each act's stamp held growth off (one per check "
-      "at batch 1, to the next act, the run's end or the cooldown); armed and 0 at "
-      "TOK_RETOK_EVERY=0, where no stamp arrives",
+      "at batch 1, to the next act, the run's end or the cooldown); ABSENT at TOK_RETOK_EVERY=0, "
+      "where no stamp arrives, beside fab.shift_notifications 0 and the Gate's UNREACHABLE",
       bool(_acts) and _bw > 0 and _fc.get("fab.blackout_windows") == _bw
-      and _fc0.get("fab.blackout_windows") == 0 and _fc0.get("fab.shift_notifications") == 0,
+      and "fab.blackout_windows" not in _fc0 and _fc0.get("fab.shift_notifications") == 0
+      and _g0 is not None and _g0[0] == "unreachable",
       f"acts {_acts}, expected {_bw}, got {_fc.get('fab.blackout_windows')}; retok 0: "
       f"{_fc0.get('fab.blackout_windows', 'ABSENT')} with "
-      f"{_fc0.get('fab.shift_notifications')} notification(s)")
+      f"{_fc0.get('fab.shift_notifications')} notification(s), gate {_g0!r}")
 _tc, _tc0 = s.vocab.counters, s0.vocab.counters
 _mw = mint_wait_expected(s.vocab, _acts)
 check("S9 tok.mint_wait_windows / tok.mint_waited equal the count off Vocabulary.prov, every mint "

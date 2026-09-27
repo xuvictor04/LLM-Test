@@ -300,7 +300,7 @@ try:
     _ph = [0, 0, 0, 1, 1, 2, 2, 2, 3, 3]
     run(o4, "k0", 0, 1.0, n=10, win=1000, nbytes=189000, fbytes=[18900] * 10,
         losses=[(k + 1) * LN2 * 18900 / CTX for k in _ph],
-        counters={"fab.blackout_windows": 0, "fab.shift_notifications": 0})
+        counters={"fab.shift_notifications": 0})
     run(o4, "k0_nuis", 0, 1.0001, n=10, win=1000, nbytes=189000, fbytes=[18900] * 10)
     new13 = dict(OLD13, **{"fab.shift_notifications": 1, "tok.mint_wait_windows": 800, "tok.mint_waited": 40,
                            "loop.act_seconds": 1.5, "loop.act_remap_seconds": 0.5, "tok.bpt_tail": 1.6})
@@ -318,6 +318,16 @@ try:
           and "BLACKOUT ALARM (C13): k3000" not in a4)
     check("F4 the upper bound beside it is 1 x 400 / 1000 = 40.0%",
           "fab.shift_notifications x cooldown 400 / windows = 40.0%" in a4)
+    # k0 CARRIES NO fab.blackout_windows: FAB seeds it at the first stamp (2026-09-27, Q-RUN-17), and
+    # this run's fab.shift_notifications is 0. That is 0 windows blacked out, not a missing reading.
+    _sec = a4[a4.find("=== SECONDARIES"):].splitlines()
+    _k0 = next((i for i, l in enumerate(_sec) if l.startswith("  k0 ")), None)
+    _k0b = _sec[_k0 + 1] if _k0 is not None and _k0 + 1 < len(_sec) else ""
+    check("F4 a run no stamp reached has fab.blackout_windows ABSENT beside fab.shift_notifications 0, "
+          "and reads 0.0% of windows, not a missing reading",
+          "blackout 0.0% of windows (fab.blackout_windows;" in _k0b
+          and re.search(r"k0 acts .*; blackout 0\.0% \(<= 0\.0%\)", b4) is not None,
+          f"{_k0b.strip()[:90]} | {[l for l in b4.splitlines() if 'k0 acts' in l]}")
     check("F4 §8 1.3's readings are read when present (mint wait 800 / 40, act 1.5 s of 100 s, "
           "tok.bpt_tail) and no 'absent' line prints",
           "mint wait 20.0 windows x 40 id(s); act 1.50% of loop time (MEM re-cut 0.50%)" in a4

@@ -4330,8 +4330,10 @@ def grow_check(fab: Config, pop, *, flush_loss, step_windows, soft_cap, memory_p
                  same reason), fab.blackout_windows (the WINDOWS whose flush's growth check found
                  the blackout open, where the pass counters count only the asks it refused;
                  ABSENT at FAB_ON=0, FAB_GROW=0 or FAB_COOLDOWN <= 0, where no stamp can block
-                 growth, and PRESENT-and-0 otherwise, read beside fab.shift_notifications, whose 0
-                 says no stamp ever arrived. The register's one name for it; 03b's
+                 growth, and until the first stamp arrives, where the growth_blackout Gate reads
+                 UNREACHABLE; PRESENT-and-0 is a stamp no later check inside its cooldown reached.
+                 Seeded at the stamp since 2026-09-27; it read PRESENT-and-0 on every check before,
+                 beside that Gate's UNREACHABLE. The register's one name for it; 03b's
                  fab.cooldown_windows is retired, docs/04_CONTRACT.md Q-RUN-17)
     ELEVEN MORE KEYS THE BODY WRITES, DECLARED HERE FOR THE REASON fabric/api.py::forward gives: a
     key in the report that the contract does not admit to producing is the same defect as a declared
@@ -4430,14 +4432,9 @@ def grow_check(fab: Config, pop, *, flush_loss, step_windows, soft_cap, memory_p
                "fab.grow_recover_passes", "fab.grow_warmup_refused",
                "fab.newfrac_spent_on_spawn"):
         counters.setdefault(_k, 0)
-    # THE BLACKOUT'S WINDOWS COUNT IS SEEDED ONLY WHERE A STAMP CAN BLOCK GROWTH, which is why it is
-    # not in the loop above with its pass-counting siblings (2026-09-26, Q-RUN-17). At FAB_GROW=0
-    # neither leg is evaluated, so no stamp blocks anything; at FAB_COOLDOWN <= 0 the blackout never
-    # opens, because a check at or after the stamp is never fewer than zero windows from it. ABSENT
-    # there is this ledger's spelling of unreachable. Where it is PRESENT-and-0, whether a stamp
-    # ever arrived is fab.shift_notifications' question, and the growth_blackout Gate prints it.
-    if grow_on and cool_n > 0:
-        counters.setdefault("fab.blackout_windows", 0)
+    # THE BLACKOUT'S WINDOWS COUNT IS NOT IN THE LOOP ABOVE with its pass-counting siblings: it is
+    # seeded below, at the first check that holds a stamp, and only where a stamp can block growth
+    # (2026-09-26, Q-RUN-17).
     _bump(counters, "fab.grow_checks")
     counters["fab.cap_lift_period"] = int(lift_period)
 
@@ -4480,6 +4477,18 @@ def grow_check(fab: Config, pop, *, flush_loss, step_windows, soft_cap, memory_p
         since_shift = int(step - U.Windows(int(g["shift_seen"])))
         if since_shift < cool_n:
             blackout_open, blackout_left = True, cool_n - since_shift
+        # THE BLACKOUT'S WINDOWS COUNT IS SEEDED HERE, AT THE FIRST STAMP, AND ONLY WHERE A STAMP CAN
+        # BLOCK GROWTH. At FAB_GROW=0 neither leg is evaluated, so no stamp blocks anything; at
+        # FAB_COOLDOWN <= 0 the blackout never opens, because a check at or after the stamp is never
+        # fewer than zero windows from it. And before any stamp the blackout cannot open at all,
+        # which is the growth_blackout Gate's own UNREACHABLE below. SEEDED AT THE STAMP AND NOT AT
+        # EVERY CHECK (corrected 2026-09-27, build 1.3's review, Q-RUN-17): a run no stamp reached --
+        # the retok fleet's k0, and TOK_MODE=fixed or bytes, at RUN_EPOCHS=1 -- printed this key
+        # PRESENT-and-0, "armed, did not fire", beside that Gate's UNREACHABLE. PRESENT-and-0 is now a
+        # stamp no later check inside its cooldown reached. `shift_seen` rides state_dict and the key
+        # rides the counters, so a resumed child agrees with its parent on both.
+        if grow_on and cool_n > 0:
+            counters.setdefault("fab.blackout_windows", 0)
     # WINDOWS, NOT PASSES (2026-09-26, Q-RUN-17). fab.growth_blackout_suppressed.* count the ASKS the
     # blackout refused, so a quiet loss inside it reads 0 there however long it stayed open; the
     # windows count is the share a fleet reads against its blackout alarm. A check that finds the

@@ -857,7 +857,12 @@ def run(sysm, *, max_windows=None, progress=True):
     if (not bool(fab_cfg.on)) or bool(fab_cfg.norm_only):
         books["loop.owners_from_domain"] = 0
     # THE MID-EPOCH ACT'S DID-IT-FIRE (03b S0b). Armed when TOK's retok cadence is: PRESENT-and-0 is
-    # "armed, no act ran"; ABSENT at TOK_RETOK_EVERY=0, where no act can be asked for.
+    # "armed, no act ran"; ABSENT where no act can be asked for -- at TOK_RETOK_EVERY=0, and off
+    # TOK_MODE=online, where TOK.on_window raises no retok Due at any cadence and seeds no
+    # tok.due_retok. THE MODE TEST IS A CORRECTION (2026-09-27, build 1.3's review, Q-RUN-17): this
+    # read the cadence alone, so TOK_MODE=fixed or bytes at the shipped TOK_RETOK_EVERY=3000 printed
+    # all four keys below PRESENT-and-0, "armed, did not fire", on arms no act can reach. The
+    # predicate is now TOK's own for tok.due_retok, the mode test the mint wait below also makes.
     # AND ITS COST, ON THE SAME PREDICATE (2026-09-26, Q-RUN-17): loop.act_seconds is the wall time
     # of the stage-X block and loop.act_remap_seconds that of the MEM re-cut the next flush makes
     # (spine/loop.py::_mem_remap_fn), timed apart as the register asks. They are WALL-CLOCK FLOATS,
@@ -866,7 +871,7 @@ def run(sysm, *, max_windows=None, progress=True):
     # out of every book that anything compares exactly. Nothing synchronises a device around them,
     # so the reading cannot slow the run: on CUDA they time the host's side of the act, and a sync
     # inside either can absorb kernels the flush before it queued.
-    if int(tok_cfg.retok_every) > 0:
+    if str(tok_cfg.mode) == "online" and int(tok_cfg.retok_every) > 0:
         books["loop.acts"] = 0
         books["loop.acts_noop"] = 0
         books["loop.act_seconds"] = 0.0
