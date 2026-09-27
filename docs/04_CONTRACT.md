@@ -3687,6 +3687,18 @@ including thresholds one double-ulp under an entry), and a 300-window run with m
 against d97779d, so **every number in the table above stands.** The GPU rate after the repair is a
 projection until the owner's next fleet measures it; `gpu_world.sh`'s ETA is still calibrated on
 windows before the first manage pass.
+**2026-09-27 (register LOW-GPU-WORLD-ETA, PENDING-GPU-THROUGHPUT-REBASELINE; Proposal 05 §8 1.5).**
+`EXP=retok` and the new `EXP=world_epoch` calibrate on 600 windows (`CAL_WINDOWS`), past the manage
+pass at window 501. `EXP=world` keeps 150 until the retok fleet's ETA-against-wall reading says
+otherwise: its paste-back block prints the ratio and, past 1.5x, names this item. The post-fix rate
+is measured inside that fleet and labelled "post-fix rate at the retok shape": windows/s and bytes/s
+per arm off each log's own loop time, the act's per-byte cost against k0 (whose rate includes its
+periodic saves, and says so), and the aggregate as every run's windows over the fleet's recorded wall
+at the chosen PAR, beside the GPU model, PAR, MPS and NCPU. `EXP=world_epoch` is the WORLD re-run's
+shape (register note WORLD 3): one whole WINDOWS x 189-byte epoch with the window cap out of reach,
+"RAN OUT OF STREAM" replaced by a window-cap flag, and `TOK_RETOK_EVERY` and `DATA_DRAW` pinned; it
+refuses to launch before SR0. `EXP=world`'s analysis of this fleet's archive is byte-identical to the
+script's before the change (`tests/test_gpu_world.py` F11).
 
 **`WORLD_FEEDBACK` stayed `True` pending the GPU experiment in `sweep_world.sh`** (history, as written before the run) (5 seeds per arm,
 paired by seed, mean of loss_curve differences over the last half; flip the default if the gain is
@@ -4343,6 +4355,34 @@ the archive's 2.189 b/B case had 22 of 23 retoks adding zero tokens. `tok.retok_
 the ship-rule measurement 03b §13 S0b names** (prequential bits/byte, `TOK_RETOK_EVERY` {0, 3000, 1000},
 3 paired seeds, non-inferiority against a nuisance-seed control); until it runs, `TOK_RETOK_EVERY`
 keeps its shipped 3000 and runs past window 3000 change. Driven: `tests/test_continuation.py` S4.
+
+**2026-09-27 (register PENDING-GPU-RETOK-FLEET, note retok fleet (1); Proposal 05 §8 1.5): THE
+SHIP-RULE FLEET KEEPS ITS CHECKPOINTS, AND A PERIODIC SAVE CHANGES NO NUMBER.** `EXP=retok bash
+gpu_world.sh` gives every run `CKPT_DIR=$OUT/ckpt/<arm>.s<seed>` (the script's `KEEP_CKPT`, on at
+`EXP=retok` and off elsewhere, so `EXP=world`'s command lines are the ones it ran before). The act
+arms save once, at the end (`CKPT_EVERY=0`); k0, k0_nuis and k0_rerun save every `KEEP_EVERY`
+windows, by default the gcd of the act cadences (1000); and k0's saves are hard-linked aside as
+`$OUT/ckpt/keep/k0.s<seed>.w<step>`, with the vocabulary beside each as `<that base>.dyntok.json`,
+because CKPT's ring keeps only `ckpt.pt` and `.prev` (`ckpt/api.py::save`). That is the layout
+`derive.checkpoint_base` resolves, so `CKPT_RESUME=<keep>/k0.s0.w3001` resumes directly (into a new
+`CKPT_DIR`). A generation is taken once its vocabulary is no older than its checkpoint -- the root
+writes the vocabulary only after `CKPT.save` returned True (§3 stage `C`) -- and each copy is named
+for the step read off the file and checked coherent, its TOK merge count against its vocabulary's
+entries. A periodic save of period P lands at window iP+1 and an act of cadence K at jK+1, so at
+P = 1000 every k1000 act window, and every k3000 one, has a k0 model of the same maturity: the
+offline control note retok fleet (4) sets each act's spike against. **Known answer: the saves are
+invisible to the run.** S4's two runs (`TOK_GROW_EVERY=30`, `TOK_RETOK_EVERY` 40 and 0, 130 windows,
+no save), rebuilt with `CKPT_EVERY=40`, reproduce their loss curves exactly and act at the same
+windows, and the ring's older generation is the periodic save at window 121 -- the last act's window
+-- beside its own vocabulary. So arm − k0 pairs a saving control with arms that save only at the end
+without bias, and M and the run-to-run check compare like with like as well (k0_nuis and k0_rerun
+save at k0's cadence): both remedies note retok fleet (1) offered. Driven:
+`tests/test_continuation.py` S11. On CPU (`WINDOWS=80`, `RETOK_ARMS='40 20'`, operation only) k0 kept
+w21, w41 and w61, all coherent, covering k40's one act and k20's three, and a resume from w41 into a
+new directory reproduced k0's own losses for windows 42-51 exactly. The verdict, the rates, the
+secondaries and the kept copies come back as the script's paste-back block, and
+`tests/test_gpu_world.py` holds the analysis, the block and the archive to known answers on
+synthetic fleets.
 
 **THE QUESTION AS IT STOOD.**
 

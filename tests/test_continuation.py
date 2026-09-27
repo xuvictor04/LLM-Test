@@ -54,6 +54,12 @@ parent's exact stream and continue. Each check below pins one promise of that pa
       k + j and j across packages -- the child's final blob holds k + j + 1 (a blob counts itself),
       and a resume from that blob restores k + j + 1, tok.vocab_saved included; a resume from a
       lineage's first save, whose blob predates every vocabulary file, restores tok.vocab_saved 1.
+  S11 PERIODIC SAVES CHANGE NO NUMBER AND LAND ON THE ACT WINDOWS (Proposal 05 §8 1.5, register note
+      retok fleet (1)): S4's two runs rebuilt with CKPT_EVERY at the act cadence reproduce their
+      no-save loss curves exactly, act at the same windows, and leave the periodic save at the last
+      act's window (121) as the ring's older generation, paired with its own vocabulary -- the
+      known answer that lets gpu_world.sh's EXP=retok pair a saving k0 with act arms that save only
+      at the end, and keep k0's saves as the spike test's maturity-matched control.
 
 WHAT THIS FILE CANNOT SEE: whether live retokenization helps a long run. That is the owner-scale
 ship-rule measurement 03b S0b names (prequential bits/byte, 3 paired seeds).
@@ -722,6 +728,43 @@ try:
           f"{o10.vocab.counters.get('tok.state_written')}")
 finally:
     shutil.rmtree(TMP10, ignore_errors=True)
+
+# ---- S11: periodic saves change no number, and land on the act windows (Proposal 05 §8 1.5) ------
+# THE KNOWN ANSWER REGISTER NOTE retok fleet (1) ASKS FOR. `EXP=retok bash gpu_world.sh` saves the k0
+# family every KEEP_EVERY windows while its act arms save only at the end, so arm - k0 is unbiased only
+# if a periodic save leaves the run it interrupts bit-identical; and k0's copies kept aside are the
+# spike test's maturity-matched control only if they sit on the windows the act arms act at. S4's two
+# runs, which never saved, are the references: each is rebuilt with CKPT_EVERY=40, the act cadence. A
+# periodic save of period P lands at i x P + 1 and an act of cadence K at j x K + 1, so the ring's
+# older generation after 130 windows is the save at 121 -- the last act's window, on both arms -- and
+# its vocabulary beside it holds that save's merge count, the pairing gpu_world.sh's index checks.
+# (At this base minting starts near window 120, so the act arm acts once, at 121, after the mint.)
+TMP11 = tempfile.mkdtemp(prefix="s11_saves_")
+try:
+    _acts11 = act_windows(r)
+    for _tag, _every, _ref in (("act", 40, r), ("k0", 0, r0)):
+        _s = build(TOK_GROW_EVERY=30, TOK_RETOK_EVERY=_every, CKPT_DIR=f"{TMP11}/{_tag}", CKPT_EVERY=40)
+        _r = loop.run(_s, max_windows=130, progress=False)
+        _a_ref, _a = books(_ref).get("loop.acts", "ABSENT"), books(_r).get("loop.acts", "ABSENT")
+        _diff = next((i for i, (x, y) in enumerate(zip(_r.loss_curve, _ref.loss_curve)) if x != y), None)
+        check(f"S11 {_tag} (TOK_RETOK_EVERY={_every}): saving every 40 windows leaves S4's no-save loss "
+              f"curve bit-identical, with the same acts at the same windows",
+              len(_r.loss_curve) == len(_ref.loss_curve) == 130 and _diff is None and _a == _a_ref
+              and act_windows(_r) == act_windows(_ref) and _saves(_r) == 4,
+              f"first differing flush {_diff}; loop.acts {_a} vs {_a_ref}; acts {act_windows(_r)} vs "
+              f"{act_windows(_ref)}; saves {_saves(_r)}")
+        _prev = torch.load(f"{TMP11}/{_tag}/ckpt.pt.prev", map_location="cpu", weights_only=False)
+        _mc = _prev["payload"]["TOK"]["merge_count"]
+        _ent = _entries(f"{TMP11}/{_tag}.prev.dyntok.json")
+        check(f"S11 {_tag}: the ring's older generation is the periodic save at window 121, the act "
+              f"arm's last act ({_acts11[-1] if _acts11 else 'none'}), paired with its own vocabulary",
+              len(_acts11) >= 1 and _prev["reason"] == "periodic" and int(_prev["step"]) == 121 == _acts11[-1]
+              and _mc == _ent,
+              f"reason {_prev['reason']}, step {_prev['step']}; acts {_acts11}; merges {_mc}, entries {_ent}")
+    check("S11 every act window of the act arm is a window the k0 arm saved at (i x 40 + 1)",
+          bool(_acts11) and all((w - 1) % 40 == 0 and w <= 130 for w in _acts11), f"acts {_acts11}")
+finally:
+    shutil.rmtree(TMP11, ignore_errors=True)
 
 print(f"\n=== {len(FAILS)} failing ===")
 sys.exit(1 if FAILS else 0)

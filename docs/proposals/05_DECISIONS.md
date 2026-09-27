@@ -629,7 +629,7 @@ detectable effect (about 0.042 bits/byte on the time-integrated gap, 0.053 on th
 | LOW-FAB-MERGED-REPORT | The `fab.merged` line mixes scopes | Fix: the run-total count with a run-scope verdict; the last-pass count with the last-pass gate. | changed | B: merges are consolidation and a forgetting risk; emergence must be observable. | None. | I10 config (`FAB_GRACE=1 FAB_MANAGE_EVERY=25`, seed 3, 300 windows) [CPU] | high |
 | LOW-RESUME-SAVED-COUNTERS | `saved` counters disagree after a resume | Fix: `*.ckpt.saved` is lineage-cumulative in every package (restored with state, like `opt.ckpt.saved`), plus a process-local `*.ckpt.saved_here`. | changed | B: post-resume reports are B's measurement path. | Low. | Parent saves k, child j; every package reports (k + j, j) [CPU] | high |
 | LOW-FAB_NORM_ONLY-GROWS | `FAB_NORM_ONLY=1` grows an expert | Fix: under `FAB_NORM_ONLY=1`, `FAB.grow_check` and `FAB.manage` return before acting, as under `FAB_ON=0` (the Q-FAB-11 precedent); today both test only `fab.on` (`src/fabric/api.py:3584`, `:4290`). No functionality is removed: growth in a node-less arm is a leak. | changed | B: the norm-only arm measures whether the fabric is a retention channel (the archive: fabric +0.373). | None to the default. | `fab.births` 0, `n_live` = `FAB_N0`, cull and merge ABSENT [CPU] | high |
-| LOW-GPU-WORLD-ETA | `gpu_world.sh` calibrates before the first manage pass | Use `CAL_WINDOWS=600` in the retok fleet. If the post-fix ETA is still off by more than 1.5×, raise the script default from 150 to at least `FAB_MANAGE_EVERY` + 20 = 520. Keep `--status`. | changed | Indirect: GPU time must be plannable. | None. | The next fleet's ETA against wall time [GPU] | high |
+| LOW-GPU-WORLD-ETA | `gpu_world.sh` calibrates before the first manage pass | Use `CAL_WINDOWS=600` in the retok fleet. If the post-fix ETA is still off by more than 1.5×, raise the script default from 150 to at least `FAB_MANAGE_EVERY` + 20 = 520. Keep `--status`. **Built (§8 1.5, 2026-09-27):** the default is 600 at `EXP=retok` (and `EXP=world_epoch`) and stays 150 at `EXP=world`; the rates are in `analyze_retok` and the ETA against wall is in the retok fleet's paste-back block, which names this row past 1.5×. `--status` is kept, and no longer fails on runs shorter than its progress cadence. | changed | Indirect: GPU time must be plannable. | None. | The next fleet's ETA against wall time [GPU] | high |
 
 **Note S0b-ship (the rule, and what surrounds it).**
 - **Rule.** M = max over 3 paired seeds of |bpb(k0) − bpb(k0_nuis)|. Cadence c ∈ {3000, 1000} ships
@@ -702,11 +702,11 @@ session that promotes quarantined material is NEW-18.
 
 | ID | Decision | Ruling and defaults | Δ | Why for B / for A | Risk → guard | Decisive test [who] | Conf. |
 |---|---|---|---|---|---|---|---|
-| PENDING-GPU-RETOK-FLEET | Run the ship-rule fleet | Run it **after the DOM half of Levels** lands (C12); if the owner wants GPU time sooner, label it "pre-Levels" and re-run the k0 vs chosen-cadence pair after. One commit, entirely before or entirely after `DATA_SYNTH_HOLDOUT` lands (after, it takes 04-Q5's pin rule). Keep one final checkpoint per run, and in k0 the saves at the act windows (note retok fleet (1)). The joint blackout budget is an alarm that orders a `FAB_COOLDOWN` {400, 100} arm at k1000, not a veto (C13). Verdict labelled **B-provisional** (note retok fleet). | changed | B: the first owner fleet that traverses all four phases (0.945 / 1.89 / 2.835 MB bounds at 3.78 MB, `DATA.data_plan`), and its kept checkpoints make learning after training testable at owner scale. A: AUD reuses the act. | A split across `DATA_SYNTH_HOLDOUT` loses pairing → one commit; prequential cannot see forgetting → the provisional label and the held-out re-read. | The fleet [GPU]; the held-out re-read after SR0 [GPU, in E2]; a continuation from kept checkpoints [GPU] | high |
+| PENDING-GPU-RETOK-FLEET | Run the ship-rule fleet | Run it **after the DOM half of Levels** lands (C12); if the owner wants GPU time sooner, label it "pre-Levels" and re-run the k0 vs chosen-cadence pair after. One commit, entirely before or entirely after `DATA_SYNTH_HOLDOUT` lands (after, it takes 04-Q5's pin rule). Keep one final checkpoint per run, and in k0 the saves at the act windows (note retok fleet (1); built in `gpu_world.sh`, §8 1.5). The joint blackout budget is an alarm that orders a `FAB_COOLDOWN` {400, 100} arm at k1000, not a veto (C13). Verdict labelled **B-provisional** (note retok fleet). | changed | B: the first owner fleet that traverses all four phases (0.945 / 1.89 / 2.835 MB bounds at 3.78 MB, `DATA.data_plan`), and its kept checkpoints make learning after training testable at owner scale. A: AUD reuses the act. | A split across `DATA_SYNTH_HOLDOUT` loses pairing → one commit; prequential cannot see forgetting → the provisional label and the held-out re-read. | The fleet [GPU]; the held-out re-read after SR0 [GPU, in E2]; a continuation from kept checkpoints [GPU] | high |
 | PENDING-CPU-S0b-SEED1 | Finish the CPU equal-bytes check | **Done as an operation check; its efficacy role is withdrawn** (the owner's CPU rule, 2026-09-26). Both seed pairs finished at about 760 KB (+0.0003 seed 0, +0.0078 seed 1; note S0b-ship): 3 acts fired in each k1000 run, every reading finite, bytes matched by the script's equal-bytes design. The two nuisance runs it planned (s0_k0_nuis and s1_k0_nuis, `SIG_WARMUP=801`, scratch `s0b/preq_eq.py` at `DATA_STREAM_BYTES=760000`, `OMP_NUM_THREADS=1`) and the comparison against M_cpu = max \|k0 − k0_nuis\| are **dropped**: a CPU margin would read harm or its absence, which the rule gives to the GPU fleet's own k0_nuis arm (§8 0.3, 2.1). Earlier ruling, kept for the record: a pre-read, not the ship rule, reported to the owner before the GPU fleet if any seed exceeded M_cpu, crashed or was non-finite. | changed | B: cheap operation checks before expensive ones; the act is already live by default. | Over-reading two CPU seeds → no efficacy reading is taken from them. | [exists, CPU: operation only]; the nuisance runs dropped, superseded by the fleet's k0_nuis (the seed pairs took 926-1037 s) | high |
 | PENDING-S0b-SECONDARIES | The S0b secondary readings | Take them in three places (note secondaries): (a) measured today on CPU; (b) read from what the retok fleet already writes; (c) small counters, proven bit-identical against `tests/_baseline_fixture.json`, built before the fleet if a build session gets there first, else in SR1, never blocking the fleet. The SIG-width trigger has fired at HEAD's k3000 cadence (03b-16.33). Resume cost grows linearly with acts. | changed | B: blackout share, mint wait, MEM remap share and resume cost are B's risk gauges for the act. | New gauges could perturb training → counters only, bit-identity. | (a) [exists, CPU]; (b) [GPU, in the fleet]; (c) [CPU]; resume wall time vs number of acts [CPU] | high |
 | PENDING-WORLD_FEEDBACK | Re-test `WORLD_FEEDBACK` | Stays **OFF**; `WORLD_ENABLED` stays **ON** (**[OWNER] O13**: OFF if the re-run shows a retention cost beyond ε); `WORLD_FEEDBACK=1` restores the wired arm exactly. Re-run for a different reason and in a different shape (note WORLD): all four arms in one post-SR0 commit with `DATA_SYNTH_HOLDOUT` ON and the retention probe ON, `DATA_DRAW` pinned 'planned'; 04-Q5's pin rule does not apply (the arms pair only with each other). Report both endpoints: last half and full run. | changed | B: the 2026-09-24 fleet read phase 1 only (about 3.8 MB of a 20 MB stream whose phases are 5 MB wide), so its null describes a stationary two-area stream, not continual learning. A: WORLD is the media plug-in point. | Re-running the stationary shape wastes a fleet → whole-epoch shape; a prequential gain hiding a retention cost → retention endpoint. | The phase-traversing re-run with SR0's probe, 5 seeds [GPU]; the data banner [owner]; S6 (b) [GPU] | medium |
-| PENDING-GPU-THROUGHPUT-REBASELINE | GPU rate after the merge-scan repair | Fold it into the retok fleet: `CAL_WINDOWS=600`; per-run windows/s from each log; aggregate as total windows over fleet wall time at the chosen PAR; k0 reported separately (the plain-text rate) from the act arms (the act's cost); record GPU model, PAR, MPS, NCPU; add rates to `analyze_retok`. Label it "post-fix rate at the retok shape". | + | B: every owed B measurement is a multi-seed fleet, and none can be budgeted without a real rate. | Approximate comparison (different stream and phases) → the label. | Inside the retok fleet [GPU]; pre-fix: 38 windows/s per run early, 2-3 late, about 25 aggregate over 21 runs; merge scan 14 s → 0.033 s at n = 2049 on CPU [exists] | high |
+| PENDING-GPU-THROUGHPUT-REBASELINE | GPU rate after the merge-scan repair | Fold it into the retok fleet: `CAL_WINDOWS=600`; per-run windows/s from each log; aggregate as total windows over fleet wall time at the chosen PAR; k0 reported separately (the plain-text rate) from the act arms (the act's cost); record GPU model, PAR, MPS, NCPU; add rates to `analyze_retok`. Label it "post-fix rate at the retok shape". **Built (§8 1.5, 2026-09-27):** `CAL_WINDOWS` 600 by default at retok; `analyze_retok` reports windows/s and bytes/s per arm off each log's loop time, the act's per-byte cost against k0 (whose rate includes its periodic saves, and says so), the aggregate as every run's windows over the fleet's recorded wall at PAR, and the card; the ETA against wall rides in the paste-back block. | + | B: every owed B measurement is a multi-seed fleet, and none can be budgeted without a real rate. | Approximate comparison (different stream and phases) → the label. | Inside the retok fleet [GPU]; pre-fix: 38 windows/s per run early, 2-3 late, about 25 aggregate over 21 runs; merge scan 14 s → 0.033 s at n = 2049 on CPU [exists] | high |
 
 **Note retok fleet (the command and the B additions).**
 - Command: `EXP=retok CAL_WINDOWS=600 bash gpu_world.sh`. Stream 3.78 MB, one whole epoch at
@@ -717,8 +717,13 @@ session that promotes quarantined material is NEW-18.
   1000 and copies each save at a k3000 or k1000 act window aside (the ring keeps only `ckpt.pt` and
   `.prev`, `src/ckpt/api.py:648`), so (4)'s control has a model of the act's maturity. k0_nuis and k0_rerun run the same `CKPT_EVERY`
   1000 as k0, so the margin M = max|k0 − k0_nuis| and the run-to-run check compare like with like
-  (or §8 1.5 adds a known answer that periodic saves leave a run bit-identical). This needs a
-  small `gpu_world.sh` option, OFF by default and ON for this fleet.
+  (or §8 1.5 adds a known answer that periodic saves leave a run bit-identical). **Built (§8 1.5,
+  2026-09-27), with both remedies:** `gpu_world.sh`'s `KEEP_CKPT` (OFF by default, ON at `EXP=retok`)
+  runs k0_nuis and k0_rerun at k0's cadence, and `tests/test_continuation.py` S11 is the known answer: a
+  periodic save at the act cadence leaves the losses bit-identical and lands on the act's window (121).
+  k0's saves are hard-linked under `$OUT/ckpt/keep` as `k0.s<seed>.w<step>`, each beside its own
+  vocabulary, named for the step it holds and checked coherent; the analysis reports which act windows
+  they cover (`docs/04_CONTRACT.md` Q-RUN-8, the 2026-09-27 note).
 - (2) **Secondaries per arm**: prequential bits/byte per phase; FAB growth and blackout share; the MEM
   remap share; bpt across acts; the act's share of wall; windows/s.
 - (3) **B-provisional**: once SR0's `EVAL.holdout_probe` exists, re-read end-state held-out bits/byte
@@ -784,11 +789,17 @@ session that promotes quarantined material is NEW-18.
 3. Shape: whole-epoch, equal-bytes sizing as in `EXP=retok`, through a new `EXP=world_epoch` sizing
    (stream = WINDOWS × 189 bytes, window cap out of reach, the out-of-stream flag suppressed). A plain
    `BYTES=` override would flag every run "RAN OUT OF STREAM" and price the ETA on the cap
-   (`gpu_world.sh:67-70`, `:144`). Arms fb_off, fb_on,
+   (`be2382a:gpu_world.sh:67-70`, `:144`). Arms fb_off, fb_on,
    skip, world_off, all four in one post-SR0 commit with `DATA_SYNTH_HOLDOUT` ON and the retention
    probe ON, `DATA_DRAW` still pinned 'planned'; 5 paired seeds. 04-Q5's pin rule is scoped to fleets
    that pair with pre-change runs, and this one does not: its arms pair with each other. So the probe
-   reads the time-integrated gap and end-state held-out bits/byte per area.
+   reads the time-integrated gap and end-state held-out bits/byte per area. **Built (§8 1.5,
+   2026-09-27):** `EXP=world_epoch` sizes the stream at `EPOCH_BYTES` = WINDOWS × 189 with the cap at
+   3 × WINDOWS, flags a run that hit the cap "STOPPED AT THE WINDOW CAP" in place of the out-of-stream
+   flag, calibrates on 600 windows, and pins `TOK_RETOK_EVERY` (`PIN_RETOK`, 3000; S0b-ship) and
+   `DATA_DRAW='planned'` on every run. It prints its sizing and this pre-registration and exits 2,
+   having written nothing, until `GO_WORLD_EPOCH=1`; SR0's build adds `DATA_SYNTH_HOLDOUT` and the
+   probe to its pins and lifts the guard.
 4. Pre-registered rule: `WORLD_FEEDBACK` flips ON only if (a) fb_on beats fb_off on the time-integrated
    all-area held-out gap (one-sided paired t, α 0.05, 5 seeds; end-state reported beside it, R5); (b) fb_on is not worse than ε on the
    worst area; (c) no seed shows the instability signature (`latent_std` < 0.9 or `extra_ratio_max` >
@@ -948,7 +959,7 @@ telemetry. Appendix B states each value, or names it owner-set or set by §8.
   `FAB_BIRTH_JITTER` levels, and stamps and Levels OFF (C24's arms).
 - **Design:** levels 0 / low / mid / high; 5 paired seeds; **matched on bytes and compute** (family (a)
   changes bytes per token, so token-matched arms read different bytes, the confound `EXP=retok` was
-  redesigned to remove, `gpu_world.sh:73-77`); both single-pass and replay regimes; streams sized to
+  redesigned to remove, `be2382a:gpu_world.sh:73-77`); both single-pass and replay regimes; streams sized to
   traverse every phase. Family (a) reuses the retok harness (equal bytes plus a nuisance-pair margin).
 - **Readings:** R1 clean held-out; R2 held-out under the same family; **R3 held-out under a family
   left out of training (decisive)**; R4 forgetting, stability-gap depth and plasticity gain; R5
@@ -1123,14 +1134,14 @@ operation only.
 | 1.2 | DOM half of Levels, with identity and cross-act known answers; one k1000 run ON vs OFF reading `part.n_created` / `n_culled` (operation: the unit reaches DOM and the counters fire; whether Levels help reads in 5.9's family (h)) | TREE-S0b-LEVELS, C12 | [CPU] |
 | 1.3 | Counters, bit-identical against `tests/_baseline_fixture.json`: `fab.blackout_windows` (extending the existing `fab.growth_blackout_suppressed.*`), `tok.mint_wait_windows`, `loop.act_seconds`, per-flush bytes, `tok.bpt_tail` | PENDING-S0b-SECONDARIES, 03b-16.26, 03b-16.33 | [CPU] |
 | 1.4 | `OPT_HORIZON_REVISE` (in-run only) and `OPT_LR_CONTINUE` with 'as_logged' bit-identical to today; a continued run's LR unchanged by `OPT_HORIZON_REVISE` | TREE-OPT_HORIZON_REVISE-LEVER, NEW-05, C01 | [CPU] |
-| 1.5 | `gpu_world.sh`: a kept-checkpoint option (OFF by default; in k0, the saves at the act windows copied aside; k0_nuis and k0_rerun save at the same cadence), `CAL_WINDOWS=600`, rates in `analyze_retok`, an `EXP=world_epoch` sizing | PENDING-GPU-RETOK-FLEET, PENDING-GPU-THROUGHPUT-REBASELINE, LOW-GPU-WORLD-ETA, PENDING-WORLD_FEEDBACK | [CPU] |
+| 1.5 | `gpu_world.sh`: a kept-checkpoint option (OFF by default; in k0, the saves at the act windows copied aside; k0_nuis and k0_rerun save at the same cadence), `CAL_WINDOWS=600`, rates in `analyze_retok`, an `EXP=world_epoch` sizing. **Built 2026-09-27:** `KEEP_CKPT` (ON at `EXP=retok`) with `KEEP_EVERY` (the gcd of the cadences) and the hard-linked, indexed k0 copies; `RETOK_ARMS` and `COOLDOWN_ARM`; `CAL_WINDOWS` 600 at `EXP=retok` and `EXP=world_epoch`; rates, secondaries (§8 1.3's counters where present) and kept-copy coverage in `analyze_retok`; `EXP=world_epoch` with its pins and its guard; the "PASTE THIS BACK" block (at most 80 lines) and the archive at the end of every fleet, `--analyze` and early stop; `tests/test_continuation.py` S11 and `tests/test_gpu_world.py` | PENDING-GPU-RETOK-FLEET, PENDING-GPU-THROUGHPUT-REBASELINE, LOW-GPU-WORLD-ETA, PENDING-WORLD_FEEDBACK | [CPU] |
 | 1.6 | Low fixes and their tests: `FAB_NORM_ONLY` grows nothing; lineage and process `saved` counters; `fab.merged` scopes; the M43 WORLD-population refusal; `FAB_LR_OWN` runs at `OPT_LR_SCHED='none'`; all six CAP grounds print | LOW-*, CONTRACT-Q-CKPT-2-R2, 04-Q11, CONTRACT-Q-CAP-1 | [CPU] |
 
 ### Stage 2 — the first owner fleet
 
 | # | Test | Decides | Who |
 |---|---|---|---|
-| 2.1 | `EXP=retok CAL_WINDOWS=600 bash gpu_world.sh` after 1.2 and 1.5, one commit, with kept checkpoints, the secondaries and the normalised spike test; the throughput re-baseline rides inside it; a `FAB_COOLDOWN` 100 arm at k1000 if the blackout alarm trips | S0b-ship (provisional), PENDING-GPU-RETOK-FLEET, PENDING-GPU-THROUGHPUT-REBASELINE, C13 | [GPU] |
+| 2.1 | `EXP=retok CAL_WINDOWS=600 bash gpu_world.sh` after 1.2 and 1.5, one commit, with kept checkpoints, the secondaries and the normalised spike test; the throughput re-baseline rides inside it; a `FAB_COOLDOWN` 100 arm at k1000 if the blackout alarm trips (`COOLDOWN_ARM=100` adds it; k1000's upper bound, 19 acts × 400 of about 19,000 windows, is 40%, so the alarm is expected to trip, C13) | S0b-ship (provisional), PENDING-GPU-RETOK-FLEET, PENDING-GPU-THROUGHPUT-REBASELINE, C13 | [GPU] |
 
 ### Stage 3 — SR0 and the scored-system join (build, then CPU tests)
 
@@ -1368,7 +1379,7 @@ owner should set.
 1728-1737; 733 at `7e902ba`), `src/capacity/api.py` (1480), `src/eval/levers.py` (146-148),
 `src/spine/compose.py` (1634, 1655-1830, 1663-1675, 1808-1818, 2299-2330, 2726-2748, 3238-3300),
 `src/spine/loop.py` (448-450, 1248-1254, 2262), `src/tok/levers.py` (280-290), `gpu_world.sh`
-(67-79, 144; 346 at `d97779d`).
+(67-79, 144 at `be2382a`; 346 at `d97779d`).
 
 **Tests.** `tests/test_continuation.py`; `tests/_baseline_fixture.json`.
 

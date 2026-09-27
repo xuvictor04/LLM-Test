@@ -143,7 +143,9 @@ Updated 2026-09-26 (the decision register, Proposal 05) on `rm-predict-DC` (the 
 0. Proposal 05 §8 orders everything: Stage 0 (owner rulings O1-O20; the fleet-archive reads; the
    k0_nuis pair; phase-traversal resizing), then Stage 1's small builds (vocab `.prev` rotation, DOM
    Levels, counters, OPT_LR_CONTINUE 'as_logged', gpu_world.sh kept checkpoints) before the owner's
-   retok fleet (Stage 2), then SR0 (Stage 3).
+   retok fleet (Stage 2), then SR0 (Stage 3). §8 1.5 DONE (2026-09-27): `EXP=retok bash gpu_world.sh`
+   keeps k0's checkpoints at the act windows, reports rates and secondaries, and ends in a PASTE THIS
+   BACK block plus a .tgz the owner keeps; EXP=world_epoch is sized and refuses to run before SR0.
 1. The owner rules on 03 §16, or accepts the recommendations.
 2. S1 per 03 Appendix A as amended by §0. **Step 0 is the baseline fixture (R7), before any tree edit.**
    Then derive ids/frames, Areas.media, the aud/tones generator plus DATA.recover, and media_batch.
@@ -158,8 +160,10 @@ Updated 2026-09-26 (the decision register, Proposal 05) on `rm-predict-DC` (the 
 - OWED from 1.6: FAB_LR_OWN's table reaches no parameter, so 04-Q11 (b)'s sweep arm is inert until a
   consumer exists (a frozen-signature move; docs/04_CONTRACT.md §3.7).
 - Q-TOK-13 is open.
-- gpu_world.sh calibrates on 150 windows, before the first manage pass at window 501. Its ETA can
-  still miss per-pass costs; `--status` gives the live ETA.
+- gpu_world.sh calibrates on 150 windows at EXP=world, before the first manage pass at window 501, so
+  its ETA can still miss per-pass costs; `--status` gives the live ETA. EXP=retok and EXP=world_epoch
+  calibrate on 600 since §8 1.5 (2026-09-27), and the retok fleet's paste-back block prints its ETA
+  against wall: past 1.5x, raise EXP=world's default to >= 520 (LOW-GPU-WORLD-ETA).
 - Next hunt classes: lever isolation, efficacy vs labels, long-horizon mechanisms, SIGUSR1 saves.
 
 ## Working rules this repo has taught
