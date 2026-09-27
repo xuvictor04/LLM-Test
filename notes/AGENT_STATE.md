@@ -145,6 +145,10 @@ Updated 2026-09-26 (the decision register, Proposal 05) on `rm-predict-DC` (the 
   value (the owner approved stream rebuilding, not a cadence).
 
 ## Next
+- 2026-09-27: Stage 1 (§8 1.1-1.6) built, reviewed and fixed; full suite green at 253bfa1; 1.5's owed
+  items built and reviewed (1bd51c5, 5bffd3f, 7728cd4, e8628e4). The retok fleet (§8 2.1) is READY
+  and handed to the owner (notes/OWNER_BRIEF.md test 2). While it runs: Stage 3 (SR0 and the
+  scored-system join, NEW-03) is the next build; the spike test's offline analysis waits for the fleet.
 0. Proposal 05 §8 orders everything: Stage 0 (owner rulings O1-O20; the fleet-archive reads; the
    k0_nuis pair; phase-traversal resizing), then Stage 1's small builds (vocab `.prev` rotation, DOM
    Levels, counters, OPT_LR_CONTINUE 'as_logged', gpu_world.sh kept checkpoints) before the owner's

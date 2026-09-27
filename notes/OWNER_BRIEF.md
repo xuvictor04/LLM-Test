@@ -4,7 +4,7 @@ The one page for the owner. Everything else — how decisions were made, the evi
 rules — is in the repo for reference (`docs/proposals/05_DECISIONS.md`, `docs/04_CONTRACT.md`,
 `results/`, `notes/AGENT_STATE.md`) and is not brought up here.
 
-Updated 2026-09-27.
+Updated 2026-09-27 (e8628e4).
 
 ## How we work
 - **Owner:** leads and monitors, keeps the goals from drifting, adds ideas, expands the project, and
@@ -20,7 +20,7 @@ Updated 2026-09-27.
 - **B — keep learning after training, without risking too much (first priority).** Not there yet:
   the tree has no post-training learning mode, and forgetting cannot be measured during a run until
   the retention probe is built (the next build stage, SR0). Rollback now works one generation back.
-  The path: small builds (all six built, in review) → the retokenization fleet → SR0 (probe, best checkpoint) →
+  The path: small builds (all six built and reviewed) → the retokenization fleet → SR0 (probe, best checkpoint) →
   the continue preset (chained learning sessions with a gate) → GPU tests of forgetting and
   plasticity.
 - **A — universal-capable.** Kept open: media and modality work is designed (Proposals 01-03b) and
@@ -42,7 +42,21 @@ Updated 2026-09-27.
 | # | Test | Status | What it decides |
 |---|---|---|---|
 | 1 | Read the 2026-09-24 fleet archive | **done** (you uploaded it; `results/gpu_world_2026-09-24/ARCHIVE_READS.md`) | data source; expert pool; culls; gradients |
-| 2 | Retokenization fleet (`EXP=retok bash gpu_world.sh`) | script built (5560342), in review; the copy-paste block follows the review | which re-segmentation cadence ships; post-fix GPU speed |
+| 2 | Retokenization fleet (`EXP=retok bash gpu_world.sh`) | **ready** (e8628e4): block below | which re-segmentation cadence ships; post-fix GPU speed; checkpoints for the first post-training test |
+
+### Test 2: the retokenization fleet, copy and paste
+On the GPU box, in the repo checkout. It runs in the background, so a dropped connection does not
+stop it.
+```bash
+git fetch origin rm-predict-DC && git checkout rm-predict-DC && git pull --ff-only
+nohup env EXP=retok bash gpu_world.sh > retok_fleet.log 2>&1 &
+```
+- Progress and time left, any time: `EXP=retok bash gpu_world.sh --status`
+- When it ends, paste back: `cat gpu_retok_out/PASTE_BACK.txt` (everything from `==== PASTE THIS
+  BACK ====` to `==== END ====`). Keep the `.tgz` it packs beside `gpu_retok_out/` and upload it here
+  as you did the last one.
+- The script sizes itself to the card: it smoke-tests every arm, calibrates for 600 windows, prints
+  its ETA, and stops early with a message if the disk is too small for the kept checkpoints.
 
 ## Rulings that touch your earlier rulings (no action needed)
 The manager resolved the 20 decisions that were queued for you (register §3.3, Appendix D). These
