@@ -42,9 +42,9 @@ Updated 2026-09-27 (e8628e4).
 | # | Test | Status | What it decides |
 |---|---|---|---|
 | 1 | Read the 2026-09-24 fleet archive | **done** (you uploaded it; `results/gpu_world_2026-09-24/ARCHIVE_READS.md`) | data source; expert pool; culls; gradients |
-| 2 | Retokenization fleet (`EXP=retok bash gpu_world.sh`) | **ready** (e8628e4): block below | which re-segmentation cadence ships; post-fix GPU speed; checkpoints for the first post-training test |
+| 2 | Retokenization fleet (`EXP=retok bash gpu_world.sh`) | **paused**: the 2026-09-27 attempt was stopped (the GPU showed no activity and nothing reported progress). A dashboard, heartbeat lines and a checked one-command launcher are being built; a new block replaces the one below when they land | which re-segmentation cadence ships; post-fix GPU speed; checkpoints for the first post-training test |
 
-### Test 2: the retokenization fleet, copy and paste
+### Test 2: the retokenization fleet (superseded block, kept for the record; do not use)
 On the GPU box, in the repo checkout. It runs in the background, so a dropped connection does not
 stop it.
 ```bash
