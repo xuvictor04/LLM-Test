@@ -512,10 +512,18 @@ class DATALevers(LeverSet):
     # THE RESUME RULE (restore_stream_state). A checkpoint whose record for an area is key None and
     # size 0 -- what a synthetic run at 0 writes -- is ADMITTED against a synthetic block now, counted
     # per area in data.holdout_admitted; the parent trained on those bytes, so an admitted block is
-    # text the lineage has seen. The reverse (a block then, none now) is refused naming this lever,
-    # and the same record against a REAL block, a change of source, stays refused. A CONTINUING
-    # mid-epoch resume across an admission is refused by the root, because the redrawn stream is not
-    # the one the parent was reading.
+    # text the lineage has seen. The reverse (a block then, none now) is refused naming this lever and
+    # DATA_SOURCE=real, the two settings that write a block, and the same record against a REAL
+    # block, a change of source, stays refused. A CONTINUING mid-epoch resume across an admission is
+    # refused by the root, because the redrawn stream is not the one the parent was reading.
+    # ONE LAW, ON A GENERATED BODY (2026-09-27, Q-DATA-9's review). At 1 the block rides on the area's
+    # generated body: its length is max(DATA_SEG_MAX + 1, 5000, DATA_STREAM_BYTES // DATA_N_PROCESSES)
+    # x 2, which every area shares, and its text is the alphabet the area's position in DATA_AREAS
+    # picks. So along a lineage at 1 those three levers keep the parent's length and the parent's
+    # areas keep their positions -- an add-an-area resume appends the area and raises
+    # DATA_STREAM_BYTES with DATA_N_PROCESSES -- and the admission holds only where both are the
+    # parent's. restore_stream_state refuses every other move by name, and the record carries each
+    # block's digest, so a text that moved under agreeing offset, size and key is refused too.
     # A BOOL, WITH THE BOOL BRANCH'S KNOWN HAZARD (see `resample`): DATA_SYNTH_HOLDOUT=flase reads as on.
 
     val_cap = Lever(4000000, "Maximum bytes of held-out tail kept per area.", U.BYTES)

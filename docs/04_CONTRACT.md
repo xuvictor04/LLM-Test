@@ -496,14 +496,16 @@ Owns the only bytes the system sees and the only split it is honestly measured o
 | `stream_state(dat, areas)` / `restore_stream_state(dat, areas, state)` | CKPT | dict / — |
 
 **Wires read:** none. **State:** per-area read cursors (load-bearing across epochs), holdout block
-offsets and sizes, `bytes_present`/`bytes_taken`, the counter vector — all checkpointed. The cached
+offsets and sizes and, since 2026-09-27, each block's digest (Q-DATA-9's review),
+`bytes_present`/`bytes_taken`, the counter vector — all checkpointed. The cached
 `Stream` at `resample=False` is **not**: it is rebuilt from `(seed, epoch)`. Nor is
 `Areas.parent_names`, the area list the resumed checkpoint recorded, which `restore_stream_state`
 fills in place from the record on every resume (empty on a fresh run; Q-DATA-9).
 **Counters:** `data.area_open`, `corpus_cap_trip`, `holdout_block`, `val_cap_trip`, `area_refused`,
 `stream_draw`, `segment`, `contig_wrap`, `resample`, `phase_entered`, `phase_resolved`,
 `state_written/restored/refused` (with `state_written_here`, the process twin of the lineage
-`state_written`, Q-CKPT-4), `holdout_admitted` with `holdout_admitted_names` (Q-DATA-9), and three
+`state_written`, Q-CKPT-4), `holdout_admitted` with `holdout_admitted_names` (Q-DATA-9; seeded
+only on a resume at `source="synthetic"`, `synth_holdout=True`, and ABSENT elsewhere), and three
 Gates (`exposure_max`, `exposure_skew`, `splice_window`). **Printed at R since 2026-09-27**, in the
 root's `DATA(areas.counters)`, `DATA(areas.gates)`, `DATA(plan.counters)` and `DATA(stream.counters)`
 rows beside the older `DATA(stream.gates)` (Q-DATA-9); before that no row printed them.
@@ -517,8 +519,15 @@ record of key None and size 0 against a synthetic block now (a real one is a cha
 stays refused), counted **per area** in `data.holdout_admitted` (a four-area parent admits 4), each
 admitted area's `seg_contig` cursor mapped onto the carved body (below the block unchanged, past it
 down by the block's size, inside it to the block's offset), and the parent's training on the
-block's bytes said in a warning. A block then and none now is refused naming `DATA_SYNTH_HOLDOUT`.
-`data.holdout_overlap` is this run's reading and is no longer overwritten by the parent's.
+block's bytes said in a warning. A block then and none now is refused naming both settings that
+write one, `DATA_SYNTH_HOLDOUT=1` and `DATA_SOURCE=real`.
+`data.holdout_overlap` is this run's reading and is no longer overwritten by the parent's. **A
+synthetic block rides on a generated body** (Q-DATA-9's review): its length is max(`seg_max` + 1,
+5000, `stream_bytes` // `n_processes`) × 2, shared by every area, and its text is the alphabet the
+area's position in `areas` picks. So on this arm a resume keeps the parent's length and the parent's
+areas' positions — an added area is appended, with `stream_bytes` raised in proportion — or is
+refused naming what moved; the admission holds only where both are the parent's; and on either
+source the record's block digest refuses a text that moved under agreeing offset, size and key.
 
 Two levers (`dir`, `corpus_cap`) are **arm-dead** under `source="synthetic"`, and two more
 (`holdout_frac`, `val_cap`) are there at `synth_holdout=False` only; `n_processes` and `synth_holdout`
@@ -6030,15 +6039,21 @@ it.
   the moved offset), and it still is. **The unit is the area**: each admitted area counts one in
   `data.holdout_admitted` and is named in `data.holdout_admitted_names`, so a four-area parent admits
   4 and SR0's written "`data.holdout_admitted` 1" is the single-area case. Both keys are ABSENT on a
-  fresh run and read 0 and `[]` on a resume that reaches the comparison. **The parent trained on
+  fresh run and read 0 and `[]` on a resume at `DATA_SOURCE=synthetic` `DATA_SYNTH_HOLDOUT=1`, the
+  one arm the admission can fire on, and ABSENT on every other (corrected 2026-09-27, below: they
+  read 0 and `[]` on every resume). **The parent trained on
   every byte of an admitted block**, so it is text the lineage has seen, not a clean held-out sample:
   the root prints that in one warning naming the areas, before the first window (the Q-DOM-1
   precedent; DATA prints nothing). **The read cursor is mapped, not copied**, because it indexed the
   whole body: below the block it stays, past it it moves down by the block's size, inside it (text
   now held out) it moves to the block's offset, the first byte after the block in the carved body,
-  reduced mod the carved length as `draw_stream` stores it (`data/api.py::_carved_cursor`). **The
-  reverse is refused naming `DATA_SYNTH_HOLDOUT`**: a block in the record and none now would train
-  on the text the parent held out. Every other move of a recorded block is refused as before.
+  reduced mod the carved length as `draw_stream` stores it (`data/api.py::_carved_cursor`). All of
+  that holds only where this run generates the parent's text for the area, which the admission
+  now checks first: the same position and the same length (corrected 2026-09-27, below). **The
+  reverse is refused naming both settings that write a block**, `DATA_SYNTH_HOLDOUT=1` and
+  `DATA_SOURCE=real` (corrected 2026-09-27, below: it named the first alone): a block in the record
+  and none now would train on the text the parent held out. Every other move of a recorded block is
+  refused as before.
 * **`Areas.parent_names`** (a list field, default empty, filled in place by the restore): the
   record's area names, in its order. It is the one place a later build can ask which areas a parent
   trained on; §8 3.1's probe and §8 3.3's parent rehearsal are the builds that will read it, and
@@ -6089,7 +6104,8 @@ the parent's or died unnamed at the rebuilt-length check. `tests/test_baseline.p
 reproduce their fixtures. The report gains four rows, and their integer counters are listed as new,
 never compared: every leg lists `data.segment`, `data.phase_resolved` and `data.phase_name_resolved`;
 a leg with saving on adds the `data.state_written` pair; a resumed child adds the restore's own,
-`data.state_restored`, `data.area_added` and `data.holdout_admitted`.
+`data.state_restored` and `data.area_added` (and listed `data.holdout_admitted` too until the
+correction below, which leaves it ABSENT on the shipped arm).
 
 **Recorded, not repaired: a continuing mid-epoch resume at `DATA_SEG_CONTIG=1` cannot continue.**
 `draw_stream` advances each area's cursor for the whole epoch when it draws it, so the checkpointed
@@ -6106,17 +6122,96 @@ before, and on a real source the carve equals the law recomputed from disk for t
 entry among them, with the lever inert there; H2, at 1 each shipped area holds out 3,000 of 60,000
 bytes at the offset `rng_for('data.holdout.<key>', seed).randint(0, 57000)` draws (seed 0: eng
 41591, py 39908, num 37668, c 53336; seed 1 differs in all four), adding a fifth area at the same
-per-area size moves no block, the val cap binds, and `DATA_HOLDOUT_FRAC=0.0` is refused naming all
+per-area size moves no block (and at the shipped `DATA_STREAM_BYTES` moves every one: corrected
+below), the val cap binds, and `DATA_HOLDOUT_FRAC=0.0` is refused naming all
 three levers; H3, the admission per area (4, and 1 for a single-area parent, through compose from a
 finished parent too), the cursor map (hand-computed, and on the cursors a `DATA_SEG_CONTIG=1` parent
 saved), `Areas.parent_names`, the warning, the R row and the overlap; H4, the reverse, a doctored
 offset and a synthetic parent resumed at `DATA_SOURCE=real` refused; H5, the continuing refusals (0 → 1 with and without a digest, `DATA_SEG_MAX` 1800 →
 1700), one segment's label changing the digest, an exact continuation that reads the admission pair
-0, and a digest-stripped log that warns once and continues exactly, all again at epoch 1, where stage
+0 (ABSENT since the correction below), and a digest-stripped log that warns once and continues exactly, all again at epoch 1, where stage
 E wrote the log; H6, `tests/test_continuation.py`'s `plain` and `mint_then_act` shapes continue
 exactly at 1; H7, `derive.stream_key` is `_holdout_key`. `tests/test_continuation.py` S10 reads
 eleven rows. Whether a held-out reading on these blocks measures anything is §8 3.1's probe and the
 GPU readings after it.
+
+**CORRECTED 2026-09-27 (§8 3.1's review) — a synthetic block rides on a generated body, so its
+refusals say what it rides on; the admission holds only on the parent's text; the record carries
+each block's digest; the admission pair is ABSENT where it cannot fire; the reverse names both
+writers; and the restore declares what it reads.** (i) *A synthetic block moves with the body it is
+carved from.* `_synthetic_areas` generates every area at max(`DATA_SEG_MAX` + 1, 5000,
+`DATA_STREAM_BYTES` // `DATA_N_PROCESSES`) × 2 bytes (now `data/api.py::_synthetic_length`, the one
+formula), and at `DATA_SYNTH_HOLDOUT=1` the carve's size is a fraction of that length and its offset
+is drawn over it, so the three levers move every area's block together. Driven at 2d201d0: a fifth
+area at `DATA_STREAM_BYTES` 120000, Q-DATA-4's add-an-area run with only the area and
+`DATA_N_PROCESSES` changed, took each body from 60,000 bytes to 48,000 and each block from 3,000 to
+2,400 (eng: offset 41591, size 3000 → 41591, 2400), and the resume was refused naming only the size;
+one area to two was refused naming only the offset (166367 → 83183), and `DATA_STREAM_BYTES` 120000
+→ 160000 at four areas the same (41591 → 66805). The ruling said a fifth area "at the same per-area
+size moves no block", which is true and was all H2 built (at 150,000 bytes, scaled by hand), while
+the restore's docstring said adding an area could not move another's block, on either source.
+**Ruling:** the law stays the real sources' verbatim. A carve independent of the generated length
+would be a second law, sized by a length that is not the body's: from `DATA_SEG_MAX` and the floor
+alone, max(1801, 5000) × 2 = 10,000 bytes at the shipped values, it holds out 500 bytes per area
+where C11 splits the shipped 3,000 into two halves of 1,500, and any larger length is a literal no
+lever declares. On this arm the refusal says what the block rides on: this run's length with the
+three levers' values,
+the parent's recorded length (`bytes_taken`), the `DATA_STREAM_BYTES` that gives it back where one
+does (150000 for a fifth area), and `DATA_SOURCE=real`, which records the same fields. The
+docstring's claim is scoped to the real sources. **Along a lineage at 1 the generated length is
+fixed:** an add-an-area resume raises `DATA_STREAM_BYTES` with `DATA_N_PROCESSES`. (ii) *And it
+holds the text the area's position picks.* Found while ruling (i): the generator takes each area's
+alphabet by position, `_ALPHABETS[i % 5]` (the old `make_proc`'s `ALPHA[s % len(ALPHA)]`), and
+`_synthetic_areas`' docstring said inserting an entry no longer moved every later area's text,
+which only its per-child draws made true. Driven at 2d201d0: `eng,rust,py,num,c` at 150,000 over a
+parent at `eng,py,num,c` was admitted with py's, num's and c's blocks other bytes under the parent's
+offset, size and key, and `py,eng,num,c` the same for eng and py: across-the-boundary numbers over
+two texts, admitted in silence. A carried area whose alphabet moved is now refused at 1 naming
+`DATA_AREAS`: the parent's areas keep their positions and new ones are appended. The alphabet stays
+positional, because keyed by name it would move the shipped four areas' text, which every synthetic
+run pairs with. (Three of the five alphabets hold 15 symbols and two hold 14; the comments said
+five of 15.) (iii) *The admission's premise.* Its warning says each admitted body is the parent's a
+block shorter and that the parent trained on the block, and the cursor map assumes the same text;
+none of it holds at another length or with the alphabet moved. Driven at 2d201d0: a child at
+`DATA_STREAM_BYTES` 400000 was admitted with all four blocks past the parent's 60,000 bytes (eng at
+166367), and a reordered child with eng's and py's blocks cut from other text. The admission is now
+refused unless this run generates the parent's text for the area, at the same position and the same
+length as the record's `bytes_taken`. The refusal names what moved, with `DATA_SYNTH_HOLDOUT=0` as
+the resume that continues as before. (iv) *The block's digest.* A real block and a synthetic one of
+the same length draw the same offset from one keyed stream over one range. Driven at 2d201d0: a real
+parent over eng (`DATA_CORPUS_CAP=200000`: offset 166367, size 10000) resumed on the synthetic source
+at 1 and `DATA_STREAM_BYTES` 400000 was admitted, as an add-an-area run over py, num and c, with
+English held out in the checkpoint and generated text held out now. Offset, size and key say where a
+block sits, and the refusal's own reason is about what it holds. `stream_state` now records each
+block's blake2b (`_block_digest`: 16 bytes, `person` `data.holdout`), and the restore compares it after
+the fields and the position, refusing a text that moved under agreeing fields and naming both
+sources. A record without it, written before this correction, is compared on the three fields, as
+it was. It also refuses what no field could see: a real corpus changed on disk under an unchanged
+cap, or a synthetic generator changed between the two runs. The cost is one hash over at most
+`DATA_VAL_CAP` bytes per area per save. (v) *DID IT FIRE.* `data.holdout_admitted` and its names were
+seeded on every resume, so the shipped arm and every real-source resume printed "armed, did not
+fire" for an admission that cannot run there: at 0 no synthetic block exists, and a real one is
+never admitted. They are now seeded only at `DATA_SOURCE=synthetic` `DATA_SYNTH_HOLDOUT=1` and are
+ABSENT elsewhere (the Q-FAB-8 precedent: `fab.ind_applied` is seeded only on the arm that can reach
+it). `tests/test_baseline.py`'s B3r and B6r children no longer list `data.holdout_admitted` as new;
+`data.area_added`, armed on every arm, still reads 0. (vi) *The reverse refusal* named
+`DATA_SYNTH_HOLDOUT=1` as "the setting that wrote the block", but a real parent resumed at the shipped
+source takes the same branch. Driven at 2d201d0, following that advice was refused again (offset
+166367 → 41591), and the resume that works, `DATA_SOURCE=real`, was never named. The record cannot
+say which source wrote a block, so the message names both. (vii) *LEVERS READ.* `restore_stream_state`
+declared none and read `source` and `synth_holdout`. It now declares those two and the three that
+size a synthetic body, which its refusals print. **No default moves.** On the shipped arm the restore
+compares two equal empty-block digests and seeds one key pair fewer, and no training number changes:
+`tests/test_baseline.py`'s six workloads reproduce their fixtures. **What CPU establishes:** operation
+only. H2: the add-an-area run as ruled, refused at 120,000 naming the three levers, both lengths and
+150000, admitted appended at 150,000 with no block moved, and refused inserted and reordered naming
+`DATA_AREAS`. H3: the pair on each of the four arms, and the admission refused at 400,000 and
+reordered, admitted appending a fifth area at the parent's length. H4: the reverse naming both
+writers; a real parent at the shipped source refused and restored at `DATA_SOURCE=real`; the digest
+refusing that parent at 400,000, and a real corpus with one byte changed inside its block on disk (a
+byte changed in the training body restores); a digest-stripped record compared as before; a
+doctored digest refused. H5: the pair ABSENT on the shipped continuation. H8 (new): every DATA stub's `LEVERS READ:`
+names exactly the levers its body reads, through the helpers it hands `dat` to.
 
 ### Q-RUN-11 — a resume drew epoch 0's stream whatever epoch it resumed in — **RESOLVED 2026-09-24: THE `stream` ROW DRAWS `Snapshot.epoch`**
 The `stream` row passed `epoch=0` unconditionally. Driven at `RUN_EPOCHS=2 DATA_RESAMPLE=1`: the

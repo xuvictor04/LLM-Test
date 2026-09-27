@@ -25,6 +25,7 @@ them as arguments, which is not an import and O10 does not refuse it):
           epoch, stream_id, draws, counters, gates
 """
 import dataclasses
+import hashlib
 import math
 import os
 import weakref
@@ -156,7 +157,7 @@ def open_areas(dat: Config, *, seed: int):
         stops the synthetic arm from reaching a per-area rng_for call unchecked.
 
     On dat.source == "synthetic": builds dat.n_processes order-2 Markov generators over the five
-    15-symbol alphabets (self_organize.py:1084-1099, :1314-1315), seeded from
+    alphabets, three of 15 symbols and two of 14 (self_organize.py:1084-1099, :1314-1315), seeded from
     rng_for("data.synth", seed) so that two run seeds are two different synthetic corpora. Today
     they are not: make_proc is seeded by the PROCESS INDEX, so `DATA_SOURCE=synthetic` measures a
     between-seed spread with the data held constant (DEFECT D-A13). WHETHER IT HOLDS ANYTHING OUT IS
@@ -166,7 +167,14 @@ def open_areas(dat: Config, *, seed: int):
     tally and 0-byte refusal -- because two holdout laws for two sources would make a synthetic
     block a different kind of sample from a real one. At False nothing is held out: every body is the
     whole generated text, no data.holdout.<key> child is minted, and data.holdout_block and
-    data.val_cap_trip read UNREACHABLE naming DATA_SYNTH_HOLDOUT=0.
+    data.val_cap_trip read UNREACHABLE naming DATA_SYNTH_HOLDOUT=0. ONE LAW, BUT THE BODY IT RUNS ON
+    IS GENERATED (2026-09-27, Q-DATA-9's review): its length is _synthetic_length, max(DATA_SEG_MAX +
+    1, MIN_AREA_BYTES, DATA_STREAM_BYTES // DATA_N_PROCESSES) x 2, and its text is the alphabet the
+    area's POSITION picks, so at True a synthetic block is keyed by its label only within one
+    generated length and one area order. A real area's body is its own directory, so adding an area
+    there moves no other area's block; here it moves every block unless DATA_STREAM_BYTES rises with
+    DATA_N_PROCESSES and the new area is appended, and restore_stream_state refuses a resume across
+    either move by name.
 
     DATA_AREAS NAMING FEWER ENTRIES THAN DATA_N_PROCESSES IS A STARTUP REFUSAL, not a license to
     invent labels (audit finding, confirmed live). `DATA_SOURCE=synthetic DATA_AREAS=eng
@@ -204,7 +212,10 @@ def open_areas(dat: Config, *, seed: int):
     same way or the paired add-an-area comparison is destroyed on the one run type it exists to
     measure. spine/rng.py::_check_name declares dotted child streams ("fabric.cull") as the supported
     shape, and DATA already derives per-epoch child names ("data.stream.e0") itself, so this needs
-    no new RNG_SUBSYSTEMS entry -- "data.holdout" stays the declared parent.
+    no new RNG_SUBSYSTEMS entry -- "data.holdout" stays the declared parent. THE STREAM IS PER AREA ON
+    BOTH SOURCES; THE BODY IS PER AREA ON A REAL ONE ONLY (2026-09-27, Q-DATA-9's review): a synthetic
+    body's length and text are shared or positional, as the synthetic paragraph above says, so the
+    property this paragraph argues for holds there only at one generated length and one area order.
 
     THE KEY IS THE LABEL, NORMALISED, AND THE COLLISION REFUSAL IS WHAT MAKES THAT SAFE.
     spine/rng.py refuses uppercase in a subsystem name on purpose ("Fabric" and "fabric" would be
@@ -718,9 +729,33 @@ def _holdout_overlap(holdout_bytes, body_bytes, n=50):
     return hits / total
 
 
-# The five 15-symbol alphabets, from the old tree's synthetic generator.
+# The five alphabets from the old tree's synthetic generator: three of 15 symbols and two of 14 (it
+# said "15-symbol" for all five until 2026-09-27). An area takes the one at its POSITION in the area
+# list, mod five, as the old make_proc took ALPHA[s % len(ALPHA)] (_synthetic_areas).
 _ALPHABETS = ("abcdefghijklmno", "pqrstuvwxyzABCD", "EFGHIJKLMNOPQRS",
               "TUVWXYZ0123456", "789!?.,;:'\"-()")
+
+
+def _synthetic_length(seg_max, stream_bytes, n_processes):
+    """One synthetic area's generated length, in bytes: max(DATA_SEG_MAX + 1, MIN_AREA_BYTES,
+    DATA_STREAM_BYTES // DATA_N_PROCESSES) x 2.
+
+    Enough text that the floor is clearable and a DATA_STREAM_BYTES stream can be drawn without the
+    sampler wrapping: the areas are generated, so there is no corpus to be short. DATA_N_PROCESSES is
+    known >= 1 wherever this runs (_synthetic_areas refuses 0 first), so it needs no max(1, n) clamp:
+    DATA_N_PROCESSES=0 is a startup refusal, not a divide-by-zero guard wearing a clamp's clothes.
+
+    ONE FORMULA FOR ITS TWO READERS (2026-09-27, Q-DATA-9's review). _synthetic_areas generates every
+    area to this length, and restore_stream_state prints it when a synthetic block moved. At
+    DATA_SYNTH_HOLDOUT=1 the block is carved out of a body of this length -- its size is a fraction of
+    it and its offset is drawn over it -- so these three levers move EVERY synthetic area's block
+    together: adding a fifth area at DATA_STREAM_BYTES 120000 takes each body from 60,000 bytes to
+    48,000 and each block from 3,000 to 2,400. Pure arithmetic on the values passed; it reads no
+    lever itself.
+
+    UNIT IN: seg_max = bytes, stream_bytes = bytes, n_processes = count. UNIT OUT: bytes.
+    """
+    return max(int(seg_max) + 1, MIN_AREA_BYTES, int(stream_bytes) // int(n_processes)) * 2
 
 
 def _synthetic_areas(dat, seed, entries, labels):
@@ -743,11 +778,17 @@ def _synthetic_areas(dat, seed, entries, labels):
     guard in spine/rng.py found the conflict: RUN.streams mints every name in RNG_SUBSYSTEMS so
     rng.issued() is a complete register at step 0, and this function drawing on `data.synth`
     directly is a SECOND generator for one name -- two call sites replaying one sequence while each
-    believes it has its own. The per-child form fixes that and buys the property Q-DATA-6 argues
-    for on the other stream: an area's text stops being a function of how many areas were generated
-    before it, so inserting one entry no longer moves every later area's corpus. The parent keeps
-    its RNG_SUBSYSTEMS row and reports zero draws, which is the honest reading -- declared, never
-    drawn -- and is what `data.holdout` already does.
+    believes it has its own. The per-child form fixes that and buys HALF the property Q-DATA-6 argues
+    for on the other stream: an area's DRAWS stop being a function of how many areas were generated
+    before it. Its ALPHABET does not, and this docstring said the whole property held until
+    2026-09-27 (Q-DATA-9's review): the alphabet is _ALPHABETS[i % 5] by the area's position i, so
+    inserting an entry, or reordering the list, still moves every later area's text -- relabelled
+    where the two alphabets are the same size, drawn afresh where they are not. Driven: DATA_AREAS
+    "eng,rust,py,num,c" against "eng,py,num,c" gives py, num and c other text. Keyed by position it
+    stays, because the shipped four areas' text is keyed so and every synthetic run pairs with it;
+    where a held-out block rides on the text, restore_stream_state refuses the move by name. The
+    parent keeps its RNG_SUBSYSTEMS row and reports zero draws, which is the honest reading --
+    declared, never drawn -- and is what `data.holdout` already does.
     """
     n = int(dat.n_processes)
     if n < 1:
@@ -774,12 +815,10 @@ def _synthetic_areas(dat, seed, entries, labels):
             f"the areas nobody named: name at least {n} area(s) in DATA_AREAS, or lower "
             f"DATA_N_PROCESSES.")
     labels = labels[:n]
-    # Enough text that the floor is clearable and a 120,000-byte stream can be drawn without the
-    # sampler wrapping: the areas are generated, so there is no corpus to be short. `n` is now known
-    # >= 1 (refused above), so this no longer needs the max(1, n) clamp the LEVERS READ docstring
-    # line and the audit both named: DATA_N_PROCESSES=0 is a startup refusal, not a divide-by-zero
-    # guard wearing a clamp's clothes.
-    per_area = max(int(dat.seg_max) + 1, MIN_AREA_BYTES, int(dat.stream_bytes) // n) * 2
+    # Enough text that the floor is clearable and the stream can be drawn without the sampler
+    # wrapping; the arithmetic, and why it needs no max(1, n) clamp now that `n` >= 1 is refused
+    # above, is _synthetic_length's, the one formula restore_stream_state prints as well.
+    per_area = _synthetic_length(dat.seg_max, dat.stream_bytes, n)
     raw, present, taken, sources = {}, {}, {}, {}
     for i, label in enumerate(labels):
         stream = _rng.rng_for(f"data.synth.{_holdout_key(label)}", seed)
@@ -1685,7 +1724,8 @@ _REPLAY = {}
 
 def stream_state(dat: Config, areas):
     """The mutable state that must survive into a checkpoint: the per-area read cursors, the epoch
-    index of the last draw, the holdout block offsets and sizes, and the counter vector.
+    index of the last draw, the holdout block offsets and sizes (and, since 2026-09-27, a digest of
+    each block's bytes: Q-DATA-9's review), and the counter vector.
 
     The cursors are LOAD-BEARING: without them a resume re-reads the head of every area under
     seg_contig and silently trains a second time on material the parent already used. The counter
@@ -1721,9 +1761,17 @@ def stream_state(dat: Config, areas):
         # whose held-out block MOVED. That refusal is the one goal B rests on: an ACROSS THE RUN
         # BOUNDARY number computed over a different block than the parent's compares two different
         # texts and reports the difference as forgetting.
+        # AND WHAT THE BLOCK HOLDS, beside where it sits (2026-09-27, Q-DATA-9's review): offset,
+        # size and key say where a block is, and two DIFFERENT texts can agree on all three -- a
+        # synthetic area moved to another position in DATA_AREAS, or a real block and a synthetic
+        # one of the same length, which draw their offset from the same keyed stream over the same
+        # range. _block_digest is the block's bytes, so the restore can compare the texts
+        # themselves. A record written before it carries none, and the restore then compares the
+        # three fields alone, as it did.
         "holdout": {k: {"offset": int((areas.rng_holdout.get(k) or {}).get("offset", 0)),
                         "size": int(areas.holdout_bytes.get(k, 0)),
-                        "key": (areas.rng_holdout.get(k) or {}).get("key")}
+                        "key": (areas.rng_holdout.get(k) or {}).get("key"),
+                        "digest": _block_digest(areas.holdout.get(k, b""))}
                     for k in areas.names},
         "bytes_present": {k: int(v) for k, v in areas.bytes_present.items()},
         "bytes_taken": {k: int(v) for k, v in areas.bytes_taken.items()},
@@ -1739,9 +1787,10 @@ def stream_state(dat: Config, areas):
 
 def restore_stream_state(dat: Config, areas, state):
     """Put the cursors and holdout offsets back. REFUSES LOUDLY if any area the parent RECORDED
-    comes back with a different holdout offset or size: a resume whose held-out block moved is a
-    resume whose ACROSS THE RUN BOUNDARY number compares two different texts, and that is the one
-    number goal B rests on.
+    comes back with a different holdout offset or size -- or, where the record carries the block's
+    digest (since 2026-09-27, Q-DATA-9's review), a different text at the same offset and size: a
+    resume whose held-out block moved is a resume whose ACROSS THE RUN BOUNDARY number compares two
+    different texts, and that is the one number goal B rests on.
 
     WHICH READING OF THE NAME CHECK IS NORMATIVE (ruled 2026-09-02, with Q-DATA-4). NOT
     set-equality. An add-an-area run is BY DEFINITION a resume whose area list gained a name --
@@ -1752,7 +1801,9 @@ def restore_stream_state(dat: Config, areas, state):
 
       * every area name PRESENT IN THE RECORD must be present now, with the same holdout offset,
         the same holdout size and the same rng key -> restore its cursor. A disagreement on any of
-        the four is the loud refusal, and it names which area and which field moved.
+        the four is the loud refusal, and it names which area and which field moved. Where the
+        record carries the block's digest (_block_digest), the block's bytes must agree too, and
+        a text that moved under agreeing fields is the same refusal, naming the digests.
       * a name present NOW and absent from the record is ADMITTED, its cursor starts at 0, and one
         data.area_added line is PRINTED naming it. That is the add-an-area run.
       * a name present in the RECORD and absent now is the loud refusal, not a silent drop: the
@@ -1761,9 +1812,27 @@ def restore_stream_state(dat: Config, areas, state):
         two different statements and only one of them is an experiment.
 
     This reading still catches everything the refusal's own stated reason is about -- a moved block
-    for a carried-over area -- and it is the reading the per-area holdout streams in open_areas
-    make TRUE rather than merely permitted: keyed by label, adding an area cannot move any other
-    area's block, so an honest add-an-area resume can no longer be refused by accident.
+    for a carried-over area -- and ON A REAL SOURCE it is the reading the per-area holdout streams in
+    open_areas make TRUE rather than merely permitted: keyed by label, adding an area cannot move any
+    other area's block there, so an honest add-an-area resume can no longer be refused by accident.
+    ON THE SYNTHETIC SOURCE AT DATA_SYNTH_HOLDOUT=1 IT CAN, AND THE REFUSAL SAYS WHY (2026-09-27,
+    Q-DATA-9's review; this paragraph claimed both sources until then). The block is carved from the
+    area's GENERATED body, whose length is _synthetic_length -- max(DATA_SEG_MAX + 1, MIN_AREA_BYTES,
+    DATA_STREAM_BYTES // DATA_N_PROCESSES) x 2 -- and whose text is the alphabet the area's POSITION
+    picks (_synthetic_areas). Driven: a fifth area at DATA_STREAM_BYTES 120000 took every body from
+    60,000 bytes to 48,000 and every block from 3,000 to 2,400, and the resume was refused naming
+    only the size that moved. So on this arm a moved block is refused naming those three levers with
+    this run's values, the parent's recorded length beside this run's, the DATA_STREAM_BYTES that
+    generates the parent's length where one does (150000 there), and DATA_SOURCE=real, which writes
+    the same fields. And a carried area whose position changed -- an entry inserted before it, or
+    the list reordered -- keeps its block's offset, size and key but not its text, which the field
+    comparison cannot see: driven, "eng,rust,py,num,c" at DATA_STREAM_BYTES 150000 was admitted over
+    a parent at "eng,py,num,c" with py's, num's and c's blocks other bytes. That is refused naming
+    DATA_AREAS. And since the fields cannot see a text at all, the record now carries each block's
+    digest and the restore compares it, which catches the rest: driven, a real parent over eng
+    resumed here at the matching length (DATA_STREAM_BYTES 400000 against DATA_CORPUS_CAP 200000)
+    drew the same offset and size and was admitted with its English block replaced by generated
+    text. On this arm an add-an-area resume appends the area and keeps the parent's length.
 
     THE ONE ADMISSION (2026-09-27, Q-DATA-9; register 04-Q5, SR0). A record of key None AND size 0
     for an area -- what the synthetic source writes at DATA_SYNTH_HOLDOUT=0, where it holds nothing
@@ -1777,9 +1846,19 @@ def restore_stream_state(dat: Config, areas, state):
     warning it prints. Its read cursor, which indexed the WHOLE body, is mapped
     onto the carved one (_carved_cursor): below the block it stays, past it it moves down by the
     block's size, and inside it -- text now held out -- it moves to the block's offset, the first
-    byte after the block in the carved body. THE REVERSE IS REFUSED, NAMING DATA_SYNTH_HOLDOUT: a
-    block in the record and none now would train on the text the parent held out. Every other move
-    of a recorded block is the loud refusal above, unchanged.
+    byte after the block in the carved body. ALL OF THAT HOLDS ONLY WHERE THIS RUN GENERATES THE
+    PARENT'S TEXT FOR THE AREA, so the admission checks it first (Q-DATA-9's review): the same
+    position, so the same alphabet, and the same length as the record's bytes_taken. Driven before
+    the check: a child at DATA_STREAM_BYTES 400000 carved all four blocks past the 60,000 bytes its
+    parent had, and one with DATA_AREAS reordered carved eng's and py's out of other text, and both
+    were admitted under a warning that the parent trained on those bytes. Either is refused naming
+    what moved, with DATA_SYNTH_HOLDOUT=0 as the resume that continues as before. THE REVERSE IS
+    REFUSED: a block in the record and none now would train on the text the parent held out. The
+    record does not say which source wrote the block, so the refusal names both that write one --
+    DATA_SOURCE=real, and DATA_SOURCE=synthetic at DATA_SYNTH_HOLDOUT=1 (Q-DATA-9's review: it named
+    the second alone, and a real parent resumed at the shipped synthetic source, told to set it, was
+    refused again for an offset that moved). Every other move of a recorded block is the loud
+    refusal above, unchanged.
 
     `Areas.parent_names` IS FILLED HERE: the record's area names, in its order -- the areas the
     parent trained on, whatever this run's list says (Q-DATA-9).
@@ -1793,14 +1872,24 @@ def restore_stream_state(dat: Config, areas, state):
     eng,py resumed from a parent over eng read {'eng': 0.0741} where its own was {'eng': 0.0741,
     'py': 0.1142} (DATA_CORPUS_CAP=200000).
 
-    LEVERS READ: none
+    LEVERS READ: source (the admission and the synthetic refusals are the synthetic source's,
+                 Q-DATA-9), synth_holdout (arms the admission, and is named in the reverse
+                 refusal), n_processes, stream_bytes, seg_max (the generated body's length, printed
+                 with their values when a synthetic block moved or an admission's length is not
+                 the parent's; this line said "none" until 2026-09-27, Q-DATA-9's review, though the
+                 admission and its reverse read the first two from the day they landed)
     WIRES READ: none
-    DID IT FIRE: data.state_restored, data.state_refused (with the area and the field that moved),
+    DID IT FIRE: data.state_restored, data.state_refused (with the area and the field that moved --
+                 or, since Q-DATA-9's review, the synthetic position, length or block digest),
                  data.area_added (the arriving area, PRINTED in the R report's DATA(areas.counters)
                  row; 0 on an ordinary resume, which is the statement "this resume added nothing"
                  -- seeded at 0 since 2026-09-27, when that row made the missing key visible),
-                 data.area_vanished, data.holdout_admitted and data.holdout_admitted_names (ABSENT
-                 on a fresh run, 0 and [] on a resume that reaches the comparison)
+                 data.area_vanished, data.holdout_admitted and data.holdout_admitted_names (0 and
+                 [] on a resume on DATA_SOURCE=synthetic at DATA_SYNTH_HOLDOUT=1, the one arm the
+                 admission can fire on; ABSENT on a fresh run and on every other arm, which is
+                 UNREACHABLE and not "armed, none admitted": at 0 no synthetic block exists to
+                 admit, and a real one is never admitted -- Q-DATA-9's review, where they read 0 on
+                 every resume)
     """
     dat = dat.owned_by("DATA")
     if not state:
@@ -1812,14 +1901,27 @@ def restore_stream_state(dat: Config, areas, state):
 
     recorded = dict(state.get("holdout") or {})
     cursors = dict(state.get("cursors") or {})
+    # THE PARENT'S LENGTH PER AREA, which stream_state has recorded as bytes_taken since DATA's resume
+    # state existed. On the synthetic source it is the generated body a block is carved from, so the
+    # synthetic refusals below compare it with this run's and print both (Q-DATA-9's review).
+    lengths = dict(state.get("bytes_taken") or {})
     live = set(areas.names)
     # THE PARENT'S AREA LIST, IN ITS ORDER, ON THE RECORD (Q-DATA-9): the one place a later
     # consumer can ask which areas the parent trained on.
     areas.parent_names[:] = list(recorded)
-    # THE RESUME'S OWN STATEMENTS, SEEDED BEFORE THE COMPARISON SO THAT 0 READS "ARMED, NONE": an
-    # ordinary resume admits nothing and adds nothing, and says so, where a fresh run has neither key.
-    areas.counters["data.holdout_admitted"] = 0
-    areas.counters["data.holdout_admitted_names"] = []
+    # THE ONE ARM THE ADMISSION CAN FIRE ON: the synthetic source at DATA_SYNTH_HOLDOUT=1. At 0 every
+    # live synthetic block has size 0, so there is nothing to admit, and a real block is never
+    # admitted (a change of source, below).
+    carves = str(dat.source) == "synthetic" and bool(dat.synth_holdout)
+    # THE RESUME'S OWN STATEMENTS, SEEDED BEFORE THE COMPARISON SO THAT 0 READS "ARMED, NONE" -- and
+    # seeded only where they are armed (2026-09-27, Q-DATA-9's review; G4). The admission pair was
+    # seeded on every resume, so the default arm and every real-source resume printed "armed, did not
+    # fire" for a mechanism that cannot run there; ABSENT is how this tree says UNREACHABLE, as
+    # fab.ind_applied's arm does. data.area_added is armed everywhere: an area can arrive on either
+    # source, and an ordinary resume says it added none, where a fresh run has no key.
+    if carves:
+        areas.counters["data.holdout_admitted"] = 0
+        areas.counters["data.holdout_admitted_names"] = []
     areas.counters["data.area_added"] = 0
 
     # NOT SET-EQUALITY, AND THE RULING IS 2026-09-02's (Q-DATA-4). An add-an-area run is BY
@@ -1841,8 +1943,7 @@ def restore_stream_state(dat: Config, areas, state):
             "size": int(areas.holdout_bytes.get(name, 0)),
             "key": (areas.rng_holdout.get(name) or {}).get("key"),
         }
-        if (str(dat.source) == "synthetic" and was.get("key") is None and was.get("size") == 0
-                and now["size"] > 0):
+        if carves and was.get("key") is None and was.get("size") == 0 and now["size"] > 0:
             # THE ONE ADMISSION (Q-DATA-9, 04-Q5): the parent held nothing out of this area and this
             # run holds a block out of it. No across-the-boundary number reads a parent block that
             # does not exist, so moving all three fields breaks no comparison. The parent trained on
@@ -1853,6 +1954,38 @@ def restore_stream_state(dat: Config, areas, state):
             # block is refused in open_areas), so the same record against a REAL block is a change
             # of source under the same area names, and it stays the refusal it was before this
             # ruling -- driven at ae70638, the field loop below refuses it naming the moved offset.
+            # ITS PREMISE FIRST (Q-DATA-9's review): this body must be the parent's text -- the
+            # alphabet its position picks, and the parent's length -- or "a block shorter than the
+            # parent's", "text the parent trained on" and the cursor map are all false. The record's
+            # one writer is a synthetic run at 0, whose text follows the same two rules, so the
+            # refusal can say which of them moved.
+            moved = []
+            at = _alphabet_moved(name, recorded, areas.names)
+            if at is not None:
+                moved.append(
+                    f"It is at position {at[1]} of this run's areas ({', '.join(areas.names)}) and "
+                    f"was at {at[0]} of the checkpoint's ({', '.join(recorded)}), and a synthetic "
+                    f"area's text is the alphabet its position picks (_ALPHABETS[position % "
+                    f"{len(_ALPHABETS)}], data/api.py::_synthetic_areas): this body is other text, "
+                    f"and the parent never trained on the block this run would carve from it. Keep "
+                    f"the parent's areas at their positions in DATA_AREAS and add new ones after "
+                    f"them.")
+            if name in lengths and int(lengths[name]) != int(areas.bytes_taken.get(name, 0)):
+                arith, back = _synthetic_body(dat, int(lengths[name]))
+                moved.append(
+                    f"The parent generated {int(lengths[name])} bytes of it and this run generates "
+                    f"{arith}: at another length this body is not the parent's a block shorter, "
+                    f"and past the parent's length the block is not text the parent trained on. "
+                    f"Generate the parent's length"
+                    + (f" (DATA_STREAM_BYTES={back} at DATA_N_PROCESSES={int(dat.n_processes)} "
+                       f"does)." if back is not None else "."))
+            if moved:
+                _refuse(
+                    f"DATA: the checkpoint held nothing out of area {name!r} (key None, size 0, as "
+                    f"DATA_SOURCE=synthetic writes at DATA_SYNTH_HOLDOUT=0), and the one admission "
+                    f"(Q-DATA-9) holds only where this run generates the parent's text for the "
+                    f"area. " + " ".join(moved) + " Or resume at DATA_SYNTH_HOLDOUT=0, which "
+                    f"continues as before.")
             areas.counters["data.holdout_admitted"] += 1
             areas.counters["data.holdout_admitted_names"].append(name)
             if name in cursors:
@@ -1860,26 +1993,98 @@ def restore_stream_state(dat: Config, areas, state):
                                                      now["size"], len(areas.bodies[name]))
             continue
         if (was.get("size") or 0) > 0 and now["size"] == 0:
-            # THE REVERSE IS REFUSED, AND BY THE LEVER THAT DOES IT (Q-DATA-9). A live size of 0 is
-            # only reachable on the synthetic source at DATA_SYNTH_HOLDOUT=0 -- a real area's
+            # THE REVERSE IS REFUSED, AND BY THE SETTINGS THAT WRITE A BLOCK (Q-DATA-9). A live size
+            # of 0 is only reachable on the synthetic source at DATA_SYNTH_HOLDOUT=0 -- a real area's
             # 0-byte block is refused in open_areas -- so the field loop's "size moved" would name
-            # the symptom and not the setting.
+            # the symptom and not the setting. WHICH setting wrote the record's block it cannot
+            # say: a real source and the synthetic one at 1 record the same key, offset and size, so
+            # the message names both (Q-DATA-9's review). It named DATA_SYNTH_HOLDOUT=1 alone, and a
+            # real parent resumed at the shipped DATA_SOURCE, told to set it, was refused a second
+            # time for an offset that moved, never told that DATA_SOURCE=real was the resume.
             _refuse(
                 f"DATA: area {name!r} had a {was.get('size')}-byte held-out block in the "
                 f"checkpoint (key {was.get('key')!r}, offset {was.get('offset')!r}) and has none "
                 f"now: DATA_SOURCE={dat.source} at DATA_SYNTH_HOLDOUT="
                 f"{int(bool(dat.synth_holdout))} holds nothing out. This run would train on the "
                 f"text the parent held out, and its across-the-boundary number would have no block "
-                f"to be read on. Resume with DATA_SYNTH_HOLDOUT=1, the setting that wrote the "
-                f"block. Only the other direction is admitted: a block where the checkpoint held "
-                f"none (key None, size 0), counted in data.holdout_admitted.")
+                f"to be read on. The record does not say which source wrote the block, and two "
+                f"do: DATA_SOURCE=real, which carves one out of every area, and "
+                f"DATA_SOURCE=synthetic at DATA_SYNTH_HOLDOUT=1. Resume with the one that wrote "
+                f"it. Only the other direction is admitted: a block where the checkpoint held none "
+                f"(key None, size 0), counted in data.holdout_admitted.")
         for field in ("offset", "size", "key"):
             if was.get(field) != now[field]:
+                # ON THE SYNTHETIC SOURCE AT 1 THE REFUSAL ALSO SAYS WHAT THE BLOCK RIDES ON
+                # (Q-DATA-9's review): the generated body's length, from three levers every area
+                # shares, so the one move an add-an-area resume makes by default moved every block
+                # and was refused naming only the field.
+                note = ""
+                if carves:
+                    then = int(lengths[name]) if name in lengths else None
+                    arith, back = _synthetic_body(dat, then)
+                    here = int(areas.bytes_taken.get(name, 0))
+                    note = (f" On DATA_SOURCE=synthetic at DATA_SYNTH_HOLDOUT=1 the block is carved "
+                            f"out of the area's generated body, {arith} on this run")
+                    if then is None:
+                        note += "; the checkpoint records no length for this area to compare."
+                    elif then != here:
+                        note += (f", where the checkpoint recorded {then}: every area's block moves "
+                                 f"with that length, so a resume that keeps the parent's blocks -- "
+                                 f"one that adds an area included -- generates the parent's length"
+                                 + (f" (DATA_STREAM_BYTES={back} at DATA_N_PROCESSES="
+                                    f"{int(dat.n_processes)} does)." if back is not None
+                                    else "."))
+                    else:
+                        note += (", the length the checkpoint recorded, so those three levers did "
+                                 "not move it: at one length a block moves with DATA_HOLDOUT_FRAC, "
+                                 "DATA_VAL_CAP or RUN_SEED.")
+                    note += (" A checkpoint written on DATA_SOURCE=real records the same fields: if "
+                             "the parent read this area from disk, resume with DATA_SOURCE=real.")
                 _refuse(
                     f"DATA: area {name!r} had holdout {field}={was.get(field)!r} in the checkpoint "
                     f"and {now[field]!r} now. A resume whose held-out block moved compares two "
                     f"different texts across the run boundary, and that is the one number goal B "
-                    f"rests on. Named here rather than discovered in the eval.")
+                    f"rests on. Named here rather than discovered in the eval." + note)
+        if carves:
+            # THE BLOCK'S FIELDS AGREE AND ITS TEXT NEED NOT (Q-DATA-9's review). The field loop
+            # compares where a block sits, not what it holds, and on the synthetic source what it
+            # holds is the alphabet the area's position picks: an entry inserted before this one,
+            # or the list reordered, keeps its offset, size and key and moves its bytes -- the
+            # across-the-boundary number over two different texts, admitted in silence.
+            at = _alphabet_moved(name, recorded, areas.names)
+            if at is not None:
+                _refuse(
+                    f"DATA: area {name!r} is at position {at[1]} of this run's areas "
+                    f"({', '.join(areas.names)}) and was at {at[0]} of the checkpoint's "
+                    f"({', '.join(recorded)}). A synthetic area's text is the alphabet its "
+                    f"position picks (_ALPHABETS[position % {len(_ALPHABETS)}], "
+                    f"data/api.py::_synthetic_areas), so this area's text is not the parent's and "
+                    f"neither is its held-out block, though the block's offset, size and key "
+                    f"agree: its across-the-boundary number would compare two different texts, "
+                    f"and that is the one number goal B rests on. Keep the parent's areas at their "
+                    f"positions in DATA_AREAS and add new ones after them (Q-DATA-9).")
+        if was.get("digest") is not None:
+            # AND THE TEXT ITSELF, WHERE THE RECORD CARRIES IT (Q-DATA-9's review; _block_digest).
+            # The three fields agree and the position did not move the alphabet, so what is left is
+            # a text the fields cannot see: a real block and a synthetic one of the same length, a
+            # corpus changed on disk, a generator that changed. A record written before the digest
+            # carries none and is compared on the fields alone, as it was.
+            have = _block_digest(areas.holdout.get(name, b""))
+            if have != was.get("digest"):
+                _refuse(
+                    f"DATA: area {name!r} has the checkpoint's holdout offset, size and key "
+                    f"({now['offset']}, {now['size']}, {now['key']!r}) and another text in them: the "
+                    f"block's blake2b is {have} now and {was.get('digest')} in the checkpoint "
+                    f"(data/api.py::_block_digest). A resume whose held-out block moved compares two "
+                    f"different texts across the run boundary, and that is the one number goal B "
+                    f"rests on. The fields cannot say which source wrote the block: DATA_SOURCE=real "
+                    f"and DATA_SOURCE=synthetic at DATA_SYNTH_HOLDOUT=1 record the same three for a "
+                    f"body of the same length. This run is DATA_SOURCE={dat.source}"
+                    + (": if the parent read this area from disk, resume with DATA_SOURCE=real; if "
+                       "it was synthetic, the generator's text moved."
+                       if str(dat.source) == "synthetic" else
+                       ": if the parent was DATA_SOURCE=synthetic at DATA_SYNTH_HOLDOUT=1, resume with "
+                       "that; if it read this area from disk, the corpus under DATA_DIR changed."))
         if name in cursors:
             areas.cursors[name] = int(cursors[name])
 
@@ -1922,3 +2127,62 @@ def _carved_cursor(cursor, offset, size, body_len):
     else:
         at = offset
     return at % body_len if body_len > 0 else 0
+
+
+def _block_digest(block):
+    """blake2b of one area's held-out block: what the block HOLDS, which stream_state records beside
+    where it sits and restore_stream_state compares (2026-09-27, Q-DATA-9's review).
+
+    WHY THE THREE FIELDS WERE NOT ENOUGH. The offset is drawn from rng_for("data.holdout.<key>",
+    seed) over len(body) - size, and the size is a fraction of len(body), so two bodies of one length
+    under one label get the same three fields whatever they hold. Driven: a real parent over eng
+    (DATA_CORPUS_CAP=200000: offset 166367, size 10000) resumed on the synthetic source at
+    DATA_SYNTH_HOLDOUT=1 and DATA_STREAM_BYTES=400000 (a 200,000-byte generated body) drew the same
+    offset and size, and was admitted -- as an add-an-area run over py, num and c -- with English
+    held out in the checkpoint and generated text held out now. An area whose synthetic alphabet
+    moved agrees on all three the same way. Hashing the bytes compares the texts themselves.
+
+    Under its own `person`, like spine/compose.py::_stream_digest, so it cannot collide with the
+    tree's other blake2b uses. Hashing the empty block of an area that holds nothing out is harmless:
+    the admission, the one move that changes it, never reads the recorded digest.
+    """
+    return hashlib.blake2b(bytes(block), digest_size=16, person=b"data.holdout").hexdigest()
+
+
+def _alphabet_moved(name, order, names):
+    """(its position in the record, its position now) for an area whose synthetic ALPHABET moved
+    between the checkpoint's area list `order` and this run's `names`; None where it did not.
+
+    _synthetic_areas gives the area at position i the alphabet _ALPHABETS[i % 5], so two positions
+    five apart are the same alphabet and the same text, and any other move is other text -- the
+    same draws relabelled where the two alphabets are the same size, other draws where they are not.
+    Positions count from 0, as the generator's `i` does. Called on the synthetic source only: a real
+    area's text is its directory, whatever its position (2026-09-27, Q-DATA-9's review).
+    """
+    then, now = list(order).index(name), list(names).index(name)
+    return None if then % len(_ALPHABETS) == now % len(_ALPHABETS) else (then, now)
+
+
+def _synthetic_body(dat, then):
+    """(the sentence, the DATA_STREAM_BYTES) a synthetic refusal in restore_stream_state prints: this
+    run's _synthetic_length spelled out with the three levers' values, and the DATA_STREAM_BYTES that
+    generates the parent's `then` bytes at this run's DATA_N_PROCESSES and DATA_SEG_MAX -- None when
+    `then` is None, or when no value does, because the parent's length was held by another term of
+    the max (2026-09-27, Q-DATA-9's review).
+
+    WHY THE SECOND NUMBER IS WORTH PRINTING: the move an add-an-area resume makes by default --
+    DATA_N_PROCESSES up by one, DATA_STREAM_BYTES left alone -- shortens every synthetic body, and
+    the one lever that gives the parent's length back is DATA_STREAM_BYTES, raised in proportion
+    (120000 -> 150000 for a fifth area). It is CHECKED, not assumed: the value is kept only if the
+    one formula, run on it, returns `then`.
+    """
+    seg_max, stream_bytes, n = int(dat.seg_max), int(dat.stream_bytes), int(dat.n_processes)
+    text = (f"max(DATA_SEG_MAX + 1 = {seg_max + 1}, {MIN_AREA_BYTES}, DATA_STREAM_BYTES="
+            f"{stream_bytes} // DATA_N_PROCESSES={n}) x 2 = "
+            f"{_synthetic_length(seg_max, stream_bytes, n)} bytes")
+    back = None
+    if then is not None and int(then) > 0:
+        guess = (int(then) // 2) * n
+        if _synthetic_length(seg_max, guess, n) == int(then):
+            back = guess
+    return text, back
