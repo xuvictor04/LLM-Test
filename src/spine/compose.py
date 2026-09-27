@@ -633,7 +633,11 @@ ASSEMBLY_ORDER = (
                                               "System.opt_load and a refusal is appended to "
                                               "System.refusals; a dim-0 widening of a MAY_WIDEN "
                                               "tensor is restored with padded moments, not "
-                                              "refused"),
+                                              "refused. continuing=System.resume_pos is not None "
+                                              "(2026-09-27, Q-OPT-12): a continuing mid-epoch "
+                                              "resume is the same run, so a session in progress or "
+                                              "an off-arm run's declined horizon is restored "
+                                              "verbatim, never re-anchored"),
     ("clock",     "RUN",   "new_clock",       "(batch_windows=OPT.batch_windows, accum=OPT.accum, "
                                               "resume_step, resume_epoch, "
                                               "resume_backwards=OptState.n_backward, "
@@ -2666,7 +2670,13 @@ def compose(environ=None, *, restored=None):
         # (opt.ckpt.moments_widened), so what still refuses is a group structure the L50 guard
         # exists to stop, and that stops the run by name here.
         sysm.stage = "restore.opt"
-        sysm.opt_load = opt_api.load_state(opt, sysm.optimizer, saved["OPT"])
+        # AND WHETHER THIS IS THE SAME RUN (2026-09-27, the build 1.4 review; Q-OPT-12). A
+        # continuing mid-epoch resume -- the one DOM's stream position crosses on, above -- is the
+        # run its checkpoint was part of, and OPT cannot tell that from its own horizons: the
+        # resumed build's is this epoch's length x RUN_EPOCHS, which acts and DATA_RESAMPLE move
+        # under a run that changed nothing, and a session in progress was re-anchored on it.
+        sysm.opt_load = opt_api.load_state(opt, sysm.optimizer, saved["OPT"],
+                                           continuing=sysm.resume_pos is not None)
         if sysm.opt_load.refused:
             sysm.refusals.append(
                 f"OPT.load_state refused the checkpoint {sysm.resume_src!r}: "

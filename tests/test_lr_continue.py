@@ -37,6 +37,28 @@ moved it silently (C01). These checks pin the known answers the register names f
   L8  'regulated' IS REFUSED BY NAME (NotBuilt, NEW-04), and a misspelt regime is refused at
       resolution rather than falling to a default.
 
+  The build 1.4 review (2026-09-27) added five more, one per confirmed finding:
+  L9  C01 THROUGH THE PARENT. An act-parent at OPT_HORIZON_REVISE=False keeps its declined revision
+      (st.horizon_declined) and trains on the unrevised schedule; its continued child prices EXACTLY
+      as the same parent at True does -- at the floor for good, on the same log -- at either child
+      flag, under 'as_logged' and 'floor'. A no-op call at an effective batch above 1 is not a
+      decline, and opt.horizon.revise_inert returns only to a child that can be inert.
+  L10 A CONTINUING RESUME OF A SESSION IS EXACT. load_state(continuing=True) -- the root's continuing
+      mid-epoch resume -- on a session whose resumed build projects a different horizon (with and
+      without one of the session's own acts in the log) keeps the record and the log verbatim,
+      re-reads no lever, counts opt.ckpt.horizon_held, and continues the uninterrupted session step
+      for step under every regime; the same checkpoint without the flag is still a session boundary.
+      An off-arm run's continuing resume keeps its declined horizon the same way.
+  L11 THE FLOOR GATE COUNTS A REGIME: a plateau below the floor and a parent stopped inside its
+      warm-up are clamped, counted, and reported FIRED on this run -- not UNREACHABLE with the count
+      blamed on a parent -- and a regime priced above the floor is UNREACHABLE and says so.
+  L12 opt.continue.pricing NAMES THE BRANCH: 'no-log parent: re-priced', 'logged parent: floor',
+      'logged parent: re-mapped', 'continues', 'record'; the opt.continue line says which.
+  and L7 gains the compose-level known answers: an act-parent at OPT_HORIZON_REVISE=False's default
+  child resumes at the floor like the True parent's, and a continued session with acts, saved
+  mid-epoch 1 after one of its own acts and resumed with the same env, trains the uninterrupted
+  session's losses under 'floor', 'plateau' and 'rewarm'.
+
 WHAT THIS FILE CANNOT SEE: whether any regime learns better. Every check here is operation on CPU --
 a run, a finite rate, a closed form, a counter. The arms are decided on GPU (§8 5.2, [OWNER] O6).
 """
@@ -102,13 +124,14 @@ def step(opt, st, p, shift_at=None):
     return opt_api.maybe_step(opt, st, shift_at=shift_at)
 
 
-def child(saved, run_windows=400, **env):
+def child(saved, run_windows=400, continuing=False, **env):
     """A resumed OPT: built at `run_windows`, then load_state from a DEEP COPY of the parent's
     state_dict -- torch's load_state_dict may keep the tensors it is handed, and two children must
-    not share one set of moments."""
+    not share one set of moments. `continuing` is what the root passes on a continuing mid-epoch
+    resume (spine/compose.py: System.resume_pos is not None)."""
     o = cfg(**env)
     st, p = fresh(o, run_windows)
-    rep = opt_api.load_state(o, st, copy.deepcopy(saved))
+    rep = opt_api.load_state(o, st, copy.deepcopy(saved), continuing=continuing)
     return o, st, p, rep
 
 
@@ -379,6 +402,264 @@ def l6(nolog):
           f"{k['opt.lr.floor_applied']}")
 
 
+# ---- L9-L12: the build 1.4 review's known answers (2026-09-27) ----------------------------------
+def declined_parent():
+    """parents()'s logged parent at OPT_HORIZON_REVISE=False: the same act at step 100 asks for 150
+    and is declined, and the parent runs to step 150 on its unrevised 200-step horizon."""
+    o = cfg(OPT_HORIZON_REVISE="False")
+    st, p = fresh(o, 200)
+    out = [step(o, st, p) for _ in range(100)]
+    got = opt_api.revise_horizon(o, st, run_windows=150)
+    out += [step(o, st, p) for _ in range(50)]
+    return copy.deepcopy(opt_api.state_dict(o, st)), out, got, st
+
+
+def line_of(led):
+    return next((ln for ln in led["opt.report_lines"] if ln.startswith("opt.continue:")), "")
+
+
+def l9(logged):
+    sd_t, _r0 = logged
+    sd_f, outs, got, st_f = declined_parent()
+    o = cfg()
+    want = [untouched(o, st_f.horizon, s) for s in range(1, 151)]
+    check("L9 an act-parent at OPT_HORIZON_REVISE=False declines its revision, KEEPS it in "
+          "horizon_declined (checkpointed), logs nothing, and trains on the unrevised schedule",
+          got is None and sd_f["horizon_revisions"] == []
+          and [tuple(r) for r in sd_f["horizon_declined"]] == [(100, 150)]
+          and st_f.counters.get("opt.horizon.revise_declined") == 1
+          and [x.lr for x in outs] == want and outs[-1].lr > P * F,
+          f"declined {sd_f['horizon_declined']}; last rate {outs[-1].lr / P:.4f} of peak")
+    for regime in ("as_logged", "floor"):
+        for flag in ("True", "False"):
+            seqs, logs, ks = [], [], []
+            for sd in (sd_t, sd_f):
+                oc, c, pc, _ = child(sd, OPT_LR_CONTINUE=regime, OPT_HORIZON_REVISE=flag)
+                seqs.append([step(oc, c, pc).lr for _ in range(100)])
+                logs.append(list(c.horizon_revisions))
+                ks.append(dict(c.counters))
+            check(f"L9 {regime}, child at OPT_HORIZON_REVISE={flag}: the False parent's child prices "
+                  f"EXACTLY as the True parent's -- lr x lr_min_frac on all 100 steps, on the same "
+                  f"log -- because its declines were applied first (C01 through the parent)",
+                  seqs[0] == seqs[1] and all(x == P * F for x in seqs[1])
+                  and logs[0] == logs[1] == [(100, 150), (150, 400)]
+                  and ks[1].get("opt.horizon.declined_applied") == 1
+                  and "opt.horizon.declined_applied" not in ks[0],
+                  f"first {seqs[0][0] / P:.4f} vs {seqs[1][0] / P:.4f}; logs {logs}; applied "
+                  f"{ks[1].get('opt.horizon.declined_applied')}")
+    oc, c, pc, _ = child(sd_f)
+    led = opt_api.counters(oc, c)
+    line = line_of(led)
+    check("L9 ... the child's line says the parent's declined revision was applied, and the pricing "
+          "label reads 'logged parent: floor'",
+          led.get("opt.continue.pricing") == "logged parent: floor"
+          and "1 revision(s) declined at OPT_HORIZON_REVISE=False were applied" in line
+          and c.horizon_declined == [], line[:220])
+    # A RAMPING REGIME STARTS FROM EACH PARENT'S OWN RATE: continuity with what the parent's in-run
+    # arm left, not a pricing the flag switches -- the log and the target are the True parent's.
+    starts = []
+    for sd in (sd_t, sd_f):
+        oc, c, pc, _ = child(sd, OPT_LR_CONTINUE="plateau", OPT_LR_CONT_WARM=50)
+        starts.append((float(c.continuation["start_frac"]), list(c.horizon_revisions)))
+    check("L9 ... under 'plateau' each child's ramp starts at its own parent's last rate (the floor, "
+          "and the False parent's under-annealed rate) on the same log and target",
+          close(starts[0][0], F) and close(starts[1][0], outs[-1].lr / P)
+          and starts[0][1] == starts[1][1], f"{starts}")
+
+    # A CALL True WOULD HAVE RETURNED FROM IS NOT A DECLINE: 200 windows at OPT_BATCH_WINDOWS=4 is 50
+    # steps, and so is 201.
+    res = {}
+    for flag in ("True", "False"):
+        ob = cfg(OPT_HORIZON_REVISE=flag, OPT_BATCH_WINDOWS=4)
+        sb, _p = fresh(ob, 200)
+        a = opt_api.revise_horizon(ob, sb, run_windows=201)
+        ka = dict(sb.counters)
+        b = opt_api.revise_horizon(ob, sb, run_windows=160)
+        res[flag] = (a, ka, b, dict(sb.counters), list(sb.horizon_revisions),
+                     list(sb.horizon_declined), opt_api.counters(ob, sb)["opt.horizon.revise"])
+    t, f = res["True"], res["False"]
+    check("L9 at OPT_BATCH_WINDOWS=4 a length change that rounds to the same 50 steps is no revision "
+          "at True and NO decline at False (revise_declined stays 0, revise_inert 1); a real one (160 "
+          "windows, 40 steps) is logged at True and declined -- and kept -- at False",
+          int(t[0]) == 50 and "opt.horizon.revisions" not in t[1] and int(t[2]) == 40
+          and t[4] == [(0, 40)]
+          and f[0] is None and f[1].get("opt.horizon.revise_declined") == 0
+          and f[1].get("opt.horizon.revise_inert") == 1 and f[2] is None
+          and f[3].get("opt.horizon.revise_declined") == 1 and f[4] == [] and f[5] == [(0, 40)]
+          and "declined 1 revision" in f[6].reason,
+          f"True {t[0]}/{t[2]} log {t[4]}; False declined {f[1].get('opt.horizon.revise_declined')} "
+          f"-> {f[3].get('opt.horizon.revise_declined')}, kept {f[5]}")
+
+    # opt.horizon.revise_inert RETURNS ONLY TO A CHILD THAT CAN BE INERT. The children resume at 150,
+    # the length the parent's run now measures, so nothing re-prices and the decline stays declined.
+    o = cfg(OPT_HORIZON_REVISE="False")
+    st, p = fresh(o, 200)
+    for _ in range(10):
+        step(o, st, p)
+    opt_api.revise_horizon(o, st, run_windows=150)
+    sd = copy.deepcopy(opt_api.state_dict(o, st))
+    got = {}
+    for flag in ("True", "False"):
+        oc, c, pc, _ = child(sd, run_windows=150, OPT_HORIZON_REVISE=flag)
+        g = opt_api.counters(oc, c)["opt.horizon.revise"]
+        got[flag] = (c.counters.get("opt.horizon.revise_inert"),
+                     c.counters.get("opt.horizon.revise_declined"), list(c.horizon_declined),
+                     c.counters["opt.continue.boundary"], g)
+    check("L9 a False parent's revise_inert=1 is DROPPED on a child at True (which cannot be inert: its "
+          "Gate is armed) and KEPT on a child at False; neither resume re-prices, so the decline is "
+          "carried, still declined",
+          got["True"][0] is None and got["True"][1] is None and got["True"][4].reachable
+          and got["False"][0] == 1 and got["False"][1] == 1
+          and got["True"][2] == got["False"][2] == [(10, 150)]
+          and got["True"][3] == got["False"][3] == 0,
+          f"True {got['True'][:4]}; False {got['False'][:4]}")
+
+
+def l10(nolog):
+    sd, _r0 = nolog
+    # A SESSION'S CRASH-RESUME, BOTH BRANCHES. With `act`, the session's own act at step 230 has put
+    # (230, 380) in its log, so the resume takes the log branch; without, the no-log branch. Either
+    # way the resumed build projects a different horizon (370 / 390) -- what an act or
+    # DATA_RESAMPLE=1 does to RUN_EPOCHS x this epoch's length -- and the resume is continuing.
+    for regime in ("floor", "plateau", "rewarm"):
+        for act in (True, False):
+            env = {"OPT_LR_CONTINUE": regime, "OPT_LR_CONT_WARM": 50}
+
+            def first_half(o, c, p):
+                lrs = [step(o, c, p).lr for _ in range(30)]
+                if act:
+                    opt_api.revise_horizon(o, c, run_windows=380)
+                return lrs + [step(o, c, p).lr for _ in range(10)]
+
+            ou, u, pu, _ = child(sd, **env)
+            uninterrupted = first_half(ou, u, pu) + [step(ou, u, pu).lr for _ in range(20)]
+            o1, c1, p1, _ = child(sd, **env)
+            first = first_half(o1, c1, p1)
+            mid = copy.deepcopy(opt_api.state_dict(o1, c1))
+            rec, log = dict(c1.continuation), list(c1.horizon_revisions)
+            moved = 370 if act else 390
+            o2, c2, p2, rep = child(mid, run_windows=moved, continuing=True,
+                                    **dict(env, OPT_LR_CONTINUE="as_logged"))
+            second = [step(o2, c2, p2).lr for _ in range(20)]
+            k = c2.counters
+            led = opt_api.counters(o2, c2)
+            line = line_of(led)
+            tag = "one of its own acts in the log" if act else "no log"
+            differs = next((i for i, (x, y) in enumerate(zip(first + second, uninterrupted))
+                            if x != y), None)
+            check(f"L10 {regime}, {tag}: a CONTINUING resume whose build projects {moved} keeps the "
+                  f"record and the log verbatim, is no boundary, counts the held projection, and "
+                  f"continues the uninterrupted session exactly",
+                  first + second == uninterrupted and k["opt.continue.boundary"] == 0
+                  and c2.continuation == rec and c2.horizon_revisions == log
+                  and k.get("opt.ckpt.horizon_held") == moved and rep.reason == ""
+                  and int(c2.horizon.run_steps) == 400 and led["opt.continue.pricing"] == "record",
+                  f"boundary {k.get('opt.continue.boundary')}, held {k.get('opt.ckpt.horizon_held')}, "
+                  f"first differing {differs}")
+            if regime == "rewarm" and act:
+                check("L10 ... the asked 'as_logged' was NOT applied, and the line says the resume is "
+                      "CONTINUING and names the projection it held back",
+                      led["opt.continue.regime"] == "rewarm" and "was NOT applied" in line
+                      and "CONTINUING resume" in line and f"projected run_steps={moved}" in line,
+                      line[:260])
+                oc, c, pc, _ = child(mid, run_windows=moved, **env)
+                check("L10 ... and the SAME checkpoint resumed without the flag -- a continued run's "
+                      "resume -- is still a session boundary: re-anchored at its step, nothing held",
+                      c.counters["opt.continue.boundary"] == 1
+                      and int(c.continuation["anchor"]) == 240
+                      and "opt.ckpt.horizon_held" not in c.counters,
+                      f"{c.continuation}")
+    # THE OFF ARM'S CRASH-RESUME: a False run that declined (100 -> 150) and was saved at step 120,
+    # resumed continuing with a build that projects 140, keeps its unrevised horizon and its decline.
+    o = cfg(OPT_HORIZON_REVISE="False")
+    u, pu = fresh(o, 200)
+    for _ in range(100):
+        step(o, u, pu)
+    opt_api.revise_horizon(o, u, run_windows=150)
+    uninterrupted = [step(o, u, pu).lr for _ in range(50)]
+    c1, p1 = fresh(o, 200)
+    for _ in range(100):
+        step(o, c1, p1)
+    opt_api.revise_horizon(o, c1, run_windows=150)
+    first = [step(o, c1, p1).lr for _ in range(20)]
+    mid = copy.deepcopy(opt_api.state_dict(o, c1))
+    o2, c2, p2, _ = child(mid, run_windows=140, continuing=True, OPT_HORIZON_REVISE="False")
+    second = [step(o2, c2, p2).lr for _ in range(30)]
+    k = c2.counters
+    check("L10 an OPT_HORIZON_REVISE=False run's continuing resume keeps its unrevised horizon and its "
+          "declined revision, and continues the uninterrupted run exactly",
+          first + second == uninterrupted and int(c2.horizon.run_steps) == 200
+          and c2.horizon_declined == [(100, 150)] and c2.horizon_revisions == []
+          and k.get("opt.ckpt.horizon_held") == 140 and k["opt.continue.boundary"] == 0
+          and k.get("opt.horizon.declined_applied") == 0,
+          f"held {k.get('opt.ckpt.horizon_held')}, horizon {int(c2.horizon.run_steps)}, "
+          f"applied {k.get('opt.horizon.declined_applied')}")
+
+
+def l11(nolog):
+    sd, _r0 = nolog
+    o, c, p, _ = child(sd, OPT_LR_CONTINUE="plateau", OPT_LR_PLATEAU=0.01, OPT_LR_CONT_WARM=10)
+    lrs = [step(o, c, p).lr for _ in range(50)]
+    g = opt_api.counters(o, c)["opt.lr.min_frac"]
+    check("L11 a plateau below the floor (OPT_LR_PLATEAU=0.01) is clamped on every step, and the floor "
+          "Gate reads FIRED for THIS run -- not UNREACHABLE with the count blamed on a parent",
+          all(x == P * F for x in lrs) and c.counters["opt.lr.floor_applied"] == 50
+          and g.reachable and g.fired and "FROM BEFORE A RESUME" not in g.reason, g.line()[:160])
+    # A PARENT STOPPED INSIDE ITS WARM-UP: 1000 windows resolve a 100-step warm-up, and two steps
+    # leave the rate at 2/100 of peak, under the floor.
+    o = cfg()
+    st, p = fresh(o, 1000)
+    for _ in range(2):
+        step(o, st, p)
+    sdw = copy.deepcopy(opt_api.state_dict(o, st))
+    oc, c, pc, _ = child(sdw, run_windows=2000, OPT_LR_CONTINUE="plateau")
+    lrs = [step(oc, c, pc).lr for _ in range(3)]
+    g = opt_api.counters(oc, c)["opt.lr.min_frac"]
+    check("L11 a parent stopped inside its warm-up (0.02 of peak) rises to the floor at the boundary: the "
+          "record keeps the parent's true rate, the clamp is counted, and the Gate FIRED",
+          close(float(c.continuation["start_frac"]), 0.02) and all(x == P * F for x in lrs)
+          and c.counters["opt.lr.floor_applied"] == 3 and g.fired, g.line()[:140])
+    o, c, p, _ = child(sd, OPT_LR_CONTINUE="plateau", OPT_LR_CONT_WARM=10)
+    for _ in range(20):
+        step(o, c, p)
+    g = opt_api.counters(o, c)["opt.lr.min_frac"]
+    check("L11 a plateau priced above the floor from a floor parent cannot be clamped: the Gate is "
+          "UNREACHABLE and says the regime prices at or above the floor",
+          not g.reachable and c.counters["opt.lr.floor_applied"] == 0
+          and "'plateau' prices at or above it" in g.reason, g.line()[:160])
+
+
+def l12(nolog, logged):
+    got = {}
+    for tag, sd, rw, env in (("no-log", nolog[0], 400, {}), ("logged", logged[0], 400, {}),
+                             ("same length", nolog[0], 200, {}),
+                             ("regime", nolog[0], 400, {"OPT_LR_CONTINUE": "plateau"})):
+        o, c, p, _ = child(sd, run_windows=rw, **env)
+        led = opt_api.counters(o, c)
+        got[tag] = (led["opt.continue.pricing"], line_of(led))
+    # A LOGGED PARENT STOPPED BEFORE ITS REVISED END: re-mapped LR-continuously, not the floor.
+    o = cfg()
+    st, p = fresh(o, 200)
+    for _ in range(100):
+        step(o, st, p)
+    opt_api.revise_horizon(o, st, run_windows=150)
+    for _ in range(20):
+        step(o, st, p)
+    oc, c, pc, _ = child(copy.deepcopy(opt_api.state_dict(o, st)))
+    led = opt_api.counters(oc, c)
+    got["logged, stopped early"] = (led["opt.continue.pricing"], line_of(led))
+    want = {"no-log": ("no-log parent: re-priced", "no-log branch"),
+            "logged": ("logged parent: floor", "the floor for good"),
+            "logged, stopped early": ("logged parent: re-mapped", "re-mapped LR-continuously"),
+            "same length": ("continues", "no session boundary"),
+            "regime": ("record", "anchor=")}
+    check("L12 opt.continue.pricing names the branch that priced each resume, and the opt.continue "
+          "line says it in words (CONTRACT-Q-DATA-7: 'floor, or the no-log re-priced rate')",
+          all(got[t][0] == w[0] and f"pricing {w[0]!r}" in got[t][1] and w[1] in got[t][1]
+              for t, w in want.items()),
+          {t: got[t][0] for t in got})
+
+
 # ---- L7: through the composition root, at a real epoch boundary ---------------------------------
 BASE = {"DATA_STREAM_BYTES": "60000", "SIG_WARMUP": "20", "FAB_N0": "256", "FAB_SLOTS": "512"}
 
@@ -482,6 +763,71 @@ def l7():
                   for k in ks)
               and ks[0].get("opt.horizon.revisions") == ks[1].get("opt.horizon.revisions")
               == logged + 1, [k.get("opt.horizon.revisions") for k in ks])
+
+        # C01 THROUGH THE PARENT, AT THE ROOT (the build 1.4 review): the same act-parent at
+        # OPT_HORIZON_REVISE=False, and each parent's default child. Before the declines were kept,
+        # the False parent's child resumed at 0.5503 of peak against 0.0500 for the True parent's.
+        fp = build(CKPT_DIR=tmp + "/pf", OPT_HORIZON_REVISE="False", **act)
+        loop.run(fp, progress=False)
+        n_declined = int(fp.optimizer.counters.get("opt.horizon.revise_declined", 0) or 0)
+        check("L7 setup: the act parent at OPT_HORIZON_REVISE=False ran its epoch, logged nothing and "
+              "kept every revision it declined",
+              n_declined >= 1 and fp.optimizer.horizon_revisions == []
+              and len(fp.optimizer.horizon_declined) == n_declined
+              and int(fp.clock.counters()["epoch"]) == 1, f"declined {n_declined}")
+        firsts, rows = [], []
+        for src in ("/p", "/pf"):
+            c = build(CKPT_RESUME=tmp + src, RUN_EPOCHS=2, DATA_RESAMPLE=1, TOK_GROW_EVERY=30,
+                      TOK_RETOK_EVERY=0)
+            oc, s0 = c.configs["OPT"], int(c.optimizer.opt_step)
+            firsts.append([opt_api.lr_at(oc, c.optimizer, U.Steps(s0 + j)) for j in range(1, 31)])
+            led = opt_api.counters(oc, c.optimizer)
+            rows.append((led.get("opt.continue.pricing"),
+                         c.optimizer.counters.get("opt.horizon.declined_applied")))
+        check("L7 each act parent's DEFAULT child (OPT_LR_CONTINUE='as_logged', OPT_HORIZON_REVISE=True) "
+              "resumes at lr x lr_min_frac on all 30 first steps, whichever flag the parent ran at -- "
+              "the False parent's declines applied to its child's log",
+              all(close(x, P * F) for seq in firsts for x in seq)
+              and rows[0] == ("logged parent: floor", None)
+              and rows[1] == ("logged parent: floor", n_declined),
+              f"first {firsts[0][0] / P:.4f} vs {firsts[1][0] / P:.4f}; {rows}")
+
+        # A CONTINUED SESSION'S CRASH-RESUME, AT THE ROOT (the build 1.4 review): the True act
+        # parent's epoch-1 session with acts, saved 70 windows in -- after its own acts -- and
+        # resumed with the same env. The loop continues the epoch at the saved position, so the root
+        # passes continuing=True; before it did, the resumed build's projection (2 x this epoch's
+        # length, which the acts moved) re-anchored the session.
+        n1, n2 = 70, 20
+        for regime in ("floor", "plateau", "rewarm"):
+            env = dict(RUN_EPOCHS=2, DATA_RESAMPLE=1, OPT_LR_CONTINUE=regime, OPT_LR_CONT_WARM=20,
+                       **act)
+            u = build(CKPT_RESUME=tmp + "/p", **env)
+            ru = loop.run(u, max_windows=n1 + n2, progress=False)
+            c1 = build(CKPT_RESUME=tmp + "/p", CKPT_DIR=f"{tmp}/s_{regime}", **env)
+            loop.run(c1, max_windows=n1, progress=False)
+            rec, log = dict(c1.optimizer.continuation), list(c1.optimizer.horizon_revisions)
+            own = len(log) - int(rec["rev_base"])
+            c2 = build(CKPT_RESUME=f"{tmp}/s_{regime}", CKPT_DIR=f"{tmp}/s2_{regime}", **env)
+            k = dict(c2.optimizer.counters)
+            cont = [w for w in c2.warnings if w.startswith("MID-EPOCH RESUME CONTINUES")]
+            # READ AT THE RESTORE: the child's own later acts append to the log as the uninterrupted
+            # session's did, which the last clause compares.
+            verbatim = (c2.optimizer.continuation == rec, list(c2.optimizer.horizon_revisions) == log)
+            rc = loop.run(c2, max_windows=n2, progress=False)
+            a, b = ru.loss_curve[n1:n1 + n2], rc.loss_curve[:n2]
+            check(f"L7 a {regime!r} session with its own acts, saved mid-epoch 1 and resumed with the "
+                  f"same env, is no boundary: the record and the log come back verbatim, the "
+                  f"resumed build's projection is HELD, and it trains the uninterrupted session's "
+                  f"losses exactly, its later acts logging what the uninterrupted session's did",
+                  own >= 1 and len(cont) == 1 and k.get("opt.continue.boundary") == 0
+                  and all(verbatim) and int(k.get("opt.ckpt.horizon_held", 0) or 0) > 0
+                  and len(a) == len(b) == n2 and a == b
+                  and c2.optimizer.horizon_revisions == u.optimizer.horizon_revisions,
+                  f"own acts {own}; continuing warnings {len(cont)}; boundary "
+                  f"{k.get('opt.continue.boundary')}; record/log verbatim {verbatim}; held "
+                  f"{k.get('opt.ckpt.horizon_held')}; losses {len(a)}/{len(b)}, first differing "
+                  f"{next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), None)}; logs at the "
+                  f"end {c2.optimizer.horizon_revisions == u.optimizer.horizon_revisions}")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -517,6 +863,10 @@ if __name__ == "__main__":
     l5(NOLOG)
     l6(NOLOG)
     l8()
+    l9(LOGGED)
+    l10(NOLOG)
+    l11(NOLOG)
+    l12(NOLOG, LOGGED)
     l7()
     print(f"\n=== {len(FAILS)} failing ===")
     sys.exit(1 if FAILS else 0)

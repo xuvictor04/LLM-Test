@@ -612,13 +612,18 @@ mid-epoch act re-measures the run: LR-continuous, logged in `st.horizon_revision
 **Two §8 1.4 mechanisms, kept apart on purpose (Q-OPT-12, 2026-09-26; C01).** `OPT_HORIZON_REVISE`
 (default `True`) is the in-run revision's off arm: at `False` `revise_horizon` is inert and counts
 every declined revision (`opt.horizon.revise_inert`, `opt.horizon.revise_declined`), and it never
-gates `load_state`'s resume revision. `OPT_LR_CONTINUE` (default `'as_logged'`) is the rate a
-continued run starts at: at a **session boundary** — a resume `load_state` re-prices, i.e. a horizon
-that differs from the checkpoint's or a new revision on a logged parent — `'floor'`, `'plateau'`
+gates `load_state`'s resume revision. Since 2026-09-27 (build 1.4's review) it also KEEPS each
+declined revision (`st.horizon_declined`, checkpointed) and counts one only where `True` would have
+logged one; a continued run applies them to its log, so an act-parent's flag cannot move its
+continued child's rate either (C01 through the parent). `OPT_LR_CONTINUE` (default `'as_logged'`) is
+the rate a continued run starts at: at a **session boundary** — a resume `load_state` re-prices, i.e.
+a horizon that differs from the checkpoint's or a new revision on a logged parent, and (since
+2026-09-27) that does not continue the checkpoint's epoch mid-way — `'floor'`, `'plateau'`
 (`OPT_LR_PLATEAU`, `OPT_LR_CONT_WARM`) and `'rewarm'` (`OPT_LR_REWARM`, `OPT_LR_CONT_WARM`) are
 anchored into the checkpointed record `st.continuation` and priced by their closed forms;
 `'as_logged'` is today's pricing, bit-identical; `'regulated'` is refused at `build` with `NotBuilt`
-(NEW-04). Every resume prints the regime in force as the ledger label `opt.continue.regime`.
+(NEW-04). Every resume prints the regime in force as the ledger label `opt.continue.regime`, and
+(since 2026-09-27) the branch that priced it as `opt.continue.pricing`.
 
 **`OptState` names its two optimizers `base` and `encoder`** (Q-OPT-7) — the same words as `build`'s
 `param_groups` keys. `maybe_step` writes `lr` into **both** and steps **`base` only**; the encoder is
@@ -626,11 +631,15 @@ stepped by `SIG.train_step`, on SIG's cadence, behind SIG's InfoNCE floor gate (
 
 **Wires read:** `d_effective_batch_windows`.
 **Receives:** `param_groups` (plain lists the packages returned — OPT never walks a module tree),
-`run_windows`, `best_bpb` (a Reading carrying its seed count), `shift_at`, `saved`. **`build` no
-longer takes `resume`** — `load_state` is the whole restore path (Q-OPT-4, a frozen signature moved).
+`run_windows`, `best_bpb` (a Reading carrying its seed count), `shift_at`, `saved`, and (since
+2026-09-27, Q-OPT-12) `continuing` — `System.resume_pos is not None`, the root's continuing
+mid-epoch resume; a defaulted keyword, so an OPT-level caller that passes nothing gets the rule it
+had. **`build` no longer takes `resume`** — `load_state` is the whole restore path (Q-OPT-4, a frozen
+signature moved).
 **Checkpointed:** both AdamW states, `n_backward`, `opt_step`, `lr_prev`, `restart_amp`,
 `cycle_best`, `cycle_index`, the resolved `Horizon`, **`param_group_shape`**, the counters,
-`horizon_revisions` (Q-OPT-10) and the **continuation record** `continuation` (Q-OPT-12). The old
+`horizon_revisions` (Q-OPT-10), the **continuation record** `continuation` (Q-OPT-12) and, since
+2026-09-27, `horizon_declined` (the off arm's declined revisions, Q-OPT-12). The old
 checkpoint saved `opt_m`/`opt_e` and *nothing else from this package*. `param_group_shape` was
 missing from `state_dict`'s enumeration while `load_state` refused on it — an untrippable L50 guard,
 repaired 2026-09-02 with Q-OPT-4. A **dim-0 widening** (FAB_SLOTS, LM_VOCAB_SLOTS) is restored with
@@ -5256,6 +5265,10 @@ is the arm's measured cost. **`load_state`'s resume revision on a logged parent 
 lever** (C01): the rate a resume starts at is `OPT_LR_CONTINUE`'s. `counters()` now carries Gate
 `opt.horizon.revise`, which prints the inert reason this entry promised and nothing printed. Driven:
 `tests/test_continuation.py` S2b and S8, `tests/test_lr_continue.py` L4.
+*2026-09-27 (build 1.4's review):* a declined revision is now KEPT — `st.horizon_declined`,
+checkpointed, never read in-run — and counted only where `True` would have logged one (the no-op
+test first, at the effective batch). A continued run applies the declines to its log; a crash-resume
+of the `False` run keeps them declined and its horizon as built. See Q-OPT-12's correction.
 
 ### Q-OPT-12 — the rate a continued run starts at, and an off arm for the in-run horizon revision — **RESOLVED 2026-09-26 (Proposal 05 §8 1.4; NEW-05, C01, TREE-OPT_HORIZON_REVISE-LEVER): `OPT_LR_CONTINUE` ∈ {as_logged, floor, plateau, rewarm, regulated}, DEFAULT 'as_logged' = TODAY'S PRICING, BIT-IDENTICAL; `OPT_HORIZON_REVISE` (DEFAULT True) IS IN-RUN ONLY. ⚠ FIVE NEW LEVERS, FIVE CENSUS AMENDMENTS; 'regulated' REFUSED (NotBuilt, NEW-04); `OPT_BORN_CLOCK` DEFERRED (C02, §8 4.2). NO SIGNATURE MOVES, NO WIRE**
 The number is Q-OPT-12 because 03b and the register already reserve Q-OPT-11 for the AUD
@@ -5299,8 +5312,10 @@ asking for a new rate (C01).
   (`opt.continue.inert`), the revise_horizon precedent.
 * **Frozen at the boundary, checkpointed.** A regime is written into `OptState.continuation` — regime,
   anchor, start_frac, target_frac, warm, end, rev_base — which `state_dict` carries and `load_state`
-  restores (an older checkpoint restores None). A resume at the parent's horizon keeps it, so a
-  session saved and resumed continues its closed form exactly and never re-reads the lever; an
+  restores (an older checkpoint restores None). A resume at the parent's horizon keeps it, and so
+  (since 2026-09-27, see the correction below) does a continuing mid-epoch resume whatever the
+  resumed build projects, so a session saved and resumed continues its closed form exactly and never
+  re-reads the lever; an
   operator who asks for another regime there gets the recorded one, and the report says so in words.
   A boundary under `'as_logged'` clears any record a parent carried.
 * **No phantom restart.** Anchoring a regime clears `lr_prev` (counted in `opt.ckpt.lr_prev_cleared`),
@@ -5340,6 +5355,77 @@ parent resumed mid-epoch (the log branch's append): loss curves, `lr_at` over ev
 counters fire, a session resumes exactly. Which regime a post-training session should use is §8 5.2's
 GPU question ([OWNER] O6). Driven: `tests/test_lr_continue.py` L1-L8, `tests/test_continuation.py` S2b,
 S8 and S5's regime case, `tests/test_prose_guards.py` G2.
+*2026-09-27 (build 1.4's review; six confirmed findings, all fixed). ⚠ A SIGNATURE MOVED:
+`OPT.load_state` gains one defaulted keyword, `continuing=False` (§7). No lever, no wire, no entry
+point.*
+1. **C01 through the parent (major).** An act-parent at `OPT_HORIZON_REVISE=False` declined its
+   revisions and checkpointed no log, so its continued child — at every default — took the no-log
+   re-pricing. Driven through compose (`TOK_GROW_EVERY=30 TOK_RETOK_EVERY=40`, a whole epoch, then
+   `RUN_EPOCHS=2 DATA_RESAMPLE=1`): 0.5503 of peak against 0.0500 for the same parent at `True`, both
+   labelled 'as_logged'. `revise_horizon` now keeps each declined pair in `st.horizon_declined`
+   (checkpointed, never read in-run), and `load_state` takes such a checkpoint through the log branch
+   on its *would-be* log — the log with the declines merged in by step. Where that resume re-prices,
+   the declines join the child's log before the resume revision (`opt.horizon.declined_applied`), so
+   the child prices as the logged parent it would have been: 0.0500 after the fix, whichever flag
+   either run has. A ramping regime still starts from the child's own parent's last rate — continuity
+   with what the parent's in-run arm left — on the same log and target. Where the resume does not
+   re-price, the run continues on its unrevised horizon with the declines carried, which also makes
+   the `False` run's own crash-resume exact: it used to take the resumed build's post-act horizon as a
+   changed one (driven: 317 → 315 steps after one act, 0.7176 → 0.7140 of peak at the first resumed
+   step). The alternative offered, accepting the parent route in writing, was not taken: this build's
+   known answer is that the lever leaves a continued run's LR unchanged, and C01 names exactly this
+   parent.
+2. **A crash-resume of a session re-anchored it (major).** "Re-priced" cannot tell a crash-resume from
+   a new run length: the resumed build's horizon is this epoch's length × `RUN_EPOCHS`, and acts and
+   `DATA_RESAMPLE=1` move this epoch's length under a run that changed nothing. Driven at 117f9b6's
+   OPT with identical settings: a 'rewarm' session saved 200 windows into its epoch 1, after one of
+   its own acts, was re-anchored at step 517 (the log branch appended 592 against the log's 613) and
+   ramped 0.1907, 0.2069, 0.2232 of peak where the uninterrupted session decayed 0.1721, 0.1698,
+   0.1675; a session with no act, saved 30 windows into epoch 2 of three, met 465 against its 474 in
+   the no-log branch and was re-anchored the same way. OPT's horizons cannot separate the two cases,
+   and keeping a record whenever the log branch appends (the fix offered) would also have stopped a
+   finished logged session from ever starting another. So the root says which resume it is:
+   `spine/compose.py` passes `continuing=System.resume_pos is not None`, the continuing mid-epoch
+   resume that DOM's stream position already crosses on. A continuing resume of a checkpoint that keeps
+   its own horizon — a session's record, or the off arm's declines — is restored **verbatim**: the
+   horizon, log, declines and record come back as saved, nothing is appended, no regime is anchored,
+   no lever is re-read, and the resumed build's projection is counted where it was held back
+   (`opt.ckpt.horizon_held`: 0 when it agreed, else its run_steps). Every mid-run save (periodic,
+   `SIGUSR1`, a stop) is mid-epoch, so a crash-resume is continuing; a continued run starts from a
+   finished run's final checkpoint, at an epoch boundary, and is still a session boundary. After the
+   fix both drives are exact, rates and losses. A checkpoint with no record and no declines — every
+   run at the defaults — is never held, so 'as_logged' keeps its log-branch append on a continuing
+   resume: the small LR-continuous inexactness it already had at 148786f, not repaired here.
+   Residuals, stated: a crash-resume from an epoch-boundary checkpoint is not continuing and takes the
+   old test; and a continuing resume never re-anchors a session in progress, so raising `RUN_EPOCHS`
+   mid-session continues the recorded session (a checkpoint with no record, continued mid-epoch at a
+   larger `RUN_EPOCHS`, still starts one).
+3. **The floor Gate ignored a regime (minor).** A 'plateau' or 'rewarm' target below `lr_min_frac`, or
+   a ramp from a parent stopped inside its warm-up, is clamped by the floor, and Gate `opt.lr.min_frac`
+   read UNREACHABLE beside the count while `_stale_note` blamed it on a configuration no longer in
+   force (driven: `OPT_LR_PLATEAU=0.01`, `floor_applied=50`). A regime whose target or first ramp rung
+   is below the floor is now a reachable route, and both reasons name it. The ramp still starts from
+   the parent's true rate, and the one discontinuity a regime has is now stated in `_continued` and
+   here: **a parent below the floor rises to it at the boundary** (driven: 0.02 of peak at step 2 of a
+   100-step warm-up, then 0.05, 0.05, 0.05 under 'plateau'), counted in `opt.lr.floor_applied`.
+4. **A no-op call counted as a decline (minor).** The `False` arm returned before the step conversion,
+   so at an effective batch above 1 a window change that rounds to the same step count read
+   `revise_declined=1` (driven: `OPT_BATCH_WINDOWS=4`, 200 → 201 windows, 50 steps both). The
+   conversion and the no-op test now run first, against the log the run would hold at `True`.
+5. **`opt.horizon.revise_inert` reached a child that cannot be inert (minor).** It is dropped on
+   restore unless the live configuration can be inert — `OPT_LR_SCHED=none`, more than one cycle, or
+   the off arm, recognised by the counter `build` seeds for it, so `load_state` still reads no
+   `OPT_HORIZON_REVISE`.
+6. **The label did not say which pricing applied (minor).** A second label, `opt.continue.pricing` —
+   'logged parent: floor', 'logged parent: re-mapped', 'no-log parent: re-priced', 'continues',
+   'record' or 'flat (OPT_LR_SCHED=none)' — and the `opt.continue:` line names the branch in words
+   (CONTRACT-Q-DATA-7). It reads `opt.ckpt.log_at_load`, the log's length once the restore settled the
+   horizon (0 = a no-log resume).
+Three new counters, each describing its own restore, never restored from a parent and ABSENT on a
+fresh run: `opt.ckpt.horizon_held`, `opt.horizon.declined_applied`, `opt.ckpt.log_at_load`. **Defaults
+are bit-identical:** at `OPT_HORIZON_REVISE=True` nothing is declined, and a checkpoint with no record
+and no declines takes both horizon branches as before. Driven: `tests/test_lr_continue.py` L9-L12 and
+L7's three compose-level checks.
 
 ### Q-RUN-17 — instruments for the mid-epoch act's secondaries — **RESOLVED 2026-09-26 (Proposal 05 §8 1.3; PENDING-S0b-SECONDARIES, 03b-16.26, 03b-16.33): SIX READINGS, ONE NEW `RunResult` FIELD (`flush_bytes`) AND ONE DRIVER FLAG (`run.py --flush-bytes`). NO SIGNATURE MOVES, NO LEVER, NO WIRE; A DEFAULT RUN REPRODUCES THE BASELINE FIXTURE**
 The retok fleet (Proposal 05 note retok fleet (2)) reports secondaries beside its ship rule, and 03b
@@ -6121,7 +6207,7 @@ OPT: revise_horizon(opt: Config, st, *, run_windows)
 OPT: remap_rows(opt: Config, st, row_events)
 OPT: counters(opt: Config, st)
 OPT: state_dict(opt: Config, st)
-OPT: load_state(opt: Config, st, saved)
+OPT: load_state(opt: Config, st, saved, *, continuing=False)
 RUN: process_setup(run: Config)
 RUN: mode(run: Config)
 RUN: Timing.span(self, name)

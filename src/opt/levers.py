@@ -931,8 +931,11 @@ class OPTLevers(LeverSet):
     horizon_revise = Lever(True, "Whether the mid-epoch act re-maps the rest of the LR schedule to "
                                  "the re-measured run length, LR-continuously (Q-OPT-10). Default "
                                  "True, today's behaviour. False (OFF) keeps the horizon as built for "
-                                 "the rest of the run and counts each revision it declines; it never "
-                                 "changes how a resume is priced, which OPT_LR_CONTINUE governs.",
+                                 "the rest of the run, across a crash-resume too, and counts and "
+                                 "checkpoints each revision it declines; a continued run applies "
+                                 "them and prices as the logged parent it would have been, so this "
+                                 "lever never changes a continued run's rate, which OPT_LR_CONTINUE "
+                                 "governs.",
                            U.FLAG)
     # CENSUS AMENDMENT, 2026-09-26 (TREE-OPT_HORIZON_REVISE-LEVER). No ancestor: the old tree never
     # revised a horizon mid-run -- it re-PROJECTED one every epoch through `_project`, the machinery
@@ -947,6 +950,14 @@ class OPTLevers(LeverSet):
     # build(), which seeds opt.horizon.revise_declined at 0 on the OFF arm only (DID IT FIRE: absent
     # where no revision can be declined). load_state's resume revision does NOT read it (C01), and
     # counters() prints it on Gate opt.horizon.revise.
+    # THE PARENT ROUTE, CLOSED 2026-09-27 (the build 1.4 review). Not gating load_state was half of
+    # C01: an act-parent at False checkpointed no log, so its continued child -- at every default --
+    # took the no-log re-pricing (driven through compose: 0.5503 of peak against 0.0500 for the same
+    # parent at True). revise_horizon now keeps each declined pair in st.horizon_declined,
+    # checkpointed, and load_state applies them to a continued child's log (and still reads no lever
+    # to do it: the off arm is recognised by the declines themselves), so the child prices as the
+    # logged parent it would have been. A crash-resume of the False run keeps them declined, which
+    # also makes that resume exact -- it used to adopt the resumed build's post-act horizon.
     # A BOOL, WITH THE BOOL BRANCH'S KNOWN HAZARD: any spelling outside ("0", "", "off", "no", "none",
     # "false") reads as True, so OPT_HORIZON_REVISE=flase is silently ON -- the same caveat
     # lr_restarts carries above.
@@ -962,8 +973,9 @@ class OPTLevers(LeverSet):
                                      "to OPT_LR_REWARM x lr and then re-decays by a cosine to the "
                                      "floor at the run's end. 'regulated' is declared and NOT BUILT "
                                      "(it needs the NEW-04 session gate) and is refused at startup. "
-                                     "A resume at the parent's horizon continues the recorded "
-                                     "regime and does not re-read this lever.",
+                                     "A resume at the parent's horizon, or one that continues the "
+                                     "checkpoint's epoch mid-way (a crash-resume), continues the "
+                                     "recorded regime and does not re-read this lever.",
                         U.NAME, choices=("as_logged", "floor", "rewarm", "plateau", "regulated"))
     # CENSUS AMENDMENT, 2026-09-26 (NEW-05, C01). No ancestor: the old tree priced a resume by
     # whatever its projection machinery produced (ISSUES P1-H17), with no switch over it.
@@ -987,6 +999,14 @@ class OPTLevers(LeverSet):
     # same-length resume of the session continues it bit-exactly and never re-reads this lever. An
     # operator who changes the regime without changing the run length gets the recorded session, and
     # the opt.continue report line says so in words.
+    # AND "RE-PRICED" ALONE COULD NOT TELL A CRASH-RESUME FROM A NEW SESSION (2026-09-27, the build
+    # 1.4 review). The resumed build's horizon is this epoch's length x RUN_EPOCHS, and acts and
+    # DATA_RESAMPLE=1 move this epoch's length under a run that changed nothing, so a session saved
+    # mid-epoch in a later epoch and resumed with identical settings was re-priced, re-anchored, and
+    # a decaying 'rewarm' ramped back up. The root now tells load_state when it continues the
+    # checkpoint's epoch at the saved position (System.resume_pos), and such a resume restores a
+    # session verbatim; a continued run -- from a finished run's final checkpoint, at an epoch
+    # boundary -- is re-priced and anchored as before.
     # 'regulated' STAYS IN choices= AND IS REFUSED AT src/opt/api.py::build WITH
     # spine/gate.py::NotBuilt, the tree's shape for a declared-and-unbuilt arm (FAB_HOP_MODE=
     # 'transition', LM_COMPOSE=1, MEM_KEY_SRC='frozen'). It sets each session's plateau from the
@@ -1024,7 +1044,9 @@ class OPTLevers(LeverSet):
     # and why DEFECT 2's "not one of these levers is a cadence" survives it (see the header). It is
     # a ramp FROM THE PARENT'S RATE and not from zero, so unlike lr_warmup it cannot start the
     # session below the rate the parent ended at, and a session boundary is LR-continuous whenever
-    # it is > 0 -- the no-jump principle Q-OPT-5 and Q-OPT-10 are both about. NOT CLAMPED to a tenth
+    # it is > 0 -- the no-jump principle Q-OPT-5 and Q-OPT-10 are both about -- except at the floor
+    # (2026-09-27): a parent stopped inside its own warm-up can sit below lr_min_frac, and the floor
+    # clamp lifts the boundary to it (src/opt/api.py::_continued says so). NOT CLAMPED to a tenth
     # of the session the way lr_warmup is clamped to a tenth of the run: a ramp longer than the
     # session ends the session mid-ramp, and 'rewarm' then has no decay phase at all, which the
     # opt.continue report line states rather than a clamp hiding it. Refused below 0 in
