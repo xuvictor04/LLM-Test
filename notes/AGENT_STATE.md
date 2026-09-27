@@ -137,7 +137,12 @@ Updated 2026-09-26 (the decision register, Proposal 05) on `rm-predict-DC` (the 
   model-free replays of the tree's functions, arithmetic. Never an efficacy verdict.
 - Efficacy (which arm is better, retention, plasticity, the belief, preset values) is decided only on
   the owner's GPU. Toy readings may order the GPU queue; they set no default.
-- O1-O20 are resolved by the manager (see OPERATING MODEL).
+- O1-O20 are resolved by the manager: Proposal 05 §3.3 and Appendix D (lean form); the detailed
+  drafts and checks are in results/decisions_2026-09-26/rulings/. The owner channel is
+  notes/OWNER_BRIEF.md (goals check, major issues, expansions, GPU queue, rulings that touch owner
+  rulings). One statistical rule governs every GPU comparison against eps (O2); each test's seeds and
+  caps are pre-registered when that test is built. TOK_RETOK_EVERY 3000 is the manager's interim
+  value (the owner approved stream rebuilding, not a cadence).
 
 ## Next
 0. Proposal 05 §8 orders everything: Stage 0 (owner rulings O1-O20; the fleet-archive reads; the

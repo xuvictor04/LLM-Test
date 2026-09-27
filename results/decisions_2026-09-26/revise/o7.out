@@ -1,0 +1,4 @@
+alpha 0.05: C=4 untagged-sd 0.0445 n*=11; easy 14 cred 19 hard 71; C=6 untagged 12
+alpha 0.04: C=4 untagged-sd 0.0445 n*=11; easy 15 cred 20 hard 76; C=6 untagged 12
+alpha 0.01: C=4 untagged-sd 0.0445 n*=16; easy 21 cred 28 hard 105; C=6 untagged 17
+untagged - planned: mean 0.0510 sd 0.0445 t 2.56 UB95 0.0934

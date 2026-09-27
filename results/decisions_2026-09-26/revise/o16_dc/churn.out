@@ -1,0 +1,23 @@
+fb_off.s0       first_full=  8901 windows_full=  10526 of post-fill  11099 share=0.948 dips/pass mean=25.5 max=50 passes=22
+fb_off.s1       first_full=  6201 windows_full=  13068 of post-fill  13799 share=0.947 dips/pass mean=24.7 max=46 passes=27
+fb_off.s2       first_full= 12201 windows_full=   7337 of post-fill   7799 share=0.941 dips/pass mean=26.6 max=36 passes=15
+fb_off.s3       first_full=  5801 windows_full=  13347 of post-fill  14199 share=0.940 dips/pass mean=27.6 max=42 passes=28
+fb_off.s4       first_full=  8701 windows_full=  10558 of post-fill  11299 share=0.934 dips/pass mean=35.8 max=51 passes=22
+fb_on.s0        first_full=  6101 windows_full=  13315 of post-fill  13899 share=0.958 dips/pass mean=26.7 max=45 passes=27
+fb_on.s1        first_full=  5801 windows_full=  12562 of post-fill  14199 share=0.885 dips/pass mean=27.9 max=51 passes=28
+fb_on.s2        first_full=  4301 windows_full=  14696 of post-fill  15699 share=0.936 dips/pass mean=23.0 max=43 passes=31
+fb_on.s3        first_full=  5101 windows_full=  13098 of post-fill  14899 share=0.879 dips/pass mean=23.5 max=39 passes=29
+fb_on.s4        first_full=  6401 windows_full=  12871 of post-fill  13599 share=0.946 dips/pass mean=28.9 max=41 passes=27
+skip.s0         first_full=  9601 windows_full=   9848 of post-fill  10399 share=0.947 dips/pass mean=27.7 max=51 passes=20
+skip.s1         first_full=  None windows_full=      0 of post-fill      0 share= dips/pass mean=0.0 max=0 passes=0
+skip.s2         first_full=  4901 windows_full=  13817 of post-fill  15099 share=0.915 dips/pass mean=24.2 max=40 passes=30
+skip.s3         first_full= 13201 windows_full=   6435 of post-fill   6799 share=0.946 dips/pass mean=31.8 max=47 passes=13
+skip.s4         first_full=  5201 windows_full=  13220 of post-fill  14799 share=0.893 dips/pass mean=37.8 max=61 passes=29
+world_off.s0    first_full=  6301 windows_full=  12649 of post-fill  13699 share=0.923 dips/pass mean=28.6 max=44 passes=27
+world_off.s1    first_full=  9101 windows_full=  10292 of post-fill  10899 share=0.944 dips/pass mean=26.3 max=46 passes=21
+world_off.s2    first_full= 12301 windows_full=   7368 of post-fill   7699 share=0.957 dips/pass mean=21.3 max=32 passes=15
+world_off.s3    first_full=  6601 windows_full=  12702 of post-fill  13399 share=0.948 dips/pass mean=28.6 max=46 passes=26
+world_off.s4    first_full=  8401 windows_full=  10855 of post-fill  11599 share=0.936 dips/pass mean=30.9 max=48 passes=23
+windows at the ceiling per run (20 distinct runs): min 0.0 median 12605.5 max 14696.0
+share of post-fill windows at the ceiling (19 runs): min 0.879 median 0.941 max 0.958
+slots freed per manage pass after fill (read 1 window after the pass): n 460 median 27.0 min 6 max 61

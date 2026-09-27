@@ -1,0 +1,16 @@
+False rollbacks: HARD kept if <=5 of 100 pooled benign sessions
+  true FR 0.02: P(stay/turn HARD) = 0.985
+  true FR 0.03: P(stay/turn HARD) = 0.919
+  true FR 0.05: P(stay/turn HARD) = 0.616
+  true FR 0.08: P(stay/turn HARD) = 0.180
+  true FR 0.10: P(stay/turn HARD) = 0.058
+Power at eps: HARD kept if >=16 of 20 graded-eps sessions caught
+  true power 0.60: P(>=16/20) = 0.051
+  true power 0.70: P(>=16/20) = 0.238
+  true power 0.80: P(>=16/20) = 0.630
+  true power 0.90: P(>=16/20) = 0.957
+  true power 0.95: P(>=16/20) = 0.997
+Canary: per-session trigger share 0.01, confirmation 0.05 per tripped canary
+  false confirmed trips over 90 sessions: expected 0.045; P(any) <= 0.044
+  false confirmed trips over 180 sessions: expected 0.090; P(any) <= 0.086
+Unconfirmed false trips expected over 90 sessions at 1%: 0.9

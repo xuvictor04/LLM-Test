@@ -1,0 +1,45 @@
+== O13: WORLD re-run (6.5) power ==
+  world_off-fb_off full run: SE 0.0114 -> SD 0.0255
+  world_off-fb_off last half: SE 0.0016 -> SD 0.0036
+  fb_on-fb_off full run: SE 0.0101 -> SD 0.0226
+  fb_on-fb_off last half: SE 0.0031 -> SD 0.0069
+  UB half-width at 5 seeds, SD 0.0255: 0.0243
+  admission power at 5 seeds, 1 comp, SD 0.0255: 0.971
+  joint over 4 areas at that SD (independent): 0.889
+  seeds for >=80% joint power over 4 areas at SD 0.0255: 5; single comp 4
+  seeds for >=80% joint power over 4 areas at SD 0.0445: 11; single comp 7
+  seeds for >=80% joint power over 4 areas at SD 0.0527: 14; single comp 9
+  seeds for >=80% joint power over 4 areas at SD 0.0624: 19; single comp 12
+  seeds for >=80% joint power over 4 areas at SD 0.1279: 71; single comp 43
+  detect cost 2eps (0.10) in one area, SD 0.0255, n 5: 1.000; false detect at true 0: 0.0000; at true eps: 0.457
+  detect cost 2eps (0.10) in one area, SD 0.0255, n 10: 1.000; false detect at true 0: 0.0000; at true eps: 0.499
+  detect cost 2eps (0.10) in one area, SD 0.0527, n 5: 0.733; false detect at true 0: 0.0049; at true eps: 0.200
+  detect cost 2eps (0.10) in one area, SD 0.0527, n 10: 0.997; false detect at true 0: 0.0009; at true eps: 0.461
+  detect cost 2eps (0.10) in one area, SD 0.0624, n 5: 0.580; false detect at true 0: 0.0073; at true eps: 0.155
+  detect cost 2eps (0.10) in one area, SD 0.0624, n 10: 0.979; false detect at true 0: 0.0033; at true eps: 0.397
+
+== O14: the S0b ship rule's operating characteristics (simulation) ==
+  n=3 true harm 0.0 x run-noise SD (both cadences): P(3000 passes) 0.701  P(none ships) 0.157
+  n=3 true harm 1.0 x run-noise SD (both cadences): P(3000 passes) 0.387  P(none ships) 0.471
+  n=3 true harm 2.0 x run-noise SD (both cadences): P(3000 passes) 0.146  P(none ships) 0.782
+  n=6 true harm 0.0 x run-noise SD (both cadences): P(3000 passes) 0.686  P(none ships) 0.165
+  n=6 true harm 1.0 x run-noise SD (both cadences): P(3000 passes) 0.331  P(none ships) 0.531
+  n=6 true harm 2.0 x run-noise SD (both cadences): P(3000 passes) 0.097  P(none ships) 0.849
+  confirmation t (alpha 0.025), n=6, harm 0.0 x SD of the paired diff: P(confirmed) 0.025
+  confirmation t (alpha 0.025), n=6, harm 1.0 x SD of the paired diff: P(confirmed) 0.509
+  confirmation t (alpha 0.025), n=6, harm 1.5 x SD of the paired diff: P(confirmed) 0.833
+
+== O14: E2 held-out re-read at margin eps ==
+  3 seeds, SD 0.0527: UB half-width 0.0888 (t_0.95,2 = 2.920)
+  3 seeds, SD 0.0624: UB half-width 0.1052 (t_0.95,2 = 2.920)
+  3 seeds, SD 0.1279: UB half-width 0.2156 (t_0.95,2 = 2.920)
+
+== O11: wall share of the floor cadence as the probe grows ==
+  forward = 1/3 step: m/t per unit r = 0.0240; w_F = 2% at r = 0.85 (probe 5 windows per area)
+  forward = 1/3 step: m/t per unit r = 0.0240; w_F = 10% at r = 4.63 (probe 28 windows per area)
+  forward = 1/3 step: m/t per unit r = 0.0240; w_F = 50% at r = 41.67 (probe 250 windows per area)
+  toy wall basis 4.3/15: m/t per unit r = 0.0206; w_F = 2% at r = 0.99 (probe 6 windows per area)
+  toy wall basis 4.3/15: m/t per unit r = 0.0206; w_F = 10% at r = 5.38 (probe 32 windows per area)
+  toy wall basis 4.3/15: m/t per unit r = 0.0206; w_F = 50% at r = 48.45 (probe 291 windows per area)
+  C03 cadence reads per 6000 windows at 333: 18.0 ; stamp-aligned: 2 x 4 = 8
+  throughput 1 - w_F at w_F 0.10 / 0.50: 0.9 0.5

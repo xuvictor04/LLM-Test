@@ -1,0 +1,4 @@
+n=6 harm 0.0 x paired-diff SD: P(confirmed) alpha .025 = 0.013; alpha .05 = 0.022
+n=6 harm 1.0 x paired-diff SD: P(confirmed) alpha .025 = 0.458; alpha .05 = 0.580
+n=6 harm 1.5 x paired-diff SD: P(confirmed) alpha .025 = 0.813; alpha .05 = 0.894
+n=6 harm 2.0 x paired-diff SD: P(confirmed) alpha .025 = 0.965; alpha .05 = 0.986

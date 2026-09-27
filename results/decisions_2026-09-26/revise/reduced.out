@@ -1,0 +1,6 @@
+easy sd=0.0527: full C=29 n*=20 joint@5=5.43e-09; reduced C=14 n*=15 joint@5=0.007
+cred sd=0.0624: full C=29 n*=27 joint@5=7.48e-12; reduced C=14 n*=20 joint@5=0.001
+hard sd=0.1279: full C=29 n*=108 joint@5=2.28e-23; reduced C=14 n*=77 joint@5=0.000
+O9 C=4 easy: n*=14 joint@5=0.061
+O9 C=4 cred: n*=19 joint@5=0.024
+O9 C=4 hard: n*=71 joint@5=0.001

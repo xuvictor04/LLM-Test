@@ -61,6 +61,19 @@ the prequential bytes are accounted over the whole epoch. The recorded prequenti
 2026-09-26, CPU checks test operation only, and whether live re-segmentation works is decided by the
 GPU `EXP=retok` fleet.
 
+**`rulings/`**: the manager's rulings on the 20 decisions first queued for the owner (O1-O20) and the
+D-1..D-10 confirmation, made under the owner's delegation of 2026-09-26. There are three versions:
+- `drafts_and_checks.json`: the first drafts and two adversarial checks.
+- `revised_detailed.json`: the detailed revision, with per-ruling statistical rules. It was not
+  committed to the register: the check rounds kept finding contradictions between the rulings, and
+  the owner had said the bulk was impractical.
+- `lean.json`: the lean form the register carries (§3.3 and Appendix D). It keeps one statistical
+  rule for every GPU comparison against ε and leaves seeds and caps to each test's own
+  pre-registration.
+
+**`revise/`**: the scripts the revision ran: power and sample-size arithmetic, O14's confirmation
+arithmetic, and the capacity and refill arithmetic behind O16 to D-CONFIRM (`o16_dc/`).
+
 ## Left out
 
 Two copies of the `d97779d` source tree, used to re-run the 2026-09-24 fleet's composition, are not

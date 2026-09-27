@@ -1,0 +1,40 @@
+t_{0.95,4} = 2.132  t_{0.95,9} = 1.833  t_{0.95,19} = 1.729
+
+5-seed per-component power to admit a zero-regression arm at margin eps=0.05
+  easy 0.0527                  normal-approx 0.497  MonteCarlo 0.544  UB half-width 0.0502
+  cred 0.0624                  normal-approx 0.393  MonteCarlo 0.438  UB half-width 0.0595
+  hard 0.1279                  normal-approx 0.158  MonteCarlo 0.179  UB half-width 0.1219
+  untagged all-area 0.0445     normal-approx 0.619  MonteCarlo 0.663  UB half-width 0.0424
+  E1 TI gap 0.0306             normal-approx 0.888  MonteCarlo 0.908  UB half-width 0.0292
+
+Seeds needed for >=80% JOINT power (independent components) at mu=0, margin eps
+  C= 1 per-comp power 0.8000 -> easy:9  cred:12  hard:43  untagged:7
+  C= 4 per-comp power 0.9457 -> easy:14  cred:19  hard:71  untagged:11
+  C= 6 per-comp power 0.9635 -> easy:15  cred:21  hard:79  untagged:12
+  C= 7 per-comp power 0.9686 -> easy:16  cred:21  hard:83  untagged:12
+  C=14 per-comp power 0.9842 -> easy:18  cred:25  hard:96  untagged:14
+  C=29 per-comp power 0.9923 -> easy:21  cred:28  hard:110  untagged:15
+
+Same at mu = eps/2 (a benign arm that regresses by 0.025)
+  C= 1 -> easy:30  cred:41  hard:164  untagged:22
+  C= 4 -> easy:49  cred:68  hard:279  untagged:36
+  C= 7 -> easy:57  cred:79  hard:324  untagged:41
+
+5-seed joint power (independent) at mu=0:
+  C=4: easy 0.0609 cred 0.02384 hard 6.17e-04
+  C=7: easy 0.0075 cred 0.00145 hard 2.42e-06
+  C=29: easy 0.0000 cred 0.00000 hard 5.36e-24
+
+P(point estimate >= eps | mu=0) per component = Phi(-eps*sqrt(n)/sd)
+  C=29 sd=0.0527 n=21: per comp 6.88e-06, any of C 1.99e-04
+  C=29 sd=0.0624 n=28: per comp 1.12e-05, any of C 3.24e-04
+  C=4 sd=0.0527 n=14: per comp 1.93e-04, any of C 7.70e-04
+  C=4 sd=0.1279 n=71: per comp 4.94e-04, any of C 1.97e-03
+
+E1 TI-gap SD implied by MDE 0.042 at 5 seeds (t_{.95,4}+t_{.80,4}): 0.0306  (t_{.80,4} = 0.941 )
+  significance threshold on mean diff: 0.0291
+  P(reads as tie | retention worse by eps=0.05): 0.092
+  P(reads as tie | worse by 0.042): 0.194
+
+Holm levels over 4 pairwise comparisons:  [0.0125, 0.0167, 0.025, 0.05]
+Bonferroni per-configuration alpha over 4 drops: 0.0125

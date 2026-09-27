@@ -1,0 +1,30 @@
+5-seed per-component admission power at mu=0 (MC):
+  easy: 0.545; joint C=4 0.0881; C=7 0.01424; C=29 2.24e-08
+  cred: 0.439; joint C=4 0.0372; C=7 0.00315; C=29 4.30e-11
+  hard: 0.183; joint C=4 0.0011; C=7 0.00001; C=29 4.25e-22
+  untagged-mean: 0.663; joint C=4 0.1933; C=7 0.05635; C=29 6.69e-06
+MC seeds for >=80% joint power (independent), mu=0:
+  C=1: easy:9  cred:12  hard:42  untagged-mean:7
+  C=4: easy:14  cred:18  hard:71  untagged-mean:10
+  C=6: easy:15  cred:20  hard:79  untagged-mean:11
+  C=7: easy:16  cred:21  hard:82  untagged-mean:12
+  C=29: easy:20  cred:28  hard:111  untagged-mean:15
+t_.95,4 = 2.132
+O16 primary, SD 0.0306, superiority power at delta=eps, 5 seeds (MC): 0.907
+O16 primary, SD 0.0306, n for 80% (MC): 5
+C=8: per-comp 0.9725; n* (MC) easy:16  cred:22  hard:85
+C=4: per-comp 0.9457; n* (MC) easy:14  cred:18  hard:71
+C=1: per-comp 0.8000; n* (MC) easy:9  cred:12  hard:42
+n_max 20, C=8: largest per-component SD with >=80% joint power (normal approx) = 0.0601
+n_max 20, C=4: largest per-component SD with >=80% joint power (normal approx) = 0.0658
+n_max 20, C=1: largest per-component SD with >=80% joint power (normal approx) = 0.0859
+5 seeds, easy: per comp 0.545, joint C=8 7.76e-03, C=4 0.088
+5 seeds, cred: per comp 0.439, joint C=8 1.38e-03, C=4 0.037
+5 seeds, hard: per comp 0.183, joint C=8 1.27e-06, C=4 0.001
+O18 false success per poisoned session <= 2.5e-05
+  over 105 poisoned sessions: P(any false success) <= 0.0026
+  over 420 poisoned sessions: P(any false success) <= 0.0104
+  without the re-read (O10's two stages only), 105 sessions: 0.0512
+  cap 12: sessions per seed (k=25, 100, 250 drip) = 39
+  cap 25: sessions per seed (k=25, 100, 250 drip) = 21
+  cap 50: sessions per seed (k=25, 100, 250 drip) = 14
