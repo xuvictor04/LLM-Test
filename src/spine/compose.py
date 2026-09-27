@@ -1095,7 +1095,10 @@ LOOP_ORDER = (
                                       "flush, which FAB.manage and FAB.grow_check take; "
                                       "baseline_loss = per_window -- the same return again, "
                                       "FAB.contribution's spelling; "
-                                      "bits = per_window -- the same return in bits per byte, "
+                                      "bits = per_window -- the same return over ln 2, bits per "
+                                      "TOKEN, and at DOM_LEVELS re-denominated by the root to bits "
+                                      "per build-time token (Q-DOM-5; this read 'bits per byte' "
+                                      "until 2026-09-26, which it never was), "
                                       "DOM.note_competence's spelling. FOUR SPELLINGS OF LM.lm_loss'S TWO "
                                       "RETURNS, which are a bare tuple with no record type to "
                                       "anchor them (lm/api.py::lm_loss); mean, the other one, is "
@@ -1304,8 +1307,14 @@ LOOP_ORDER = (
                                       "supply what LM.decode requires -- the row and the record "
                                       "were wrong together, which is why naming the field was not "
                                       "enough on its own"),
-    ("B", "DOM",   "note_competence", "did from DOM.observe; bits from the per-window loss; the "
-                                      "rate is the d_comp_ema wire"),
+    ("B", "DOM",   "note_competence", "did from DOM.observe; bits from the per-window loss, in "
+                                      "the unit DOM_LEVELS sets (Q-DOM-5): at DOM_LEVELS the root "
+                                      "hands bits per BUILD-TIME token -- the window's per-token "
+                                      "loss / ln 2 x Vocabulary.bytes_per_token / the window's own "
+                                      "bytes per token off Segmentation.byte_pos, one window at a "
+                                      "time (spine/loop.py::_build_token_scale); at DOM_LEVELS=0 "
+                                      "the per-token loss / ln 2, bits per token; the rate is the "
+                                      "d_comp_ema wire"),
     ("B", "CKPT",  "save",            "Cadences.due('ckpt', CKPT.save_period(ck), clock), or the "
                                       "SIGUSR1 flag -- the B-level route INTO the C block, with "
                                       "reason='periodic' or 'sigusr1'. It does not assemble "
@@ -2584,6 +2593,22 @@ def compose(environ=None, *, restored=None):
                "source 0, an id the parent's partition no longer holds")
             + ". This continues a different optimisation from the checkpoint's under its name; to "
             "ablate domains cleanly, start a fresh run at DOM_ENABLED=0.")
+    # A COMPETENCE BOOK FOLDED IN THE OTHER UNIT IS SAID, NOT REFUSED (Q-DOM-5, 2026-09-26), on the
+    # Q-DOM-1 precedent above. DOM_LEVELS changes the unit the root hands DOM.note_competence, and a
+    # checkpoint written before the lever existed, or at its other value, restores EMAs in the unit it
+    # was folded in: open_partition keeps them (there is no per-domain bytes history to convert with,
+    # and dropping them would disarm the spare) and counts part.n_comp_unit_changed. The C12 case is
+    # a "pre-Levels" fleet checkpoint continued at the default.
+    if int(sysm.partition.counters.get("part.n_comp_unit_changed", 0)) > 0:
+        _now_unit = ("bits per build-time token" if bool(dom.levels) else "bits per token")
+        _was_unit = ("bits per token" if bool(dom.levels) else "bits per build-time token")
+        sysm.warnings.append(
+            f"DOM_LEVELS={int(bool(dom.levels))} on a resume whose competence book was folded in "
+            f"{_was_unit}; this run hands DOM {_now_unit} (Q-DOM-5). The parent's book is kept: each "
+            f"domain's EMA moves to this run's unit at the d_comp_ema rate as its own windows "
+            f"arrive, and a domain that receives none keeps the parent's unit, so until then the "
+            f"cull's competence spare compares readings in two units. For a clean arm, resume at "
+            f"the parent's DOM_LEVELS={int(not bool(dom.levels))}.")
 
     # -- 9. the capacity valve, and the refusal that needs the population -------------------------
     # new_valve's `restored` is the LIFTED CAP alone, because Valve.origin has to record where the

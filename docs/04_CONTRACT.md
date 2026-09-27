@@ -19,7 +19,7 @@ WIRES READ:  <comma-separated d_ fields, or "none">
 DID IT FIRE: <the counters that prove the mechanism executed, in G4's three states>
 ```
 
-`tests/test_contract.py` parses those blocks. **All 267** of the declared levers are named by at
+`tests/test_contract.py` parses those blocks. **All 268** of the declared levers are named by at
 least one stub as read by it — **261, not 259, since 2026-09-02: there are now TWO CENSUS
 AMENDMENTS, `OPT_GRAD_CLIP` under Q-OPT-3 and `MEM_JUDGE_FRAC` under Q-MEM-8** (see
 `.rework/CENSUS.md`, section `amendments`, which holds both and states that the census's 328 is
@@ -734,7 +734,7 @@ training distribution in this project and moving it there is an unmeasured behav
 (**Q-MEM-10**, RESOLVED (a): the join is a composition-root closure and **no signature moves on
 either side**); `state_dict` is a stage-`C` row.
 
-### DOM — `src/domains/api.py` (28 levers)
+### DOM — `src/domains/api.py` (29 levers, one of them a census amendment — `DOM_LEVELS`)
 
 The self-assembling partition; `did` is the **unit of forgetting**, and its granularity is what makes
 a delete cost 1.6% of memory rather than 30%.
@@ -752,8 +752,13 @@ reaches FAB as `live_domains`, and both renames stay in `compose.py`'s `produces
 one record feeding two vocabularies is why "spell it as the consumer does" is not a function.
 **`rekey` is an EVENT the spine delivers** — the cadence is MEM's and the arm test is SIG's, and both
 were read directly from inside the domain block at `:6688-6689`.
+**`DOM_LEVELS` (Q-DOM-5) is read by the ROOT, which converts before `note_competence`:** at the
+default the book is folded in bits per build-time token, at 0 in bits per token. The inputs are the
+window's bytes and TOK's build-time bytes per token, neither of which this package may hold; DOM reads
+the lever only to stamp the checkpointed book's unit and compare it on a resume.
 **Checkpointed additions:** the reservoirs (the uncensored sample the measured radius needs),
-`tokc`, `comp`/`comp_glob`, the adjacent-distance history, and the RNG stream `rng` (Q-CKPT-4). The boundary clock **must not restart** on
+`tokc`, `comp`/`comp_glob`, the adjacent-distance history, the RNG stream `rng` (Q-CKPT-4), and
+`comp_unit`, the unit the competence book was folded in (Q-DOM-5). The boundary clock **must not restart** on
 resume; `grace` **does**, and the asymmetry is deliberate.
 **Where they are called (§3):** `rekey` is a stage-`A` row on `Cadences.due('dom.rekey',
 MEM.rekey_every, clock)` **after** `observe` — without it `accept_rule="radius"` silently degenerates
@@ -1110,7 +1115,7 @@ report live joins as missing:
 |---|---|
 | `RunClock.step` | `step` (TOK ×3, `Retention.consider`, `CKPT.save`), `step_windows` (SIG, FAB ×3), `now` (MEM ×2, DOM ×2) |
 | `Snapshot.payload` | `state` (DATA, TOK, CAP), `saved` (LM, OPT), `sd` (SIG, FAB, WORLD), `restored` (MEM, DOM, CAP, CKPT), `resume` (OPT), `snapshot` (CKPT) |
-| `LM.lm_loss`'s two returns | `per_window_loss` (FAB.observe), `flush_loss` (FAB.manage/grow_check), `baseline_loss` (FAB.contribution), `bits` (DOM.note_competence), and one summand of the objective |
+| `LM.lm_loss`'s two returns | `per_window_loss` (FAB.observe), `flush_loss` (FAB.manage/grow_check), `baseline_loss` (FAB.contribution), `bits` (DOM.note_competence; over ln 2, and in bits per build-time token at `DOM_LEVELS`, Q-DOM-5), and one summand of the objective |
 | `Assignment.did` | `did` (DOM ×2), `domain_id` (FAB ×3), `sources` (MEM.write) |
 | `Process.device` | `device`, at six constructors |
 | `streams[...]` | `rng` (MEM, DOM, WORLD, EVAL), `generator` (SIG, FAB) |
@@ -1621,7 +1626,7 @@ been fixed is a real outcome and acting on it writes a second wrong sentence. **
 The union of the five `levers_unconsumed` lists was **15**. Thirteen of them were EVAL's, and all
 thirteen were given a declared reader by writing the P6 instrument signatures into
 `src/eval/api.py`. **The last two were FAB's, and as of 2026-09-02 this table is EMPTY: every one of
-the 267 declared levers is named `LEVERS READ:` by a stub.** Neither of the two was dropped, and
+the 268 declared levers is named `LEVERS READ:` by a stub.** Neither of the two was dropped, and
 neither was given a fake reader; each was ruled, and the ruling is what produced the reader.
 
 | lever | env name | why it has no reader | disposition |
@@ -5166,6 +5171,88 @@ the blackout split across a save) and S9 (each reading fires, equals its recompu
 where disarmed), `tests/test_tok_dom_cap.py` T4-T5, `tests/test_fabric_internals.py` I11. What the
 readings say about retok cadences is the GPU fleet's question (§8 2.1).
 
+### Q-DOM-5 — DOM's competence was a per-token level, so every act moved it — **RESOLVED 2026-09-26 (Proposal 05 §8 1.2; register TREE-S0b-LEVELS, C12; 03b 0b.5): `DOM_LEVELS`, DEFAULT ON — THE ROOT HANDS `note_competence` BITS PER BUILD-TIME TOKEN; OFF IS TODAY'S PER-TOKEN UNIT, BIT FOR BIT. ⚠ ONE NEW LEVER, A CENSUS AMENDMENT; A DEFAULT RUN'S COMPETENCE VALUES CHANGE. NO SIGNATURE MOVES, NO WIRE**
+**What was asked.** `DOM.note_competence` folds each window's mean cross-entropy / ln 2 into the
+domain's EMA and the population's `comp_glob`: a level PER TOKEN, since the mean runs over the
+window's `ctx` targets. A mid-epoch act re-spells the unconsumed tail in longer tokens, so the same
+text costs more bits per token after it than before, and every domain's EMA shifts by the act's
+bytes-per-token ratio — about 1.47x across a bytes-to-build splice (`tests/test_levels.py` L3 reads
+1.4656). The cull's competence spare, the book's one consumer (`domains/api.py::manage`, brake two),
+then reads a change the model did not make. The register rules one lever per consumer, default ON,
+OFF = today's unit, and the DOM half built before the retok fleet (C12).
+
+**The ruling, as built.**
+* **`DOM_LEVELS`** (U.FLAG, default `True`; `src/domains/levers.py` section 8; a census amendment,
+  since the old tree had no switch over the unit). At ON, `spine/loop.py::_flush` hands each window's
+  reading as (nats / ln 2) × (bpt_build / `derive.bytes_per_token`(window bytes, window tokens)) —
+  bits per byte × bpt_build, i.e. bits per build-time token. The window's tokens are its targets
+  ids[a+1:b], ctx of them; its bytes are what they span off `Segmentation.byte_pos`, through
+  `spine/loop.py::_window_bytes`, which `loop.bytes_scored` now sums too, so the two readings cannot
+  disagree about a window's bytes. Row k of a flush's per-window loss is rescaled by window k's bytes
+  at every `OPT_BATCH_WINDOWS`. OFF is `float(nats) / ln 2`, the expression before this entry,
+  untouched.
+* **bpt_build is `Vocabulary.bytes_per_token`**, TOK's measurement over the build sample, recorded in
+  the vocabulary file and adopted on every resume (Q-TOK-13, `tok.bpt_adopted` 1), so the unit is a
+  constant of the model's lineage across continuation sessions; the stream's own
+  `Segmentation.bytes_per_token` is re-measured per stream and is not. At the shipped default the two
+  differ by 1.58% (1.5018 against 1.4784 over the 120 KB stream). A vocabulary file older than the
+  recorded field re-measures at the resume (`tok.bpt_adopted` 0), and the unit then follows the
+  child's measurement.
+* **The order of operations is chosen for the identity known answer.** As a ratio of two bytes-per-
+  token values, a window whose measured value equals the build-time one gives x / x = 1.0 exactly, so
+  ON equals OFF to the bit there. The register's left-to-right (mean nats × tokens / ln 2 / bytes) ×
+  bpt_build is the same arithmetic, but it rounds at each step and does not promise that.
+* **Why the root converts.** Both inputs are ones DOM may not hold: `byte_pos` is the cut's, and the
+  bytes per token is TOK's, measured after assembly, so it cannot be a wire (SIG's width is the same
+  case). **What DOM reads the lever for:** `state_dict` stamps the book's unit as `comp_unit`
+  (`'build_token'` / `'token'`), and `open_partition` compares it with this run's unit on a resume.
+  `part.n_comp_unit_changed` is ABSENT on a fresh partition, 0 on a restore in the same unit or of a
+  book with no reading, and 1 on a book folded in the other unit; a blob older than the key reads as
+  `'token'`, the only unit there was. That book is KEPT — not converted, since there is no per-domain
+  bytes history to convert with, and not dropped, which would disarm the spare for every domain the
+  child does not feed — and the root STATES it before the first window, on the Q-DOM-1 precedent: the
+  warning names `DOM_LEVELS` and both units, says each EMA moves to the new unit at the `d_comp_ema`
+  rate as its own windows arrive while an unfed domain keeps the parent's, and says a clean arm
+  resumes at the parent's value. That is C12's "pre-Levels" fleet checkpoint continued at the default.
+* **Counters.** `loop.levels_rescaled` (the loop's flush books): the windows whose factor was not
+  exactly 1.0. ABSENT at `DOM_LEVELS=0`; PRESENT-and-0 when armed and no window left the build-time
+  value (`TOK_MODE=bytes`); this process's windows, like `loop.bytes_scored`. `part.n_comp_unit_changed`
+  as above. The R report's `DOM.census` row now prints `comp_glob` beside `comp_unit`, the unit it is in.
+* **Text only, and DOM's half only.** MEM's rescaled surprise (Q-MEM-14, the register's (c)), CAP's
+  improving test (inert until `CAP.observe` is rowed at P4, (d)) and FAB's stamped-act known answer
+  ((b)) are not built here; each gets its own lever when it is. A media window's unit is a different
+  conversion (03b item 16). At `DOM_ENABLED=0` the one `did=0` book is converted too, harmlessly.
+* **Order-table prose.** The `DOM.note_competence` row names the unit, and `LM.lm_loss`'s produces
+  column no longer calls `bits` "bits per byte": it was bits per token before this entry.
+
+**What the default changes.** Competence VALUES change from the first window: at the shipped default
+no window's bytes per token equals the build-time value (targets span 166-218 bytes against ctx ×
+bpt_build = 192.2, factors 0.88-1.16, over the 634 windows of the 120 KB stream). The book's one
+consumer is `DOM.manage`'s competence spare, so a default run's loss curve and counters move only from
+the first cull decision the new unit decides differently, which needs a non-empty cull budget (ten or
+more live domains at `DOM_CULL_FRAC` 0.1) and a candidate past `DOM_GRACE` and `DOM_CULL_STALE` (500
+windows each). **The baseline fixture is unaffected and is not re-recorded:** no `DOM.manage` pass runs
+in its 80 windows (the fixture has no `part.n_manage_calls`), and `tests/test_baseline.py` B1 passes
+against the d32e2ce fixture (80 losses, 248 integer counters) with `loop.levels_rescaled` listed as new.
+
+**What CPU establishes:** operation only — the unit reaches DOM, its known answers hold, the
+counters fire, a resume is exact. Against the tree before this entry (072df9a), `DOM_LEVELS=0` over a
+240 KB epoch with `TOK_RETOK_EVERY=200 DOM_GRACE=50 DOM_CULL_STALE=50 DOM_CULL_FRAC=0.5` (1230 windows,
+6 acts, 12 manage passes, 8 culls, 4 competence spares) gives a byte-identical loss curve and all 323
+integer counters equal. The default ON on that configuration gives the same curve and counters (the
+same 4 spares; `loop.levels_rescaled` 1230 of 1230): no spare decision moved in that run.
+The register's k1000 pair (`TOK_RETOK_EVERY=1000 DATA_STREAM_BYTES=760000 RUN_SEED=0`, one whole
+epoch, ON against OFF, everything else at its default): 3815 windows and 3 acts on each arm, finite;
+`part.n_created` 99 and `part.n_culled` 0 on both, and the loss curves and every integer counter
+equal. The unit reached DOM — `comp_glob` 2.690 bits per build-time token against 2.951 bits per
+token, `loop.levels_rescaled` 3815 — but the spare it feeds was never consulted: the cull budget was
+empty at 34 manage passes out of 38 (the population ends at 4 live domains after 87 merges and 8 folds),
+and the 4 cull candidates were inside `DOM_GRACE`. At the default shape, then, the unit decides
+nothing yet; the (h) family's GPU arms are where it can.
+Whether the unit improves domain management is read on GPU (U-series family (h), S5 (iii)), and an
+adverse reading there returns the lever to OFF. Driven: `tests/test_levels.py` L1-L7,
+`tests/test_continuation.py` S5 (now at ON by default).
+
 ### Q-RUN-11 — a resume drew epoch 0's stream whatever epoch it resumed in — **RESOLVED 2026-09-24: THE `stream` ROW DRAWS `Snapshot.epoch`**
 The `stream` row passed `epoch=0` unconditionally. Driven at `RUN_EPOCHS=2 DATA_RESAMPLE=1`: the
 parent's epoch-1 draw hashed `65cd298845`; its child, resumed at epoch 1, drew `cfacafbe13` (epoch
@@ -5593,7 +5680,7 @@ on existing rulings:** gate `fab.on` at `FAB_ON=0` (ruled a switch read false, `
 | K1 | every name this document declares exists in the tree **with the signature it claims** | rename a parameter; drop a function |
 | K2 | `spine.compose` imports and `compose()` raises **only `NotImplementedError`, from a stub** | a typo in the root surfaces as `AttributeError`/`TypeError`, not as a missing body |
 | K3 | no package imports another (O10 restated at the contract boundary) | add `from fabric import api` to `src/memory/` |
-| K4 | every one of the 267 declared levers is named `LEVERS READ:` by a stub, or is in the UNCONSUMED table above **with a reason** | declare a lever and give it no reader |
+| K4 | every one of the 268 declared levers is named `LEVERS READ:` by a stub, or is in the UNCONSUMED table above **with a reason** | declare a lever and give it no reader |
 | K5 | every `d_` field the ledger declares is read by a stub in its own package, and no stub reads an undeclared one | add a wire nobody consumes |
 | K6 | every entry point is **named by a row** in `ASSEMBLY_ORDER` or `LOOP_ORDER`, or is in `compose.DEFERRED_ENTRY_POINTS` with a reason | declare a mechanism the root never calls; or leave a deferral in place after a row starts naming it — the check reads that table **backwards** and reports the stale entry |
 | K7 | the root reads only names a package **declares** off a Config | `int(lm.depth)` where LM declares `layers` — a crash at whatever stage reaches it, invisible while an earlier stub raises first |

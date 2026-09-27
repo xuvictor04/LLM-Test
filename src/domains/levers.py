@@ -39,12 +39,16 @@ not the ones the project shipped first.
 WHAT WAS EMITTED, AND WHAT WAS NOT
 --------------------------------------------------------------------------------------------------
 The census (.rework/census.json, filtered on new_owner == "DOM") files 33 of its 328 rows here. All 33
-sit in the `domains` family; no other family sends a row to this package. This file emits 28 levers:
+sit in the `domains` family; no other family sends a row to this package. This file emits 29 levers:
 
      20  rows with verdict rename
    +  8  rows with verdict keep
+   +  1  CENSUS AMENDMENT: DOM_LEVELS, minted 2026-09-26 under Proposal 05 §8 1.2 (register row
+         TREE-S0b-LEVELS, conflict C12) and ruled in docs/04_CONTRACT.md Q-DOM-5. It has no ancestor
+         knob -- the old tree folded per-token competence and had no switch over its unit -- so it is
+         recorded as an `amendments` row in census.json, which is what N2 reads.
    -------
-     28  Lever declarations, all reachable as DOM_<FIELD>
+     29  Lever declarations, all reachable as DOM_<FIELD>
 
 Not emitted, by verdict: 3 drop and 2 merge.
   DROPPED (not declared, and each for a structural reason rather than a null measurement):
@@ -157,6 +161,9 @@ is declared here, because a value another package owns is a wire or it is nothin
                        The re-key is an EVENT this package receives, not a cadence it owns.
     SIG_MODE        -- SIG's arm; :6689 rekeys only when SIG_MODE == "learned".
 And the retok event behind `tokc_decay` arrives from TOK as a signal. DOM must not read RETOK_EVERY.
+A FIFTH FOREIGN VALUE IS KEPT OUT BY CONSTRUCTION, 2026-09-26: the build-time bytes per token that
+`levels` converts competence into is TOK's (Vocabulary.bytes_per_token), and the window's bytes are the
+Segmentation's. The ROOT does the conversion and hands `note_competence` the result; see `levels`.
 
 --------------------------------------------------------------------------------------------------
 TWO DECLARATION CHOICES THAT ARE NOT THE CENSUS'S
@@ -706,3 +713,48 @@ class DOMLevers(LeverSet):
     # cumulative-forever -- and 0.0 drops the pre-retok counts outright, which is the strict reading
     # of the argument above that they are observations of a different distribution. Above 1.0 the
     # counts would be AMPLIFIED at an event that supplies no new observations at all.
+
+    # ==============================================================================================
+    # 8. WHAT UNIT COMPETENCE ARRIVES IN (Proposal 03b 0b.5, register TREE-S0b-LEVELS, Q-DOM-5)
+    #
+    # The competence book is a LOSS per window, and until 2026-09-26 it was a loss per TOKEN. A
+    # mid-epoch act re-spells the unconsumed tail in longer tokens, so the same text costs more bits
+    # per token after it than before, and every domain's EMA shifts by the bytes-per-token ratio of
+    # the act -- 1.47x across a bytes-to-build splice (tests/test_levels.py L3). The cull's
+    # competence spare, the book's one consumer, then reads a change the model did not make.
+    # ==============================================================================================
+
+    levels = Lever(True, "The unit DOM's competence book is folded in. On (the default): bits per "
+                         "BUILD-TIME token -- the root rescales each window's per-token loss by the "
+                         "build-time bytes per token over the window's own, so an act that lengthens "
+                         "tokens does not read as a change in competence. Off: bits per token (the "
+                         "window's mean loss / ln 2), the unit before 2026-09-26, bit for bit, which "
+                         "moves at every act.", U.FLAG)
+    # CENSUS AMENDMENT, 2026-09-26 (Proposal 05 §8 1.2; register TREE-S0b-LEVELS and C12). No
+    # ancestor: the old tree folded per-token competence and had no switch over the unit, so there
+    # is no (family, old_name) key and N2 is satisfied by an amendment row.
+    # THE ROOT CONVERTS, NOT THIS PACKAGE, AND THAT IS FORCED RATHER THAN CHOSEN. The two inputs are
+    # the window's bytes (Segmentation.byte_pos, the cut's) and the build-time bytes per token
+    # (Vocabulary.bytes_per_token, TOK's measurement at build, adopted from the parent's vocabulary
+    # file on every resume under Q-TOK-13). DOM may hold neither, and a value measured after assembly
+    # cannot be a wire -- SIG's width is the same case. So spine/loop.py::_flush reads this lever and
+    # hands note_competence the converted number; note_competence folds what it is handed.
+    # WHY THE BUILD-TIME VALUE AND NOT THE STREAM'S: it is recorded with the vocabulary and adopted by
+    # every continuation, so the unit is a constant of the model's lineage across sessions (goal B),
+    # where the stream's epoch-0 figure would change with the corpus a session reads.
+    # WHAT THIS PACKAGE READS IT FOR, which is what makes it this package's lever and not the root's:
+    # src/domains/api.py::state_dict stamps the unit into the checkpointed book (`comp_unit`) and
+    # src/domains/api.py::open_partition compares the stamp against this run's unit on a resume
+    # (part.n_comp_unit_changed). A parent's book folded in the other unit is KEPT -- there is no
+    # per-domain bytes history to convert it with, and dropping it would disarm the spare for every
+    # domain that is not fed again -- and the root says so before the first window.
+    # ONE LEVER PER CONSUMER (the register's ruling). MEM's rescaled surprise (Q-MEM-14) and CAP's
+    # improving test (inert until CAP.observe is rowed, P4) get their own levers in their own
+    # packages when they are built, so an adverse GPU reading on one does not switch off another.
+    # TEXT ONLY: bits per clip-second for media windows is a different conversion (03b item 16).
+    # ON BY DEFAULT on the unit's known answers, not on an efficacy reading: at a window whose bytes
+    # per token equals the build-time value the factor is exactly 1.0 and ON equals OFF to the bit,
+    # and across an act the converted level is continuous where the per-token one jumps. Whether it
+    # improves domain management reads on GPU (U-series family (h), S5 (iii)); an adverse reading
+    # there returns it to OFF.
+    # A BOOL, WITH THE BOOL BRANCH'S KNOWN HAZARD (module header): DOM_LEVELS=flase reads as on.

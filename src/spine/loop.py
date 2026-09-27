@@ -632,6 +632,31 @@ def _window_bounds(ids, i, ctx):
     return a, b
 
 
+def _window_bytes(byte_pos, n_bytes, bounds):
+    """The bytes a window's TARGETS span: ids[a+1:b], from the first target's offset to the offset
+    after the last one (the stream's end when the window closes the segmentation). ONE DEFINITION,
+    because two consumers read it -- loop.bytes_scored (03b S0b) and DOM_LEVELS's conversion
+    (Q-DOM-5) -- and a byte count spelled twice is a bits-per-byte reading and a competence unit that
+    can disagree about which bytes a window scored."""
+    a, b = bounds
+    return (byte_pos[b] if b < len(byte_pos) else n_bytes) - byte_pos[a + 1]
+
+
+def _build_token_scale(bounds, byte_pos, n_bytes, bpt_build):
+    """The factor that turns a window's bits per TOKEN into bits per BUILD-TIME token (Q-DOM-5):
+    bpt_build over the window's own bytes per token, measured over its targets with
+    derive.bytes_per_token, the tree's one estimator.
+
+    It is the register's (mean nats x tokens in window / ln 2 / bytes in window) x bpt_build, and
+    the ORDER OF OPERATIONS IS CHOSEN FOR THE IDENTITY KNOWN ANSWER. Written as a ratio of two bytes
+    per token, a window whose measured value equals the build-time one gives x / x, which is exactly
+    1.0 in IEEE arithmetic, so its converted bits equal the per-token bits to the bit. The register's
+    left-to-right product rounds at each step and does not promise that."""
+    a, b = bounds
+    return float(bpt_build) / _derive.bytes_per_token(_window_bytes(byte_pos, n_bytes, bounds),
+                                                      b - a - 1)
+
+
 def _flush_bounds(batch):
     """The flush's (x, y) out of the accumulated window slices. ONE NAME, as the table says.
 
@@ -851,6 +876,13 @@ def run(sysm, *, max_windows=None, progress=True):
     # arms that do not compare only in bits per BYTE: sum(loss x targets) / ln 2 / this. Every window
     # at RUN_EPOCHS=1 is scored before its update, so that ratio is the run's prequential bits/byte.
     books["loop.bytes_scored"] = 0
+    # DOM_LEVELS' DID-IT-FIRE (Q-DOM-5): the windows whose competence reading _flush rescaled to bits
+    # per build-time token by a factor other than exactly 1.0. ABSENT at DOM_LEVELS=0, where nothing
+    # is rescaled; PRESENT-and-0 means armed and every window's bytes per token equalled the
+    # build-time value (TOK_MODE=bytes, where both are 1.0). This process's windows, like
+    # loop.bytes_scored; not carried across a save.
+    if bool(dom_cfg.levels):
+        books["loop.levels_rescaled"] = 0
     # THE PENDING RESEGMENTATION EVENT, set by the epoch roll and consumed by the next flush. None
     # on every other flush, which is what makes store.n_resegment_events a count of ROLLS.
     resegment = None
@@ -986,9 +1018,7 @@ def run(sysm, *, max_windows=None, progress=True):
                 f"on disagree, which is a defect rather than arithmetic.")
         else:
             batch.append(bounds)
-            _bp = sysm.segmentation.byte_pos
-            _wb = ((_bp[bounds[1]] if bounds[1] < len(_bp)
-                    else len(sysm.stream.bytes)) - _bp[bounds[0] + 1])
+            _wb = _window_bytes(sysm.segmentation.byte_pos, len(sysm.stream.bytes), bounds)
             books["loop.bytes_scored"] += _wb
             batch_bytes += _wb
             # DOM.observe IS CALLED ONCE PER WINDOW, ABOVE THE BATCH EARLY-OUT, and that placement is
@@ -1883,6 +1913,12 @@ def _report(sysm, elapsed_s, ctx):
         "held": _dc.held, "spared": _dc.spared, "emptied": _dc.emptied,
         "pooled_radius": round(float(_dc.pooled_radius), 6),
         "partition_off": bool(_dc.partition_off), "collapsed_at": _dc.collapsed_at,
+        # THE COMPETENCE BASELINE AND ITS UNIT, printed together (2026-09-26, Q-DOM-5). The number
+        # alone is ambiguous between the two units DOM_LEVELS chooses, and this file is the one that
+        # chose: _flush converted with this same lever. None is "no window attributed yet".
+        "comp_glob": None if _dc.comp_glob is None else round(float(_dc.comp_glob), 6),
+        "comp_unit": ("bits per build-time token (DOM_LEVELS)" if bool(cfg["DOM"].levels)
+                      else "bits per token (DOM_LEVELS=0)"),
     }
     out["DOM(part.counters)"] = dict(sysm.partition.counters)
     # ONE SUMMARY OVER THE LIVE DOMAINS (called above, before the copy). Rendered as counts of the
@@ -2571,10 +2607,23 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
             # vocabulary in hand is real; this caller has the vocabulary.
 
     # COMPETENCE IS SEPARATE FROM DOM.observe BECAUSE THE NUMBER IS ONLY KNOWN AFTER THE FORWARD
-    # PASS. It is bits per window, not nats: the loss is a natural-log cross-entropy and the
-    # domain series is declared in bits, so the conversion happens once, here, at the one place the
-    # two meet. Dividing by ln(2) at the read site instead is how one series ends up compared
-    # against another in different units.
+    # PASS. It is bits, not nats: the loss is a natural-log cross-entropy and the domain series is
+    # declared in bits, so the conversion happens once, here, at the one place the two meet.
+    # Dividing by ln(2) at the read site instead is how one series ends up compared against another
+    # in different units. (This said "bits per window" until 2026-09-26. The value is a MEAN over
+    # the window's targets, so it is bits per TOKEN.)
+    # AND AT DOM_LEVELS IT IS BITS PER BUILD-TIME TOKEN (Q-DOM-5, register TREE-S0b-LEVELS). Per
+    # token, the book moved at every mid-epoch act: the same text spelled in longer tokens costs
+    # more bits per token, 1.47x across a bytes-to-build splice, and the cull's competence spare
+    # read that as a change in competence. Each window's bits are multiplied by the build-time bytes
+    # per token over the window's own (_build_token_scale), which is bits per byte x bpt_build.
+    # THE ROOT CONVERTS because both inputs are ones DOM may not hold: the window's bytes are the
+    # Segmentation's byte_pos, cut by the same _window_bytes loop.bytes_scored sums, and bpt_build is
+    # TOK's Vocabulary.bytes_per_token -- the build-time measurement, adopted from the parent's
+    # vocabulary file on every resume (Q-TOK-13), so the unit is a constant of the model's lineage
+    # rather than of one stream. A value measured after assembly cannot be a wire (SIG's width is
+    # the same case). TEXT ONLY: a media window's unit is a different conversion (03b item 16).
+    # OFF IS TODAY'S EXPRESSION, UNTOUCHED: `float(_nats) / _ln2` and nothing after it.
     # ONE CALL PER WINDOW, ON THAT WINDOW'S OWN id AND LOSS -- WHICH IS WHAT THE CALLEE DEMANDS AND
     # WHAT THIS LINE DID NOT DO UNTIL 2026-09-24. It passed did=domain_id (the LAST window's) and
     # bits=the FLUSH MEAN as a Python float, which slipped past domains/api.py::note_competence's
@@ -2585,8 +2634,20 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     # mean is `mean`); above it the EMA now runs at its declared per-window rate.
     _ln2 = math.log(2.0)
     _pw = per_window.detach().float().reshape(-1).tolist()
-    for _did, _nats in zip(dids if dids else [domain_id] * len(_pw), _pw):
-        dom_api.note_competence(cfg_dom, sysm.partition, did=int(_did), bits=float(_nats) / _ln2)
+    # ROW k OF per_window IS pairs[k]: x and y above are cut from `pairs` in that order, so the
+    # window whose bytes rescale a reading is the window that reading was scored on.
+    _lv = bool(cfg_dom.levels)
+    if _lv:
+        _bp, _nb = sysm.segmentation.byte_pos, len(sysm.stream.bytes)
+        _bpt = float(vocab.bytes_per_token)
+    for _k, (_did, _nats) in enumerate(zip(dids if dids else [domain_id] * len(_pw), _pw)):
+        _bits = float(_nats) / _ln2
+        if _lv:
+            _s = _build_token_scale(pairs[_k], _bp, _nb, _bpt)
+            if _s != 1.0 and "loop.levels_rescaled" in books:
+                books["loop.levels_rescaled"] += 1
+            _bits = _bits * _s
+        dom_api.note_competence(cfg_dom, sysm.partition, did=int(_did), bits=_bits)
     # THE PER-WINDOW MEAN SURPRISE IS RETURNED BECAUSE THE NEXT FLUSH NEEDS IT AS `novelty`, and
     # it is NOT the per-window loss this function returned until the MEM wiring landed. Both are
     # (B,) and both come off the same flush, which is exactly why the substitution survived: only

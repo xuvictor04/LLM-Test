@@ -84,7 +84,7 @@ DISARMED — which the cadence audit reports as a different state from starved.
 
 ## 2. Every lever, by package
 
-267 levers across 13 packages.
+268 levers across 13 packages.
 
 
 ### CAP (7 levers)
@@ -132,7 +132,7 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `DATA_STREAM_BYTES` | `120000` | bytes |  | Bytes of stream one epoch draws from the areas. |
 | `DATA_VAL_CAP` | `4000000` | bytes |  | Maximum bytes of held-out tail kept per area. |
 
-### DOM (28 levers)
+### DOM (29 levers)
 
 | lever | default | unit | accepts | what it is |
 |---|---|---|---|---|
@@ -146,6 +146,7 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `DOM_FOLD` | `True` | on/off |  | Fold domains that never recur into their nearest neighbour instead of leaving them standing. |
 | `DOM_FOLD_MULT` | `1.5` | count |  | Refuse to fold a domain further than this multiple of the POOLED radius. |
 | `DOM_GRACE` | `500` | Windows |  | Minimum age in windows since birth before a domain may be culled, on both cull paths. |
+| `DOM_LEVELS` | `True` | on/off |  | The unit DOM's competence book is folded in. |
 | `DOM_MANAGE` | `True` | on/off |  | Run merge, cull and fold over the population; off freezes the domain set and lets it grow unbounded. |
 | `DOM_MANAGE_EVERY` | `100` | Windows |  | Windows between management passes: merge, then cull, then fold. |
 | `DOM_MARGIN` | `0.75` | fraction 0..1 |  | Under accept_rule=margin, re-identify when the nearest centroid is at most this fraction of the runner-up's distance. |

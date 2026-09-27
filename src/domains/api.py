@@ -373,7 +373,18 @@ def open_partition(dom: Config, *, sig_dim, vocab_slots, device, rng, restored=N
     had not happened to be re-entered twice since the resume. Same word, opposite consequence; the
     difference is which side of the comparison the reset lands on.
 
-    LEVERS READ: none (nothing off `dom` directly -- see d_expert_slots under WIRES READ.
+    THE COMPETENCE BOOK'S UNIT IS COMPARED, AND A CHANGED ONE IS KEPT AND COUNTED (2026-09-26,
+    Q-DOM-5). state_dict stamps `comp_unit` -- "build_token" at DOM_LEVELS, "token" off -- and a blob
+    older than the key was folded per token, the only unit there was. When the stamp differs from
+    this run's unit and the parent's book holds a reading, part.n_comp_unit_changed is 1: every
+    restored EMA is in the parent's unit and moves to this run's at the d_comp_ema rate as its own
+    windows arrive, so until then the cull's competence spare compares across units. Not converted
+    (there is no per-domain bytes history to convert with), not dropped (that would disarm the spare
+    for every domain the child does not feed), and not refused: the root states it, the Q-DOM-1
+    precedent.
+
+    LEVERS READ: levels (only to compare the restored book's `comp_unit` stamp with this run's unit;
+                 nothing else off `dom` directly -- see d_expert_slots under WIRES READ.
                  `enabled` and `reservoir` are consumed by observe, this package's own next entry
                  point and still a stub, and `prior_blend` by state_dict/prior/census, also stubs,
                  each of which already names it in its own LEVERS READ line; this line used to list
@@ -382,7 +393,9 @@ def open_partition(dom: Config, *, sig_dim, vocab_slots, device, rng, restored=N
                  entry point, an empty partition either way costing nothing to allocate, but was
                  not what the claim said)
     WIRES READ: d_expert_slots
-    DID IT FIRE: part.n_opened, part.n_restored_domains
+    DID IT FIRE: part.n_opened, part.n_restored_domains; part.n_comp_unit_changed (ABSENT on a
+                 fresh partition, 0 on a restore in the same unit or of a book with no reading, 1
+                 on a restore of a book folded in the other unit)
     """
     dom = dom.owned_by("DOM")
     slots = int(dom.d_expert_slots)   # WIRE READ HERE -- the domain id namespace bound
@@ -466,7 +479,22 @@ def open_partition(dom: Config, *, sig_dim, vocab_slots, device, rng, restored=N
         "part.id_namespace": slots,
         "part.boundary_clock": part.nb,
     }
+    if restored is not None:
+        # THE BOOK'S UNIT AGAINST THIS RUN'S (Q-DOM-5); see the docstring. A book with no reading
+        # (comp_glob None) has nothing to mix, so it reads 0 whatever its stamp says.
+        _now = _comp_unit(dom)
+        _saved = restored.get("comp_unit", "token")
+        part.counters["part.n_comp_unit_changed"] = int(_saved != _now
+                                                        and part.comp_glob is not None)
     return part
+
+
+def _comp_unit(dom: Config):
+    """The unit this run's competence book is folded in, as state_dict stamps it: "build_token" at
+    DOM_LEVELS (the root hands bits per build-time token), "token" off (bits per token). One
+    spelling for the stamp and the comparison, so the two cannot disagree about a name."""
+    dom = dom.owned_by("DOM")
+    return "build_token" if bool(dom.levels) else "token"
 
 
 def _new(part, q, at):
@@ -1079,7 +1107,12 @@ def rekey(dom: Config, part, *, encode):
 
 
 def note_competence(dom: Config, part, *, did, bits):
-    """Fold this window's bits/window into the domain's competence EMA and the population's.
+    """Fold one window's competence reading into the domain's competence EMA and the population's.
+
+    THE UNIT IS THE ROOT'S TO SET AND IS STATED HERE (Q-DOM-5): at DOM_LEVELS, bits per BUILD-TIME
+    token -- the window's mean loss / ln 2, rescaled by the build-time bytes per token over the
+    window's own -- and at DOM_LEVELS=0 bits per token, the mean loss / ln 2. This body folds what
+    it is handed; state_dict stamps which of the two the book holds.
 
     Separate from observe() because the number is only known AFTER the forward pass, later in the
     flush. THE EMA RATE IS THE WIRE d_comp_ema AND NOT AN ARGUMENT: FAB owns the number (the
@@ -1126,10 +1159,14 @@ def note_competence(dom: Config, part, *, did, bits):
     # THE UNIT IS THE CALLER'S AND THIS CALL DOES NOT CONVERT. `bits` is folded exactly as handed
     # over, and comp is only ever compared against comp_glob, which is fed from this same argument,
     # so the comparison is unit-consistent whatever the caller supplies. What is NOT free is the
-    # NAME: LM.lm_loss's per-window value is in NATS, and a report that prints this series as
-    # bits/window without the caller dividing by ln(2) is the wrong-measurement class this tree
+    # NAME: LM.lm_loss's per-window value is a mean in NATS PER TOKEN, and a report that prints this
+    # series as bits without the caller dividing by ln(2) is the wrong-measurement class this tree
     # rates worst. Converting here instead would be worse -- it would silently rescale a caller who
     # had already converted -- so the obligation is stated and left with the one caller that knows.
+    # SINCE 2026-09-26 THAT CALLER ALSO RE-DENOMINATES (Q-DOM-5): per token, the book moved at every
+    # mid-epoch act by the act's bytes-per-token ratio, so at DOM_LEVELS spine/loop.py::_flush hands
+    # bits per BUILD-TIME token. The inputs are the window's bytes and TOK's build-time measurement,
+    # neither of which this package may hold -- which is the same reason the conversion stays there.
 
     if did not in part.cent:
         # A DOMAIN THE PARTITION DOES NOT HOLD, AND IT IS LEGAL. DOM.observe returns did=0 for every
@@ -1862,9 +1899,10 @@ def state_dict(dom: Config, part):
     TOKEN HISTOGRAMS, the COMPETENCE EMAs and the population baseline, and the ADJACENT-DISTANCE
     HISTORY the relative shift test calibrates on. The four capitalised ones are the omissions that
     each disarmed a live mechanism at the run boundary (M51). And this package's RNG stream, `rng`,
-    since 2026-09-24.
+    since 2026-09-24. And the unit the competence book was folded in, `comp_unit`, since 2026-09-26
+    (Q-DOM-5), so a resume can tell a book in the other unit from one in its own.
 
-    LEVERS READ: none (a pure read of `part`)
+    LEVERS READ: levels (the unit stamped as `comp_unit`; otherwise a pure read of `part`)
     WIRES READ: none
     DID IT FIRE: part.n_state_dicts
     """
@@ -1907,6 +1945,10 @@ def state_dict(dom: Config, part):
         # never been scored -- which is every run where DOM.note_competence is not yet driven. The
         # None is the fact being saved: "no window has been attributed yet".
         "comp_glob": None if part.comp_glob is None else float(part.comp_glob),
+        # THE UNIT `comp` AND `comp_glob` WERE FOLDED IN (Q-DOM-5): "build_token" at DOM_LEVELS,
+        # "token" off. The root converts before note_competence, so the book cannot say its own unit
+        # and this stamp is the only record of it; open_partition compares it on a resume.
+        "comp_unit": _comp_unit(dom),
         # THE ADJACENT-DISTANCE HISTORY the relative shift test calibrates on. Without it the first
         # windows of a resumed run are tested against an empty calibration, which is the same as
         # testing them against nothing.

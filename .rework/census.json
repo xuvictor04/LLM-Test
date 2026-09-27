@@ -5489,6 +5489,25 @@
      "OPT_LR_REWARM",
      "OPT_LR_WARMUP"
     ]
+   },
+   {
+    "old_name": "(amendment: DOM_LEVELS)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DOM",
+    "new_name": "DOM_LEVELS",
+    "unit": "on/off",
+    "purpose": "The unit DOM's competence book is folded in. On (the shipped default): the root hands DOM.note_competence bits per BUILD-TIME token -- each window's mean loss / ln 2 x the build-time bytes per token (TOK's Vocabulary.bytes_per_token) / the window's own bytes per token off Segmentation.byte_pos -- so a mid-epoch act that lengthens tokens does not move the book. Off: bits per token, the unit before 2026-09-26, bit for bit. DOM reads it to stamp the checkpointed book's unit (comp_unit) and compare it on a resume (part.n_comp_unit_changed); the root counts rescaled windows in loop.levels_rescaled.",
+    "reason": "AMENDMENT, 2026-09-26, Proposal 05 \u00a78 1.2 (register row TREE-S0b-LEVELS and conflict C12; Proposal 03b 0b.5), ruled in docs/04_CONTRACT.md Q-DOM-5. There is no ancestor knob: the old tree folded a per-token competence and had no switch over its unit, so there is no (family, old_name) key a DEPARTURES entry could be written under and N2 could only be satisfied by amending the census. IT DOES NOT CHANGE THE 328: that figure counts the old _SPEC's knobs and this was never one. WHY: per token, every domain's competence EMA shifts at each mid-epoch act by the act's bytes-per-token ratio (1.47x across a bytes-to-build splice, tests/test_levels.py L3), and the cull's competence spare -- the book's one consumer -- reads a change the model did not make. The register rules one lever per consumer, default ON on the unit's known answers (identity at bytes/token = bpt_build; continuity across an act) rather than on an efficacy reading, OFF = today's per-token unit; efficacy is GPU family (h) and S5 (iii), and an adverse GPU reading returns it to OFF. MEM's rescaled surprise (Q-MEM-14) and CAP's improving test (P4) get their own levers when built.",
+    "couples_with": [
+     "FAB_COMP_PROTECT",
+     "FAB_COMP_EMA",
+     "TOK_RETOK_EVERY",
+     "TOK_GROW_EVERY",
+     "DOM_CULL_FRAC",
+     "DOM_GRACE",
+     "DOM_CULL_STALE"
+    ]
    }
   ]
  }
