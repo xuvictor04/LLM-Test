@@ -192,12 +192,20 @@ def _clamp_blocked_clause(arm, kind, f):
 
     `f` is the branch's numbers, keyed by name; every key a kind reads is written by new_valve in
     the same statement that appends the record.
+
+    EVERY CLAUSE OPENS WITH ITS ARM AND ITS GROUND BY NAME, `(expert, ground at_ceiling)`
+    (2026-09-27, register CONTRACT-Q-CAP-1). The clauses described their grounds in words, so the
+    six names above -- the ones the 25,344-configuration sweep counted and Q-CAP-1 asks the owner
+    to rule on -- were on no line a run printed, and the bare word `inert` appeared only inside the
+    UNREACHABLE boilerplate. The name is the closed set's own spelling, so a reader can match a
+    report line to this table and to the sweep. REPORTING ONLY: which grounds are UNREACHABLE is
+    _clamp_gate's verdict and the owner's ruling (O19), and neither moves here.
     """
     if kind not in _CLAMP_BLOCKED_KINDS:
         raise ValueError(f"cap.clamp: unknown blocked-kind {kind!r}; the closed set is "
                          f"{_CLAMP_BLOCKED_KINDS}")
     if kind == "unarmed":
-        return (f"({arm}) NOT ARMED, so NO LIFT IS EVER EARNED on it: CAP_TARGETS="
+        return (f"({arm}, ground {kind}) NOT ARMED, so NO LIFT IS EVER EARNED on it: CAP_TARGETS="
                 f"{f['targets']} does not arm this arm, and a clamp is a property of a lift")
     if kind == "nonpositive":
         # THE ORIGIN IS PART OF THE EQUATION AND DROPPING IT MADE THE CLAUSE FALSE ON THE RESTORE
@@ -207,36 +215,37 @@ def _clamp_blocked_clause(arm, kind, f):
         # the cap beside it. capacity/api.py::new_valve._resolve's four origin strings exist so a cap
         # which came from the wrong place is visible, and cap.valve's own nonpositive prose prints
         # both; this clause is the one surface that hid it.
-        return (f"({arm}) NO LIFT IS EVER EARNED: the soft cap is {f['cap']} ({f['lever']}="
-                f"{f['given']}, {f['origin']}), at or below zero, which this valve reports dead "
-                f"before any lift is considered -- a cap there makes the clamp that reads it "
-                f"negative (C30)")
+        return (f"({arm}, ground {kind}) NO LIFT IS EVER EARNED: the soft cap is {f['cap']} "
+                f"({f['lever']}={f['given']}, {f['origin']}), at or below zero, which this valve "
+                f"reports dead before any lift is considered -- a cap there makes the clamp that "
+                f"reads it negative (C30)")
     if kind == "never_pins":
-        return (f"({arm}) NO LIFT IS EVER EARNED: the soft cap of {f['cap']} sits above the cull's "
-                f"settling point of {f['operating']}, so the population never reaches it, never "
-                f"pins, and the pin clock never accumulates")
+        return (f"({arm}, ground {kind}) NO LIFT IS EVER EARNED: the soft cap of {f['cap']} sits "
+                f"above the cull's settling point of {f['operating']}, so the population never "
+                f"reaches it, never pins, and the pin clock never accumulates")
     if kind == "at_ceiling":
-        return (f"({arm}) EARNED AND REFUSED, WHICH IS NOT CLAMPED: the cap of {f['cap']} is "
-                f"already at or above its hard ceiling of {f['hard']}, so observe refuses by name "
-                f"as at_hard_ceiling BEFORE any lift is computed. A refused lift is never applied "
-                f"and so can never be held at a ceiling, and a clamp raises a cap only from BELOW "
-                f"one -- from {f['cap']} it would be a lowering, which this valve may never do")
+        return (f"({arm}, ground {kind}) EARNED AND REFUSED, WHICH IS NOT CLAMPED: the cap of "
+                f"{f['cap']} is already at or above its hard ceiling of {f['hard']}, so observe "
+                f"refuses by name as at_hard_ceiling BEFORE any lift is computed. A refused lift "
+                f"is never applied and so can never be held at a ceiling, and a clamp raises a cap "
+                f"only from BELOW one -- from {f['cap']} it would be a lowering, which this valve "
+                f"may never do")
     if kind == "refused_unmasked":
-        return (f"({arm}) EARNED AND REFUSED, WHICH IS NOT CLAMPED: the cap of {f['cap']} is below "
-                f"its hard ceiling of {f['hard']}, so lifts ARE earned here, and "
-                f"LM_MASK_DEAD_ROWS={f['mask']} makes observe refuse every one of them by name as "
-                f"dead_rows_unmasked. Those refusals are the block-reason histogram's number and "
-                f"cap.vocab_arm_honest's line; a lift that is never applied cannot be held"
+        return (f"({arm}, ground {kind}) EARNED AND REFUSED, WHICH IS NOT CLAMPED: the cap of "
+                f"{f['cap']} is below its hard ceiling of {f['hard']}, so lifts ARE earned here, "
+                f"and LM_MASK_DEAD_ROWS={f['mask']} makes observe refuse every one of them by name "
+                f"as dead_rows_unmasked. Those refusals are the block-reason histogram's number "
+                f"and cap.vocab_arm_honest's line; a lift that is never applied cannot be held"
                 + (f". THE MASK IS NOT THE ONLY THING IN THE WAY HERE: derive.lift_to({f['cap']}, "
                    f"CAP_LIFT={f['lift']}, CAP_LIFT_MIN={f['lift_min']}) = {f['cap']}, so even with "
                    f"LM_MASK_DEAD_ROWS=1 the applied lift would move nothing and still reach no "
                    f"ceiling" if f.get("inert_too") else ""))
     if kind == "inert":
-        return (f"({arm}) EARNED AND APPLIED AND MOVES NOTHING, WHICH IS NOT CLAMPED: the cap of "
-                f"{f['cap']} is below its hard ceiling of {f['hard']}, so an earned lift IS "
-                f"applied -- and derive.lift_to({f['cap']}, CAP_LIFT={f['lift']}, CAP_LIFT_MIN="
-                f"{f['lift_min']}) = {f['cap']} returns it unchanged, so the applied cap never "
-                f"approaches the ceiling and there is nothing for the clamp to hold")
+        return (f"({arm}, ground {kind}) EARNED AND APPLIED AND MOVES NOTHING, WHICH IS NOT "
+                f"CLAMPED: the cap of {f['cap']} is below its hard ceiling of {f['hard']}, so an "
+                f"earned lift IS applied -- and derive.lift_to({f['cap']}, CAP_LIFT={f['lift']}, "
+                f"CAP_LIFT_MIN={f['lift_min']}) = {f['cap']} returns it unchanged, so the applied "
+                f"cap never approaches the ceiling and there is nothing for the clamp to hold")
     raise ValueError(f"cap.clamp: blocked-kind {kind!r} is declared in "
                      f"capacity/api.py::_CLAMP_BLOCKED_KINDS and no clause is written for it here, "
                      f"so the closed set advertises a kind this function cannot render. The set is "
@@ -1681,13 +1690,16 @@ def state(valve):
 
     LEVERS READ: none. Pure read of `valve`.
     WIRES READ: none
-    DID IT FIRE: valve.counters["cap.state_written"]. THE KEY IS NAMED BECAUSE THE RECORD HAS NO
-                 FIELD FOR IT: this line used to read `valve.state_written`, which is neither a
-                 declared field of Valve nor produced anywhere, so the one signal saying the
-                 checkpoint carried the valve's earned state had no home a reader could find. The
-                 ledger dict is that home -- new_valve already seeds it and CAP.counters reads it --
-                 and setting an ad-hoc attribute on the dataclass instead would put half this
-                 package's DID IT FIRE surface somewhere the record type does not describe.
+    DID IT FIRE: valve.counters["cap.state_written"] (LINEAGE since 2026-09-27: it travels as the
+                 payload's `state_written`, counting the save that writes it) and
+                 valve.counters["cap.state_written_here"] (THIS PROCESS's; never restored). THE
+                 FIRST KEY IS NAMED BECAUSE THE RECORD HAS NO FIELD FOR IT: this line used to read
+                 `valve.state_written`, which is neither a declared field of Valve nor produced
+                 anywhere, so the one signal saying the checkpoint carried the valve's earned state
+                 had no home a reader could find. The ledger dict is that home -- new_valve already
+                 seeds it and CAP.counters reads it -- and setting an ad-hoc attribute on the
+                 dataclass instead would put half this package's DID IT FIRE surface somewhere the
+                 record type does not describe.
     """
     # THE CLOCKS TRAVEL WITH THE CAPS, WHICH IS HALF OF THE M38 FIX. The old tree saved the lifted
     # caps at :5423 and not the clocks, so a resumed valve carried an EARNED ceiling and an UNEARNED
@@ -1716,7 +1728,15 @@ def state(valve):
     # THE LEDGER KEY, NOT AN ATTRIBUTE. This line used to be declared as `valve.state_written`,
     # which is neither a field of Valve nor produced anywhere, so the one signal saying the
     # checkpoint carried the valve's earned state had no home a reader could find.
+    # AND IT NOW TRAVELS, COUNTING THE SAVE THAT WRITES IT (2026-09-27, register
+    # LOW-RESUME-SAVED-COUNTERS). The rest of valve.counters is new_valve's record of what THIS
+    # build resolved -- targets, origins, hard ceilings, the startup analysis -- and a parent's copy
+    # would report the parent's resolution as this one's, so the ledger does not travel. The save
+    # count is the one row whose meaning is the lineage's: without it a resumed report read j
+    # beside OPT's k + j. CAP.restore puts it back; cap.state_written_here is this process's alone.
     valve.counters["cap.state_written"] = valve.counters.get("cap.state_written", 0) + 1
+    valve.counters["cap.state_written_here"] = valve.counters.get("cap.state_written_here", 0) + 1
+    payload["state_written"] = int(valve.counters["cap.state_written"])
     return payload
 
 
@@ -1792,6 +1812,11 @@ def restore(cap: Config, valve, state):
                         ("stall_checks", int), ("last_window", int)):
         if state.get(field) is not None:
             setattr(valve, field, cast(state[field]))
+    # THE LINEAGE'S SAVE COUNT, the one ledger row the payload carries (2026-09-27, register
+    # LOW-RESUME-SAVED-COUNTERS; CAP.state says why only it travels). A payload older than the key
+    # leaves the count at this process's saves.
+    if state.get("state_written") is not None:
+        valve.counters["cap.state_written"] = int(state["state_written"])
     valve.counters["cap.state_restored"] = valve.counters.get("cap.state_restored", 0) + 1
 
 
@@ -1899,6 +1924,9 @@ def counters(cap: Config, valve):
         # wrote or restored valve state, which is a different fact from having written it zero
         # times, and `.get(..., 0)` would hide the difference.
         "cap.state_written": int(led.get("cap.state_written", 0)),
+        # THE PROCESS TWIN OF THE LINEAGE COUNT ABOVE (2026-09-27, register
+        # LOW-RESUME-SAVED-COUNTERS): the pair reads (lineage, this process) after a resume.
+        "cap.state_written_here": int(led.get("cap.state_written_here", 0)),
         "cap.state_restored": int(led.get("cap.state_restored", 0)),
         "cap.state_refused": int(led.get("cap.state_refused", 0)),
         # THE BLOCK-REASON HISTOGRAM IS THE POINT OF THIS CALL. round11 pinned 42,425 against a

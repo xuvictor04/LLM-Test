@@ -21,6 +21,17 @@ loop -- so the bodies were right and the call site starved them:
   W5  THE MASK. LM.decode masks with -inf and the vote multiplies by weights that are exactly 0 at
       FAB_HALT=0, so without FAB's finite floor the loss is nan at LM_MASK_DEAD_ROWS=1.
   W6  FAB_HOP_MODE=transition (declared, not built) must print REFUSED and exit 2, not a traceback.
+  W7  FAB_NORM_ONLY=1 GREW (Proposal 05 §8 1.6, register LOW-FAB_NORM_ONLY-GROWS): expert 257 at
+      window 81 of this configuration, with manage passes culling and merging on the control arm.
+      Over 100 windows nothing is born, n_live stays FAB_N0, the manage/grow family is ABSENT and
+      the growth gates read UNREACHABLE naming the lever; the experts stay in the optimizer.
+  W8  THE fab.merged LINE MIXED SCOPES (register LOW-FAB-MERGED-REPORT): on the I10 configuration
+      (seed 3, FAB_GRACE=1, FAB_MANAGE_EVERY=25, 300 windows) it printed the run total beside the
+      last pass's 'armed-but-zero'. The run gate now fires on the ledger total, and the last pass's
+      verdict prints its own gauge as gate:fab.merged_last_pass.
+  W9  FAB_LR_OWN=1 AT OPT_LR_SCHED='none' (04-Q11 (b), register C02) runs 30 windows, finite, scaling
+      every live expert; its loss curve equals FAB_LR_OWN=0's, which pins that the table still
+      reaches no parameter (docs/04_CONTRACT.md §3.7).
 """
 import math
 import os
@@ -240,6 +251,108 @@ def w6():
           f"rc={p.returncode}; first stdout line {p.stdout.splitlines()[:1]!r:.100}")
 
 
+def w7():
+    # THE REGISTER'S KNOWN ANSWER THROUGH THE LOOP: on this configuration the unfixed tree grew expert
+    # 257 at window 81 (a regression burst) and ran three manage passes on the control arm.
+    sysm = build(FAB_NORM_ONLY=1, FAB_N0=256, FAB_SLOTS=512, FAB_GRACE=1, FAB_MANAGE_EVERY=25)
+    fab_ids = {id(t) for t in (sysm.fabric.A, sysm.fabric.B, sysm.fabric.halt_b)}
+    in_opt = sum(1 for t in sysm.base_params if id(t) in fab_ids)
+    res = loop.run(sysm, max_windows=100, progress=False)
+    fc = res.report["FAB.counters"]
+    grow = res.report.get("FAB.grow_check(last call's gates)")
+    gg = grow.get("gate:fab.grow_check") if isinstance(grow, dict) else None
+    present = [k for k in ("fab.births", "fab.rescued", "fab.grow_checks", "fab.manage_passes",
+                           "fab.cull_fail", "fab.cull_util", "fab.merged", "fab.grown_regression",
+                           "fab.blackout_windows") if k in fc]
+    ga = fc.get("gate:fab.growth_armed", ("",))
+    check("W7 FAB_NORM_ONLY=1 grows, culls and merges nothing over 100 windows (LOW-FAB_NORM_ONLY-"
+          "GROWS): no birth, n_live == FAB_N0, the manage/grow family ABSENT, growth_armed and the "
+          "last grow_check UNREACHABLE naming the lever -- and the experts stay in the optimizer",
+          fc.get("fab.norm_only_passes") == 100 and int(sysm.fabric.births) == 0
+          and fc.get("fab.n_live") == 256 and not present
+          and ga[0] == "unreachable" and "FAB_NORM_ONLY=1" in ga[2]
+          and gg is not None and gg[0] == "unreachable" and "FAB_NORM_ONLY=1" in gg[1]
+          and in_opt == 3,
+          f"norm_only_passes {fc.get('fab.norm_only_passes')}; births {int(sysm.fabric.births)}; "
+          f"n_live {fc.get('fab.n_live')}; present {present}; growth_armed {ga[:1]}; grow_check "
+          f"{gg[:1] if gg else None}; fabric tensors in base_params {in_opt}")
+
+
+def _verdict_agrees(st):
+    """A three-state line agrees with its own count: fired iff the count is positive, unless the
+    gate is unreachable (which is not a measurement and may carry any count its ledger has)."""
+    return st[0] == "unreachable" or ((st[0] == "fired") == (int(st[1]) > 0))
+
+
+def w8():
+    # THE REGISTER'S DECISIVE I10 CONFIGURATION (LOW-FAB-MERGED-REPORT), under run.py's own defaults:
+    # seed 3, FAB_GRACE=1, FAB_MANAGE_EVERY=25, 300 windows. Unfixed, it printed ('armed-but-zero', 4,
+    # '... no pair ... sat within ...') -- the run total beside the last pass's verdict. The exact
+    # merge count is not pinned; the structure is.
+    _lever._reopen_assembly()
+    rng.reset_issued()
+    sysm = compose(environ={"RUN_DEVICE": "cpu", "RUN_SEED": "3", "FAB_GRACE": "1",
+                            "FAB_MANAGE_EVERY": "25"})
+    res = loop.run(sysm, max_windows=300, progress=False)
+    fc = res.report["FAB.counters"]
+    run, last = fc.get("gate:fab.merged"), fc.get("gate:fab.merged_last_pass")
+    ok = (isinstance(run, tuple) and isinstance(last, tuple) and int(fc.get("fab.merged", 0)) > 0
+          and run[0] == "fired" and run[1] == fc.get("fab.merged")
+          and last[1] == fc.get("fab.merged_last_pass")
+          and _verdict_agrees(run) and _verdict_agrees(last))
+    check("W8 the I10 configuration prints each merge verdict beside its own scope's count: the run "
+          "gate FIRED with the ledger total, the last-pass gate with the last pass's gauge",
+          ok, f"fab.merged {fc.get('fab.merged')}, fab.merged_last_pass "
+              f"{fc.get('fab.merged_last_pass')}, armed passes {fc.get('fab.merge_armed_passes')} of "
+              f"{fc.get('fab.manage_passes')}; run {run[:2] if run else None}; last pass "
+              f"{last[:2] if last else None}")
+
+
+def w9():
+    # FAB_LR_OWN AT OPT_LR_SCHED='none' (04-Q11 (b), register C02): the old tree's P1-H15 was a
+    # NameError here on the first flush. It runs, stays finite, and scales every live expert on every
+    # optimizer step. THE LOSS CURVE EQUAL TO FAB_LR_OWN=0 PINS compose.py's FOUR-ELEMENT
+    # FAB.own_lr_scale ROW -- the table reaches no parameter -- and must flip when a consumer is built.
+    curves, detail, ok = {}, [], True
+    for own in (1, 0):
+        sysm = build(FAB_LR_OWN=own, OPT_LR_SCHED="none", FAB_N0=256, FAB_SLOTS=512)
+        err = None
+        try:
+            res = loop.run(sysm, max_windows=30, progress=False)
+        except Exception as e:                                    # noqa: BLE001 -- the check IS this
+            err, res = e, None
+        if res is None:
+            ok = False
+            detail.append(f"FAB_LR_OWN={own} raised {err!r:.120}")
+            continue
+        curves[own] = tuple(res.loss_curve)
+        if not own:
+            continue
+        fc = res.report["FAB.counters"]
+        table = fab_api.own_lr_scale(sysm.configs["FAB"], sysm.fabric,
+                                     applied_lr=float(sysm.configs["OPT"].lr))
+        maxr = float(sysm.configs["FAB"].lr_maxr)
+        gl = fc.get("gate:fab.lr_own", ("",))
+        ok = ok and (all(math.isfinite(x) for x in res.loss_curve) and len(res.loss_curve) == 30
+                     and fc.get("fab.lr_calls") == res.opt_steps
+                     and fc.get("fab.lr_scaled_experts") == fc.get("fab.n_live") > 0
+                     and fc.get("fab.lr_zero_applied") == 0 and gl[0] == "fired"
+                     and table is not None and bool(torch.isfinite(table).all())
+                     and float(table.min()) > 0.0 and float(table.max()) <= maxr)
+        detail.append(f"lr_calls {fc.get('fab.lr_calls')} of {res.opt_steps} steps; scaled "
+                      f"{fc.get('fab.lr_scaled_experts')} of {fc.get('fab.n_live')}; zero_applied "
+                      f"{fc.get('fab.lr_zero_applied')}; gate {gl[:1]}; table "
+                      f"[{float(table.min()):.4f}, {float(table.max()):.4f}] against "
+                      f"FAB_LR_MAXR={maxr}" if table is not None else "table None")
+    check("W9 FAB_LR_OWN=1 at OPT_LR_SCHED=none runs 30 windows, finite, scaling every live expert "
+          "on every step (the P1-H15 crash cannot arise)", ok, "; ".join(detail))
+    first = next((i for i, (a, b) in enumerate(zip(curves.get(1, ()), curves.get(0, ()))) if a != b),
+                 None)
+    check("W9 ... and its loss curve equals FAB_LR_OWN=0's bit for bit, because the table reaches no "
+          "parameter (compose.py's four-element FAB.own_lr_scale row; flips when a consumer exists)",
+          len(curves) == 2 and curves[1] == curves[0], f"first differing window {first}")
+
+
 def main():
     w1()
     w2()
@@ -247,6 +360,9 @@ def main():
     w4()
     w5()
     w6()
+    w7()
+    w8()
+    w9()
     print(f"\n{len(FAILS)} FAIL(s)" + (": " + ", ".join(FAILS) if FAILS else ""))
     return 1 if FAILS else 0
 

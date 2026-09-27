@@ -162,7 +162,9 @@ class FABLevers(LeverSet):
     # norm_only leaves the object built, its parameters in the optimizer and its state in the
     # checkpoint, and is then re-tested at six separate call sites as `not fab.norm_only`. (Off also
     # leaves the object built and checkpointed, but since Q-FAB-11 hands OPT none of its parameters
-    # and runs none of its mechanisms -- norm_only's experts stay in the optimizer and keep growing.)
+    # and runs none of its mechanisms -- norm_only's experts stay in the optimizer. Since
+    # 2026-09-27 they no longer grow, cull or merge: FAB.grow_check and FAB.manage return before
+    # acting on this arm too, register LOW-FAB_NORM_ONLY-GROWS.)
     norm_only = Lever(False, "Control arm: keep the fabric's normalization, remove nodes and routing "
                              "from the forward pass.", U.FLAG)
 
@@ -930,9 +932,15 @@ class FABLevers(LeverSet):
     lr_own = Lever(False, "Put each expert on its own cyclical learning-rate schedule, clocked from "
                           "its own use count.", U.FLAG)
     # The saving from leaving it off is real and belongs in the docs: the rescaling path clones every
-    # live row of A and B on each optimizer step, about 50 MB at 2048 experts. UNFIXED CRASH ON THE
-    # ON PATH (ISSUES P1-H15): _lrv is undefined when LR_SCHED=none and lr_own is on -- a NameError on
-    # the first flush. The global rate is OPT's number and must arrive as the wire d_base_lr.
+    # live row of A and B on each optimizer step, about 50 MB at 2048 experts. THE OLD TREE'S CRASH
+    # ON THE ON PATH (ISSUES P1-H15, _lrv undefined when LR_SCHED=none and lr_own is on -- a
+    # NameError on the first flush) CANNOT ARISE HERE, and this comment called it UNFIXED until
+    # 2026-09-27 (register C02, 04-Q11 (b)): fabric/api.py::own_lr_scale takes the applied rate as
+    # its `applied_lr` argument and the envelope's endpoints as the wires d_base_lr and
+    # d_lr_min_frac, so no global is read. tests/test_fabric_forward.py W9 drives FAB_LR_OWN=1 at
+    # OPT_LR_SCHED=none for 30 windows, finite. WHAT IS STILL OWED IS A CONSUMER: the table reaches
+    # no parameter (spine/compose.py's four-element FAB.own_lr_scale row), so the rescaling cost
+    # above is the old tree's and this flag changes no loss today -- docs/04_CONTRACT.md §3.7.
 
     lr_cycle = Lever(24.0, "Half-cycle of the per-expert triangular2 schedule, measured on the "
                            "expert's own use clock.", U.Selections)

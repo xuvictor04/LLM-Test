@@ -1693,6 +1693,13 @@ def run(sysm, *, max_windows=None, progress=True):
     # BEFORE the R stage -- and the R stage is not a passive read: MEM.census(reconcile=True)
     # recounts the per-source census exactly and bumps n_census_reconciles, so the blob's census
     # and the report's census were two different numbers by construction.
+    # ONE DELIBERATE EXCEPTION, THE SAVE COUNTS (2026-09-27, register LOW-RESUME-SAVED-COUNTERS).
+    # Each package's save counter -- lm.ckpt.saved, opt.ckpt.saved, fab.state_written and their
+    # siblings, with their `_here` twins -- counts the save that writes it, so the final blob holds
+    # exactly one more on those keys than the report printed: the report cannot count a save that
+    # follows it, and a blob that did not count itself would restore one save short. tok.vocab_saved
+    # is not among them: it counts vocabulary FILES, which _save writes after the blob, so each
+    # file records its own ordinal and tok/api.py::restore_vocab takes it from the file it replays.
     # ONE elapsed_s FOR BOTH, MEASURED HERE. RUN.bench_summary's throughput and RunResult.elapsed_s
     # were read at two different instants with a 130MB torch.save between them, so the run length
     # the report quoted and the one the throughput was computed from disagreed by the cost of the
@@ -1760,13 +1767,17 @@ def run(sysm, *, max_windows=None, progress=True):
             f"two. Save a rolled-back run into a directory of its own to keep both generations.")
 
     c = clock.counters()
+    # THE SAVE LINE COUNTS THIS PROCESS (2026-09-27, register LOW-RESUME-SAVED-COUNTERS): on a
+    # resume "this run" read as the lineage, which is what each package's save count now carries.
+    # Their `_here` twins are this process's too, but the report took them BEFORE the final save
+    # below, so they read one fewer than this line whenever that save was written.
     return RunResult(
         windows=int(c["step"]), windows_here=int(c["step"]) - start_step,
         opt_steps=int(c["opt_steps"]), flushes=int(c["flushes"]),
         epochs=int(c["epoch"]), loss_first=first_loss, loss_last=last_loss,
         loss_curve=tuple(curve), elapsed_s=elapsed_s, skipped=skipped,
         gated=_gate_report(sysm) + (
-            f"CKPT.save: {saves} checkpoint(s) written by this run (periodic, SIGUSR1 and the "
+            f"CKPT.save: {saves} checkpoint(s) written by this process (periodic, SIGUSR1 and the "
             f"final one together); 0 means CKPT_DIR names no directory and saving is off",),
         report=report,
         cadence_ledger=cadences.ledger(), warnings=tuple(warnings),

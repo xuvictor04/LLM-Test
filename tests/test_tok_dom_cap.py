@@ -28,6 +28,9 @@ measured wrong, or not delivered at all, and nothing in tests/ could see it:
       entry per loss and sums to loop.bytes_scored.
   C1  CAP.counters' cap.clamp said "an armed arm has room" at CAP_TARGETS=off; an untargeted arm's
       origin read as the sentinel's.
+  C2  THE SIX GROUNDS WERE NOT ON THE LINE (Proposal 05 §8 1.6, register CONTRACT-Q-CAP-1): each
+      arm's clause described its ground in words. One configuration per ground reaches all six, and
+      each arm now prints '(arm, ground kind)' beside the UNREACHABLE verdict, which is unchanged.
 """
 import os
 import sys
@@ -220,6 +223,50 @@ for targets in ("off", "vocab"):
         check("C1 an arm CAP_TARGETS does not name reads 'off for this arm'",
               str(c["cap.origin_experts"]).startswith("off for this arm"),
               str(c["cap.origin_experts"]))
+
+# ---- C2: every arm prints its ground by name beside the cap.clamp verdict -----------------------
+# REPORTING ONLY (register CONTRACT-Q-CAP-1): the verdict stays UNREACHABLE on all six grounds -- the
+# classification is the owner's (O19) -- and what is pinned is that each arm's ground is ON THE LINE,
+# as '(arm, ground kind)', at the R stage and at startup. The token is arm-qualified because the bare
+# word 'inert' is already in the UNREACHABLE boilerplate. One lever configuration per ground, no loop.
+from spine import assemble                                         # noqa: E402
+
+_GROUNDS = {
+    "unarmed": {"CAP_TARGETS": "off"},
+    "nonpositive": {"CAP_TARGETS": "experts", "CAP_FAB_START": "-5"},
+    "at_ceiling": {"CAP_TARGETS": "experts", "CAP_FAB_START": "5000"},
+    "never_pins": {"CAP_TARGETS": "experts", "CAP_FAB_START": "3000"},
+    "inert": {"CAP_TARGETS": "experts", "CAP_FAB_START": "5", "CAP_LIFT": "0.01", "CAP_LIFT_MIN": "0"},
+    "refused_unmasked": {"CAP_TARGETS": "vocab", "CAP_VOCAB_START": "1000", "LM_MASK_DEAD_ROWS": "0"},
+}
+_kinds_seen, _inert_facts = set(), None
+for _ground, _env in _GROUNDS.items():
+    _lever._reopen_assembly()
+    rng.reset_issued()
+    _cfgs, _w, _ = assemble.build(dict(_env))
+    _v = cap_api.new_valve(_cfgs["CAP"])
+    _g = cap_api.counters(_cfgs["CAP"], _v)["cap.clamp"]
+    _b = next(g for g in _v.gates if g.name == "cap.clamp")
+    _facts = [(a, k) for a, k, _f in (_v.clamp_dead_facts or ())]
+    _kinds_seen.update(k for _a, k in _facts)
+    if _ground == "inert":
+        _inert_facts = _v.clamp_dead_facts
+    _missing = [f"({a}, ground {k})" for a, k in _facts
+                if f"({a}, ground {k})" not in _g.reason or f"({a}, ground {k})" not in _b.reason]
+    check(f"C2 {_ground}: cap.clamp stays UNREACHABLE and every arm prints its ground by name, at "
+          f"the R stage and at startup",
+          not _g.reachable and not _b.reachable and (_ground in {k for _a, k in _facts})
+          and not _missing,
+          f"facts {_facts}; missing {_missing}")
+check("C2 the six configurations reach exactly the closed set capacity/api.py::_CLAMP_BLOCKED_KINDS "
+      "(a seventh ground fails here until it has a configuration and a clause)",
+      _kinds_seen == set(cap_api._CLAMP_BLOCKED_KINDS),
+      f"seen {sorted(_kinds_seen)}; closed set {sorted(cap_api._CLAMP_BLOCKED_KINDS)}")
+# THE 'agrees' BRANCH QUOTES THE GROUNDS TOO: two lifts taken, none clamped, on an inert arm.
+_agree = cap_api._clamp_gate("experts 5/ceiling 4096", 2, 0, dead_facts=_inert_facts)
+check("C2 the ledger-agrees branch (lifts taken on an inert arm) prints the ground by name",
+      _inert_facts is not None and "(expert, ground inert)" in _agree.reason
+      and "AGREES" in _agree.reason, _agree.reason[:120])
 
 print(f"{len(FAILS)} FAIL(s)")
 sys.exit(1 if FAILS else 0)

@@ -480,6 +480,11 @@ def open_partition(dom: Config, *, sig_dim, vocab_slots, device, rng, restored=N
         "part.boundary_clock": part.nb,
     }
     if restored is not None:
+        # THE LINEAGE'S SAVE COUNT, the one ledger row the blob carries (2026-09-27, register
+        # LOW-RESUME-SAVED-COUNTERS; DOM.state_dict says why only it travels). Its process twin,
+        # part.n_state_dicts_here, starts with this process's first save.
+        if restored.get("n_state_dicts") is not None:
+            part.counters["part.n_state_dicts"] = int(restored["n_state_dicts"])
         # THE BOOK'S UNIT AGAINST THIS RUN'S (Q-DOM-5); see the docstring. A book with no reading
         # (comp_glob None) has nothing to mix, so it reads 0 whatever its stamp says.
         _now = _comp_unit(dom)
@@ -1904,9 +1909,14 @@ def state_dict(dom: Config, part):
 
     LEVERS READ: levels (the unit stamped as `comp_unit`; otherwise a pure read of `part`)
     WIRES READ: none
-    DID IT FIRE: part.n_state_dicts
+    DID IT FIRE: part.n_state_dicts (LINEAGE: it travels as the payload's `n_state_dicts` and
+                 counts the save that writes it), part.n_state_dicts_here (THIS PROCESS's)
     """
     dom = dom.owned_by("DOM")
+    # BUMPED FIRST, SO THE BLOB COUNTS ITSELF (2026-09-27, register LOW-RESUME-SAVED-COUNTERS; see
+    # the payload's `n_state_dicts` below for why this one count travels).
+    part.counters["part.n_state_dicts"] = part.counters.get("part.n_state_dicts", 0) + 1
+    part.counters["part.n_state_dicts_here"] = part.counters.get("part.n_state_dicts_here", 0) + 1
     # WRITTEN IN EXACTLY THE SHAPE open_partition(restored=...) READS, key for key. The two halves
     # of a persistence pair are one mechanism, and the failure they had is asymmetry: the old blob
     # saved cent/size/last/next_id and dropped the reservoir, comp and comp_glob, tokc, and the
@@ -1975,12 +1985,19 @@ def state_dict(dom: Config, part):
             "pend": (None if part.pend is None
                      else [x.detach().cpu().tolist() for x in part.pend]),
             "bornb": {str(k): int(v) for k, v in (part.bornb or {}).items()}},
+        # THE SAVE COUNT, AND ONLY IT OF THIS PACKAGE'S LEDGER (2026-09-27, register
+        # LOW-RESUME-SAVED-COUNTERS). The rest of part.counters is rebuilt by open_partition and
+        # describes THIS open -- domains opened and restored, the id namespace, the boundary clock
+        # -- so carrying the ledger would overwrite this process's readings with the parent's. The
+        # save count is the one row whose meaning is the lineage's: without it a resumed report
+        # read j beside OPT's k + j. open_partition puts it back; a blob older than the key starts
+        # the count at this process's saves.
+        "n_state_dicts": int(part.counters["part.n_state_dicts"]),
     }
     # `cur`, `run`, `run_sig` and `pend` ARE NOT SAVED, and open_partition resets them. The current
     # domain is a property of the STREAM POSITION and the resume starts a new stream; carrying it
     # would attribute the first window of the resumed run to whatever the parent was in the middle
     # of. That is a save-side statement as much as a load-side one, which is why it is here too.
-    part.counters["part.n_state_dicts"] = part.counters.get("part.n_state_dicts", 0) + 1
     return out
 
 

@@ -151,10 +151,12 @@ Updated 2026-09-26 (the decision register, Proposal 05) on `rm-predict-DC` (the 
 3. On GPU (the owner): a fleet throughput re-baseline after 4feb65f.
 
 ## Known low items, not yet fixed
-- The `fab.merged` report line pairs the RUN-TOTAL counter with the LAST-PASS gate, so it prints
-  e.g. `('armed-but-zero', 2, 'no pair ... sat within')`. Reporting only; behaviour is unaffected.
-- After a resume, the "saved" counters disagree across packages.
-- FAB_NORM_ONLY=1 grows one expert.
+- Fixed in Proposal 05 §8 1.6 (2026-09-27), kept here so the old symptoms are recognisable:
+  `gate:fab.merged` is now run-scope and the last pass's verdict is `gate:fab.merged_last_pass`
+  (Q-FAB-2); every package's save counter is lineage-cumulative with a process `_here` twin
+  (Q-CKPT-4); FAB_NORM_ONLY=1 grows, culls and merges nothing (Q-FAB-11).
+- OWED from 1.6: FAB_LR_OWN's table reaches no parameter, so 04-Q11 (b)'s sweep arm is inert until a
+  consumer exists (a frozen-signature move; docs/04_CONTRACT.md §3.7).
 - Q-TOK-13 is open.
 - gpu_world.sh calibrates on 150 windows, before the first manage pass at window 501. Its ETA can
   still miss per-pass costs; `--status` gives the live ETA.

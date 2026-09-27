@@ -26,11 +26,21 @@ world_proj at all, so each of these could regress in silence:
       field falls back to `world.forecasts` in its counters; world.proj_zeroed_on_load counts across
       the lineage and adds 0 on a restore even when the parent's counters already carry it; and
       world.proj_trained_basis names which evidence decided.
+  W4  THE POPULATION REFUSAL, M43, HAD NO TEST (Proposal 05 §8 1.6, register CONTRACT-Q-CKPT-2-R2,
+      docs/04_CONTRACT.md Q-CKPT-2). A WORLD population mismatch in either direction is refused by
+      name before training: WORLD.load_into refuses a 6-predictor blob at WORLD_NMAX=4 and 8 with no
+      live tensor moved; through compose a lever-driven mismatch is refused first by the geometry
+      gate (world.nmax is EXACT), and a snapshot whose population disagrees with its recorded
+      extent is refused by M43 itself; the parent's files hash identically afterwards.
 """
 import copy
+import dataclasses
+import hashlib
 import os
 import random
+import shutil
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 
@@ -40,7 +50,9 @@ torch.set_num_threads(1)
 from spine import lever as _lever                                  # noqa: E402
 from spine import rng                                              # noqa: E402
 from spine import loop                                             # noqa: E402
+from spine import assemble                                         # noqa: E402
 from spine.compose import compose                                  # noqa: E402
+from ckpt import api as ckpt_api                                   # noqa: E402
 from lm import api as lm_api                                       # noqa: E402
 from world import api as world_api                                 # noqa: E402
 
@@ -214,6 +226,122 @@ def w3_load(sysm):
           world_api.state_dict(cfg_w, w).get("proj_trained") is True)
 
 
+def _world_at(nmax, seed=4242):
+    """A World built by WORLD.build at WORLD_NMAX=nmax off a real assemble.build, and its Config."""
+    _lever._reopen_assembly()
+    rng.reset_issued()
+    cfgs, _w, _ = assemble.build({"WORLD_NMAX": str(nmax)})
+    lm_cfg = cfgs["LM"]
+    w = world_api.build(cfgs["WORLD"], d_model=int(lm_cfg.width), device=torch.device("cpu"),
+                        ctx_tokens=int(lm_cfg.ctx), rng=_FixedRng(seed))
+    return cfgs["WORLD"], w
+
+
+def _world_tensors(w):
+    out = {f: getattr(w, f).detach().clone() for f in ("preds", "keys", "alive", "fit", "mass",
+                                                        "grown")}
+    for mod in ("encoder", "qproj", "world_proj"):
+        for n, t in getattr(w, mod).named_parameters():
+            out[f"{mod}.{n}"] = t.detach().clone()
+    return out
+
+
+def _tree_hash(d):
+    out = {}
+    for root, _dirs, files in os.walk(d):
+        for f in files:
+            p = os.path.join(root, f)
+            with open(p, "rb") as fh:
+                out[os.path.relpath(p, d)] = hashlib.sha256(fh.read()).hexdigest()
+    return out
+
+
+def _raised(fn):
+    try:
+        fn()
+        return None, ""
+    except Exception as e:                                         # noqa: BLE001 -- reported
+        return type(e).__name__, str(e)
+
+
+def w4_population_refusal():
+    # (a) UNIT, BOTH DIRECTIONS: a blob from the default WORLD_NMAX=6 into Worlds at 4 and 8.
+    cfg6, w6 = _world_at(6)
+    blob = world_api.state_dict(cfg6, w6)
+    for nmax, head in ((4, "WORLD_NMAX:"), (8, "WORLD_N0/WORLD_NMAX:")):
+        cfg_n, w_n = _world_at(nmax, seed=99)
+        before = _world_tensors(w_n)
+        kind, msg = _raised(lambda: world_api.load_into(cfg_n, w_n, blob))
+        after = _world_tensors(w_n)
+        same = before.keys() == after.keys() and all(torch.equal(before[k], after[k]) for k in before)
+        check(f"W4 (M43) a 6-predictor blob into WORLD_NMAX={nmax} is refused by name, before any "
+              f"tensor moves",
+              kind == "LeverError" and msg.startswith(head) and same
+              and w_n.counters.get("world.state_refused") == 1
+              and "world.state_restored" not in w_n.counters,
+              f"{kind}: {msg[:90]}; tensors unchanged {same}; refused "
+              f"{w_n.counters.get('world.state_refused')}, restored "
+              f"{w_n.counters.get('world.state_restored', 'ABSENT')}")
+    cfg_c, w_c = _world_at(6, seed=99)
+    kind, msg = _raised(lambda: world_api.load_into(cfg_c, w_c, blob))
+    check("W4 (M43) control: the same blob into a matching WORLD_NMAX=6 restores",
+          kind is None and w_c.counters.get("world.state_restored") == 1
+          and torch.equal(w_c.preds.detach(), blob["preds"]), f"{kind}: {msg[:90]}")
+
+    # (b) THROUGH compose, WITH A REAL CHECKPOINT ON DISK. The lever-driven mismatch is answered by
+    # the geometry gate first -- world.nmax is EXACT -- by name.
+    tmp = tempfile.mkdtemp(prefix="w4_m43_")
+    try:
+        env = {"FAB_N0": 256, "FAB_SLOTS": 512, "SIG_WARMUP": 20}
+        lm_api._COUNTS.clear()
+        loop.run(build(CKPT_DIR=tmp + "/p", **env), max_windows=4, progress=False)
+        before = _tree_hash(tmp)
+        for nmax in (4, 8):
+            lm_api._COUNTS.clear()
+            kind, msg = _raised(lambda: build(CKPT_RESUME=tmp + "/p", CKPT_DIR=tmp + f"/g{nmax}",
+                                              WORLD_NMAX=nmax, **env))
+            check(f"W4 a child at WORLD_NMAX={nmax} is refused at the geometry gate, naming the lever",
+                  kind == "GeometryRefusal" and msg.startswith("WORLD_NMAX:"), f"{kind}: {msg[:90]}")
+        # (c) M43 ITSELF, PAST THE GATE: the snapshot's WORLD population cut to 4 rows or padded to
+        # 8, with its recorded world.n to match, so the gate passes and WORLD.load_into answers.
+        _lever._reopen_assembly()
+        rng.reset_issued()
+        cfgs, _w, _ = assemble.build(dict(BASE, CKPT_RESUME=tmp + "/p",
+                                          **{k: str(v) for k, v in env.items()}))
+        snap = ckpt_api.load(cfgs["CKPT"])
+        for rows, head in ((4, "WORLD_N0/WORLD_NMAX: the checkpoint allocates 4 predictors and "
+                               "this run allocates 6"),
+                           (8, "WORLD_NMAX: the checkpoint holds 8 predictors and this run "
+                               "allocates at most 6")):
+            wsd = dict(snap.payload["WORLD"])
+            for f in ("preds", "keys", "fit", "mass", "alive", "grown"):
+                t = wsd[f]
+                wsd[f] = (t[:rows].clone() if rows < t.shape[0] else
+                          torch.cat([t, torch.zeros((rows - t.shape[0],) + tuple(t.shape[1:]),
+                                                    dtype=t.dtype)], 0))
+            geo = dict(snap.geometry)
+            if "world.n" in geo:
+                geo["world.n"] = (rows,) + tuple(geo["world.n"][1:])
+            doc = dataclasses.replace(snap, payload=dict(snap.payload, WORLD=wsd), geometry=geo)
+            lm_api._COUNTS.clear()
+            _lever._reopen_assembly()
+            rng.reset_issued()
+            e = dict(BASE, CKPT_DIR=tmp + f"/m{rows}", **{k: str(v) for k, v in env.items()})
+            kind, msg = _raised(lambda: compose(environ=e, restored=doc))
+            check(f"W4 (M43) past the gate, a {rows}-row WORLD population is refused by WORLD.load_into "
+                  f"before any System returns", kind == "LeverError" and msg.startswith(head),
+                  f"{kind}: {msg[:110]}")
+        after = _tree_hash(tmp)
+        check("W4 after every refusal the parent's files hash identically, nothing new is on disk and "
+              "no child CKPT_DIR exists",
+              before == after and len(before) >= 2
+              and not any(os.path.exists(tmp + f"/{d}") for d in ("g4", "g8", "m4", "m8")),
+              f"files {sorted(before)}; changed "
+              f"{sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))}")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main():
     sysm = build()
     lm_cfg = sysm.configs["LM"]
@@ -221,6 +349,7 @@ def main():
     w2_forecast_noop_and_learns(sysm)
     w3_load(build())
     w2_loop_arms()
+    w4_population_refusal()
     print(f"\n{len(FAILS)} failing" + (": " + ", ".join(FAILS) if FAILS else ""))
     return 1 if FAILS else 0
 

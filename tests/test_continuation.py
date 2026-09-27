@@ -48,6 +48,12 @@ parent's exact stream and continue. Each check below pins one promise of that pa
       final segmentation, and on the act's own line; RunResult.flush_bytes summing to
       loop.bytes_scored; and run.py --flush-bytes beside --loss-curve. On the TOK_RETOK_EVERY=0 run
       each is ABSENT, or armed and 0 where the ledger says so.
+  S10 THE SAVE COUNTERS ARE THE LINEAGE'S, BESIDE A PROCESS TWIN (Proposal 05 §8 1.6, register
+      LOW-RESUME-SAVED-COUNTERS): a parent that saved k times and a child that saved j times before
+      its report read (k + j, j) on all ten save counts -- where the unfixed tree read k - 1 + j,
+      k + j and j across packages -- the child's final blob holds k + j + 1 (a blob counts itself),
+      and a resume from that blob restores k + j + 1, tok.vocab_saved included; a resume from a
+      lineage's first save, whose blob predates every vocabulary file, restores tok.vocab_saved 1.
 
 WHAT THIS FILE CANNOT SEE: whether live retokenization helps a long run. That is the owner-scale
 ship-rule measurement 03b S0b names (prequential bits/byte, 3 paired seeds).
@@ -611,6 +617,111 @@ try:
           f"{_printed.group(1) if _printed else None}; {_p.stderr[-200:] if _p.returncode else ''}")
 finally:
     shutil.rmtree(TMP9, ignore_errors=True)
+
+# ---- S10: every package's save counter is the lineage's, beside a process twin -------------------
+# THE REGISTER'S KNOWN ANSWER (LOW-RESUME-SAVED-COUNTERS): a parent saves k times and its child j
+# times, and every package reports (k + j, j). Unfixed, the child read k - 1 + j on LM, SIG, FAB,
+# WORLD, MEM and TOK (each copied its ledger before counting the save), k + j on OPT, and j on DOM
+# and CAP (their ledgers do not travel). k and j come off each run's own 'CKPT.save: N' line: k is
+# the parent's N, the final save included, and j is the child's N - 1, because LOOP_ORDER puts the R
+# stage before the final save. LM's tally is process-global, so it is cleared before each System,
+# which stands for its own process. No R-stage row prints DATA's counters, so DATA is read in the
+# blob, which counts itself and so holds one more than the report on every one of these keys but
+# tok.vocab_saved, whose file is written after the blob.
+from lm import api as lm_api                                       # noqa: E402
+
+TMP10 = tempfile.mkdtemp(prefix="s10_saved_")
+_S10 = (("LM.counters", "lm.ckpt.saved"), ("OPT.counters", "opt.ckpt.saved"),
+        ("SIG.counters", "sig.state_written"), ("FAB.counters", "fab.state_written"),
+        ("WORLD(w.counters)", "world.state_written"), ("MEM(store.counters)", "store.n_state_dicts"),
+        ("DOM(part.counters)", "part.n_state_dicts"), ("CAP.counters", "cap.state_written"),
+        ("TOK(vocab.counters)", "tok.state_written"), ("TOK(vocab.counters)", "tok.vocab_saved"))
+
+
+def _pairs(res):
+    out = {}
+    for row, key in _S10:
+        r = res.report.get(row)
+        r = r if isinstance(r, dict) else {}
+        out[key] = (r.get(key, "ABSENT"), r.get(key + "_here", "ABSENT"))
+    return out
+
+
+try:
+    lm_api._COUNTS.clear()
+    p10 = build(CKPT_DIR=TMP10 + "/p", CKPT_EVERY=20)
+    rp10 = loop.run(p10, max_windows=60, progress=False)
+    k = _saves(rp10)
+    lm_api._COUNTS.clear()
+    c10 = build(CKPT_RESUME=TMP10 + "/p", CKPT_DIR=TMP10 + "/c", CKPT_EVERY=20)
+    rc10 = loop.run(c10, max_windows=40, progress=False)
+    j = _saves(rc10) - 1
+    pp, pc = _pairs(rp10), _pairs(rc10)
+    bad_p = {kk: v for kk, v in pp.items() if v != (k - 1, k - 1)}
+    bad_c = {kk: v for kk, v in pc.items() if v != (k + j, j)}
+    check(f"S10 setup: the parent saved k >= 2 times and the child j >= 1 times before its report",
+          k >= 2 and j >= 1, f"k {k}, j {j}")
+    check("S10 a fresh parent's report reads (k - 1, k - 1) on every package: lineage == process, "
+          "the final save following the report", not bad_p, f"k {k}; off: {bad_p}")
+    check("S10 THE KNOWN ANSWER: the child reports (k + j, j) on every package -- the lineage "
+          "count beside this process's", not bad_c, f"k {k}, j {j}; off: {bad_c}")
+    blob = torch.load(TMP10 + "/c/ckpt.pt", map_location="cpu", weights_only=False)["payload"]
+    held = {"lm.ckpt.saved": blob["LM"]["counters"].get("lm.ckpt.saved"),
+            "opt.ckpt.saved": blob["OPT"]["counters"].get("opt.ckpt.saved"),
+            "sig.state_written": blob["SIG"]["counters"].get("sig.state_written"),
+            "fab.state_written": blob["FAB"]["counters"].get("fab.state_written"),
+            "world.state_written": blob["WORLD"]["counters"].get("world.state_written"),
+            "store.n_state_dicts": blob["MEM"]["counters"].get("store.n_state_dicts"),
+            "tok.state_written": blob["TOK"]["counters"].get("tok.state_written"),
+            "DOM n_state_dicts": blob["DOM"].get("n_state_dicts"),
+            "CAP state_written": blob["CAP"].get("state_written"),
+            "data.state_written": blob["DATA"]["counters"].get("data.state_written")}
+    dc = blob["DATA"]["counters"]
+    check("S10 the child's final blob counts itself: k + j + 1 on every save count it carries "
+          "(DATA's too, with data.state_written_here = j + 1), and tok.vocab_saved k + j, its file "
+          "being written after the blob",
+          all(v == k + j + 1 for v in held.values())
+          and dc.get("data.state_written_here") == j + 1
+          and blob["TOK"]["counters"].get("tok.vocab_saved") == k + j,
+          f"want {k + j + 1}: {held}; data _here {dc.get('data.state_written_here')}; tok.vocab_saved "
+          f"{blob['TOK']['counters'].get('tok.vocab_saved')}")
+    # AND A GRANDCHILD READ FROM THAT BLOB RESTORES k + j + 1 -- tok.vocab_saved included, because
+    # the vocabulary file it replays records its own ordinal -- with every process twin absent until
+    # it saves (seeded 0 on OPT, and CAP's report reads 0).
+    lm_api._COUNTS.clear()
+    g10 = build(CKPT_RESUME=TMP10 + "/c", CKPT_DIR=TMP10 + "/g", CKPT_EVERY=0)
+    gl = {"lm.ckpt.saved": lm_api._COUNTS.get("lm.ckpt.saved"),
+          "opt.ckpt.saved": g10.optimizer.counters.get("opt.ckpt.saved"),
+          "fab.state_written": g10.fabric.counters.get("fab.state_written"),
+          "part.n_state_dicts": g10.partition.counters.get("part.n_state_dicts"),
+          "cap.state_written": g10.valve.counters.get("cap.state_written"),
+          "tok.vocab_saved": g10.vocab.counters.get("tok.vocab_saved")}
+    twins = {"lm": lm_api._COUNTS.get("lm.ckpt.saved_here", "ABSENT"),
+             "opt": g10.optimizer.counters.get("opt.ckpt.saved_here"),
+             "fab": g10.fabric.counters.get("fab.state_written_here", "ABSENT"),
+             "tok": g10.vocab.counters.get("tok.vocab_saved_here", "ABSENT")}
+    check("S10 a resume from the child's blob restores k + j + 1 on every save count, "
+          "tok.vocab_saved included, and no process twin crosses",
+          all(v == k + j + 1 for v in gl.values())
+          and twins == {"lm": "ABSENT", "opt": 0, "fab": "ABSENT", "tok": "ABSENT"},
+          f"want {k + j + 1}: {gl}; twins {twins}")
+    # THE LINEAGE'S FIRST SAVE: its blob was written before any vocabulary file, so it carries no
+    # tok.vocab_saved at all, and the file the resume replays records ordinal 1.
+    lm_api._COUNTS.clear()
+    loop.run(build(CKPT_DIR=TMP10 + "/one", CKPT_EVERY=0), max_windows=5, progress=False)
+    first = torch.load(TMP10 + "/one/ckpt.pt", map_location="cpu", weights_only=False)
+    lm_api._COUNTS.clear()
+    o10 = build(CKPT_RESUME=TMP10 + "/one", CKPT_DIR=TMP10 + "/one_c", CKPT_EVERY=0)
+    check("S10 a resume from a lineage's first save counts the file it read: tok.vocab_saved 1 "
+          "from a blob that carries none, beside tok.state_written 1",
+          "tok.vocab_saved" not in first["payload"]["TOK"]["counters"]
+          and o10.vocab.counters.get("tok.vocab_saved") == 1
+          and o10.vocab.counters.get("tok.state_written") == 1,
+          f"blob {first['payload']['TOK']['counters'].get('tok.vocab_saved', 'ABSENT')}; restored "
+          f"{o10.vocab.counters.get('tok.vocab_saved')}, state_written "
+          f"{o10.vocab.counters.get('tok.state_written')}")
+finally:
+    shutil.rmtree(TMP10, ignore_errors=True)
 
 print(f"\n=== {len(FAILS)} failing ===")
 sys.exit(1 if FAILS else 0)

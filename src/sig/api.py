@@ -1615,9 +1615,15 @@ def state_dict(sig: Config, st):
 
     LEVERS READ: none
     WIRES READ: none
-    DID IT FIRE: sig.state_written
+    DID IT FIRE: sig.state_written (LINEAGE, and it counts the save that writes it),
+                 sig.state_written_here (THIS PROCESS's; load_state_dict never restores it)
     """
     sig = sig.owned_by("SIG")
+    # BUMPED BEFORE THE COUNTERS ARE COPIED, SO A BLOB COUNTS ITSELF, with a process twin the
+    # restore skips (2026-09-27, register LOW-RESUME-SAVED-COUNTERS; lm/api.py::state_dict says
+    # what the old order cost).
+    st.counters["sig.state_written"] = st.counters.get("sig.state_written", 0) + 1
+    st.counters["sig.state_written_here"] = st.counters.get("sig.state_written_here", 0) + 1
     enc = getattr(st, "encoder", None)
     out = {
         # THE ENCODER, OR THE FROZEN BIGRAM MODULUS. Both arms come through `st.encoder`; only one
@@ -1648,7 +1654,6 @@ def state_dict(sig: Config, st):
     # checkpointed there; this package asserts only that a resized alphabet_size invalidates them
     # -- which the old tree got wrong in the OPPOSITE direction, dropping the encoder's moments for
     # a FABRIC widening (P3-H24).
-    st.counters["sig.state_written"] = st.counters.get("sig.state_written", 0) + 1
     return out
 
 
@@ -1690,7 +1695,10 @@ def load_state_dict(sig: Config, st, sd, *, sidecar):
         # WHAT warm_up READS TO KNOW THE ENCODER IS ALREADY TRAINED. See warm_up's RESUME paragraph.
         st.encoder_restored = True
     if sd.get("counters"):
-        st.counters.update(sd["counters"])
+        # EVERY KEY BUT THE SAVE COUNT'S PROCESS TWIN (2026-09-27, register
+        # LOW-RESUME-SAVED-COUNTERS): the parent's saves are not this process's.
+        st.counters.update({k: v for k, v in sd["counters"].items()
+                            if k != "sig.state_written_here"})
     if sd.get("warmup_curve") is not None:
         st.warmup_curve = list(sd["warmup_curve"])
     if sd.get("rng") and getattr(st, "rng", None) is not None:

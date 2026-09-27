@@ -1645,9 +1645,17 @@ def stream_state(dat: Config, areas):
 
     LEVERS READ: none (accounting only)
     WIRES READ: none
-    DID IT FIRE: data.state_written
+    DID IT FIRE: data.state_written (LINEAGE, and it counts the save that writes it),
+                 data.state_written_here (THIS PROCESS's; restore_stream_state never restores it)
     """
     dat = dat.owned_by("DATA")
+    # BUMPED BEFORE THE COUNTERS ARE COPIED, SO A BLOB COUNTS ITSELF, with a process twin the
+    # restore skips (2026-09-27, register LOW-RESUME-SAVED-COUNTERS; lm/api.py::state_dict says
+    # what the old order cost). No R-stage row prints DATA's counters, so the pair is read in the
+    # blob.
+    areas.counters["data.state_written"] = areas.counters.get("data.state_written", 0) + 1
+    areas.counters["data.state_written_here"] = areas.counters.get("data.state_written_here",
+                                                                   0) + 1
     out = {
         # THE PER-AREA READ CURSORS, WHICH ARE THE LOAD-BEARING PART. Without them a resume
         # re-reads the head of every area under seg_contig and silently trains a SECOND time on
@@ -1671,7 +1679,6 @@ def stream_state(dat: Config, areas):
     # THE CACHED Stream AT resample=False IS NOT CHECKPOINTED and that is deliberate: it is rebuilt
     # from (seed, epoch), so saving it would put a second copy of a derivable thing in the payload
     # and let the two disagree.
-    areas.counters["data.state_written"] = areas.counters.get("data.state_written", 0) + 1
     return out
 
 
@@ -1760,7 +1767,8 @@ def restore_stream_state(dat: Config, areas, state):
     if state.get("counters"):
         for k, v in state["counters"].items():
             if k not in ("data.state_restored", "data.state_refused", "data.area_added",
-                         "data.area_vanished", "data.areas_added_names"):
+                         "data.area_vanished", "data.areas_added_names",
+                         "data.state_written_here"):
                 areas.counters[k] = v
     areas.counters["data.state_restored"] = areas.counters.get("data.state_restored", 0) + 1
     return areas

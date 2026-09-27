@@ -661,6 +661,9 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
                  declaration nothing writes),
                  tok.bpt_adopted (REPLAY ARM ONLY: 1 = bytes_per_token is the value the parent's
                  file recorded, 0 = the file predates the field and the value was measured here),
+                 tok.vocab_saved (REPLAY ARM ONLY, and only from a file that records it: the
+                 file's ordinal in its lineage, which restore_vocab keeps over the checkpoint's
+                 count -- save_vocabulary's lineage counter, seeded here, 2026-09-27),
                  tok.bpt_mismatch, tok.bpt_mismatch_detail (REPLAY ARM, file records the value,
                  TOK_DROPOUT=0: the re-measurement on the parent's build-time vocabulary against
                  the recorded value -- 0 agreed to the bit, 1 disagreed and the detail names both;
@@ -971,6 +974,13 @@ def build_vocabulary(tok: Config, *, area_heads, seed: int, soft_cap=None):
         # value was adopted, 0 = the file predates the field and the measurement above stands.
         # Absent on the fresh-build and mode="bytes" arms, where there is no file to adopt from.
         c["tok.bpt_adopted"] = 0
+        # THE FILE'S ORDINAL IS THE LINEAGE'S FILE COUNT (2026-09-27, register
+        # LOW-RESUME-SAVED-COUNTERS): save_vocabulary records it in the file it writes, and the
+        # checkpoint that also carries tok.vocab_saved was written one file earlier. Put on the
+        # ledger here, where the file is read; restore_vocab keeps it over the blob's count. A file
+        # older than the field writes nothing, and the blob's count stands.
+        if rec.get("vocab_saved") is not None:
+            c["tok.vocab_saved"] = int(rec["vocab_saved"])
         recorded_bpt = rec.get("bytes_per_token")
         if recorded_bpt is None:
             vocab.bytes_per_token = measured
@@ -1195,7 +1205,8 @@ def _replay_merges(vocab, path, *, recon=None, recorded=None):
     it as vmax would report a false mismatch on every fixed-mode resume.
 
     `recorded`, WHEN GIVEN, IS FILLED WITH THE FILE'S OWN MEASUREMENT FIELDS -- `bytes_per_token`
-    and `v0`, each None when the file predates it -- so build_vocabulary can adopt the parent's
+    and `v0`, each None when the file predates it, and since 2026-09-27 `vocab_saved`, the file's
+    ordinal in its lineage -- so build_vocabulary can adopt the parent's
     measurement instead of re-measuring on a vocabulary that has grown since (see the replay arm
     there: re-measuring moved the signature width and SIG refused every resume after a mint).
     """
@@ -1209,6 +1220,9 @@ def _replay_merges(vocab, path, *, recon=None, recorded=None):
     if recorded is not None:
         recorded["bytes_per_token"] = blob.get("bytes_per_token")
         recorded["v0"] = blob.get("v0")
+        # THE FILE'S ORDINAL IN ITS LINEAGE (2026-09-27; save_vocabulary writes it), None when the
+        # file predates the field.
+        recorded["vocab_saved"] = blob.get("vocab_saved")
 
     if recon is not None:
         lines = []
@@ -2890,7 +2904,9 @@ def save_vocabulary(tok: Config, vocab, *, suffix=""):
     WIRES READ: d_vocab_save_path, d_vocab_read_path (the refusal to overwrite the parent's file,
                 and the refusal to rotate onto it), d_vocab_ceiling (recorded as vmax, for the same
                 reconciliation)
-    DID IT FIRE: tok.vocab_saved, tok.vocab_saved_suffixed (a snapshot-suffixed write; 0 means no
+    DID IT FIRE: tok.vocab_saved (LINEAGE: the files this lineage wrote, this one included),
+                 tok.vocab_saved_here (THIS PROCESS's files; restore_vocab drops a parent's copy),
+                 tok.vocab_saved_suffixed (a snapshot-suffixed write; 0 means no
                  bestN save has happened, which at CKPT.best_keep=0 is "unreachable" and must say
                  so rather than read 0); tok.vocab_rotated and tok.vocab_rotate_failed (SEEDED AT 0
                  on every call with saving on, ABSENT with saving off, which is the unreachable
@@ -2950,6 +2966,11 @@ def save_vocabulary(tok: Config, vocab, *, suffix=""):
     d = os.path.dirname(dst)
     if d:
         os.makedirs(d, exist_ok=True)
+    # THIS FILE'S ORDINAL IN ITS LINEAGE, written INTO it (2026-09-27, register
+    # LOW-RESUME-SAVED-COUNTERS). The checkpoint carrying tok.vocab_saved is written BEFORE this
+    # file (spine/loop.py::_save), so its count is always one short; the file is the only record
+    # that knows itself, and restore_vocab takes the number from here on a replaying resume.
+    ordinal = int(vocab.counters.get("tok.vocab_saved", 0)) + 1
     blob = {
         # `entries`, IN THE SHAPE build_vocabulary READS, AND THE FIRST DRAFT WROTE `merges`.
         # The two halves of a persistence pair are ONE mechanism and this one was written from its
@@ -2993,6 +3014,9 @@ def save_vocabulary(tok: Config, vocab, *, suffix=""):
         "max_tok": int(tok.max_bytes),
         "dropout": float(tok.dropout),
         "vmax": int(tok.d_vocab_ceiling),
+        # THE LINEAGE'S FILE COUNT, THIS FILE INCLUDED -- see `ordinal` above. Read back by
+        # _replay_merges under this name; a file without it is older than the field.
+        "vocab_saved": ordinal,
     }
     tmp = dst + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
@@ -3018,7 +3042,12 @@ def save_vocabulary(tok: Config, vocab, *, suffix=""):
                 vocab.counters["tok.vocab_rotate_failed_detail"] = (
                     f"{dst!r} -> {prev!r}: {type(e).__name__}: {e.strerror or e}")
     os.replace(tmp, dst)
-    vocab.counters["tok.vocab_saved"] = vocab.counters.get("tok.vocab_saved", 0) + 1
+    # THE FILE COUNT, LINEAGE AND PROCESS (2026-09-27, register LOW-RESUME-SAVED-COUNTERS).
+    # tok.vocab_saved is the lineage's -- it crosses a resume, and on a replaying one it is the
+    # ordinal the file above recorded -- and tok.vocab_saved_here is this process's files, which
+    # restore_vocab drops from a parent's copy.
+    vocab.counters["tok.vocab_saved"] = ordinal
+    vocab.counters["tok.vocab_saved_here"] = vocab.counters.get("tok.vocab_saved_here", 0) + 1
     return dst
 
 
@@ -3079,10 +3108,16 @@ def vocab_state(tok: Config, vocab):
                 the period and points there, and must not grow a second verdict of its own. See
                 FOR THE OWNER Q-CLOCK-1, MEASURABLE: this row retires when CAP.counters has a body
                 that renders that histogram, and not before)
-    DID IT FIRE: tok.state_written
+    DID IT FIRE: tok.state_written (LINEAGE, and it counts the save that writes it),
+                 tok.state_written_here (THIS PROCESS's; restore_vocab drops a parent's copy)
     """
     tok = tok.owned_by("TOK")
     lift_period = tok.d_cap_lift_period      # WIRE READ HERE -- reported beside tok.cap_lift
+    # BUMPED BEFORE THE COUNTERS ARE COPIED, SO A BLOB COUNTS ITSELF, with a process twin the
+    # restore drops (2026-09-27, register LOW-RESUME-SAVED-COUNTERS; lm/api.py::state_dict says
+    # what the old order cost).
+    vocab.counters["tok.state_written"] = vocab.counters.get("tok.state_written", 0) + 1
+    vocab.counters["tok.state_written_here"] = vocab.counters.get("tok.state_written_here", 0) + 1
     out = {
         # THE RETIREMENTS AND THE PROVENANCE TABLE, WHICH IS DEFECT D-T3. A save/load round trip
         # UNDID EVERY RETIREMENT, because load() replays every merge into the match table including
@@ -3130,7 +3165,6 @@ def vocab_state(tok: Config, vocab):
     out["fired_where"] = ("the cadence clocks are the tok.<key>_seeded_window rows of `counters` "
                           "(written by tok/api.py::_due); `fired` is a copy for reading, and "
                           "restore_vocab restores them from `counters`")
-    vocab.counters["tok.state_written"] = vocab.counters.get("tok.state_written", 0) + 1
     return out
 
 
@@ -3149,6 +3183,10 @@ def restore_vocab(tok: Config, state, vocab):
     parent's copies are dropped the same way, while tok.vocab_saved stays lineage-cumulative -- the lineage-or-process
     question for `saved` counters is Proposal 05 §8 1.6 (LOW-RESUME-SAVED-COUNTERS) and does not
     cover the rotation rows.
+    THAT RULING (2026-09-27): tok.state_written and tok.vocab_saved are lineage-cumulative and each
+    has a process twin, tok.state_written_here and tok.vocab_saved_here, dropped here like the
+    rotation rows. On the replay arm tok.vocab_saved is the ordinal the replayed FILE records,
+    because the root writes that file after the blob that carries the count (see the body).
 
     LEVERS READ: none
     WIRES READ: none
@@ -3210,13 +3248,30 @@ def restore_vocab(tok: Config, state, vocab):
         # own is lost. tok.vocab_saved is NOT one of them and stays lineage-cumulative; whether
         # `saved` counters should be lineage or process is Proposal 05 §8 1.6
         # (LOW-RESUME-SAVED-COUNTERS), which does not cover these rows.
+        # AND THE TWO SAVE COUNTS' PROCESS TWINS (2026-09-27, register LOW-RESUME-SAVED-COUNTERS):
+        # tok.state_written and tok.vocab_saved are the lineage's and come back; their `_here`
+        # twins are this process's saves, of which there are none yet.
         _here_rows = ("tok.vocab_rotated", "tok.vocab_rotate_failed",
-                      "tok.vocab_rotate_failed_detail", "tok.vocab_rotate_refused")
+                      "tok.vocab_rotate_failed_detail", "tok.vocab_rotate_refused",
+                      "tok.state_written_here", "tok.vocab_saved_here")
+        # THE FILE'S OWN ORDINAL BEATS THE BLOB'S COUNT (2026-09-27, register
+        # LOW-RESUME-SAVED-COUNTERS). tok.vocab_saved counts vocabulary FILES, and
+        # spine/loop.py::_save writes each file right AFTER the checkpoint whose counters carry
+        # this count -- so every blob a run writes holds one file fewer than its lineage wrote,
+        # whatever order this package bumps in. The file knows better: save_vocabulary records in
+        # it the lineage count including itself, and build_vocabulary's replay put that number on
+        # the ledger before this call. It wins here. A file older than the field, or a resume at
+        # TOK_MODE=bytes (which reads no file), leaves the blob's count standing, one short
+        # (docs/04_CONTRACT.md Q-CKPT-4 records it).
+        from_file = vocab.counters.get("tok.vocab_saved") if "tok.bpt_adopted" in vocab.counters \
+            else None
         mine = {k: vocab.counters[k] for k in _replay_rows + _here_rows if k in vocab.counters}
         vocab.counters.update(state["counters"])
         for k in _replay_rows + _here_rows:
             vocab.counters.pop(k, None)
         vocab.counters.update(mine)
+        if from_file is not None:
+            vocab.counters["tok.vocab_saved"] = int(from_file)
     if state.get("tally") is not None:
         vocab.counters["tok.tally_restored"] = len(vocab.tally)
     vocab.counters["tok.state_restored"] = vocab.counters.get("tok.state_restored", 0) + 1

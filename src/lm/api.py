@@ -1351,9 +1351,18 @@ def state_dict(lm: Config, model, geom):
 
     LEVERS READ: none (everything comes off geom)
     WIRES READ: none
-    DID IT FIRE: lm.ckpt.saved
+    DID IT FIRE: lm.ckpt.saved (LINEAGE: it crosses a resume with the rest of the tally and counts
+                 the save that writes it), lm.ckpt.saved_here (THIS PROCESS's saves; load_state
+                 never restores it)
     """
     lm = lm.owned_by("LM")
+    # BUMPED BEFORE THE TALLY IS COPIED, SO A BLOB COUNTS ITSELF (2026-09-27, register
+    # LOW-RESUME-SAVED-COUNTERS). The bump followed the copy, so every blob carried one save fewer
+    # than the lineage had made, and a child resumed from it reported k-1+j beside OPT's k+j
+    # (opt.ckpt.saved always bumped first). The `_here` twin is this process's alone: load_state
+    # skips it, so the pair reads (lineage, process) and a resume cannot confuse the two.
+    _bump("lm.ckpt.saved")
+    _bump("lm.ckpt.saved_here")
     out = {
         "module": model.state_dict(),
         # THE RESOLVED GEOMETRY, FIELD BY FIELD, so a resume can refuse a mismatch BY KNOB NAME.
@@ -1385,7 +1394,6 @@ def state_dict(lm: Config, model, geom):
     # mask cache. Both are REBUILT on load, so a resume with a re-segmented vocabulary cannot come
     # back with a stale table -- which is the point, and is why they are named here rather than
     # simply absent.
-    _bump("lm.ckpt.saved")
     return out
 
 
@@ -1535,7 +1543,12 @@ def load_state(lm: Config, model, geom, saved):
     # parent's ledger carried, the way opt.ckpt.loaded accumulates.
     # lm.build.* IS EXCLUDED FOR THE SAME REASON (2026-09-24): build_model has already run in this
     # process and its five gauges describe the model THIS process built.
+    # lm.ckpt.saved_here IS EXCLUDED TOO (2026-09-27, register LOW-RESUME-SAVED-COUNTERS): it is
+    # the process twin of the lineage count lm.ckpt.saved, and the parent's saves are not this
+    # process's.
     for key, value in dict(saved.get("counters") or {}).items():
+        if key == "lm.ckpt.saved_here":
+            continue
         if not str(key).startswith(("lm.resolve.", "lm.build.")):
             _COUNTS[key] = value
 

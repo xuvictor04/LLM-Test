@@ -500,7 +500,8 @@ offsets and sizes, `bytes_present`/`bytes_taken`, the counter vector — all che
 `Stream` at `resample=False` is **not**: it is rebuilt from `(seed, epoch)`.
 **Counters:** `data.area_open`, `corpus_cap_trip`, `holdout_block`, `val_cap_trip`, `area_refused`,
 `stream_draw`, `segment`, `contig_wrap`, `resample`, `phase_entered`, `phase_resolved`,
-`state_written/restored/refused`, and three Gates (`exposure_max`, `exposure_skew`,
+`state_written/restored/refused` (with `state_written_here`, the process twin of the lineage
+`state_written`, Q-CKPT-4), and three Gates (`exposure_max`, `exposure_skew`,
 `splice_window`).
 
 Five levers (`dir`, `corpus_cap`, `holdout_frac`, `val_cap`, `seg_contig`) are **arm-dead** under
@@ -538,7 +539,8 @@ re-segmentation fired scored **4.364 against 2.175** held-out b/B.
 `soft_cap`, `v0`, and the three cadence clocks (`tok.<key>_seeded_window`, kept in `counters` by
 `_due`). **Where each crosses a checkpoint:** the merges and the measured `bytes_per_token` in the
 vocabulary FILE (`save_vocabulary`), which a resume replays and whose recorded `bytes_per_token` it
-**adopts** rather than re-measuring (Q-TOK-13); `prov`, `retired`, `soft_cap`, `v0`, the tally and
+**adopts** rather than re-measuring (Q-TOK-13), with the file's own ordinal, `vocab_saved`, which a
+replaying resume restores as `tok.vocab_saved` (Q-CKPT-4); `prov`, `retired`, `soft_cap`, `v0`, the tally and
 `tally_seen` (exactly, as parallel int arrays) and the counters in `payload['TOK']` (`vocab_state`),
 put back by `restore_vocab` after its merge-count refusal. The match-table revision `rev` is
 per-process and deliberately not carried. A save/load round trip **used to undo every retirement**
@@ -551,7 +553,8 @@ new generation. It never rotates onto `d_vocab_read_path` (a run resumed from `<
 that saves into `<dir>`). See Q-TOK-13's closing note.
 **Counters:** `tok.build_pass/build_mint/v0`, `load_reconciled`, `bpt_adopted`/`bpt_mismatch`,
 `tally_restored`, `mint` + eight mint-outcome counters, `retok`/`retok_noop`, `dropout_skip`,
-`mint_frozen_at`, `probation_*`, `cap_lift`, `vocab_saved`,
+`mint_frozen_at`, `probation_*`, `cap_lift`, `vocab_saved` (lineage) with `vocab_saved_here`
+(process, Q-CKPT-4),
 `vocab_rotated`/`vocab_rotate_failed`/`vocab_rotate_refused` (per process; `vocab_rotate_refused`
 is present only on the in-place arm), `state_*`, and Gates `mint_pmin` and `probation_embed`.
 
@@ -697,7 +700,8 @@ unported, and `FAB.build` says so rather than silently running `soc`.
 neither before, so the shipped `hop_vote` never formed and **the default objective changed** when it
 did. `live_domains` is `DOM.census`'s `n_live` (**Q-FAB-9**), `observe` takes one domain id per
 window (**Q-FAB-10**), and the two control arms `FAB_ON=0` / `FAB_NORM_ONLY=1` run end to end,
-with `FAB_ON=0` handing OPT no fabric parameter (**Q-FAB-11**).
+with `FAB_ON=0` handing OPT no fabric parameter (**Q-FAB-11**), and neither grows, culls or merges
+(2026-09-27, register LOW-FAB_NORM_ONLY-GROWS).
 
 ### MEM — `src/memory/api.py` (26 levers, 25 read directly, one of them a census amendment)
 
@@ -1437,6 +1441,16 @@ tables claiming one, and it names the producer each is waiting on.
   row, but it means `fab.lr_scaled_experts` counts an effect this contract never applies: the mirror
   image of an argument with no producer, and the row says so rather than leaving the reader to
   discover it from an unread return.
+  **2026-09-27 (04-Q11 (b), register C02, Proposal 05 §8 1.6):** `FAB_LR_OWN=1` at
+  `OPT_LR_SCHED='none'` runs and stays finite — 30 windows at `FAB_N0=256`, `fab.lr_calls` equal to
+  the optimizer steps, every live expert scaled, the table in [0.7625, 1.0]
+  (`tests/test_fabric_forward.py` W9). ISSUES P1-H15 cannot arise here (the applied rate is the
+  `applied_lr` argument and the endpoints are wires), and `fabric/levers.py`'s *"UNFIXED CRASH"*
+  comment is corrected. **OWED, and larger than a low fix:** the table still reaches no parameter —
+  W9 pins the loss curve equal to `FAB_LR_OWN=0`'s bit for bit, and must flip when a consumer lands —
+  so 04-Q11 (b)'s on-against-off sweep arm measures nothing until one exists. The consumer is a
+  frozen-signature move (a parameter on `OPT.maybe_step`, or a FAB rescale around the step), and
+  C02's `'newborn'` scope depends on it.
 * **`Stream.splice_starts` and `Stream.area_changes`.** `data/api.py:153-156` argues hard that BOTH
   must leave the package "so no consumer has to guess which one it wanted" — against ISSUES P1-H10,
   where boundary precision/recall was scored on every splice start and on a one-area run all ~96
@@ -1818,6 +1832,15 @@ armed-but-0 where lifts are earned and lost (13,134), which buys a sharper readi
 pays for it with a *"0 clamped of 0 lifts"* line on configurations where no clamp is possible.
 **The recommendation is (a)**, and nothing in the tree fails either way: no check compares a Gate's
 verdict against `.rework/DECISIONS.md`, which is why this is a question and not a finding.
+
+**2026-09-27 (register CONTRACT-Q-CAP-1, Proposal 05 §8 1.6), reporting only:** every arm's clause
+now prints its ground by name — `(expert, ground unarmed)` through `(vocabulary, ground
+refused_unmasked)` — at the R stage and at startup, and in the ledger-disagrees and ledger-agrees
+branches that quote them. Before, each clause described its ground in words, so the names the
+sweep above counted were on no line a run printed, and the bare word `inert` appeared only in the
+UNREACHABLE boilerplate. The verdict and the classification are unchanged, and (a)/(b) is still the
+owner's (register O19). Known answer: `tests/test_tok_dom_cap.py` C2, one configuration per ground,
+which also pins the closed set (a seventh ground fails it).
 
 ### Q-DERIVE-1 — re-type `derive.pin_tick` from `Steps` to `Windows`? — **RESOLVED 2026-08-30, repair (a) adopted**
 
@@ -2582,6 +2605,33 @@ lowers `merge_dist`, which is what that lever is for); the Adam moments on `A[a]
 after an in-place write, as they already do for `rescue`; and the *better* gate — output-space
 redundancy from `FAB.contribution` — is unavailable because that entry point is deferred for want of
 `candidates` and `baseline_logits_fn`. If it is ever un-deferred, revisit this.
+
+**2026-09-27 (register LOW-FAB-MERGED-REPORT, Proposal 05 §8 1.6): one merge gate per scope.**
+`fabric/api.py::_three_state` renders a gate's count from the ledger key of the gate's own name, and
+the per-pass verdict was named `fab.merged` — the name of the RUN-total counter — so the report
+paired the ledger's total with the last pass's verdict. On the register's I10 configuration (seed 3,
+`FAB_GRACE=1`, `FAB_MANAGE_EVERY=25`, 300 windows, run.py's defaults) it printed `fab.merged 4`
+beside `gate:fab.merged ('armed-but-zero', 4, '0 vs 0.1 -- 476 expert(s) were past grace at entry
+and no pair with a past-grace member sat within FAB_MERGE_DIST=0.1 cosine; ...')`. **Ruling: a gate
+named like a ledger counter takes that counter's scope.** `gate:fab.merged` is now the **run-scope**
+verdict — lineage, since FAB's ledger crosses a resume — FIRED iff the ledger's `fab.merged` is
+positive, with that total as its count, UNREACHABLE only when nothing merged and no pass in the
+ledger had a past-grace expert at entry with merging on (a new counter, `fab.merge_armed_passes`,
+counts those passes), and armed-but-zero otherwise; its reason quotes the residual quantiles of the
+last pass that merged and the cumulative `fab.merge_declined_grace`. The per-pass verdict, its
+fields and its reasons move unchanged to **`gate:fab.merged_last_pass`**, whose count is a new gauge
+of the same name written on every pass. `ManageReport` is unchanged. A checkpoint written before
+this build carries no `fab.merge_armed_passes`, so its passes read as unarmed in the run gate's
+reason (a merge it recorded still fires the gate). **After**, on the same
+configuration: `gate:fab.merged ('fired', 4, '4 vs 0.1')` and `gate:fab.merged_last_pass
+('armed-but-zero', 0, ...)`, with `fab.merge_armed_passes 11` of 11 passes, and the loss curve
+byte-identical to the unfixed tree's (reporting only). The register's expected "2 fired" predates
+this tree; the known answers pin the structure, not the count: `tests/test_fabric_internals.py` I13
+(a pass that merges one pair and one that merges none; nothing past grace; `FAB_MERGE_DIST=0`) and
+`tests/test_fabric_forward.py` W8 (the I10 configuration). Left alone, because no run-scope counter
+shares their names and the ruling does not reach them: `gate:fab.cull_gate`,
+`gate:fabric.cull_eligible`, `gate:fab.growth_armed` and `gate:fab.lr_own` still print a count
+nothing counts beside a verdict (for example `('fired', 0, ...)`).
 
 ### Q-FAB-5 — splitting `use` from `uage` re-denominates `grace` — **RESOLVED 2026-09-02: SPLIT AS SPECIFIED, `grace` STAYS AT 48, AND THE RETUNE BECOMES A MEASUREMENT**
 The split is required — without it, eligibility and the cull's ranking key are the same number (H12)
@@ -3974,7 +4024,7 @@ field on GrowReport and one root join"*). Naming it in one place is what stops i
 differently. **What is still open and is NOT this question's to close:** `CAP.observe` stays deferred
 for `improving` and `observations`, and the root join itself is unwritten.
 
-### Q-CKPT-2 — what does the SAVE side write for the geometry gate, and who emits FAB's sidecar? — **FIRST HALF RESOLVED 2026-08-30; RESIDUE (1) RESOLVED 2026-09-22 — BOTH SIDECARS HAD A PRODUCER ALL ALONG. (2) STANDS.**
+### Q-CKPT-2 — what does the SAVE side write for the geometry gate, and who emits FAB's sidecar? — **FIRST HALF RESOLVED 2026-08-30; RESIDUE (1) RESOLVED 2026-09-22 — BOTH SIDECARS HAD A PRODUCER ALL ALONG. (2) RULED 2026-09-27: THE ROW-LEVEL REFUSAL STAYS, AND IS TESTED.**
 
 **The first half was already answered in the tree, by the declaration a check reads.**
 `ROW_ARGUMENTS_ELSEWHERE["CKPT.save"]` says `geometry` **is** `_geometry_manifest(sysm)` — the same
@@ -4030,10 +4080,22 @@ and 20 in three live statements at once. Run `_geometry_manifest`.
    cannot join the manifest — `_geometry_manifest` is computed before any package is built, which is
    the point of it. It is re-refused by `WORLD.load_into` (M43) at its own row, and whether that is
    sufficient is the remaining question.
+   **RULED 2026-09-27 (register CONTRACT-Q-CKPT-2-R2, Proposal 05 §8 1.6): it is.** No gate check
+   is added — the manifest is computed before any build, by design. Under Q-WORLD-8 (b) the
+   allocated population is `WORLD_NMAX` and `world.nmax` is `EXACT` at the gate, so a lever-driven
+   mismatch is refused **first by the gate**, by name (`WORLD_NMAX: the checkpoint was written at
+   world.nmax=6 and this run resolves 4` — or 8). M43 is the backstop for a blob whose population
+   disagrees with its own recorded extent, and nothing in `tests/` drove it until
+   `tests/test_world.py` W4: a 6-predictor blob into `WORLD.load_into` at `WORLD_NMAX=4` and 8 is
+   refused (`WORLD_NMAX: ...` and `WORLD_N0/WORLD_NMAX: ...`) with no live tensor moved; through
+   `compose`, both lever directions are refused at the gate; a snapshot whose WORLD tensors are cut
+   to 4 rows or padded to 8 (its recorded `world.n` edited to match) passes the gate and is refused
+   by M43 before any System returns; and afterwards the parent's files hash identically, nothing new
+   is on disk and no child `CKPT_DIR` exists. No source changed.
 
 **For the owner:** (1) needed no decision in the end — the tree answered it, and nothing frozen
-moved. (2) needs no decision unless you want the grown counts checked at the gate rather than at the
-row.
+moved. (2) is ruled (register CONTRACT-Q-CKPT-2-R2): the grown counts stay checked at the row, and
+the row is now tested.
 
 ### Q-EVAL-10 — `EVAL.coherence` takes a `sample` and its docstring says it draws its own — **RESOLVED 2026-09-02: A FROZEN SIGNATURE MOVES**
 `coherence(ev, *, logits_fn, sample, rng)`, while `eval/api.py:162-168` says it runs "over its OWN
@@ -4784,6 +4846,24 @@ guard's own message refused); a zero-size pool at `FAB_ON=0` (every consumer of 
 turning one crash into several); skipping `FAB.observe` on those arms (it would turn its
 `fab.observe_unrouted` reading into an absence).
 
+**2026-09-27 (register LOW-FAB_NORM_ONLY-GROWS, Proposal 05 §8 1.6): `FAB_NORM_ONLY=1` grows, culls
+and merges nothing.** `FAB.manage` and `FAB.grow_check` tested `fab.on` alone, so the control arm —
+whose forward reads no expert — kept selecting over experts nothing computes: at `FAB_N0=256
+FAB_SLOTS=512 FAB_GRACE=1 FAB_MANAGE_EVERY=25` (`DATA_STREAM_BYTES=60000 SIG_WARMUP=20`) a
+100-window run grew expert 257 at window 81 (`fab.grown_regression 1`) and ran three manage passes,
+with `gate:fab.cull_gate` FIRED and the cull counters present-and-0. **Ruling, on this entry's own
+precedent:** both entry points **return before seeding** on that arm, as at `FAB_ON=0`, so the
+manage and grow families are ABSENT; the build gates `fab.growth_armed`, `fab.cull_gate` and
+`fab.depth_advance` read UNREACHABLE naming `FAB_NORM_ONLY=1` (the default arm's lines are
+byte-identical); a resume re-renders none of them (`_refresh_build_predictions` returns on that
+arm); and `fab.births` / `fab.rescued` are ABSENT by clause (3)'s rule. The experts stay in the
+optimizer and the checkpoint — the arm's point is unchanged, and `FAB.own_lr_scale`, which the ruling
+does not name, is left as it was. **After**, on the same configuration: 256 live, no birth, the
+family ABSENT, and the loss curve **identical** to the unfixed tree's for all 100 windows (the
+norm-only forward reads no expert, and at 256 or 257 live its normalization depth is `hops` either
+way). Known answers: `tests/test_fabric_internals.py` I12 (unit: the same inputs merge one pair and
+grow one expert at `FAB_NORM_ONLY=0`, and nothing at 1) and `tests/test_fabric_forward.py` W7.
+
 ### Q-CKPT-4 — the root discarded both restore verdicts, and three pieces of state did not cross a resume — **RESOLVED 2026-09-24: A REFUSED LM OR OPT RESTORE IS A NAMED REFUSAL THAT STOPS THE RUN; `loop.run` REFUSES A SYSTEM CARRYING ONE; THE LM COUNTERS, MEM's GENERATOR, DOM's STREAM AND `token_seen` NOW CROSS. NO SIGNATURE MOVES**
 `LM.load_state` and `OPT.load_state` refuse by **returning** a `LoadReport(refused=True, reason=…)`,
 and `compose` called both as bare statements. Driven on a 160-window parent: a child at
@@ -4829,6 +4909,47 @@ refuses any difference — the gate let a wider `WORLD_NMAX` through to die afte
 built. `CKPT_RESUME`'s three documented spellings (`runs/x`, `runs/x/`, `runs/x/ckpt.pt`) and a
 trailing-slash `CKPT_DIR` share one string rule, `derive.checkpoint_base`, with `resume_source`; only
 the bare form resumed before (tests/test_couplings.py C5 pins all of them).
+
+**2026-09-27 (register LOW-RESUME-SAVED-COUNTERS, Proposal 05 §8 1.6): one semantics for the save
+counters.** After a resume the packages disagreed about how many saves there had been: a parent that
+saved k = 3 times and a child that saved j = 2 times before its report (a 60-window parent and a
+40-window child at `CKPT_EVERY=20`, `DATA_STREAM_BYTES=60000 SIG_WARMUP=20 FAB_N0=256
+FAB_SLOTS=512`) read **k − 1 + j = 4** on
+`lm.ckpt.saved`, `sig.state_written`, `fab.state_written`, `world.state_written`,
+`store.n_state_dicts`, `tok.state_written` and `tok.vocab_saved` (each copied its ledger into the
+payload before counting the save), **k + j = 5** on `opt.ckpt.saved` (bumped first), and **j = 2** on
+`part.n_state_dicts` and `cap.state_written` (their ledgers do not travel). **Ruling:** each package's
+save counter is **lineage-cumulative and counts the save that writes it** — bumped before the ledger
+is copied, as `opt.ckpt.saved` always was — and beside it sits a **process-local twin**, the same
+name with `_here`, which no restore touches: `lm.ckpt.saved`, `opt.ckpt.saved`, `sig.state_written`,
+`fab.state_written`, `world.state_written`, `store.n_state_dicts`, `part.n_state_dicts`,
+`cap.state_written`, `tok.state_written`, `tok.vocab_saved` and `data.state_written`, each with its
+`_here`. The names are the packages' own (renaming to `*.ckpt.saved` would drop report names a
+fixture reads); the register's `*` names the role. **DOM's and CAP's ledgers still do not travel** —
+each is the record of what this open or this build resolved — so each payload carries this one count
+(`payload['DOM']['n_state_dicts']`, `payload['CAP']['state_written']`), put back by
+`DOM.open_partition` and `CAP.restore`. **TOK's vocabulary file is written after its blob**
+(`spine/loop.py::_save`), so a blob's `tok.vocab_saved` is always one file short; the file is the
+record that knows itself, so `TOK.save_vocabulary` writes its **ordinal in the lineage** into the
+file (key `vocab_saved`), `build_vocabulary`'s replay puts it on the ledger, and `TOK.restore_vocab`
+keeps it over the blob's count — so a blob from the lineage's first save, which carries no count at
+all, restores 1. A file older than the key, or a resume at `TOK_MODE=bytes` (which reads no file),
+leaves the blob's count standing, one short. The file gains one key and older trees ignore it.
+**The R stage precedes the final save**, so a report shows (k + j, j) with j the saves before R,
+and the final blob holds exactly one more than the report on these keys — `tok.vocab_saved`
+excepted, for the reason above. That is a deliberate exception to
+the R row's *"the checkpointed counter vectors are the ones the report printed"*: a blob that did not
+count itself would restore one save short. **Measured after**, same configuration: (5, 2) on all ten
+report rows, the child's final blob 6 on every save count it carries (`data.state_written_here` 3,
+`tok.vocab_saved` 5), and a grandchild resumed from it restores 6, `tok.vocab_saved` included, with no
+twin crossing. **Older checkpoints** resume unchanged and read one short on LM, SIG, FAB, WORLD, MEM,
+TOK and DATA (their blobs never counted themselves); DOM and CAP start from this process's saves;
+OPT is exact. Nothing corrects them, because nothing in an old blob says which tree wrote it.
+Three neighbours that are **not** this pair: `opt.encoder_steps_here` is an older and different
+"here" (the package, Q-OPT-6); LM's tally is process-global (`lm/api.py::_COUNTS`), so an in-process
+test clears it for each System that stands for its own process; and CKPT's own per-route record and
+the loop's `CKPT.save: N checkpoint(s) written by this process` line count this process. Known answer:
+`tests/test_continuation.py` S10. In §2, DATA's and TOK's counter lists name the twins.
 
 ### Q-OPT-8 — a MAY_WIDEN resume dropped every AdamW moment — **RESOLVED 2026-09-24: A DIM-0 WIDENING IS RESTORED WITH ZERO-PADDED MOMENTS; EVERY OTHER SHAPE CHANGE IS STILL REFUSED**
 The geometry gate admits `fab.slots`, `fab.cap` and `lm.vocab_slots` widening, `LM.load_state` and

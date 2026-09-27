@@ -1269,6 +1269,12 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
                f"setpoint is {_occ!r} -- which falls on the other side of that setpoint from the "
                f"digits shown."
                if (_occ >= _press) != (_occ_shown >= _press) else "")
+    # FAB_NORM_ONLY=1 JOINS FAB_ON=0 ON THE THREE LINES BELOW THAT PREDICT SELECTION AND GROWTH
+    # (2026-09-27, register LOW-FAB_NORM_ONLY-GROWS). FAB.manage and FAB.grow_check now return
+    # before acting on that arm, so a build line predicting a first cull, a first depth advance or
+    # an armed growth leg would contradict the family the report then prints ABSENT. `selects` is
+    # the one predicate; the default arm's three lines are unchanged.
+    selects = on and not norm_only
     pop.gates = (
         Gate("fab.on", on, on, True,
              reason="" if on else "FAB_ON=0: the forward is the identity, so every gate below this "
@@ -1279,12 +1285,16 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
                      f"window(s)), so no cull was evaluated. PREDICTION at build: the founding "
                      f"population would {'OPEN' if cull_open else 'SHUT'} this gate.{_caveat} The "
                      f"first manage pass replaces this line with the verdict it evaluated."))
-        if on else
+        if selects else
         Gate("fab.cull_gate", False,
              f"{n0}/{max(1, slots)}={n0 / max(1, slots):.3f}", float(fab.pressure), reachable=False,
              reason="FAB_ON=0: there is no population to cull. The occupancy arithmetic still "
                     "evaluates, and printing it as FIRED would claim a mechanism ran that the "
-                    "switch above had already turned off."),
+                    "switch above had already turned off."
+                    if not on else
+                    "FAB_NORM_ONLY=1: the control arm's forward reads no expert, so FAB.manage "
+                    "returns before any selection pass and nothing is ever culled. The occupancy "
+                    "arithmetic still evaluates; no pass will replace this line."),
         # THE TWO ARMS THAT ARE DECIDED HERE AND SPENT SOMEWHERE ELSE. Both belong at build for the
         # reason the three control-arm counters above do: the answer is a frozen lever, it is
         # settled before any window runs, and the entry point that acts on it may never be CALLED --
@@ -1298,11 +1308,16 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
         # that arm, and fabric/api.py::grow_check -- which never read fab.on -- then grew expert
         # 2049 into a fabric whose forward is the identity (measured: n_live 2048 -> 2049 on a
         # 400-loss probe with one jump). grow_check now returns before acting on that arm.
-        Gate("fab.growth_armed", grow and on, value=f"FAB_GROW={grow}", threshold="FAB_GROW=True",
-             reachable=on,
+        Gate("fab.growth_armed", grow and selects, value=f"FAB_GROW={grow}",
+             threshold="FAB_GROW=True", reachable=selects,
              reason="FAB_ON=0: there is no fabric in the forward to grow into, so neither growth "
                     "leg is evaluated and FAB.grow_check returns before its counters are seeded."
-                    if not on else "" if grow else
+                    if not on else
+                    "FAB_NORM_ONLY=1: the control arm's forward reads no expert, so neither growth "
+                    "leg is evaluated and FAB.grow_check returns before its counters are seeded -- "
+                    "the population stays as built or restored, in the optimizer and the "
+                    "checkpoint."
+                    if norm_only else "" if grow else
                     f"FAB_GROW={grow}: the population is FROZEN at FAB_N0={n0}. Both growth legs "
                     f"are off -- no regression burst and no stall birth -- while culling, routing "
                     f"and selection all still run, which is what makes this the arm that isolates "
@@ -1323,10 +1338,13 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
         (_depth_gate(pop, depth0=int(fab.depth0), hops=int(fab.hops),
                      patience=int(fab.depth_patience), stage_max=int(fab.depth_stage_max),
                      manage_every=int(fab.manage_every))
-         if on else
+         if selects else
          Gate("fab.depth_advance", False, f"depth {depth_now}", f"FAB_HOPS={int(fab.hops)}",
               reachable=False,
               reason="FAB_ON=0: no selection pass runs on a switched-off fabric, so the staged-"
+                     "depth curriculum it carries never checks"
+                     if not on else
+                     "FAB_NORM_ONLY=1: no selection pass runs on the control arm, so the staged-"
                      "depth curriculum it carries never checks")),
     )
     # THE WIRE IS READ AND COMPARED, not merely touched: d_operating_population is the same
@@ -2322,11 +2340,14 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     hops, depth0 = int(fab.hops), int(fab.depth0)
     if norm_only:
         # THE CONTROL ARM. It keeps the normalization and removes nodes and routing, which is what
-        # separates it from FAB_ON=0: the population is still in the optimizer and still grows,
-        # culls and is checkpointed -- so a run on this arm answers "what did the EXPERTS buy"
-        # rather than "what did the whole package buy", and the two questions have different
-        # answers. At FAB_ON=0 the pool is still ALLOCATED and checkpointed (Q-FAB-11) but hands OPT
-        # no parameter and grow_check/manage/own_lr_scale return before acting.
+        # separates it from FAB_ON=0: the population is still in the optimizer and is checkpointed
+        # -- so a run on this arm answers "what did the EXPERTS buy" rather than "what did the
+        # whole package buy", and the two questions have different answers. It no longer grows,
+        # culls or merges (2026-09-27, register LOW-FAB_NORM_ONLY-GROWS): grow_check and manage
+        # return before acting, as at FAB_ON=0, because selection over experts this forward never
+        # reads leaks into the measurement. At FAB_ON=0 the pool is still ALLOCATED and
+        # checkpointed (Q-FAB-11) but hands OPT no parameter and grow_check/manage/own_lr_scale
+        # return before acting.
         out = h
         for _ in range(max(1, min(hops, 2 + int(pop.n_live) // 2))):
             out = pop.modules["norm"](out)
@@ -3536,11 +3557,18 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
     12,288)". This CANNOT ride derive.cadences_that_cannot_fire: that audit refuses anything that
     is not units.Windows and `grace` is units.Selections, so the reachability statement is
     FAB-owned by construction. C11 cannot see this family and whoever answers C11 must be told.
-    `fab.merged` takes the identical treatment for the identical reason (step 0).
+    `fab.merged_last_pass` takes the identical treatment for the identical reason (step 0), and
+    `fab.merged` is its RUN-scope twin since 2026-09-27 (register LOW-FAB-MERGED-REPORT):
+    _three_state prints a gate's count from the ledger key of the gate's own name, so each verdict
+    carries its own scope's count -- the ledger total beside the run verdict (UNREACHABLE only when
+    no pass in the ledger was armed), this pass's merges beside this pass's verdict.
+
+    FAB_ON=0 AND FAB_NORM_ONLY=1 RETURN BEFORE ANY OF THIS (Q-FAB-11): neither arm's forward reads
+    an expert, so the whole family below is ABSENT there and the build gates say why.
 
     LEVERS READ: grace, cull_frac, pressure, slots, comp_protect, err_fast, err_slow,
                  shift_tol, fail_tol, rescue, mut_big, manage_every, depth0, depth_eps,
-                 depth_patience, depth_stage_max, hops, merge_dist, on
+                 depth_patience, depth_stage_max, hops, merge_dist, on, norm_only
     WIRES READ: d_manage_period (recorded on the report beside manage_every, so the WINDOW cadence
                 this function is called on and the FLUSH cadence `contribution` is called on are
                 visible side by side and a cadence that never coincides reads as a zero rather than
@@ -3561,7 +3589,12 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
                  fab.merged / fab.merge_residual_p50 / fab.merge_residual_p99 /
                  fab.merge_declined_grace / fab.merge_declined_residual (step 0: "no pair was close
                  enough", "no expert was past grace" and "the residual refused every pair" are
-                 THREE different outcomes and one number cannot carry them)
+                 THREE different outcomes and one number cannot carry them),
+                 fab.merged_last_pass (a gauge, this pass's merges, written on every pass),
+                 fab.merge_armed_passes (the passes whose per-pass merge gate was reachable: a
+                 past-grace expert at entry and FAB_MERGE_DIST > 0), and the two merge gates --
+                 fab.merged_last_pass (this pass's verdict) and fab.merged (the ledger's, over
+                 fab.merged and fab.merge_armed_passes)
     """
     fab = fab.owned_by("FAB")
     period = fab.d_manage_period     # WIRE READ HERE -- both cadences reported side by side
@@ -3589,12 +3622,24 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
     if not bool(fab.on):
         return ManageReport(manage_every=manage_every, manage_period_flushes=period,
                             cull_gate="FAB_ON=0: no selection pass runs on a switched-off fabric")
+    # FAB_NORM_ONLY=1 RETURNS AT THE SAME PLACE AND FOR THE SAME REASON (2026-09-27, register
+    # LOW-FAB_NORM_ONLY-GROWS). The control arm's forward reads no expert, so a cull, a merge or a
+    # depth advance here acts on a population nothing computes -- the arm exists to measure what
+    # the EXPERTS buy, and a population that changes under it is a leak into that measurement. This
+    # body tested fab.on alone, so the arm merged and culled (measured: one merge on the unit
+    # population tests/test_fabric_internals.py I12 builds). The experts stay in the optimizer and
+    # the checkpoint; only selection stops.
+    if bool(fab.norm_only):
+        return ManageReport(manage_every=manage_every, manage_period_flushes=period,
+                            cull_gate="FAB_NORM_ONLY=1: no selection pass runs on the control arm, "
+                                      "whose forward reads no expert")
 
     # SEEDED BEFORE ANY BRANCH DECIDES -- the rule fabric/api.py::_bump states and that this
     # package's own sig sibling broke for a whole run. Every one of these is reachable on some arm.
     for _k in ("fab.manage_passes", "fab.cull_fail", "fab.cull_util", "fab.spared_contrib",
                "fab.spared_comp", "fab.spared_shift", "fab.rescued", "fab.deepened",
-               "fab.merged", "fab.merge_declined_grace", "fab.merge_declined_residual"):
+               "fab.merged", "fab.merge_declined_grace", "fab.merge_declined_residual",
+               "fab.merge_armed_passes"):
         counters.setdefault(_k, 0)
     _bump(counters, "fab.manage_passes")
     counters["fab.manage_period_flushes"] = int(period)
@@ -3665,6 +3710,15 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
         counters["fab.merge_residual_p99"] = rs[min(len(rs) - 1, int(0.99 * len(rs)))]
     if declined_grace:
         _bump(counters, "fab.merge_declined_grace", declined_grace)
+    # TWO SCOPES, TWO KEYS (2026-09-27, register LOW-FAB-MERGED-REPORT). fab.merged above is the
+    # LEDGER's total -- lineage, since FAB's ledger crosses a resume -- and this pass's own count is
+    # the gauge fab.merged_last_pass, written on every pass so a pass that merged nothing reads 0.
+    # fab.merge_armed_passes counts the passes on which the per-pass gate below was reachable (a
+    # past-grace expert at entry, merging on), which is the memory the run-scope gate needs to say
+    # 'armed' rather than 'unreachable' after a later pass saw nothing past grace.
+    counters["fab.merged_last_pass"] = merged
+    if merge_dist > 0.0 and n_elig_entry > 0:
+        _bump(counters, "fab.merge_armed_passes")
 
     # ---- 1. FAILURE CULL, AT ANY OCCUPANCY ------------------------------------------------------
     # THE GOAL-B PROTECTION AND THE ONLY CULL PATH THAT STILL RUNS ON A SMALL OR SHRINKING
@@ -3860,9 +3914,16 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
                   f"load-bearing"
                   if fail_base is not None else
                   "no failure cull: comp_glob is None, so no window has been attributed yet")
+    # THE MERGE'S RUN-SCOPE READING, off the ledger alone (2026-09-27, register
+    # LOW-FAB-MERGED-REPORT); see the two Gates at the end of this tuple.
+    _run_merged = int(counters.get("fab.merged", 0))
+    _armed_passes = int(counters.get("fab.merge_armed_passes", 0))
+    _passes = int(counters.get("fab.manage_passes", 0))
+    _declined_run = int(counters.get("fab.merge_declined_grace", 0))
+    _run_merge_reach = _run_merged > 0 or (merge_dist > 0.0 and _armed_passes > 0)
     _gates = tuple(g for g in pop.gates
-                   if g.name not in ("fabric.cull_eligible", "fab.merged", "fab.cull_gate",
-                                     "fab.depth_advance"))
+                   if g.name not in ("fabric.cull_eligible", "fab.merged", "fab.merged_last_pass",
+                                     "fab.cull_gate", "fab.depth_advance"))
     pop.gates = _gates + (_depth_gate(pop, depth0=depth0, hops=hops, patience=depth_patience,
                                       stage_max=depth_stage_max, manage_every=manage_every,
                                       step_n=step_n, flush_loss_seen=flush_loss is not None),) + (
@@ -3886,10 +3947,19 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
         # verdict compares, as build's prediction does, and the reason carries the floor.
         Gate("fab.cull_gate", gate_open,
              f"{n_live}/{max(1, slots)}={n_live / max(1, slots):.3f}", pressure, reason=gate_str),
-        Gate("fab.merged", merged > 0, merged, merge_dist,
+        # ONE GATE PER SCOPE, AND EACH GATE'S NAME IS ITS COUNTER'S (2026-09-27, register
+        # LOW-FAB-MERGED-REPORT). fabric/api.py::_three_state renders a build or manage gate's count
+        # by looking ITS NAME up in the ledger, so a gate that shares a ledger counter's name prints
+        # that counter beside its verdict -- and the verdict must then be of the counter's scope.
+        # The per-pass verdict was named fab.merged and so printed the RUN total beside the LAST
+        # pass's reading: the I10 config (seed 3, FAB_GRACE=1, FAB_MANAGE_EVERY=25, 300 windows)
+        # printed ('armed-but-zero', 4, '... no pair ... sat within ...'). The per-pass verdict, its
+        # fields and its reasons move unchanged to fab.merged_last_pass, whose gauge is written
+        # above; fab.merged is now the RUN-scope verdict over the same ledger total it prints.
+        Gate("fab.merged_last_pass", merged > 0, merged, merge_dist,
              reachable=n_elig_entry > 0 and merge_dist > 0.0,
-             reason=(f"{merged} pair(s) consolidated within FAB_MERGE_DIST={merge_dist} cosine; "
-                     f"residual p50/p99 "
+             reason=(f"{merged} pair(s) consolidated on this pass within FAB_MERGE_DIST="
+                     f"{merge_dist} cosine; residual p50/p99 "
                      f"{counters.get('fab.merge_residual_p50', 0.0):.4f}/"
                      f"{counters.get('fab.merge_residual_p99', 0.0):.4f}"
                      if merged else
@@ -3899,12 +3969,38 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
                      # the reason used to fall through to the 'unreachable' text below, so the
                      # report printed ('armed-but-zero', ..., 'unreachable ...') on one line.
                      f"{n_elig_entry} expert(s) were past grace at entry and no pair with a "
-                     f"past-grace member sat within FAB_MERGE_DIST={merge_dist} cosine; "
-                     f"{declined_grace} close pair(s) declined because the absorbed one was inside "
-                     f"grace"
+                     f"past-grace member sat within FAB_MERGE_DIST={merge_dist} cosine on this "
+                     f"pass; {declined_grace} close pair(s) declined because the absorbed one was "
+                     f"inside grace"
                      if n_elig_entry else
                      f"unreachable ({_reach}): the absorbed expert must be past grace and no "
-                     f"expert is. {declined_grace} pair(s) were close enough and declined for it")))
+                     f"expert is. {declined_grace} pair(s) were close enough and declined for it")),
+        # THE RUN-SCOPE VERDICT. FIRED once the ledger holds a merge; UNREACHABLE only when no pass
+        # in the ledger was armed (and nothing merged), quoting this pass's arithmetic as the state
+        # now; armed-but-zero otherwise. The residual quantiles are the LAST MERGING pass's -- the
+        # two keys are overwritten per merging pass -- and the declined count is cumulative.
+        Gate("fab.merged", _run_merged > 0, _run_merged, merge_dist,
+             reachable=_run_merge_reach,
+             reason=(f"{_run_merged} pair(s) consolidated over the ledger's {_passes} manage "
+                     f"pass(es), {_armed_passes} of them with a past-grace expert at entry and "
+                     f"merging on; residual p50/p99 "
+                     f"{counters.get('fab.merge_residual_p50', 0.0):.4f}/"
+                     f"{counters.get('fab.merge_residual_p99', 0.0):.4f} on the last pass that "
+                     f"merged; {_declined_run} close pair(s) declined over the ledger because the "
+                     f"absorbed one was inside grace"
+                     if _run_merged else
+                     f"FAB_MERGE_DIST={merge_dist} is 0: merging is off by configuration, and "
+                     f"nothing merged earlier in the ledger"
+                     if merge_dist <= 0.0 else
+                     f"{_armed_passes} of the ledger's {_passes} manage pass(es) had a past-grace "
+                     f"expert at entry and on none of them did a pair with a past-grace member sit "
+                     f"within FAB_MERGE_DIST={merge_dist} cosine; {_declined_run} close pair(s) "
+                     f"declined over the ledger because the absorbed one was inside grace"
+                     if _run_merge_reach else
+                     f"unreachable: on none of the ledger's {_passes} manage pass(es) was an "
+                     f"expert past grace at entry, and the absorbed expert must be (now: "
+                     f"{_reach}). {_declined_run} pair(s) over the ledger were close enough and "
+                     f"declined for it")))
 
     return ManageReport(
         merged=merged, merge_declined_grace=declined_grace,
@@ -4203,7 +4299,8 @@ def grow_check(fab: Config, pop, *, flush_loss, step_windows, soft_cap, memory_p
 
     LEVERS READ: grow, burst, z, plateau, warmup, cooldown, recover_min, recover_max, new_frac,
                  replicate, parent_k, parent_max, birth_win, mut, mut_big, mut_big_p, xover,
-                 birth_jitter, grow_on_mem_pressure, spawn, slots, n0, on
+                 birth_jitter, grow_on_mem_pressure, spawn, slots, n0, on, norm_only (both
+                 return before the seeding, Q-FAB-11)
     WIRES READ: d_cap_lift_period (reported beside the decline counters, so "0 lifts" is
                 distinguishable from "the valve's period is longer than the run" -- round6 measured
                 0 vocabulary lifts and it was a clock-unit fault, not the plateau condition.
@@ -4302,6 +4399,16 @@ def grow_check(fab: Config, pop, *, flush_loss, step_windows, soft_cap, memory_p
                                       threshold="FAB_ON=1", reachable=False,
                                       reason="FAB_ON=0: nothing is grown into a fabric that is "
                                              "not in the forward."),))
+    # AND FAB_NORM_ONLY=1, ON THE SAME PRECEDENT (2026-09-27, register LOW-FAB_NORM_ONLY-GROWS).
+    # This body tested fab.on alone, so the control arm grew: measured, expert 257 born at window 81
+    # of a 100-window FAB_N0=256 run whose forward never read an expert -- growth in a node-less arm
+    # is a leak into the measurement the arm exists for. The family stays ABSENT and the build gate
+    # fab.growth_armed says why; spawn is forward's door and that forward returns before it.
+    if bool(fab.norm_only):
+        return GrowReport(gates=(Gate("fab.grow_check", False, value="FAB_NORM_ONLY=1",
+                                      threshold="FAB_NORM_ONLY=0", reachable=False,
+                                      reason="FAB_NORM_ONLY=1: nothing is grown into the control "
+                                             "arm, whose forward reads no expert."),))
 
     # SEEDED BEFORE ANY BRANCH DECIDES, so ABSENT never masquerades as ZERO. SIG shipped a counter
     # that was missing rather than 0 for a whole run at the one configuration the tree ships,
@@ -4945,8 +5052,10 @@ def counters(fab: Config, pop):
     # BIRTHS AND RESCUES ARE THE MANAGE/GROW FAMILY'S, AND AT FAB_ON=0 THAT FAMILY IS ABSENT
     # (Q-FAB-11 (3)). These two were read off Population state on every arm, so the off arm printed
     # fab.births 0 and fab.rescued 0 -- G4's "armed, did not fire" -- beside gate fab.growth_armed
-    # UNREACHABLE and manage returning before it seeds. On the off arm they are left out.
-    if pop.on:
+    # UNREACHABLE and manage returning before it seeds. On the off arm they are left out, and on
+    # the FAB_NORM_ONLY=1 arm too (2026-09-27), where grow_check and manage return at the same
+    # place.
+    if pop.on and not bool(fab.norm_only):
         out["fab.births"] = int(pop.births)
         out["fab.rescued"] = int(pop.rescued)
     return out
@@ -5065,9 +5174,15 @@ def state_dict(fab: Config, pop):
 
     LEVERS READ: none
     WIRES READ: none
-    DID IT FIRE: fab.state_written
+    DID IT FIRE: fab.state_written (LINEAGE, and it counts the save that writes it),
+                 fab.state_written_here (THIS PROCESS's; load_state_dict never restores it)
     """
     fab = fab.owned_by("FAB")
+    # BUMPED BEFORE THE LEDGER IS COPIED, SO A BLOB COUNTS ITSELF, with a process twin the restore
+    # skips (2026-09-27, register LOW-RESUME-SAVED-COUNTERS; lm/api.py::state_dict says what the
+    # old order cost).
+    _bump(pop.counters, "fab.state_written")
+    _bump(pop.counters, "fab.state_written_here")
     def _t(x):
         return None if x is None else x.detach().cpu().clone()
     out = {
@@ -5123,7 +5238,6 @@ def state_dict(fab: Config, pop):
         # either until then.
         "sidecar": _sidecar_of(pop),
     }
-    pop.counters["fab.state_written"] = pop.counters.get("fab.state_written", 0) + 1
     return out
 
 
@@ -5153,7 +5267,8 @@ def load_state_dict(fab: Config, pop, sd, *, sidecar):
 
     LEVERS READ: slots, n0, rank, dk, emb_hid (compared against the sidecar); pressure,
                  manage_every, depth0, hops, depth_patience, depth_stage_max (to re-render the two
-                 build-time prediction gates from the restored population)
+                 build-time prediction gates from the restored population); norm_only (the arm on
+                 which no pass runs and nothing is re-rendered)
     WIRES READ: none
     DID IT FIRE: fab.resume_widened, fab.resume_refused; gates fab.cull_gate and
                  fab.depth_advance re-rendered as RESTORED predictions
@@ -5243,7 +5358,10 @@ def load_state_dict(fab: Config, pop, sd, *, sidecar):
     if sd.get("row_events"):
         pop.row_events = [tuple(e) for e in sd["row_events"]]
     if sd.get("counters"):
-        pop.counters.update(sd["counters"])
+        # EVERY KEY BUT THE SAVE COUNT'S PROCESS TWIN (2026-09-27, register
+        # LOW-RESUME-SAVED-COUNTERS): the parent's saves are not this process's.
+        pop.counters.update({k: v for k, v in sd["counters"].items()
+                             if k != "fab.state_written_here"})
     if sd.get("rng") and getattr(pop, "rng", None) is not None:
         state, draws = sd["rng"]
         pop.rng._r.setstate(state)
@@ -5261,9 +5379,11 @@ def _refresh_build_predictions(fab, pop):
     manage pass -- up to FAB_MANAGE_EVERY windows -- the report printed the founding occupancy
     (2048/4096) and a depth stage counted from zero beside a restored depth_now, fab.deepened and
     depth_seen that said otherwise (driven: parent depth_now 3, deepened 2; restored report "cannot
-    deepen past 1"). Only an ON population carries these predictions; the FAB_ON=0 lines stand.
+    deepen past 1"). Only an ON population carries these predictions; the FAB_ON=0 lines stand,
+    and so do the FAB_NORM_ONLY=1 lines (2026-09-27): no manage pass runs on that arm, so there is
+    no first pass to predict and build's UNREACHABLE reading is still the true one.
     """
-    if not pop.on:
+    if not pop.on or bool(fab.norm_only):
         return
     n, slots, press = int(pop.n_live), max(1, int(pop.cap)), float(fab.pressure)
     opens = _derive.cull_gate_open(n, slots, press)

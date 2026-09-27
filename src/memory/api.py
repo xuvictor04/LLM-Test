@@ -490,7 +490,10 @@ def open_store(mem: Config, *, key_dim, vocab_slots, device, rng, lm_kind, resto
         # none, and the store keeps the freshly seeded stream -- the pre-2026-09-24 behaviour.
         if restored.get("gen") is not None:
             store.gen.set_state(torch.as_tensor(restored["gen"], dtype=torch.uint8).cpu())
-        _seeded = set(store.counters)
+        # store.n_state_dicts_here IS SKIPPED TOO (2026-09-27, register LOW-RESUME-SAVED-COUNTERS):
+        # the process twin of the lineage count store.n_state_dicts, and the parent's saves are not
+        # this process's.
+        _seeded = set(store.counters) | {"store.n_state_dicts_here"}
         for _k, _v in dict(restored.get("counters") or {}).items():
             if _k in _seeded:
                 continue
@@ -2964,9 +2967,16 @@ def state_dict(mem: Config, store):
 
     LEVERS READ: none (a pure read of `store`)
     WIRES READ: none
-    DID IT FIRE: store.n_state_dicts
+    DID IT FIRE: store.n_state_dicts (LINEAGE, and it counts the save that writes it),
+                 store.n_state_dicts_here (THIS PROCESS's; open_store never restores it)
     """
     mem = mem.owned_by("MEM")
+    # BUMPED BEFORE THE COUNTERS ARE COPIED, SO A BLOB COUNTS ITSELF, with a process twin the
+    # restore skips (2026-09-27, register LOW-RESUME-SAVED-COUNTERS; lm/api.py::state_dict says
+    # what the old order cost).
+    store.counters["store.n_state_dicts"] = store.counters.get("store.n_state_dicts", 0) + 1
+    store.counters["store.n_state_dicts_here"] = store.counters.get("store.n_state_dicts_here",
+                                                                    0) + 1
     # ROW BY ROW, EACH CARRYING ITS OWNER BLOCK, which is the shape _restore_by_block reads. Blocks
     # are stored WITH their block index so open_store places rows back BY BLOCK and refuses a row
     # whose block no longer exists, rather than truncating in save order. Lowering MEM_OWNERS makes
@@ -3034,7 +3044,6 @@ def state_dict(mem: Config, store):
         # byte-identical to a freshly seeded memory.torch stream). A CPU ByteTensor on every device.
         "gen": store.gen.get_state().clone(),
     }
-    store.counters["store.n_state_dicts"] = store.counters.get("store.n_state_dicts", 0) + 1
     return out
 
 

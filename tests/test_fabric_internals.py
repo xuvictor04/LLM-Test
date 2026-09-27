@@ -38,6 +38,15 @@ repository root as `python3 tests/test_fabric_internals.py`; exit 0 = every chec
       check that finds it open covers -- one per check at batch 1, the whole flush above it, never
       a window before the stamp, counted from the stamp when a checkpoint carries no previous
       check -- and is ABSENT at FAB_GROW=0 and FAB_COOLDOWN=0, where no stamp can block growth.
+  I12 FAB_NORM_ONLY=1 merged, culled and grew (Proposal 05 §8 1.6, register LOW-FAB_NORM_ONLY-GROWS):
+      manage and grow_check tested fab.on alone. On inputs that merge one pair and grow one expert
+      at FAB_NORM_ONLY=0, the norm-only arm now does neither, both families are ABSENT, the build
+      gates read UNREACHABLE naming the lever (and still do after a restore), and fab.births /
+      fab.rescued are ABSENT.
+  I13 gate:fab.merged PRINTED THE RUN TOTAL BESIDE THE LAST PASS'S VERDICT (register
+      LOW-FAB-MERGED-REPORT): after a pass that merges one pair and one that merges none, the run
+      gate FIRES with count 1 and gate:fab.merged_last_pass reads armed-but-zero at 0; with nothing
+      past grace both are UNREACHABLE at 0, and at FAB_MERGE_DIST=0 both say off by configuration.
 
 WHAT THIS FILE CANNOT CATCH: whether the new baselines make a LONG run better. That is a GPU-length
 measurement the owner runs; these checks pin the arithmetic each repair promises.
@@ -510,6 +519,165 @@ def check_i10_merge_pairs_match_the_scalar_scan():
                    f"{ran} (matrix, merge_dist) cases against the scalar reference", findings)
 
 
+def _merge_population(c):
+    """I12's and I13's population: all six experts past grace (uage 5 against FAB_GRACE=1) and expert
+    1's centroid on expert 0's, so that one pair merges at FAB_MERGE_DIST=0.01 and every other pair
+    sits at cosine distance 0.43 or more (measured), so no second pass merges anything."""
+    pop = population(c)
+    for i in range(int(pop.n_live)):
+        pop.uage[i] = 5
+    with torch.no_grad():
+        pop.cent[1] = pop.cent[0].clone()
+    return pop
+
+
+_BIG_CAPS = type("Caps", (), {"experts": 10**6, "headroom": lambda self, n: 10**6})()
+
+
+def _grow_series(c, pop):
+    """30 flat checks at loss 3.0 and one at 30.0 -- a regression the MAD trigger grows one expert
+    for on this population (measured) -- returning the last call's GrowReport."""
+    sig = torch.nn.functional.normalize(torch.randn(SIG_D, generator=torch.Generator().manual_seed(12)),
+                                        dim=0)
+    r = None
+    for w, loss in enumerate([3.0] * 30 + [30.0], 1):
+        r = FAB.grow_check(c["FAB"], pop, flush_loss=torch.tensor(loss), step_windows=U.Windows(w),
+                           soft_cap=_BIG_CAPS, memory_pressure=None, signature=sig)
+    return r
+
+
+def check_i12_norm_only_grows_and_selects_nothing():
+    """FAB_NORM_ONLY=1 grows, culls and merges nothing (register LOW-FAB_NORM_ONLY-GROWS): FAB.manage
+    and FAB.grow_check return before seeding, as at FAB_ON=0, the build gates that predict selection
+    and growth read UNREACHABLE naming the lever, a restore re-renders none of them, and
+    fab.births / fab.rescued are ABSENT. The same inputs at FAB_NORM_ONLY=0 merge one pair and grow
+    one expert, which is the witness that the inputs reach both mechanisms."""
+    findings, seen = [], []
+    for no in (0, 1):
+        c = cfg(FAB_GRACE=1, FAB_MERGE_DIST=0.01, FAB_PRESSURE=0.99, FAB_NORM_ONLY=no)
+        pop = _merge_population(c)
+        r = FAB.manage(c["FAB"], pop, step_windows=U.Windows(500), flush_loss=None)
+        gpop = population(c)
+        gr = _grow_series(c, gpop)
+        seen.append(f"FAB_NORM_ONLY={no}: merged {r.merged}, n_live {int(pop.n_live)}; grown to "
+                    f"{int(gpop.n_live)} with {int(gpop.births)} birth(s)")
+        if not no:
+            if r.merged != 1 or int(pop.n_live) != 5 or int(gpop.n_live) != 7 or int(gpop.births) != 1:
+                findings.append(f"the FAB_NORM_ONLY=0 witness: merged {r.merged} (want 1), n_live "
+                                f"{int(pop.n_live)} (want 5), grown n_live {int(gpop.n_live)} (want 7), "
+                                f"births {int(gpop.births)} (want 1) -- the inputs no longer reach "
+                                f"the mechanisms, so the check below proves nothing")
+            continue
+        if (r.merged, r.cull_fail, r.cull_util, r.rescued, r.eligible) != (0, 0, 0, 0, 0) \
+                or "FAB_NORM_ONLY=1" not in r.cull_gate or int(pop.n_live) != 6:
+            findings.append(f"FAB.manage on the norm-only arm returned {r} with n_live {int(pop.n_live)}; "
+                            f"want an empty report naming FAB_NORM_ONLY=1 and n_live 6")
+        fam = [k for k in ("fab.manage_passes", "fab.merged", "fab.cull_fail", "fab.merge_armed_passes",
+                           "fab.grow_checks", "fab.grown_regression", "fab.grow_asked_regression")
+               if k in pop.counters or k in gpop.counters]
+        if fam:
+            findings.append(f"the manage/grow family is PRESENT on the norm-only arm: {fam}")
+        if int(gpop.n_live) != 6 or int(gpop.births) != 0:
+            findings.append(f"grow_check grew on the norm-only arm: n_live {int(gpop.n_live)}, births "
+                            f"{int(gpop.births)}")
+        g = gr.gates[0] if gr is not None and gr.gates else None
+        if g is None or g.name != "fab.grow_check" or g.reachable or "FAB_NORM_ONLY=1" not in g.reason:
+            findings.append(f"grow_check's returned gate is {g.line() if g else None!r}; want "
+                            f"fab.grow_check UNREACHABLE naming FAB_NORM_ONLY=1")
+        out = FAB.counters(c["FAB"], pop)
+        for name in ("fab.growth_armed", "fab.cull_gate", "fab.depth_advance"):
+            st = out.get(f"gate:{name}", ("ABSENT", 0, ""))
+            if st[0] != "unreachable" or "FAB_NORM_ONLY=1" not in st[2]:
+                findings.append(f"build gate {name} reads {st!r:.160}; want UNREACHABLE naming "
+                                f"FAB_NORM_ONLY=1")
+        if "fab.births" in out or "fab.rescued" in out:
+            findings.append("fab.births / fab.rescued are PRESENT on the norm-only arm; the family is "
+                            "unreachable there and ABSENT is its reading (Q-FAB-11 (3))")
+        # A RESUME RE-RENDERS NOTHING ON THIS ARM: the build's UNREACHABLE lines stand.
+        sd = FAB.state_dict(c["FAB"], gpop)
+        back = population(c, seed=77)
+        FAB.load_state_dict(c["FAB"], back, sd, sidecar=sd["sidecar"])
+        rb = {gg.name: gg for gg in back.gates}
+        for name in ("fab.cull_gate", "fab.depth_advance"):
+            gg = rb.get(name)
+            if gg is None or gg.reachable or "FAB_NORM_ONLY=1" not in gg.reason:
+                findings.append(f"after a restore {name} reads {gg.line() if gg else None!r:.160}; "
+                                f"want build's UNREACHABLE line naming FAB_NORM_ONLY=1")
+        if "fab.state_written" not in sd["counters"] or not any(p is back.A for p in back.parameters()):
+            findings.append("the norm-only population was not checkpointed with its ledger or left "
+                            "the optimizer's parameter list")
+    return _report("I12", "FAB_NORM_ONLY=1 grows, culls and merges nothing, and says why", not findings,
+                   "; ".join(seen), findings)
+
+
+def check_i13_merge_gates_carry_their_own_scope():
+    """gate:fab.merged is the RUN-scope verdict over the ledger total it prints, and the last pass's
+    verdict is gate:fab.merged_last_pass over the fab.merged_last_pass gauge (register
+    LOW-FAB-MERGED-REPORT). Pass 1 merges one pair and pass 2 none: the run gate FIRES with count
+    1 and the last-pass gate reads armed-but-zero with count 0 -- where one gate used to print
+    ('armed-but-zero', 1, '... no pair ...'). With nothing past grace both read UNREACHABLE at 0,
+    and at FAB_MERGE_DIST=0 both say merging is off by configuration."""
+    findings, seen = [], []
+
+    def lines(c, pop):
+        out = FAB.counters(c["FAB"], pop)
+        return out, out.get("gate:fab.merged"), out.get("gate:fab.merged_last_pass")
+
+    c = cfg(FAB_GRACE=1, FAB_MERGE_DIST=0.01, FAB_PRESSURE=0.99)
+    pop = _merge_population(c)
+    r1 = FAB.manage(c["FAB"], pop, step_windows=U.Windows(500), flush_loss=None)
+    r2 = FAB.manage(c["FAB"], pop, step_windows=U.Windows(1000), flush_loss=None)
+    out, run, last = lines(c, pop)
+    seen.append(f"passes merged {r1.merged}, {r2.merged}: run {run[:2] if run else None}, last pass "
+                f"{last[:2] if last else None}, armed passes {out.get('fab.merge_armed_passes')}")
+    if (r1.merged, r2.merged) != (1, 0):
+        findings.append(f"the two passes merged {(r1.merged, r2.merged)}, want (1, 0): the fixture moved")
+    if run is None or run[0] != "fired" or run[1] != 1 or run[1] != out.get("fab.merged"):
+        findings.append(f"gate:fab.merged is {run!r:.160}; want ('fired', 1, ...) with the count "
+                        f"equal to the ledger's fab.merged {out.get('fab.merged')}")
+    if last is None or last[0] != "armed-but-zero" or last[1] != 0 or "no pair" not in last[2] \
+            or out.get("fab.merged_last_pass") != 0:
+        findings.append(f"gate:fab.merged_last_pass is {last!r:.160} beside the gauge "
+                        f"{out.get('fab.merged_last_pass')!r}; want ('armed-but-zero', 0, '... no "
+                        f"pair ...')")
+    if out.get("fab.merge_armed_passes") != 2:
+        findings.append(f"fab.merge_armed_passes {out.get('fab.merge_armed_passes')!r}, want 2")
+    # NO LINE ANYWHERE IN THE LEDGER PAIRS A NONZERO COUNT WITH 'armed-but-zero'.
+    mixed = [k for k, v in out.items() if k.startswith("gate:") and isinstance(v, tuple)
+             and v[0] == "armed-but-zero" and isinstance(v[1], int) and v[1] > 0]
+    if mixed:
+        findings.append(f"gate line(s) printing a nonzero count beside 'armed-but-zero': {mixed}")
+    # NOTHING PAST GRACE ON EITHER PASS: both UNREACHABLE at 0, and the run gate says the ledger's.
+    c0 = cfg(FAB_GRACE=1000, FAB_MERGE_DIST=0.01, FAB_PRESSURE=0.99)
+    p0 = population(c0)
+    with torch.no_grad():
+        p0.cent[1] = p0.cent[0].clone()
+    for w in (500, 1000):
+        FAB.manage(c0["FAB"], p0, step_windows=U.Windows(w), flush_loss=None)
+    out0, run0, last0 = lines(c0, p0)
+    seen.append(f"nothing past grace: {run0[:2] if run0 else None}, {last0[:2] if last0 else None}")
+    if not (run0 and last0 and run0[:2] == ("unreachable", 0) and last0[:2] == ("unreachable", 0)
+            and "none of the ledger's 2 manage pass(es)" in run0[2]
+            and out0.get("fab.merge_armed_passes") == 0):
+        findings.append(f"nothing past grace over two passes: run {run0!r:.200}, last {last0!r:.120}, "
+                        f"armed passes {out0.get('fab.merge_armed_passes')!r}; want both UNREACHABLE "
+                        f"at 0, the run gate over the ledger's 2 passes, and 0 armed passes")
+    # OFF BY CONFIGURATION.
+    cz = cfg(FAB_GRACE=1, FAB_MERGE_DIST=0, FAB_PRESSURE=0.99)
+    pz = _merge_population(cz)
+    FAB.manage(cz["FAB"], pz, step_windows=U.Windows(500), flush_loss=None)
+    outz, runz, lastz = lines(cz, pz)
+    seen.append(f"FAB_MERGE_DIST=0: {runz[:2] if runz else None}, {lastz[:2] if lastz else None}")
+    if not (runz and lastz and runz[0] == lastz[0] == "unreachable"
+            and "off by configuration" in runz[2] and "off by configuration" in lastz[2]
+            and int(pz.n_live) == 6):
+        findings.append(f"FAB_MERGE_DIST=0: run {runz!r:.160}, last {lastz!r:.160}, n_live "
+                        f"{int(pz.n_live)}; want both UNREACHABLE and off by configuration, nothing "
+                        f"merged")
+    return _report("I13", "each merge gate prints the count of its own scope", not findings,
+                   "; ".join(seen), findings)
+
+
 CHECKS = (
     check_i1_failure_cull_baseline,
     check_i2_comp_protect_direction,
@@ -522,6 +690,8 @@ CHECKS = (
     check_i9_shift_warm_rewarms_n_steps,
     check_i10_merge_pairs_match_the_scalar_scan,
     check_i11_blackout_windows_counts_windows,
+    check_i12_norm_only_grows_and_selects_nothing,
+    check_i13_merge_gates_carry_their_own_scope,
 )
 
 

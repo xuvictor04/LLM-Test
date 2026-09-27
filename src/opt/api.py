@@ -1405,6 +1405,7 @@ def build(opt: Config, *, param_groups, run_windows):
         "opt.clip.armed_no_clip": 0,
         "opt.shift.notifications": 0,
         "opt.ckpt.saved": 0,
+        "opt.ckpt.saved_here": 0,
         "opt.ckpt.loaded": 0,
         "opt.ckpt.refused": 0,
         "opt.ckpt.horizon_changed": 0,
@@ -3071,10 +3072,16 @@ def state_dict(opt: Config, st):
 
     LEVERS READ: accum (recorded, so a resume can count the partial group this run leaves)
     WIRES READ: none
-    DID IT FIRE: opt.ckpt.saved
+    DID IT FIRE: opt.ckpt.saved (LINEAGE: restored with the rest of the ledger, and bumped before
+                 the ledger is copied, so a blob counts the save that writes it),
+                 opt.ckpt.saved_here (THIS PROCESS's saves: seeded 0 by build, never restored)
     """
     opt = opt.owned_by("OPT")
+    # THE ONE PACKAGE THAT ALREADY COUNTED ITS OWN BLOB, and the rule the other nine now follow
+    # (2026-09-27, register LOW-RESUME-SAVED-COUNTERS). The `_here` twin is the process's count
+    # beside the lineage one; load_state skips it.
     st.counters["opt.ckpt.saved"] += 1
+    st.counters["opt.ckpt.saved_here"] = st.counters.get("opt.ckpt.saved_here", 0) + 1
     return {
         "base": st.base.state_dict(),
         "encoder": st.encoder.state_dict(),
@@ -3246,6 +3253,11 @@ def load_state(opt: Config, st, saved):
     # would report the parent run's warmup clamp against this run's schedule.
     for key, value in dict(saved.get("counters", {})).items():
         if key.startswith("opt.build."):
+            continue
+        # THIS PROCESS'S SAVES ARE ITS OWN (2026-09-27, register LOW-RESUME-SAVED-COUNTERS):
+        # opt.ckpt.saved carries the lineage, and its `_here` twin stays at build's 0 until this
+        # process saves.
+        if key == "opt.ckpt.saved_here":
             continue
         # THE ENCODER'S RATE-WRITE TALLY RETURNS ONLY TO A BUILD THAT SEEDED IT: a parent with an
         # encoder must not make the key present on a child whose encoder group is empty.

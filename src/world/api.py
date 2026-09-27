@@ -970,9 +970,15 @@ def state_dict(world: Config, w):
 
     LEVERS READ: none
     WIRES READ: none
-    DID IT FIRE: world.state_written
+    DID IT FIRE: world.state_written (LINEAGE, and it counts the save that writes it),
+                 world.state_written_here (THIS PROCESS's; load_into never restores it)
     """
     world = world.owned_by("WORLD")
+    # BUMPED BEFORE THE COUNTERS ARE COPIED, SO A BLOB COUNTS ITSELF, with a process twin the
+    # restore skips (2026-09-27, register LOW-RESUME-SAVED-COUNTERS; lm/api.py::state_dict says
+    # what the old order cost).
+    w.counters["world.state_written"] = w.counters.get("world.state_written", 0) + 1
+    w.counters["world.state_written_here"] = w.counters.get("world.state_written_here", 0) + 1
     def _t(x):
         return None if x is None else x.detach().cpu().clone()
     out = {
@@ -997,7 +1003,6 @@ def state_dict(world: Config, w):
         "counters": dict(w.counters),
         "rng": (w.rng._r.getstate(), int(w.rng._draws)) if getattr(w, "rng", None) else None,
     }
-    w.counters["world.state_written"] = w.counters.get("world.state_written", 0) + 1
     return out
 
 
@@ -1129,7 +1134,10 @@ def load_into(world: Config, w, sd):
     w._wl_ema = sd.get("_wl_ema")
     w._wl_lastgrow = int(sd.get("_wl_lastgrow", 0))
     if sd.get("counters"):
-        w.counters.update(sd["counters"])
+        # EVERY KEY BUT THE SAVE COUNT'S PROCESS TWIN (2026-09-27, register
+        # LOW-RESUME-SAVED-COUNTERS): the parent's saves are not this process's.
+        w.counters.update({k: v for k, v in sd["counters"].items()
+                           if k != "world.state_written_here"})
     # WRITTEN AFTER THE MERGE, ON BOTH ARMS. The parent's saved counters carry the parent's own
     # values of these keys, so a value written before the update would be overwritten by them and
     # this load would report the PARENT's re-zero (driven in the Q-WORLD-10 design round: a lineage
