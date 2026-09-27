@@ -1954,9 +1954,17 @@ def _report(sysm, elapsed_s, ctx):
         # THE COMPETENCE BASELINE AND ITS UNIT, printed together (2026-09-26, Q-DOM-5). The number
         # alone is ambiguous between the two units DOM_LEVELS chooses, and this file is the one that
         # chose: _flush converted with this same lever. None is "no window attributed yet".
+        # THE LEVER IS THE UNIT OF THIS RUN'S READINGS, NOT OF A RESTORED BOOK'S (2026-09-27, the
+        # build 1.2 review): after a resume that changed DOM_LEVELS, the EMAs DOM still counts as
+        # carrying the other unit (part.n_comp_carried, its census counters) are named beside it,
+        # so the label cannot call a book wholly this run's unit while part of it is not.
         "comp_glob": None if _dc.comp_glob is None else round(float(_dc.comp_glob), 6),
         "comp_unit": ("bits per build-time token (DOM_LEVELS)" if bool(cfg["DOM"].levels)
-                      else "bits per token (DOM_LEVELS=0)"),
+                      else "bits per token (DOM_LEVELS=0)")
+                     + (f"; {int(_dc.counters['part.n_comp_carried'])} restored EMA(s) still carry "
+                        + ("bits per token" if bool(cfg["DOM"].levels) else "bits per build-time token")
+                        + " (part.n_comp_carried)"
+                        if int(_dc.counters.get("part.n_comp_carried", 0)) > 0 else ""),
     }
     out["DOM(part.counters)"] = dict(sysm.partition.counters)
     # ONE SUMMARY OVER THE LIVE DOMAINS (called above, before the copy). Rendered as counts of the

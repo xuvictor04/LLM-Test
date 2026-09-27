@@ -747,7 +747,9 @@ class DOMLevers(LeverSet):
     # src/domains/api.py::open_partition compares the stamp against this run's unit on a resume
     # (part.n_comp_unit_changed). A parent's book folded in the other unit is KEPT -- there is no
     # per-domain bytes history to convert it with, and dropping it would disarm the spare for every
-    # domain that is not fed again -- and the root says so before the first window.
+    # domain that is not fed again -- and the root says so before the first window. Since 2026-09-27
+    # the blob also carries what of the book is still in the other unit (`comp_carry`), so a run that
+    # changed unit and saved before refolding its parent's EMAs does not pass them on as its own.
     # ONE LEVER PER CONSUMER (the register's ruling). MEM's rescaled surprise (Q-MEM-14) and CAP's
     # improving test (inert until CAP.observe is rowed, P4) get their own levers in their own
     # packages when they are built, so an adverse GPU reading on one does not switch off another.

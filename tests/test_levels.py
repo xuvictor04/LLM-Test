@@ -19,7 +19,8 @@ Each check below pins one known answer of that unit, or the plumbing that carrie
       segmentation and at the stream's end).
   L2  IDENTITY, end to end: at TOK_MODE=bytes (build-time and every window's bytes per token are 1.0)
       a DOM_LEVELS=1 run and a DOM_LEVELS=0 run hand DOM the same bits to the bit, with manage passes
-      and the competence spare reachable, and end with the same loss curve, the same books and the
+      and the competence spare's comparison reached (culls plus spares above 0, not the key alone,
+      which every pass seeds), and end with the same loss curve, the same books and the
       same part.* counters; loop.levels_rescaled is PRESENT-and-0 on the ON arm (armed, never
       rescaled) and ABSENT on the OFF arm.
   L3  CROSS-ACT, the unit, on a real segmentation: a bytes-only stream spliced at the build table
@@ -40,6 +41,13 @@ Each check below pins one known answer of that unit, or the plumbing that carrie
       into the other unit counts part.n_comp_unit_changed 1 and the root warns before the first
       window; the same unit counts 0 with no warning; a fresh partition has no key; a blob older
       than the stamp reads as the per-token unit.
+  L8  THE MIXED BOOK CROSSES A SAVE (the build 1.2 review): a child that changed unit and saved three
+      windows later carries each EMA's share of its parent's unit in `comp_carry`, each share
+      exactly (1 - d_comp_ema) to the power of the readings that EMA folded. Its grandchild at the
+      child's value is warned again, with every carried EMA counted and the parent's unit named; one
+      at the parent's value is warned of the complement -- only the EMAs the child fed, in the
+      child's unit. A share one fold takes below 2**-53 is refolded and leaves part.n_comp_carried;
+      the carry survives a save to the bit; the R report's unit label names the carried EMAs.
   L7  RESUME EXACTNESS OF THE CONVERTED BOOK: at the default ON, across mint bursts and acts, a run
       saved and resumed ends with the uninterrupted run's comp and comp_glob to the bit, because
       the build-time bytes per token crosses the resume in the vocabulary file (tok.bpt_adopted).
@@ -200,11 +208,21 @@ for _lv in (1, 0):
         _res = loop.run(_s2, max_windows=300, progress=False)
     _arms[_lv] = (_s2, _res, _log)
 (_s_on, _r_on, _c_on), (_s_off, _r_off, _c_off) = _arms[1], _arms[0]
+# THE SPARE IS "REACHED" ONLY WHERE ITS COMPARISON RAN (2026-09-27, the build 1.2 review). The key
+# alone does not say so: DOM.manage seeds part.n_spared_by_competence at the top of every pass with
+# protection on, before any candidate is examined, so it is present on a pass whose candidates were all
+# skipped for grace (driven: TOK_MODE=bytes without REACH, 300 windows -- 2 candidates, 2 grace skips,
+# 0 culled, 0 spared, and the old predicate held). A candidate reaches brake two's comparison only past
+# grace, the activity test and brake one, and leaves it either spared or culled, so a nonzero sum of the
+# two is the comparison having run.
 check("L2 setup: at TOK_MODE=bytes the build-time bytes per token is 1.0 and the manage pass and its "
-      "competence spare were reached (so a differing reading could have moved a decision)",
+      "competence spare were reached -- the spare's comparison ran (part.n_culled + "
+      "part.n_spared_by_competence > 0), so a differing reading could have moved a decision",
       float(_s_on.vocab.bytes_per_token) == 1.0
       and int(_s_on.partition.counters.get("part.n_manage_passes", 0)) >= 2
-      and "part.n_spared_by_competence" in _s_on.partition.counters,
+      and "part.n_spared_by_competence" in _s_on.partition.counters
+      and int(_s_on.partition.counters.get("part.n_culled", 0))
+      + int(_s_on.partition.counters.get("part.n_spared_by_competence", 0)) > 0,
       f"bpt {_s_on.vocab.bytes_per_token}, passes "
       f"{_s_on.partition.counters.get('part.n_manage_passes')}, spared "
       f"{_s_on.partition.counters.get('part.n_spared_by_competence')}, culled "
@@ -370,13 +388,21 @@ for _plv, _tag, _unit in ((0, "p_off", "token"), (1, "p_on", "build_token")):
                    CKPT_DIR=os.path.join(TMP, f"{_tag}_c{_clv}"))
         _chg = _c.partition.counters.get("part.n_comp_unit_changed", "ABSENT")
         _want = int(_clv != _plv)
+        # A PARENT THAT NEVER CHANGED UNIT LEAVES A BOOK WHOLLY IN ITS OWN, so a child in the other
+        # unit carries every EMA -- each restored domain's and the baseline's -- at share 1.0.
+        _ncar = _c.partition.counters.get("part.n_comp_carried", "ABSENT")
+        _nall = int(_c.partition.counters["part.n_restored_domains"]) + 1
         check(f"L6 a DOM_LEVELS={_plv} parent resumed at DOM_LEVELS={_clv}: part.n_comp_unit_changed "
-              f"{_want}, and the root {'warns' if _want else 'says nothing'} before the first window",
-              _chg == _want and len(_warned(_c)) == _want,
-              f"counter {_chg}; warnings {[w[:90] for w in _warned(_c)]}")
+              f"{_want}, part.n_comp_carried {'every EMA' if _want else '0'}, and the root "
+              f"{'warns' if _want else 'says nothing'} before the first window",
+              _chg == _want and len(_warned(_c)) == _want and _ncar == _want * _nall,
+              f"counter {_chg}, carried {_ncar} of {_nall}; warnings {[w[:90] for w in _warned(_c)]}")
 _fresh = build()
-check("L6 a fresh partition carries no part.n_comp_unit_changed (ABSENT: nothing was restored)",
-      "part.n_comp_unit_changed" not in _fresh.partition.counters)
+check("L6 a fresh partition carries no part.n_comp_unit_changed and no part.n_comp_carried (ABSENT: "
+      "nothing was restored)",
+      "part.n_comp_unit_changed" not in _fresh.partition.counters
+      and "part.n_comp_carried" not in _fresh.partition.counters
+      and _fresh.partition.comp_carry is None)
 _legacy = {k: v for k, v in _blob.items() if k != "comp_unit"}
 _sd = dict(sig_dim=int(_fresh.configs["SIG"].d), vocab_slots=int(_fresh.configs["LM"].vocab_slots),
            device=torch.device("cpu"), rng=_fresh.streams["domains"])
@@ -420,6 +446,120 @@ check("L7 the resumed run ends with the uninterrupted run's comp and comp_glob t
       and tuple(_rc.loss_curve[:_n2]) == tuple(_ru.loss_curve[_n1:_n1 + _n2])
       and _c7.partition.counters.get("part.n_comp_unit_changed") == 0,
       f"comp_glob {_c7.partition.comp_glob!r} vs {_u.partition.comp_glob!r}")
+
+# ---- L8: the mixed book crosses a save ------------------------------------------------------------
+# THE CASE THE BUILD 1.2 REVIEW DROVE AT d4b010d: a DOM_LEVELS=0 parent (L6's, saved at window 120)
+# resumed at DOM_LEVELS=1, saved three windows later. Its blob was stamped 'build_token' while all
+# but the EMAs it fed were still the parent's per-token values, and a grandchild at DOM_LEVELS=1 read
+# part.n_comp_unit_changed 0 with no warning.
+_keep = 1.0 - float(_fresh.configs["DOM"].d_comp_ema)
+_P8 = os.path.join(TMP, "p_off")
+_load = lambda d: torch.load(os.path.join(TMP, d, "ckpt.pt"), map_location="cpu",  # noqa: E731
+                             weights_only=False)["payload"]["DOM"]
+_pb8 = _load("p_off")
+_log8 = []
+_c8 = build(DOM_LEVELS=1, CKPT_RESUME=_P8, CKPT_DIR=os.path.join(TMP, "l8c"))
+with spy_competence(_log8):
+    loop.run(_c8, max_windows=3, progress=False)
+_cb8 = _load("l8c")
+_cc8 = _cb8.get("comp_carry") or {}
+# THE KNOWN ANSWER IS THE EMA'S OWN ARITHMETIC: an EMA that folded k readings in the new unit holds
+# the old unit at (1 - d_comp_ema)**k, multiplied in the order the folds happened.
+_fed8 = {}
+for _d, _ in _log8:
+    _fed8[_d] = _fed8.get(_d, 0) + 1
+
+
+def _share(k):
+    w = 1.0
+    for _ in range(k):
+        w *= _keep
+    return w
+
+
+_want8 = {k: _share(_fed8.get(int(k), 0)) for k in _pb8["domains"] if k in _cb8["domains"]}
+check("L8 a DOM_LEVELS=0 book resumed at DOM_LEVELS=1 and saved 3 windows later is stamped 'build_token' "
+      "AND carries each restored EMA's share of 'token', (1 - d_comp_ema)**k for the k readings that "
+      "EMA folded, to the bit",
+      _cb8.get("comp_unit") == "build_token" and _cc8.get("unit") == "token"
+      and {k: bits_of(v) for k, v in (_cc8.get("domains") or {}).items()}
+      == {k: bits_of(v) for k, v in _want8.items()}
+      and bits_of(_cc8.get("glob", -1.0)) == bits_of(_share(len(_log8)))
+      and len(_log8) == 3 and any(v < 1.0 for v in _want8.values()),
+      f"carry {_cc8!r:.200}; fed {_fed8}")
+_fedk = [k for k, w in _want8.items() if w < 1.0]
+for _glv, _unit, _named in ((1, "token", "bits per token"), (0, "build_token", "bits per build-time token")):
+    _g8 = build(DOM_LEVELS=_glv, CKPT_RESUME=os.path.join(TMP, "l8c"),
+                CKPT_DIR=os.path.join(TMP, f"l8g{_glv}"))
+    _gc8, _gcar = _g8.partition.counters, _g8.partition.comp_carry or {}
+    # AT THE CHILD'S VALUE the carry is as saved; AT THE PARENT'S it is the complement -- the EMAs
+    # the child fed hold 1 - share of the child's unit, and the ones it did not are wholly the
+    # grandchild's own again, so they leave the carry.
+    _exp = ({int(k): w for k, w in _want8.items()} if _glv == 1
+            else {int(k): 1.0 - _want8[k] for k in _fedk})
+    _expg = _share(len(_log8)) if _glv == 1 else 1.0 - _share(len(_log8))
+    check(f"L8 its grandchild at DOM_LEVELS={_glv} reads part.n_comp_unit_changed 1 and "
+          f"part.n_comp_carried {len(_exp) + 1}, carries {_unit!r} at the exact shares, and is warned "
+          f"with the carried unit named ({_named})",
+          _gc8.get("part.n_comp_unit_changed") == 1 and _gc8.get("part.n_comp_carried") == len(_exp) + 1
+          and _gcar.get("unit") == _unit
+          and {k: bits_of(v) for k, v in (_gcar.get("domains") or {}).items()}
+          == {k: bits_of(v) for k, v in _exp.items()}
+          and bits_of(_gcar.get("glob", -1.0)) == bits_of(_expg)
+          and len(_warned(_g8)) == 1 and f"folded in {_named}:" in _warned(_g8)[0],
+          f"changed {_gc8.get('part.n_comp_unit_changed')}, carried {_gc8.get('part.n_comp_carried')} "
+          f"(want {len(_exp) + 1}); warnings {[w[:120] for w in _warned(_g8)]}")
+    if _glv == 1:
+        _g8on = _g8
+# THE CARRY SURVIVES A SAVE TO THE BIT: the child run on uninterrupted for 6 windows against the
+# child's 3, saved, and the DOM_LEVELS=1 grandchild's 3.
+_u8 = build(DOM_LEVELS=1, CKPT_RESUME=_P8)
+loop.run(_u8, max_windows=6, progress=False)
+_rg8 = loop.run(_g8on, max_windows=3, progress=False)
+_cu8, _cg8 =_u8.partition.comp_carry or {}, _g8on.partition.comp_carry or {}
+check("L8 the carry survives a save exactly: 3 + 3 windows across the child's checkpoint end with the "
+      "uninterrupted 6's shares, comp and comp_glob to the bit",
+      _cu8.get("unit") == _cg8.get("unit") == "token"
+      and {k: bits_of(v) for k, v in _cu8.get("domains", {}).items()}
+      == {k: bits_of(v) for k, v in _cg8.get("domains", {}).items()}
+      and bits_of(_cu8.get("glob", -1.0)) == bits_of(_cg8.get("glob", -2.0))
+      and {k: bits_of(v) for k, v in _u8.partition.comp.items()}
+      == {k: bits_of(v) for k, v in _g8on.partition.comp.items()}
+      and bits_of(_u8.partition.comp_glob) == bits_of(_g8on.partition.comp_glob),
+      f"glob share {_cu8.get('glob')!r} vs {_cg8.get('glob')!r}")
+# THE FLOOR: a share that one more fold takes below 2**-53 (DOM._CARRY_FLOOR) is refolded -- it leaves
+# the carry and part.n_comp_carried -- and a carry with none left is None. The restore-time
+# part.n_comp_unit_changed keeps what the restore read.
+_F = dom_api._CARRY_FLOOR
+_d0, _d1 = sorted(_cb8["domains"], key=int)[:2]
+_pf = dom_api.open_partition(
+    _fresh.configs["DOM"], **_sd,
+    restored=dict(_cb8, comp_carry={"unit": "token", "glob": 1.01 * _F,
+                                    "domains": {_d0: 1.01 * _F, _d1: 1.0}}))
+_n_open = _pf.counters.get("part.n_comp_carried")
+dom_api.note_competence(_fresh.configs["DOM"], _pf, did=int(_d0), bits=1.0)
+_n_one = _pf.counters.get("part.n_comp_carried")
+_left = dict((_pf.comp_carry or {}).get("domains") or {})
+_pz = dom_api.open_partition(
+    _fresh.configs["DOM"], **_sd,
+    restored=dict(_cb8, comp_carry={"unit": "token", "glob": 1.01 * _F, "domains": {_d0: 1.01 * _F}}))
+dom_api.note_competence(_fresh.configs["DOM"], _pz, did=int(_d0), bits=1.0)
+check("L8 a share one fold takes below 2**-53 is refolded: the baseline's and domain d0's leave "
+      "(part.n_comp_carried 3 -> 1, d1 still at 1.0 x (1 - d_comp_ema)**0), and a carry with none "
+      "left is None at part.n_comp_carried 0, beside the restore's part.n_comp_unit_changed 1",
+      _n_open == 3 and _n_one == 1 and _left == {int(_d1): 1.0}
+      and _pz.comp_carry is None and _pz.counters.get("part.n_comp_carried") == 0
+      and _pz.counters.get("part.n_comp_unit_changed") == 1,
+      f"{_n_open} -> {_n_one}, left {_left}; zeroed carry {_pz.comp_carry!r}, "
+      f"{_pz.counters.get('part.n_comp_carried')}")
+_lab8 = _rg8.report["DOM.census"].get("comp_unit", "")
+check("L8 the R report's DOM.census names the carried EMAs beside the unit, and a book in one unit "
+      "(L5's fresh run) gets no such clause",
+      _lab8 == (f"bits per build-time token (DOM_LEVELS); "
+                f"{int(_g8on.partition.counters['part.n_comp_carried'])} restored EMA(s) still carry "
+                f"bits per token (part.n_comp_carried)")
+      and "still carry" not in _r5.report["DOM.census"].get("comp_unit", ""),
+      f"{_lab8!r}")
 
 print(f"=== {len(FAILS)} failure(s)")
 sys.exit(1 if FAILS else 0)

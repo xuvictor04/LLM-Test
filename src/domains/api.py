@@ -17,8 +17,8 @@ three of MEM's internals inline at self_organize.py:3688, including a private me
 
 RECORD TYPES RETURNED (P4 defines them):
   Partition    per-domain cent/reservoir/size/act/born/last/visits/bornb/rad/tokc/comp, plus
-               next_id, merged, cur, run, run_sig, pend, sh, nb, radp, comp_glob, collapsed_at,
-               the counters and the package RNG stream
+               next_id, merged, cur, run, run_sig, pend, sh, nb, radp, comp_glob, comp_carry,
+               collapsed_at, the counters and the package RNG stream
   Assignment   did, boundary, spawned, reentered
   Plan         folds, deletions, live, merged, culled, folded, held, spared, emptied
   PartitionCensus  what DOM.census returns, DECLARED HERE rather than left in that docstring's prose
@@ -302,8 +302,8 @@ class Partition:
 
     __slots__ = ("cent", "reservoir", "size", "act", "born", "last", "visits", "bornb", "rad",
                  "tokc", "comp", "next_id", "merged", "cur", "run", "run_sig", "pend", "sh",
-                 "nb", "radp", "comp_glob", "collapsed_at", "adj_hist", "slots", "sig_dim",
-                 "vocab_slots", "counters", "rng")
+                 "nb", "radp", "comp_glob", "comp_carry", "collapsed_at", "adj_hist", "slots",
+                 "sig_dim", "vocab_slots", "counters", "rng")
 
     def __init__(self, *, sig_dim, vocab_slots, slots, device, rng):
         self.sig_dim, self.vocab_slots, self.slots = sig_dim, vocab_slots, slots
@@ -337,6 +337,17 @@ class Partition:
         # identical field on the identical argument, and the two populations' books are compared.
         # state_dict and open_partition carry the None through rather than casting it.
         self.comp_glob = None
+        # WHAT OF THE COMPETENCE BOOK IS IN A UNIT OTHER THAN THIS RUN'S (Q-DOM-5, 2026-09-27, the
+        # build 1.2 review). None whenever every reading in the book was folded in this run's unit,
+        # which is every fresh partition and every restore of a book in its own unit. After a resume
+        # that changed DOM_LEVELS it is {"unit": the other unit, "glob": the share of comp_glob's EMA
+        # still weighted on that unit's readings, "domains": {id: the same share of that domain's
+        # EMA}}. A share is exact arithmetic, not an estimate: every fold multiplies an EMA's past by
+        # (1 - d_comp_ema), so it multiplies the carried share by the same factor. open_partition
+        # sets it, note_competence decays it, manage's tidy drops the domains that leave, and
+        # state_dict saves it -- so a child that saves before its book is refolded no longer stamps
+        # the whole book in its own unit.
+        self.comp_carry = None
         self.collapsed_at = None
         self.adj_hist = []        # the adjacent-distance history behind the relative shift test
         self.counters = {}
@@ -382,6 +393,19 @@ def open_partition(dom: Config, *, sig_dim, vocab_slots, device, rng, restored=N
     (there is no per-domain bytes history to convert with), not dropped (that would disarm the spare
     for every domain the child does not feed), and not refused: the root states it, the Q-DOM-1
     precedent.
+    THE MIXED BOOK CROSSES THE NEXT SAVE (2026-09-27, the build 1.2 review). The stamp alone is the
+    unit the SAVING run folded in, and a child that changed unit and saved a few windows later stamped
+    a book still mostly in its parent's unit as wholly its own: its grandchild at the same value read
+    0 and was not told, and one at the other value was told the wrong unit (driven at d4b010d: 11 of 12
+    domains' comp still the grandparent's per-token values under a 'build_token' stamp). So the blob
+    also carries `comp_carry` -- the share of each EMA still in the other unit, see
+    Partition.comp_carry -- and this function re-reads it against this run's unit: kept as saved when
+    the stamp is this run's unit, and complemented when it is not, since DOM_LEVELS is a flag and the
+    carried readings are then in this run's unit and every other reading is not. A share below
+    _CARRY_FLOOR is refolded and dropped. part.n_comp_carried is the number of the book's EMAs (each
+    domain's and the population baseline's) left holding the other unit, and part.n_comp_unit_changed
+    is 1 when it is above 0. A blob written between d4b010d and this entry carries no share, so a
+    mixed one of them still reads as wholly in its stamp: nothing in it can recover the split.
 
     LEVERS READ: levels (only to compare the restored book's `comp_unit` stamp with this run's unit;
                  nothing else off `dom` directly -- see d_expert_slots under WIRES READ.
@@ -394,8 +418,12 @@ def open_partition(dom: Config, *, sig_dim, vocab_slots, device, rng, restored=N
                  not what the claim said)
     WIRES READ: d_expert_slots
     DID IT FIRE: part.n_opened, part.n_restored_domains; part.n_comp_unit_changed (ABSENT on a
-                 fresh partition, 0 on a restore in the same unit or of a book with no reading, 1
-                 on a restore of a book folded in the other unit)
+                 fresh partition, 0 on a restore of a book wholly in this run's unit or with no
+                 reading, 1 on a restore of a book holding readings folded in the other unit, the
+                 whole of it or the share an earlier resume left); part.n_comp_carried (ABSENT on a
+                 fresh partition; on a restore, the EMAs -- each domain's, and the baseline's --
+                 still holding the other unit: set here, lowered by note_competence as they are
+                 refolded and by manage as their domains leave, 0 once none does)
     """
     dom = dom.owned_by("DOM")
     slots = int(dom.d_expert_slots)   # WIRE READ HERE -- the domain id namespace bound
@@ -487,10 +515,10 @@ def open_partition(dom: Config, *, sig_dim, vocab_slots, device, rng, restored=N
             part.counters["part.n_state_dicts"] = int(restored["n_state_dicts"])
         # THE BOOK'S UNIT AGAINST THIS RUN'S (Q-DOM-5); see the docstring. A book with no reading
         # (comp_glob None) has nothing to mix, so it reads 0 whatever its stamp says.
-        _now = _comp_unit(dom)
-        _saved = restored.get("comp_unit", "token")
-        part.counters["part.n_comp_unit_changed"] = int(_saved != _now
-                                                        and part.comp_glob is not None)
+        part.comp_carry = _carry_on_restore(_comp_unit(dom), restored, part)
+        part.counters["part.n_comp_carried"] = 0
+        _settle_carry(part)
+        part.counters["part.n_comp_unit_changed"] = int(part.counters["part.n_comp_carried"] > 0)
     return part
 
 
@@ -500,6 +528,56 @@ def _comp_unit(dom: Config):
     spelling for the stamp and the comparison, so the two cannot disagree about a name."""
     dom = dom.owned_by("DOM")
     return "build_token" if bool(dom.levels) else "token"
+
+
+_CARRY_FLOOR = 2.0 ** -53
+"""The share below which a carried unit counts as refolded out of an EMA (Q-DOM-5, 2026-09-27):
+float64's unit roundoff. Below it the other unit's readings weigh less than the rounding of one fold
+of the EMA they sit in, so no later reading can tell them apart. NOT A LEVER: it is a property of the
+number format, not a choice about competence. At d_comp_ema 0.02 an EMA crosses it on its 1,819th fold
+in the new unit -- comp_glob after 1,819 windows, a domain after 1,819 windows of its own."""
+
+
+def _carry_on_restore(now, restored, part):
+    """What of a restored competence book is in a unit other than `now`, as Partition.comp_carry holds
+    it, or None. Reads the blob's `comp_unit` stamp and `comp_carry` shares; `part` is the partition
+    open_partition has just restored the book into.
+
+    TWO CASES, BECAUSE THERE ARE TWO UNITS. When the stamp is this run's unit, the other unit is what
+    the saving run still carried, as it saved it. When it is not, the saving run folded every reading
+    after its own change in the other unit, and what it carried is in this run's: the shares
+    complement, and a domain the blob carried nothing for is wholly the other unit. A blob with no
+    `comp_carry` (the saving run's book was in one unit, or the blob predates the key) carries
+    nothing, and a blob with no `comp_unit` was folded per token.
+    """
+    if part.comp_glob is None:
+        return None
+    saved = restored.get("comp_unit", "token")
+    was = restored.get("comp_carry") or {}
+    shares = {int(k): float(v) for k, v in (was.get("domains") or {}).items()}
+    if saved == now:
+        if not was:
+            return None
+        return {"unit": str(was["unit"]), "glob": float(was.get("glob", 0.0)),
+                "domains": {i: w for i, w in shares.items() if i in part.comp}}
+    return {"unit": str(saved), "glob": 1.0 - float(was.get("glob", 0.0)),
+            "domains": {i: 1.0 - shares.get(i, 0.0) for i in part.comp}}
+
+
+def _settle_carry(part):
+    """Drop every carried share below _CARRY_FLOOR, drop the carry once no EMA holds one, and keep
+    part.n_comp_carried current -- the gauge only where open_partition declared it (a restore), so
+    a fresh partition keeps it ABSENT."""
+    cc = part.comp_carry
+    if cc is not None:
+        cc["domains"] = {i: w for i, w in cc["domains"].items() if w >= _CARRY_FLOOR}
+        if cc["glob"] < _CARRY_FLOOR:
+            cc["glob"] = 0.0
+        if not cc["domains"] and cc["glob"] == 0.0:
+            part.comp_carry = cc = None
+    if "part.n_comp_carried" in part.counters:
+        part.counters["part.n_comp_carried"] = (
+            0 if cc is None else len(cc["domains"]) + int(cc["glob"] > 0.0))
 
 
 def _new(part, q, at):
@@ -1132,7 +1210,8 @@ def note_competence(dom: Config, part, *, did, bits):
     LEVERS READ: none (this is state maintenance whose rate arrives as a wire, d_comp_ema below)
     WIRES READ: d_comp_ema
     DID IT FIRE: part.n_competence_updates; comp_glob is None until the first one lands, which is
-                 the state in which competence protection cannot fire, and the Gate says so
+                 the state in which competence protection cannot fire, and the Gate says so;
+                 part.n_comp_carried falls as a carried unit is refolded (see open_partition)
     """
     dom = dom.owned_by("DOM")
     rate = float(dom.d_comp_ema)  # WIRE READ HERE -- one smoothing rate for both populations
@@ -1204,6 +1283,14 @@ def note_competence(dom: Config, part, *, did, bits):
     # happens to read zero.
     part.comp_glob = bits if part.comp_glob is None else \
         (1.0 - rate) * float(part.comp_glob) + rate * bits
+    # A CARRIED UNIT'S SHARE FALLS BY THE FACTOR THE EMA DECAYS ITS PAST BY (Q-DOM-5, 2026-09-27):
+    # this reading is in this run's unit, so what the other unit weighs in the two EMAs it just
+    # entered is (1 - rate) of what it weighed. None on every run that did not change the unit.
+    if part.comp_carry is not None:
+        if did in part.comp_carry["domains"]:
+            part.comp_carry["domains"][did] *= (1.0 - rate)
+        part.comp_carry["glob"] *= (1.0 - rate)
+        _settle_carry(part)
     part.counters["part.n_competence_updates"] = part.counters.get(
         "part.n_competence_updates", 0) + 1
     part.counters["part.n_competence_domains"] = len(part.comp)
@@ -1400,6 +1487,8 @@ def manage(dom: Config, part, *, now, memory_counts, mem_floor_entries):
       part.n_mem_floor_entries -- the floor THIS PASS judged against, SET and not bumped, printed
         beside n_held_by_mem_floor. A floor of 0 means brake one is armed and cannot hold, and
         "held 0" cannot be read without it.
+    AND ONE GAUGE IT LOWERS, open_partition's: part.n_comp_carried (2026-09-27, Q-DOM-5) stops
+    counting a domain the pass removed, whose EMA carried another unit.
     """
     dom = dom.owned_by("DOM")
     protect = bool(dom.d_comp_protect)   # WIRE READ HERE -- brake two, FAB's policy on domains
@@ -1639,6 +1728,12 @@ def manage(dom: Config, part, *, now, memory_counts, mem_floor_entries):
     # COMPETENCE FOLLOWS THE POPULATION. A book keyed on a domain that no longer exists would be
     # restored by the next checkpoint and compared against comp_glob for ever.
     part.comp = {i: v for i, v in part.comp.items() if i in part.cent}
+    # AND SO DOES A CARRIED UNIT'S SHARE (Q-DOM-5, 2026-09-27): a domain that left holds no EMA, so
+    # it carries nothing, and part.n_comp_carried stops counting it.
+    if part.comp_carry is not None:
+        part.comp_carry["domains"] = {i: w for i, w in part.comp_carry["domains"].items()
+                                      if i in part.cent}
+        _settle_carry(part)
 
     # ---- THE COLLAPSE STAMP (L36) --------------------------------------------------------------
     # DOM CANNOT TEST "IN A MULTI-PROCESS RUN" and must not learn to: no wire carries the process
@@ -1904,8 +1999,12 @@ def state_dict(dom: Config, part):
     TOKEN HISTOGRAMS, the COMPETENCE EMAs and the population baseline, and the ADJACENT-DISTANCE
     HISTORY the relative shift test calibrates on. The four capitalised ones are the omissions that
     each disarmed a live mechanism at the run boundary (M51). And this package's RNG stream, `rng`,
-    since 2026-09-24. And the unit the competence book was folded in, `comp_unit`, since 2026-09-26
-    (Q-DOM-5), so a resume can tell a book in the other unit from one in its own.
+    since 2026-09-24. And the unit the competence book was folded in, since 2026-09-26 (Q-DOM-5), so
+    a resume can tell a book in the other unit from one in its own: `comp_unit` is the unit THIS run
+    folded in, and since 2026-09-27 `comp_carry` is what of the book is still in the other one --
+    None when the book is wholly in `comp_unit`, else each EMA's carried share (Partition.comp_carry).
+    The two together are the book's unit. The stamp alone was the saving run's lever, and a child
+    that changed unit and saved before refolding its parent's EMAs stamped them as its own.
 
     LEVERS READ: levels (the unit stamped as `comp_unit`; otherwise a pure read of `part`)
     WIRES READ: none
@@ -1959,6 +2058,14 @@ def state_dict(dom: Config, part):
         # "token" off. The root converts before note_competence, so the book cannot say its own unit
         # and this stamp is the only record of it; open_partition compares it on a resume.
         "comp_unit": _comp_unit(dom),
+        # AND WHAT OF THE BOOK IS STILL IN THE OTHER UNIT (2026-09-27): None, or the carried shares
+        # of the EMAs this blob saves -- so a grandchild of a run that changed unit is told again,
+        # and in the right unit. JSON-shaped (string ids), like `domains` above.
+        "comp_carry": None if part.comp_carry is None else {
+            "unit": str(part.comp_carry["unit"]),
+            "glob": float(part.comp_carry["glob"]),
+            "domains": {str(i): float(w) for i, w in part.comp_carry["domains"].items()
+                        if i in part.cent}},
         # THE ADJACENT-DISTANCE HISTORY the relative shift test calibrates on. Without it the first
         # windows of a resumed run are tested against an empty calibration, which is the same as
         # testing them against nothing.

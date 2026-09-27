@@ -773,8 +773,9 @@ window's bytes and TOK's build-time bytes per token, neither of which this packa
 the lever only to stamp the checkpointed book's unit and compare it on a resume.
 **Checkpointed additions:** the reservoirs (the uncensored sample the measured radius needs),
 `tokc`, `comp`/`comp_glob`, the adjacent-distance history, the RNG stream `rng` (Q-CKPT-4), and
-`comp_unit`, the unit the competence book was folded in (Q-DOM-5). The boundary clock **must not restart** on
-resume; `grace` **does**, and the asymmetry is deliberate.
+`comp_unit`, the unit the saving run folded the competence book in, with `comp_carry`, the share of
+each EMA still in the other unit after a resume that changed it (Q-DOM-5, corrected 2026-09-27). The
+boundary clock **must not restart** on resume; `grace` **does**, and the asymmetry is deliberate.
 **Where they are called (§3):** `rekey` is a stage-`A` row on `Cadences.due('dom.rekey',
 MEM.rekey_every, clock)` **after** `observe` — without it `accept_rule="radius"` silently degenerates
 to the constant rule, because `rekey` is the only site that measures a radius; `census` is at `A`
@@ -5562,10 +5563,13 @@ OFF = today's unit, and the DOM half built before the retok fleet (C12).
   warning names `DOM_LEVELS` and both units, says each EMA moves to the new unit at the `d_comp_ema`
   rate as its own windows arrive while an unfed domain keeps the parent's, and says a clean arm
   resumes at the parent's value. That is C12's "pre-Levels" fleet checkpoint continued at the default.
+  (The stamp alone was the saving run's lever, not the book's unit; since 2026-09-27 the blob also
+  carries `comp_carry` and the restore counts `part.n_comp_carried`. See the correction below.)
 * **Counters.** `loop.levels_rescaled` (the loop's flush books): the windows whose factor was not
   exactly 1.0. ABSENT at `DOM_LEVELS=0`; PRESENT-and-0 when armed and no window left the build-time
   value (`TOK_MODE=bytes`); this process's windows, like `loop.bytes_scored`. `part.n_comp_unit_changed`
   as above. The R report's `DOM.census` row now prints `comp_glob` beside `comp_unit`, the unit it is in.
+  `part.n_comp_carried` since 2026-09-27 (the correction below).
 * **Text only, and DOM's half only.** MEM's rescaled surprise (Q-MEM-14, the register's (c)), CAP's
   improving test (inert until `CAP.observe` is rowed at P4, (d)) and FAB's stamped-act known answer
   ((b)) are not built here; each gets its own lever when it is. A media window's unit is a different
@@ -5596,10 +5600,76 @@ equal. The unit reached DOM — `comp_glob` 2.690 bits per build-time token agai
 token, `loop.levels_rescaled` 3815 — but the spare it feeds was never consulted: the cull budget was
 empty at 34 manage passes out of 38 (the population ends at 4 live domains after 87 merges and 8 folds),
 and the 4 cull candidates were inside `DOM_GRACE`. At the default shape, then, the unit decides
-nothing yet; the (h) family's GPU arms are where it can.
+nothing yet; the (h) family's GPU arms are where it can. (This pair reported end-of-run totals only;
+the register asks for readings at the acts, and `part.n_culled` never fired. The correction below
+gives the per-act readings, and a substitute pair where the cull fires.)
 Whether the unit improves domain management is read on GPU (U-series family (h), S5 (iii)), and an
-adverse reading there returns the lever to OFF. Driven: `tests/test_levels.py` L1-L7,
+adverse reading there returns the lever to OFF. Driven: `tests/test_levels.py` L1-L8,
 `tests/test_continuation.py` S5 (now at ON by default).
+**CORRECTED 2026-09-27 (build 1.2's review) — the checkpoint carries a mixed book's split, L2 proves
+the spare's comparison ran, and the k1000 known answer is read at the acts.** (i) *The stamp was the
+saving run's lever, not the book's unit.* `state_dict` wrote `comp_unit` from `DOM_LEVELS`, so a
+child that resumed into the other unit (`part.n_comp_unit_changed` 1, warned) and saved a few
+windows later stamped a book still mostly in its parent's unit as wholly its own. Driven at d4b010d
+(the review's scratch `stage1/review/mixed_stamp.py`): a `DOM_LEVELS=0` parent saved at window 120
+(12 domains, `'token'`) was resumed at `DOM_LEVELS=1` for 3 windows and saved. Its blob read
+`'build_token'`, and 11 of the 12 domains' `comp` were still exactly the parent's per-token values.
+A `DOM_LEVELS=1` grandchild read `part.n_comp_unit_changed` 0 and was not warned; a `DOM_LEVELS=0`
+one was warned that the book was "folded in bits per build-time token". The `DOM.census` `comp_unit`
+label, taken from the lever, had the same blind spot. **Repair:** the blob also carries
+`comp_carry`, which is None when the book is wholly in `comp_unit`. Otherwise it holds the unit the
+rest of the book is in, and each EMA's share of it: the population baseline's and each domain's. A
+share is the EMA's own arithmetic, not an estimate. Every fold multiplies an EMA's past by (1 −
+`d_comp_ema`), so `note_competence` multiplies the carried share of the two EMAs it folds into by
+the same factor. A share below 2⁻⁵³ (`domains/api.py::_CARRY_FLOOR`, float64's unit roundoff: below
+it the other unit weighs less than the rounding of one fold) counts as refolded and is dropped. At
+0.02 that is an EMA's 1,819th fold in the new unit. `manage`'s tidy drops the shares of domains that
+leave. `open_partition` re-reads the shares against this run's unit. They are kept as saved when the
+stamp is this run's unit, and complemented when it is not: `DOM_LEVELS` is a flag, so the carried
+readings are then in this run's unit and every other reading is not. A new gauge,
+`part.n_comp_carried`, is ABSENT on a fresh partition. On a restore it counts the EMAs still holding
+the other unit, falls as they are refolded or their domains leave, and reads 0 once none does.
+`part.n_comp_unit_changed` is now 1 when that count is above 0 at the restore. That is unchanged for
+every blob written in one unit, and it is 1 for both grandchildren above. The root's warning names
+the carried unit (the one this run does not hand DOM) and counts the carried EMAs. It says the
+checkpoint carries the shares, and gives the clean arm as a resume where `part.n_comp_carried` reads
+0. That is the other `DOM_LEVELS` only when the parent's book is wholly in one unit; a mixed book is
+whole in neither. While the count is above 0 the `DOM.census` label adds "k restored EMA(s) still
+carry" the other unit. A blob written between d4b010d and this correction carries no shares, so a
+mixed one of them still reads as wholly in its stamp: nothing in it can recover the split. No
+default moves. `comp_carry` is None on every run that did not change the unit, and none of the new
+branches is entered. Driven: `tests/test_levels.py` L6 (a book in one unit, resumed in the other,
+carries every EMA: 13 of 13) and L8. L8 drives the case above. The child's blob carries each
+restored EMA at (1 − `d_comp_ema`)^k for its k readings, to the bit. The `DOM_LEVELS=1` grandchild
+reads `part.n_comp_unit_changed` 1 with 13 of 13 EMAs carried, and is warned in bits per token. The
+`DOM_LEVELS=0` grandchild carries 2 of 13 (the one domain the child fed, and the baseline) and is
+warned in bits per build-time token. A share that one fold takes below 2⁻⁵³ leaves the carry. 3 + 3
+windows across the child's checkpoint end with the uninterrupted 6's shares, `comp` and `comp_glob`,
+to the bit. L8 also checks the census label. (ii) *L2's setup check did not prove the spare's
+comparison ran.* It asserted that the key `part.n_spared_by_competence` exists. But `manage` seeds
+that key at the top of every pass with protection on, before any candidate is examined. At
+`TOK_MODE=bytes` without the reach levers (300 windows; the review's scratch
+`stage1/review/l2_setup.py`) the predicate held with 2 candidates, 2 grace skips, 0 culled and 0
+spared. It now also requires `part.n_culled` + `part.n_spared_by_competence` > 0. A candidate
+reaches brake two only past grace, the activity test and brake one, and leaves it either spared or
+culled. On L2's reach configuration the sum is 6: 5 culled and 1 spared. (iii) *The register's k1000
+known answer was not met, and this entry did not say so.* TREE-S0b-LEVELS asks for `part.n_created`
+and `part.n_culled` read at the acts, and for counters that fire. The pair was re-run at 1f69a29
+through a driver that reads DOM's counters as each act calls `DOM.on_retokenize` (scratch
+`stage1/k1000c/drive.py`). Both arms act at windows 1001, 2001 and 3001. At those acts, both read
+`part.n_created` 71, 82, 96 (99 at the end) and `part.n_culled` 0, 0, 0 (0 at the end), with equal
+curves, as above. **At the k1000 defaults the register's "counters fire" is therefore unmet for
+`part.n_culled`.** The cull budget was zero at 6, 16 and 26 of the 10, 20 and 30 passes before each
+act (`DOM_CULL_FRAC` 0.1 needs ten live domains, and the population held 10, 3 and 4 at the acts).
+The 4 candidates examined were all inside `DOM_GRACE`. **The substitute makes the cull reachable:**
+the same pair plus `DOM_GRACE=50 DOM_CULL_STALE=50 DOM_CULL_FRAC=0.5`, the reach levers of the 240
+KB run above. Each arm ran 3815 windows and 3 acts, finite. At the three acts, ON reads
+`part.n_created` 77, 127, 138, `part.n_culled` 12, 15, 18 and `part.n_spared_by_competence` 9, 11,
+13. OFF reads 80, 126, 146; 14, 16, 18; and 5, 8, 11. At the end, ON reads 140 / 18 / 13 and OFF 149
+/ 18 / 11. The losses are equal for the first 700 flushes and differ from the 701st on. So on this
+shape the unit decides spares, which the default shape never let it do. That is operation: the
+counters fire, and the arms separate where the spare is consulted. It says nothing about which arm
+manages domains better. The end losses (1.947 ON, 2.039 OFF) are one seed on CPU.
 
 ### Q-RUN-11 — a resume drew epoch 0's stream whatever epoch it resumed in — **RESOLVED 2026-09-24: THE `stream` ROW DRAWS `Snapshot.epoch`**
 The `stream` row passed `epoch=0` unconditionally. Driven at `RUN_EPOCHS=2 DATA_RESAMPLE=1`: the

@@ -2603,16 +2603,30 @@ def compose(environ=None, *, restored=None):
     # was folded in: open_partition keeps them (there is no per-domain bytes history to convert with,
     # and dropping them would disarm the spare) and counts part.n_comp_unit_changed. The C12 case is
     # a "pre-Levels" fleet checkpoint continued at the default.
+    # AND THE SHARE AN EARLIER RESUME LEFT IS SAID TOO (2026-09-27, the build 1.2 review). The blob's
+    # stamp is the unit the saving run folded in, so a child that changed unit and saved before its
+    # parent's EMAs were refolded passed them on under its own stamp: its grandchild at the same value
+    # was told nothing, and one at the other value was told the wrong unit. The blob now carries each
+    # EMA's share of the other unit (DOM.state_dict's `comp_carry`), and part.n_comp_carried counts
+    # the EMAs holding one. The unit named is the one this run does not hand DOM: with two units, it
+    # is what every carried reading is in.
     if int(sysm.partition.counters.get("part.n_comp_unit_changed", 0)) > 0:
         _now_unit = ("bits per build-time token" if bool(dom.levels) else "bits per token")
         _was_unit = ("bits per token" if bool(dom.levels) else "bits per build-time token")
+        _k = int(sysm.partition.counters.get("part.n_comp_carried", 0))
+        _n = int(sysm.partition.counters.get("part.n_restored_domains", 0)) + 1
         sysm.warnings.append(
-            f"DOM_LEVELS={int(bool(dom.levels))} on a resume whose competence book was folded in "
-            f"{_was_unit}; this run hands DOM {_now_unit} (Q-DOM-5). The parent's book is kept: each "
-            f"domain's EMA moves to this run's unit at the d_comp_ema rate as its own windows "
-            f"arrive, and a domain that receives none keeps the parent's unit, so until then the "
-            f"cull's competence spare compares readings in two units. For a clean arm, resume at "
-            f"the parent's DOM_LEVELS={int(not bool(dom.levels))}.")
+            f"DOM_LEVELS={int(bool(dom.levels))} on a resume whose competence book holds readings "
+            f"folded in {_was_unit}: {_k} of its {_n} EMAs (one per restored domain, and the "
+            f"population baseline) carry them (part.n_comp_carried) -- every one when the parent "
+            f"folded in that unit, the share an earlier resume left when it did not. This run hands "
+            f"DOM {_now_unit} (Q-DOM-5). The book is kept: a carried EMA's share of the other unit "
+            f"is multiplied by (1 - d_comp_ema) at each reading it folds and a domain that receives "
+            f"none keeps it, so until then the cull's competence spare compares readings in two units; "
+            f"the checkpoint carries the shares, so a resume from it is told again. For a clean arm, "
+            f"resume where part.n_comp_carried reads 0: at DOM_LEVELS={int(not bool(dom.levels))} "
+            f"when the parent's book is wholly in {_was_unit}; a book an earlier resume mixed is "
+            f"whole in neither unit.")
 
     # -- 9. the capacity valve, and the refusal that needs the population -------------------------
     # new_valve's `restored` is the LIFTED CAP alone, because Valve.origin has to record where the
