@@ -39,6 +39,8 @@ because the table is the only evidence of what the old system actually did. Wher
 reached into the environment from inside its body, the parameter arrives as an argument instead; that is
 the only intended behavioural difference, and it is noted on the function.
 """
+import re
+
 from .units import Backwards, Clock, Epochs, Flushes, Steps, UnitError, Windows
 
 
@@ -1455,6 +1457,31 @@ def phase_schedule(n_areas, n_phases=None, width=None):
         lo = round(i * (n_areas - w) / max(1, p - 1))      # window slides from the first area to the last
         out.append(list(range(lo, lo + w)))
     return out
+
+
+# === the rng key an area's label becomes =========================================================
+
+def stream_key(label):
+    """The key a label becomes inside an rng child-stream name: lowercased, with every character
+    outside [a-z0-9_] replaced by "_".
+
+    UNIT IN: label = an area label (name). UNIT OUT: name.
+
+    ONE NORMALISATION FOR EVERY PACKAGE THAT KEYS A STREAM BY AN AREA'S NAME. spine/rng.py refuses
+    uppercase in a subsystem name ("Fabric" and "fabric" would be two streams for one subsystem) and
+    refuses "/" (its seed separator), and area labels are directory names that may carry both --
+    "code_OOD" today, "continual/01_rust" under Q-DATA-4's slash rule. DATA keys each area's held-out
+    block and each synthetic generator by it (data/api.py::_holdout_key delegates here), and SR0's
+    pinned probe draw keys its windows by the SAME area names (register §8 3.1, 04-Q5). The two
+    packages may not import each other (O10), so the rule lives here: two copies of it would be two
+    answers to "which stream is this area's", and an across-the-boundary comparison built on one of
+    them would silently read a different draw from the other.
+
+    WHAT IT DOES NOT DO: refuse. Two labels that normalise to one key ("rustA" and "rusta") would
+    draw from one stream; data/api.py::open_areas refuses that at startup, naming DATA_AREAS and both
+    entries, which is where the operator can act on it. Pure string work, no lever and no state.
+    """
+    return re.sub(r"[^a-z0-9_]", "_", str(label).lower())
 
 
 # === the checkpoint's base path ==================================================================

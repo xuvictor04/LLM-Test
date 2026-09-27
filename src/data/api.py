@@ -19,7 +19,7 @@ implementation agents share; nothing else about the layout is load-bearing.
 RECORD TYPES RETURNED (P4 defines them; they are DATA's objects and other packages receive
 them as arguments, which is not an import and O10 does not refuse it):
   Areas   names, bodies, holdout, holdout_bytes, bytes_present, bytes_taken, cursors, rng_holdout,
-          counters, gates
+          counters, gates, parent_names
   Plan    protocol, schedule, phase_bounds, per_area_draw, exposure, gates, counters
   Stream  bytes, labels, splice_starts, area_changes, phase_bounds, area_names, per_area_drawn,
           epoch, stream_id, draws, counters, gates
@@ -27,7 +27,6 @@ them as arguments, which is not an import and O10 does not refuse it):
 import dataclasses
 import math
 import os
-import re
 import weakref
 
 from spine.lever import Config, LeverError
@@ -73,6 +72,11 @@ class Areas:
     report greps both and finds each name once. Until this field existed, every one of those names
     was computed nowhere and DATA's armed-but-0 and UNREACHABLE states were the same silence --
     which is the one distinction spine/gate.py::Gate exists to preserve.
+
+    `parent_names` IS THE AREA LIST THE RESUMED CHECKPOINT RECORDED, in its order, FILLED IN PLACE by
+    restore_stream_state (2026-09-27, Q-DATA-9) -- the one record of which areas the parent trained
+    on, beside `names`, which is this run's. Empty on a fresh run. A list and not a tuple for the
+    reason `cursors` is a dict: the record is frozen and its restore mutates the value, not the field.
     """
     names: tuple
     bodies: dict
@@ -84,6 +88,7 @@ class Areas:
     rng_holdout: dict
     counters: dict = dataclasses.field(default_factory=dict)
     gates: tuple = ()
+    parent_names: list = dataclasses.field(default_factory=list)
 
 
 def _holdout_key(label):
@@ -95,8 +100,13 @@ def _holdout_key(label):
     lowercased with everything outside [a-z0-9_] replaced by "_", and two areas whose KEYS collide
     are the same startup refusal as two whose labels collide. That is exactly the objection rng.py
     raises, answered at startup rather than papered over.
+
+    THE RULE IS spine/derive.py::stream_key AND THIS DELEGATES TO IT (2026-09-27, Q-DATA-9). SR0's
+    pinned probe keys its windows by the same area names in another package, and two copies of the
+    normalisation would be two answers to "which stream is this area's".
     """
-    return re.sub(r"[^a-z0-9_]", "_", str(label).lower())
+    from spine import derive as _derive
+    return _derive.stream_key(label)
 
 
 
@@ -149,7 +159,14 @@ def open_areas(dat: Config, *, seed: int):
     15-symbol alphabets (self_organize.py:1084-1099, :1314-1315), seeded from
     rng_for("data.synth", seed) so that two run seeds are two different synthetic corpora. Today
     they are not: make_proc is seeded by the PROCESS INDEX, so `DATA_SOURCE=synthetic` measures a
-    between-seed spread with the data held constant (DEFECT D-A13). Holds nothing out.
+    between-seed spread with the data held constant (DEFECT D-A13). WHETHER IT HOLDS ANYTHING OUT IS
+    dat.synth_holdout's to say (2026-09-27, Q-DATA-9; 04-Q5 rules it ON, and it is built OFF until
+    the flip lands). At True each generated body goes through the real sources' held-out law below,
+    VERBATIM -- the same size, the same per-area child stream, the same removal, seam, overlap, val-cap
+    tally and 0-byte refusal -- because two holdout laws for two sources would make a synthetic
+    block a different kind of sample from a real one. At False nothing is held out: every body is the
+    whole generated text, no data.holdout.<key> child is minted, and data.holdout_block and
+    data.val_cap_trip read UNREACHABLE naming DATA_SYNTH_HOLDOUT=0.
 
     DATA_AREAS NAMING FEWER ENTRIES THAN DATA_N_PROCESSES IS A STARTUP REFUSAL, not a license to
     invent labels (audit finding, confirmed live). `DATA_SOURCE=synthetic DATA_AREAS=eng
@@ -216,7 +233,7 @@ def open_areas(dat: Config, *, seed: int):
                  _synthetic_areas sizes every generated corpus from DATA_STREAM_BYTES, so the shipped
                  configuration's build sample, merge table and measured bytes_per_token all move with
                  a lever this line used to omit; declared here rather than silently left off a second
-                 time)
+                 time), synth_holdout (the synthetic arm's held-out law, Q-DATA-9)
     WIRES READ: none
     DID IT FIRE: EVERY NAME BELOW IS CARRIED OUT ON THE RETURNED `Areas`, exactly once, and which
                  field it lands in follows the rule stated on the record: a name with a
@@ -243,7 +260,8 @@ def open_areas(dat: Config, *, seed: int):
                  is never seen in a completed run; declared so the refusal is a named mechanism
                  rather than an assertion),
                  data.corpus_cap_trip (fired N / armed but 0, prints taken vs present per area),
-                 data.holdout_block (prints offset+size AND the rng key per area),
+                 data.holdout_block (prints offset+size AND the rng key per area; UNREACHABLE on
+                 source=synthetic at DATA_SYNTH_HOLDOUT=0, and the real arm's gate at 1),
                  data.holdout_seam (one per area -- removing a MIDDLE block leaves exactly one
                  manufactured discontinuity in a body seg_contig=True reads in order, and
                  data/levers.py::DATALevers claims the only boundaries left are the text's own; one
@@ -252,12 +270,16 @@ def open_areas(dat: Config, *, seed: int):
                  offset 0 or at the tail, which is the state it must say rather than read 0),
                  data.holdout_overlap (a READING, not a lever and not a gate: the fraction of
                  held-out bytes that also occur verbatim in the training body at a fixed n-gram
-                 length, per area, printed once at startup. It costs no lever, no wire and no
-                 default, and it answers the one question the split rule CANNOT: Lee et al.
-                 arXiv:2107.06499 measures models "underestimate perplexity on evaluation documents
-                 with near duplicates" and says benchmarks "should actively remove contaminated
-                 training data, rather than just partitioning held out splits by documents", so
-                 NEITHER the tail nor the random block is safe on its own), data.val_cap_trip,
+                 length, per area, computed once at startup -- and printed in the R report's
+                 DATA(areas.counters) row since 2026-09-27; no row printed it before. It costs no
+                 lever, no wire and no default, and it answers the one question the split rule
+                 CANNOT: Lee et al. arXiv:2107.06499 measures models "underestimate perplexity on
+                 evaluation documents with near duplicates" and says benchmarks "should actively
+                 remove contaminated training data, rather than just partitioning held out splits
+                 by documents", so NEITHER the tail nor the random block is safe on its own. It is
+                 a reading of THIS run's blocks, so restore_stream_state never overwrites it with
+                 the parent's), data.val_cap_trip (UNREACHABLE on source=synthetic at
+                 DATA_SYNTH_HOLDOUT=0, like data.holdout_block),
                  data.area_refused (a refusal exits at startup, so N>0 is never seen in a
                  completed run), rng.issued()["data.synth"],
                  rng.issued()["data.holdout.<key>"] -- ONE PER AREA, and the PARENT NAME
@@ -368,6 +390,12 @@ def open_areas(dat: Config, *, seed: int):
 
     names = tuple(raw)
     bodies, holdout, holdout_bytes, rng_holdout, cursors = {}, {}, {}, {}, {}
+    # THE ONE ARM THAT HOLDS NOTHING OUT (2026-09-27, Q-DATA-9): the synthetic source at
+    # DATA_SYNTH_HOLDOUT=0. Everywhere else -- a real source, or the synthetic one at 1 -- the loop
+    # below runs the real sources' law VERBATIM, because one held-out law for both sources is what
+    # makes a synthetic block the same kind of sample as a real one (04-Q5). On this arm the loop runs
+    # the statements it ran before the lever existed, in order, and mints no data.holdout.<key> child.
+    synth_off = str(dat.source) == "synthetic" and not bool(dat.synth_holdout)
     for label in names:
         blob = raw[label]
         # THE FLOOR IS CHECKED ON THE USABLE BODY, i.e. after the held-out block comes out, which is
@@ -377,8 +405,8 @@ def open_areas(dat: Config, *, seed: int):
         # kept per area because the gate below prints the arithmetic rather than a verdict.
         frac_bytes[label] = int(len(blob) * float(dat.holdout_frac))
         n_hold = min(frac_bytes[label], int(dat.val_cap))
-        if str(dat.source) == "synthetic":
-            n_hold = 0             # the synthetic path holds nothing out
+        if synth_off:
+            n_hold = 0             # the synthetic path at DATA_SYNTH_HOLDOUT=0 holds nothing out
         elif frac_bytes[label] > int(dat.val_cap):
             n_val_cap += 1
         if len(blob) - n_hold < floor:
@@ -433,7 +461,7 @@ def open_areas(dat: Config, *, seed: int):
                     "block landed at the body's own tail: no text follows it, so removing it "
                     "manufactures no discontinuity")
         else:
-            if str(dat.source) != "synthetic":
+            if not synth_off:
                 # A REAL AREA'S HOLDOUT ROUNDING TO ZERO IS A REFUSAL, NOT A SILENT SKIP (audit
                 # finding, confirmed live). The `else` branch below is written for exactly one
                 # reason -- "source=synthetic holds nothing out" -- and used to run unconditionally,
@@ -445,16 +473,28 @@ def open_areas(dat: Config, *, seed: int):
                 # across-the-run-boundary comparison for this area would then have nothing held out
                 # to be computed against, silently. Refused instead, naming both levers and the
                 # arithmetic that zeroed the block.
+                # AND A SYNTHETIC AREA AT DATA_SYNTH_HOLDOUT=1 IS REFUSED THE SAME WAY (2026-09-27,
+                # Q-DATA-9): it runs the real sources' law, so a block that rounds to nothing is the
+                # same failure there, and the OFF record below would stamp "holds nothing out" on a
+                # run that asked for a block. Its message also names the lever that asked.
                 raise CorpusError(
                     f"area {label!r} computed a 0-byte held-out block: min(int({len(blob)} * "
                     f"{float(dat.holdout_frac)}), {int(dat.val_cap)}) == 0 from DATA_HOLDOUT_FRAC="
                     f"{dat.holdout_frac} and DATA_VAL_CAP={int(dat.val_cap)} against a "
                     f"{len(blob)}-byte body. Refused rather than trained on with no held-out block "
-                    f"at all: raise DATA_HOLDOUT_FRAC or DATA_VAL_CAP.")
+                    f"at all: raise DATA_HOLDOUT_FRAC or DATA_VAL_CAP."
+                    + (" DATA_SOURCE=synthetic at DATA_SYNTH_HOLDOUT=1 carves under the real "
+                       "sources' law and is refused the same way; DATA_SYNTH_HOLDOUT=0 is the "
+                       "synthetic arm that holds nothing out." if str(dat.source) == "synthetic"
+                       else ""))
             holdout[label] = b""
             bodies[label] = blob
+            # THE OFF RECORD NAMES THE LEVER THAT MADE IT (2026-09-27, Q-DATA-9): since the synthetic
+            # source can hold a block out, "source=synthetic holds nothing out" is no longer a
+            # property of the source but of DATA_SYNTH_HOLDOUT=0 on it. The key, offset, size and
+            # seam are unchanged, and they are what restore_stream_state compares.
             rng_holdout[label] = {"key": None, "offset": 0, "size": 0, "seam_at": None,
-                                  "why": "source=synthetic holds nothing out"}
+                                  "why": "DATA_SYNTH_HOLDOUT=0 holds nothing out on this source"}
         holdout_bytes[label] = len(holdout[label])
         cursors[label] = 0
 
@@ -508,17 +548,22 @@ def open_areas(dat: Config, *, seed: int):
             reason=f"DATA_SOURCE=synthetic: each area is generated to the size the sampler needs and "
                    f"nothing is read off disk, so DATA_CORPUS_CAP={int(dat.corpus_cap)} truncates "
                    f"nothing and bytes_present == bytes_taken by construction, not by measurement"))
-        gates.append(Gate(
-            "data.holdout_block", False, None, n_entries, reachable=False,
-            reason="DATA_SOURCE=synthetic: this arm holds nothing out, so no block is drawn and no "
-                   "data.holdout.<key> child stream is minted for any area -- an area with no child "
-                   "in rng.issued() never asked for a block, which is a different statement from a "
-                   "block of size zero"))
-        gates.append(Gate(
-            "data.val_cap_trip", False, None, int(dat.val_cap), reachable=False,
-            reason=f"DATA_SOURCE=synthetic: with nothing held out there is no block for "
-                   f"DATA_VAL_CAP={int(dat.val_cap)} to bind, so the cap is not armed-and-inert "
-                   f"here -- it has nothing to be armed against"))
+        if synth_off:
+            # THE HELD-OUT PAIR IS UNREACHABLE ON THIS ARM ONLY AT DATA_SYNTH_HOLDOUT=0 (2026-09-27,
+            # Q-DATA-9), and the reason now names that lever and not the source: at 1 the synthetic
+            # source carves under the real sources' law, and both gates take the real arm below.
+            gates.append(Gate(
+                "data.holdout_block", False, None, n_entries, reachable=False,
+                reason="DATA_SOURCE=synthetic at DATA_SYNTH_HOLDOUT=0: this arm holds nothing out, so "
+                       "no block is drawn and no data.holdout.<key> child stream is minted for any "
+                       "area -- an area with no child in rng.issued() never asked for a block, which "
+                       "is a different statement from a block of size zero. DATA_SYNTH_HOLDOUT=1 "
+                       "carves one per area under the real sources' law"))
+            gates.append(Gate(
+                "data.val_cap_trip", False, None, int(dat.val_cap), reachable=False,
+                reason=f"DATA_SOURCE=synthetic at DATA_SYNTH_HOLDOUT=0: with nothing held out there "
+                       f"is no block for DATA_VAL_CAP={int(dat.val_cap)} to bind, so the cap is not "
+                       f"armed-and-inert here -- it has nothing to be armed against"))
     else:
         gates.append(Gate(
             "data.area_open", n_open > 0, n_open, n_entries,
@@ -542,6 +587,9 @@ def open_areas(dat: Config, *, seed: int):
             "data.corpus_cap_trip", n_cap_trip > 0, n_cap_trip, len(names),
             reason=f"DATA_CORPUS_CAP={int(dat.corpus_cap)}, and the cap's bite is a PRINTED NUMBER "
                    f"per area rather than a warning about a default -- {cap_detail}"))
+    if not synth_off:
+        # THE HELD-OUT PAIR'S REAL ARM, taken by a real source and, since 2026-09-27, by the
+        # synthetic one at DATA_SYNTH_HOLDOUT=1 (Q-DATA-9): the same law, so the same two gates.
         block_detail = "; ".join(
             f"{label}: {rng_holdout[label]['key']} offset {rng_holdout[label]['offset']} "
             f"size {rng_holdout[label]['size']}" for label in names)
@@ -571,8 +619,9 @@ def open_areas(dat: Config, *, seed: int):
         "data.area_refused", False, 0, n_entries,
         reason="every refusal in this function raises CorpusError and exits at startup -- an empty "
                "DATA_AREAS, a label or rng-key collision, an entry that escapes DATA_DIR, an area "
-               "with no usable bytes, a body under the derived floor, a real area whose held-out "
-               "block rounded to zero, or DATA_N_PROCESSES out of range -- so this row reads zero "
+               "with no usable bytes, a body under the derived floor, an area whose held-out block "
+               "rounded to zero (a real one, or a synthetic one at DATA_SYNTH_HOLDOUT=1), or "
+               "DATA_N_PROCESSES out of range -- so this row reads zero "
                "in every Areas that exists. It is declared so a refusal is a named mechanism and "
                "not an assertion nobody counts"))
 
@@ -675,7 +724,9 @@ _ALPHABETS = ("abcdefghijklmno", "pqrstuvwxyzABCD", "EFGHIJKLMNOPQRS",
 
 
 def _synthetic_areas(dat, seed, entries, labels):
-    """`dat.n_processes` order-2 Markov generators, one area each. Holds nothing out.
+    """`dat.n_processes` order-2 Markov generators, one area each. Holds nothing out ITSELF: what it
+    returns is each area's whole generated text, and open_areas carves the held-out block from it
+    under the real sources' law when DATA_SYNTH_HOLDOUT asks for one (2026-09-27, Q-DATA-9).
 
     `labels` ARRIVES PRE-VALIDATED, computed once by open_areas for both sources (basename applied,
     checked against every OTHER entry for a label or rng-key collision) rather than derived twice and
@@ -1647,14 +1698,16 @@ def stream_state(dat: Config, areas):
     WIRES READ: none
     DID IT FIRE: data.state_written (LINEAGE, and it counts the save that writes it),
                  data.state_written_here (THIS PROCESS's; restore_stream_state never restores it;
-                 ABSENT until this process saves, and read in the blob: no R row prints DATA's
-                 counters)
+                 ABSENT until this process saves). Both are printed in the R report's
+                 DATA(areas.counters) row since 2026-09-27 (Q-DATA-9), under the root's
+                 _SAVE_COUNTS rule like every other package's pair; before that no row printed
+                 them and they were read in the blob
     """
     dat = dat.owned_by("DATA")
     # BUMPED BEFORE THE COUNTERS ARE COPIED, SO A BLOB COUNTS ITSELF, with a process twin the
     # restore skips (2026-09-27, register LOW-RESUME-SAVED-COUNTERS; lm/api.py::state_dict says
-    # what the old order cost). No R-stage row prints DATA's counters, so the pair is read in the
-    # blob.
+    # what the old order cost). The R report's DATA(areas.counters) row prints the pair (Q-DATA-9),
+    # one save short of the final blob, as every package's pair is.
     areas.counters["data.state_written"] = areas.counters.get("data.state_written", 0) + 1
     areas.counters["data.state_written_here"] = areas.counters.get("data.state_written_here",
                                                                    0) + 1
@@ -1712,11 +1765,42 @@ def restore_stream_state(dat: Config, areas, state):
     make TRUE rather than merely permitted: keyed by label, adding an area cannot move any other
     area's block, so an honest add-an-area resume can no longer be refused by accident.
 
+    THE ONE ADMISSION (2026-09-27, Q-DATA-9; register 04-Q5, SR0). A record of key None AND size 0
+    for an area -- what the synthetic source writes at DATA_SYNTH_HOLDOUT=0, where it holds nothing
+    out -- against a block NOW on the synthetic source (DATA_SYNTH_HOLDOUT=1) is ADMITTED: all three
+    fields move, and nothing is lost, because the parent had no held-out block and so no number
+    across the run boundary reads one. The same record against a REAL block is a change of source
+    under the same area names, and it is refused as it was before the ruling. Each admitted AREA
+    counts one in data.holdout_admitted -- the unit is the area, so a four-area parent admits 4 --
+    and is named in data.holdout_admitted_names. THE PARENT TRAINED ON THOSE BYTES: an admitted
+    block is text the lineage has seen, not a clean held-out sample, and the root says so in the
+    warning it prints. Its read cursor, which indexed the WHOLE body, is mapped
+    onto the carved one (_carved_cursor): below the block it stays, past it it moves down by the
+    block's size, and inside it -- text now held out -- it moves to the block's offset, the first
+    byte after the block in the carved body. THE REVERSE IS REFUSED, NAMING DATA_SYNTH_HOLDOUT: a
+    block in the record and none now would train on the text the parent held out. Every other move
+    of a recorded block is the loud refusal above, unchanged.
+
+    `Areas.parent_names` IS FILLED HERE: the record's area names, in its order -- the areas the
+    parent trained on, whatever this run's list says (Q-DATA-9).
+
+    THE COUNTERS THE RECORD DOES NOT OVERWRITE are this resume's own statements and this run's own
+    readings: the restore and refusal tallies, data.area_added and its names, the process twin
+    data.state_written_here, the admission pair, and data.holdout_overlap -- a reading of THIS
+    run's blocks, which open_areas computed a moment ago. Copying the parent's over it would read
+    "no block to measure" beside an admitted block, and it dropped a newly added area's reading from
+    the add-an-area run: driven at ae70638, the tree before this ruling, a real-source child over
+    eng,py resumed from a parent over eng read {'eng': 0.0741} where its own was {'eng': 0.0741,
+    'py': 0.1142} (DATA_CORPUS_CAP=200000).
+
     LEVERS READ: none
     WIRES READ: none
     DID IT FIRE: data.state_restored, data.state_refused (with the area and the field that moved),
-                 data.area_added (the arriving area, PRINTED; 0 on an ordinary resume, which is the
-                 statement "this resume added nothing"), data.area_vanished
+                 data.area_added (the arriving area, PRINTED in the R report's DATA(areas.counters)
+                 row; 0 on an ordinary resume, which is the statement "this resume added nothing"
+                 -- seeded at 0 since 2026-09-27, when that row made the missing key visible),
+                 data.area_vanished, data.holdout_admitted and data.holdout_admitted_names (ABSENT
+                 on a fresh run, 0 and [] on a resume that reaches the comparison)
     """
     dat = dat.owned_by("DATA")
     if not state:
@@ -1729,6 +1813,14 @@ def restore_stream_state(dat: Config, areas, state):
     recorded = dict(state.get("holdout") or {})
     cursors = dict(state.get("cursors") or {})
     live = set(areas.names)
+    # THE PARENT'S AREA LIST, IN ITS ORDER, ON THE RECORD (Q-DATA-9): the one place a later
+    # consumer can ask which areas the parent trained on.
+    areas.parent_names[:] = list(recorded)
+    # THE RESUME'S OWN STATEMENTS, SEEDED BEFORE THE COMPARISON SO THAT 0 READS "ARMED, NONE": an
+    # ordinary resume admits nothing and adds nothing, and says so, where a fresh run has neither key.
+    areas.counters["data.holdout_admitted"] = 0
+    areas.counters["data.holdout_admitted_names"] = []
+    areas.counters["data.area_added"] = 0
 
     # NOT SET-EQUALITY, AND THE RULING IS 2026-09-02's (Q-DATA-4). An add-an-area run is BY
     # DEFINITION a resume whose area list gained a name -- longrun.sh:938 runs DOMAINS="eng,$NAME"
@@ -1749,6 +1841,38 @@ def restore_stream_state(dat: Config, areas, state):
             "size": int(areas.holdout_bytes.get(name, 0)),
             "key": (areas.rng_holdout.get(name) or {}).get("key"),
         }
+        if (str(dat.source) == "synthetic" and was.get("key") is None and was.get("size") == 0
+                and now["size"] > 0):
+            # THE ONE ADMISSION (Q-DATA-9, 04-Q5): the parent held nothing out of this area and this
+            # run holds a block out of it. No across-the-boundary number reads a parent block that
+            # does not exist, so moving all three fields breaks no comparison. The parent trained on
+            # the block's bytes, which the root's warning says; the cursor is mapped, not copied,
+            # because it indexed the whole body.
+            # ON THE SYNTHETIC SOURCE ONLY, which is the move 04-Q5 rules on: DATA_SYNTH_HOLDOUT
+            # 0 -> 1. Only a synthetic run at 0 writes key None and size 0 (a real area's empty
+            # block is refused in open_areas), so the same record against a REAL block is a change
+            # of source under the same area names, and it stays the refusal it was before this
+            # ruling -- driven at ae70638, the field loop below refuses it naming the moved offset.
+            areas.counters["data.holdout_admitted"] += 1
+            areas.counters["data.holdout_admitted_names"].append(name)
+            if name in cursors:
+                areas.cursors[name] = _carved_cursor(int(cursors[name]), now["offset"],
+                                                     now["size"], len(areas.bodies[name]))
+            continue
+        if (was.get("size") or 0) > 0 and now["size"] == 0:
+            # THE REVERSE IS REFUSED, AND BY THE LEVER THAT DOES IT (Q-DATA-9). A live size of 0 is
+            # only reachable on the synthetic source at DATA_SYNTH_HOLDOUT=0 -- a real area's
+            # 0-byte block is refused in open_areas -- so the field loop's "size moved" would name
+            # the symptom and not the setting.
+            _refuse(
+                f"DATA: area {name!r} had a {was.get('size')}-byte held-out block in the "
+                f"checkpoint (key {was.get('key')!r}, offset {was.get('offset')!r}) and has none "
+                f"now: DATA_SOURCE={dat.source} at DATA_SYNTH_HOLDOUT="
+                f"{int(bool(dat.synth_holdout))} holds nothing out. This run would train on the "
+                f"text the parent held out, and its across-the-boundary number would have no block "
+                f"to be read on. Resume with DATA_SYNTH_HOLDOUT=1, the setting that wrote the "
+                f"block. Only the other direction is admitted: a block where the checkpoint held "
+                f"none (key None, size 0), counted in data.holdout_admitted.")
         for field in ("offset", "size", "key"):
             if was.get(field) != now[field]:
                 _refuse(
@@ -1768,9 +1892,33 @@ def restore_stream_state(dat: Config, areas, state):
             areas.counters.setdefault("data.areas_added_names", []).append(name)
     if state.get("counters"):
         for k, v in state["counters"].items():
+            # data.holdout_overlap IS THIS RUN'S READING (Q-DATA-9): skipped with the resume's own
+            # statements, so the parent's reading of its own blocks never stands in for this one.
             if k not in ("data.state_restored", "data.state_refused", "data.area_added",
                          "data.area_vanished", "data.areas_added_names",
-                         "data.state_written_here"):
+                         "data.state_written_here", "data.holdout_admitted",
+                         "data.holdout_admitted_names", "data.holdout_overlap"):
                 areas.counters[k] = v
     areas.counters["data.state_restored"] = areas.counters.get("data.state_restored", 0) + 1
     return areas
+
+
+def _carved_cursor(cursor, offset, size, body_len):
+    """Where a read cursor over a WHOLE body lands once [offset, offset + size) is carved out of it.
+
+    UNIT: bytes in, bytes out. An admitted area's parent read its body whole (Q-DATA-9), so its
+    DATA_SEG_CONTIG cursor indexes text that now includes a held-out block. Below the block the two
+    bodies agree byte for byte and the cursor stays; past it every byte sits `size` earlier and so
+    does the cursor; INSIDE it the cursor pointed at text this run holds out, and the next byte the
+    parent would have read that this run still trains on is the first byte after the block, which in
+    the carved body is at `offset`. Reduced mod the carved body's length, the form draw_stream stores,
+    so a block at the tail sends a cursor inside it to the head, where the whole body's read would
+    have wrapped.
+    """
+    if cursor < offset:
+        at = cursor
+    elif cursor >= offset + size:
+        at = cursor - size
+    else:
+        at = offset
+    return at % body_len if body_len > 0 else 0

@@ -55,8 +55,9 @@ parent's exact stream and continue. Each check below pins one promise of that pa
       read armed and 0 there beside FAB's UNREACHABLE Gate and now waits for the first stamp.
   S10 THE SAVE COUNTERS ARE THE LINEAGE'S, BESIDE A PROCESS TWIN (Proposal 05 §8 1.6, register
       LOW-RESUME-SAVED-COUNTERS): a parent that saved k times and a child that saved j times before
-      its report read (k + j, j) on all ten save counts -- where the unfixed tree read k - 1 + j,
-      k + j and j across packages -- the child's final blob holds k + j + 1 (a blob counts itself),
+      its report read (k + j, j) on all eleven save counts (DATA's since its R row, Q-DATA-9) --
+      where the unfixed tree read k - 1 + j, k + j and j across packages on the ten it then printed
+      -- the child's final blob holds k + j + 1 (a blob counts itself),
       and a resume from that blob restores k + j + 1, tok.vocab_saved included; a resume from a
       lineage's first save, whose blob predates every vocabulary file, restores tok.vocab_saved 1.
       AND ONE RULE FOR THE TWIN (build 1.6's review): no ledger carries one before its process
@@ -706,8 +707,9 @@ finally:
 # and CAP (their ledgers do not travel). k and j come off each run's own 'CKPT.save: N' line: k is
 # the parent's N, the final save included, and j is the child's N - 1, because LOOP_ORDER puts the R
 # stage before the final save. LM's tally is process-global, so it is cleared before each System,
-# which stands for its own process. No R-stage row prints DATA's counters, so DATA is read in the
-# blob, which counts itself and so holds one more than the report on every one of these keys but
+# which stands for its own process. DATA's pair is the eleventh row since 2026-09-27 (Q-DATA-9: the
+# R report's DATA(areas.counters) row); before that no R row printed it and DATA was read in the blob
+# alone. The blob counts itself and so holds one more than the report on every one of these keys but
 # tok.vocab_saved, whose file is written after the blob.
 # THE TWIN'S RULE, AFTER BUILD 1.6's REVIEW: a package writes its `_here` twin at its process's
 # first save and seeds none, and the R report prints it 0 where saving is on
@@ -720,7 +722,8 @@ _S10 = (("LM.counters", "lm.ckpt.saved"), ("OPT.counters", "opt.ckpt.saved"),
         ("SIG.counters", "sig.state_written"), ("FAB.counters", "fab.state_written"),
         ("WORLD(w.counters)", "world.state_written"), ("MEM(store.counters)", "store.n_state_dicts"),
         ("DOM(part.counters)", "part.n_state_dicts"), ("CAP.counters", "cap.state_written"),
-        ("TOK(vocab.counters)", "tok.state_written"), ("TOK(vocab.counters)", "tok.vocab_saved"))
+        ("TOK(vocab.counters)", "tok.state_written"), ("TOK(vocab.counters)", "tok.vocab_saved"),
+        ("DATA(areas.counters)", "data.state_written"))
 
 
 def _pairs(res):
@@ -732,9 +735,9 @@ def _pairs(res):
     return out
 
 
-# THE TEN PACKAGES' LEDGERS, READ OFF THE SYSTEM (LM's is the process-global tally), with DATA's,
-# which no R row prints. The twin names are the ten above plus DATA's.
-_TWIN_KEYS = frozenset([key + "_here" for _, key in _S10] + ["data.state_written_here"])
+# THE ELEVEN LEDGERS, READ OFF THE SYSTEM (LM's is the process-global tally): the ten packages' and
+# DATA's, whose report row the eleventh entry above reads. The twin names are the eleven above.
+_TWIN_KEYS = frozenset(key + "_here" for _, key in _S10)
 
 
 def _ledgers(s):
@@ -749,7 +752,7 @@ def _twins_on_ledgers(s):
 
 
 def _lineage_on_ledgers(s):
-    lin = {key for _, key in _S10} | {"data.state_written"}
+    lin = {key for _, key in _S10}
     return {kk: v for d in _ledgers(s).values() for kk, v in d.items() if kk in lin}
 
 
@@ -766,7 +769,7 @@ try:
     bad_p = {kk: v for kk, v in pp.items() if v != (k - 1, k - 1)}
     bad_c = {kk: v for kk, v in pc.items() if v != (k + j, j)}
     check(f"S10 setup: the parent saved k >= 2 times and the child j >= 1 times before its report, "
-          f"and the ten rows here are the ten spine/loop.py::_SAVE_COUNTS renders",
+          f"and the eleven rows here are the eleven spine/loop.py::_SAVE_COUNTS renders",
           k >= 2 and j >= 1 and tuple(_S10) == tuple(loop._SAVE_COUNTS), f"k {k}, j {j}")
     check("S10 a fresh parent's report reads (k - 1, k - 1) on every package: lineage == process, "
           "the final save following the report", not bad_p, f"k {k}; off: {bad_p}")
@@ -794,7 +797,7 @@ try:
           f"{blob['TOK']['counters'].get('tok.vocab_saved')}")
     # AND A GRANDCHILD READ FROM THAT BLOB RESTORES k + j + 1 -- tok.vocab_saved included, because
     # the vocabulary file it replays records its own ordinal -- with no process twin on any of the
-    # ten ledgers: none crosses a resume, and since build 1.6's review no package seeds one either.
+    # eleven ledgers: none crosses a resume, and since build 1.6's review no package seeds one either.
     # OPT's build seeded its twin 0 and CAP.counters printed 0 for a missing one, while the other
     # eight read ABSENT, and this check asserted that split as correct. Whether saving is armed is
     # the root's to say (System.saving), so it is the R report that prints it: see j = 0 below.
@@ -842,7 +845,8 @@ try:
     # A FRESH RUN AT SAVING OFF, the default and tests/test_baseline.py's workload: every twin
     # ABSENT on every row and every ledger. The lineage keys are the packages' own there: OPT seeds
     # opt.ckpt.saved 0 at build and CAP.counters prints cap.state_written 0, and the baseline
-    # fixture pins both, while the other eight print ABSENT -- a residue Q-CKPT-4 states.
+    # fixture pins both, while the other nine (DATA's row since Q-DATA-9) print ABSENT -- a residue
+    # Q-CKPT-4 states.
     lm_api._COUNTS.clear()
     f10 = build(CKPT_DIR="")
     pf = _pairs(loop.run(f10, max_windows=3, progress=False))

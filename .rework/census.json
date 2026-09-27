@@ -5508,6 +5508,24 @@
      "DOM_GRACE",
      "DOM_CULL_STALE"
     ]
+   },
+   {
+    "old_name": "(amendment: DATA_SYNTH_HOLDOUT)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_SYNTH_HOLDOUT",
+    "unit": "on/off",
+    "purpose": "Whether DATA_SOURCE=synthetic holds out a block per area. On: the real sources' held-out law runs on each generated body verbatim -- min(int(body x DATA_HOLDOUT_FRAC), DATA_VAL_CAP) bytes, a seeded contiguous block from rng_for('data.holdout.<key>', seed), removed from the body, with its seam, its overlap reading, the val-cap tally and the 0-byte refusal. Off (the build default): the synthetic source holds nothing out, as it did before 2026-09-27, bit for bit. A resume admits a block where the checkpoint recorded none (key None, size 0), counted per area in data.holdout_admitted, and refuses the reverse.",
+    "reason": "AMENDMENT, 2026-09-27, Proposal 04's SR0 (register row 04-Q5; Proposal 05 \u00a78 3.1), ruled in docs/04_CONTRACT.md Q-DATA-9. There is no ancestor knob: the old synthetic generator held nothing out and had no switch over it, so there is no (family, old_name) key a DEPARTURES entry could be written under and N2 could only be satisfied by amending the census. IT DOES NOT CHANGE THE 328: that figure counts the old _SPEC's knobs and this was never one. WHY: every goal-B number on a synthetic run -- SR0's retention probe, E1's primary reading, every reading on 'focusbed' -- needs held-out text the run never trained on, and one held-out law for both sources makes a synthetic block a sample of the generated text rather than a separately drawn continuation (the judge's variant, rejected in SR0). BUILT OFF, RULED ON: at On every synthetic stream changes and no run before the change pairs with one after it, so 04-Q5's flip lands last and alone, after SR0's bit-identity, and pending fleets that pair with earlier runs pin it to 0 (04-Q5's pin rule).",
+    "couples_with": [
+     "DATA_SOURCE",
+     "DATA_HOLDOUT_FRAC",
+     "DATA_VAL_CAP",
+     "DATA_STREAM_BYTES",
+     "DATA_N_PROCESSES",
+     "DATA_SEG_MAX"
+    ]
    }
   ]
  }

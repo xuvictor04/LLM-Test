@@ -1510,8 +1510,11 @@ def run(sysm, *, max_windows=None, progress=True):
             # appear in the run's own training data. Until this line the loop warned, at the end of
             # every run, that its mints were real and unusable.
             prev_n = len(ids)
-            # A NEW EPOCH, A NEW SEGMENTATION LOG: its first event is this cut (03b S0b).
-            sysm.seg_log = {"epoch": int(tick.epoch), "events": [_c_seg_event(vocab, "tokenize")]}
+            # A NEW EPOCH, A NEW SEGMENTATION LOG: its first event is this cut (03b S0b), carrying
+            # the digest of the stream it cuts, which a continuing resume of this epoch compares
+            # with its own redraw before replaying the log (2026-09-27, Q-DATA-9).
+            sysm.seg_log = {"epoch": int(tick.epoch),
+                            "events": [_c_seg_event(vocab, "tokenize", stream=sysm.stream)]}
             sysm.segmentation = tok_api.tokenize(
                 tok_cfg, vocab, sysm.stream.bytes, sysm.stream.labels,
                 regularize=True, seed=int(run_cfg.seed))
@@ -1851,7 +1854,7 @@ _R_MISSING = (
     "FAB.forward, which is the same missing join that deferred FAB.contribution.",
 )
 
-# THE TEN SAVE COUNTS AND THE R ROWS THAT PRINT THEM (2026-09-27, build 1.6's review; Q-CKPT-4).
+# THE ELEVEN SAVE COUNTS AND THE R ROWS THAT PRINT THEM (2026-09-27, build 1.6's review; Q-CKPT-4).
 # Each package's state_dict counts the save it is called for -- the lineage count and its `_here`
 # twin -- and no package can tell whether saving is on: that is CKPT.saving_on's answer, recorded
 # once as System.saving, and the root is the only caller of the state_dicts. Two packages guessed.
@@ -1860,14 +1863,16 @@ _R_MISSING = (
 # a resumed child at the default CKPT_EVERY=0 (whose only save follows R) failed the register's
 # (k + j, j) at j = 0. Now no package seeds either key, and _report renders the armed state from
 # System.saving: PRESENT-and-0 on every row when saving is on and nothing has been counted, ABSENT
-# when it is off. DATA's pair (data.state_written and its twin) has no R row and is read in the blob.
+# when it is off. DATA's pair (data.state_written and its twin) had no R row and was read in the
+# blob until DATA(areas.counters) gave it one (2026-09-27, Q-DATA-9); it is the eleventh row here.
 _SAVE_COUNTS = (("LM.counters", "lm.ckpt.saved"), ("OPT.counters", "opt.ckpt.saved"),
                 ("SIG.counters", "sig.state_written"), ("FAB.counters", "fab.state_written"),
                 ("WORLD(w.counters)", "world.state_written"),
                 ("MEM(store.counters)", "store.n_state_dicts"),
                 ("DOM(part.counters)", "part.n_state_dicts"), ("CAP.counters", "cap.state_written"),
                 ("TOK(vocab.counters)", "tok.state_written"),
-                ("TOK(vocab.counters)", "tok.vocab_saved"))
+                ("TOK(vocab.counters)", "tok.vocab_saved"),
+                ("DATA(areas.counters)", "data.state_written"))
 
 
 def _report(sysm, elapsed_s, ctx):
@@ -1947,6 +1952,21 @@ def _report(sysm, elapsed_s, ctx):
     # render them in and the driver may not import FAB's private renderer.
     out["MEM.census(reconcile=True)"].update(
         {f"gate:{k}": v for k, v in _gate.three_state(_mc.gates).items()})
+    # DATA'S OTHER SURFACES, READ BY THE ROOT AS ITS STREAM GATES ARE (2026-09-27, Q-DATA-9). DATA
+    # declares no counters() entry point, so its records are read here, spelled `DATA(<record>.<field>)`
+    # like MEM's and TOK's -- the root took them, it did not ask. Until these rows no report printed
+    # the Areas ledger (the resume's data.state_restored, data.area_added, data.holdout_admitted and
+    # their names, the lineage save pair, the held-out overlap reading), the Areas gates (the
+    # held-out block, the val cap, the seams, the corpus cap), the Plan's readings or the Stream's
+    # segment count, and "PRINTED" in data/api.py's own DID IT FIRE lines had nothing behind it. The
+    # Areas and Plan records are the run's, built once at compose; the Stream is sysm.stream, the
+    # epoch's own, for the reason given on the gates row below.
+    out["DATA(areas.counters)"] = dict(sysm.areas.counters)
+    out["DATA(areas.gates)"] = (
+        {f"gate:{k}": v for k, v in _gate.three_state(sysm.areas.gates).items()}
+        if getattr(sysm.areas, "gates", ()) else "no Areas gates: the record carries none")
+    out["DATA(plan.counters)"] = (dict(sysm.plan.counters) if getattr(sysm.plan, "counters", None)
+                                  else "no Plan counters: the plan carries none")
     # DATA'S STREAM GATES, READ OFF sysm.stream AT R AND NOT OFF A REFERENCE TAKEN AT COMPOSE: stage
     # E redraws the stream on every epoch roll, and a cached one would report epoch 0's draw.
     # data/api.py::Stream declares `gates` the DID-IT-FIRE surface for data.contig_wrap and
@@ -1956,6 +1976,9 @@ def _report(sysm, elapsed_s, ctx):
         {f"gate:{k}": v for k, v in _gate.three_state(sysm.stream.gates).items()}
         if sysm.stream is not None and getattr(sysm.stream, "gates", ()) else
         "no Stream gates: the stream carries none")
+    out["DATA(stream.counters)"] = (
+        dict(sysm.stream.counters) if sysm.stream is not None
+        and getattr(sysm.stream, "counters", None) else "no Stream counters: the stream carries none")
     # THE LAST FAB.grow_check CALL'S GATES. GrowReport was a bare expression statement's return
     # value until 2026-09-24 and its per-call gates reached nothing; spine/loop.py::_flush now keeps
     # the gates tuple -- never the record -- on System.grow_gates. Rendered as its own row because a

@@ -38,15 +38,18 @@ they arrive from THREE families, which is the whole argument for owning by prefi
      2 rows from the `misc` family      -- n_processes and val_cap, both mis-tagged, and the survey's
                                            so-config record says so outright for both.
 
-This file emits 18 levers:
+This file emits 19 levers:
 
     11  rows with verdict rename
   +  6  rows with verdict keep
   +  1  amendment: DATA_DRAW, minted 2026-09-02 under the owner's ruling on ISSUES P1-H58. It has no
          census ancestor -- the old tree had one draw law and no switch over it -- so it is carried
          as an `amendments` row in census.json, which is what N2 reads.
+  +  1  amendment: DATA_SYNTH_HOLDOUT, minted 2026-09-27 under Proposal 04's SR0 (register 04-Q5,
+         Proposal 05 §8 3.1; docs/04_CONTRACT.md Q-DATA-9). No ancestor either: the old synthetic
+         generator held nothing out and had no switch over it.
   -------
-    18  Lever declarations, all reachable as DATA_<FIELD>
+    19  Lever declarations, all reachable as DATA_<FIELD>
 
 Not emitted, by verdict: 1 merge, 0 drop, 0 promote-to-wire.
   MERGED (folds into a lever this file DOES declare, so it is not an unresolved merge):
@@ -468,9 +471,10 @@ class DATALevers(LeverSet):
     # over a 2 MB area: "min(int(2000000 * -0.5), 4000000) == 0", where the min is -1000000. That
     # route is closed HERE rather than there, and the message is left to its owner. 1.0 stays inside
     # and is the whole area held out; open_areas then refuses THAT by the usable-bytes floor, with
-    # the area's own numbers. 0.0 is a legal spelling refused per area for a real source by the same
-    # function -- "raise DATA_HOLDOUT_FRAC or DATA_VAL_CAP" -- and inert on the synthetic arm, which
-    # holds nothing out.
+    # the area's own numbers. 0.0 is a legal spelling refused per area by the same function -- "raise
+    # DATA_HOLDOUT_FRAC or DATA_VAL_CAP" -- wherever a block is carved: on a real source, and since
+    # 2026-09-27 on the synthetic one at DATA_SYNTH_HOLDOUT=1 (whose refusal names that lever too). At
+    # DATA_SYNTH_HOLDOUT=0 the synthetic arm holds nothing out and this lever is inert there (Q-DATA-9).
     # Census: VAL_FRAC -> DATA_HOLDOUT_FRAC. Renamed to the word the report already prints: "VAL" appears
     # nowhere in the output this produces (G12). Read at :1165 and applied at :1167-1172.
     # THE DEFECT TO CARRY IS IN THE SPLIT, NOT THE FRACTION. The last 5% of a corpus is a SAMPLE only if
@@ -485,6 +489,34 @@ class DATALevers(LeverSet):
     # shuffle_buffer is 0, and prints NOTHING when there is no manifest, which "says nothing either way,
     # so claim nothing" (:1189-1190). A measurement whose validity depends on a file that may be absent
     # is not a measurement the report can stand behind.
+
+    synth_holdout = Lever(False, "Hold out a block per area on DATA_SOURCE=synthetic, under the real "
+                                 "sources' law: min(DATA_HOLDOUT_FRAC x body, DATA_VAL_CAP) bytes, a "
+                                 "seeded contiguous block removed from the body. Off, the synthetic "
+                                 "source holds nothing out.", U.FLAG)
+    # CENSUS AMENDMENT, 2026-09-27 (Proposal 04's SR0, register 04-Q5, Proposal 05 §8 3.1; ruled in
+    # docs/04_CONTRACT.md Q-DATA-9). No ancestor: the old synthetic generator held nothing out and had
+    # no switch over it, so there is no (family, old_name) key and N2 is satisfied by an amendment row.
+    # ONE LAW FOR BOTH SOURCES, NOT A SECOND ONE. At 1, data/api.py::open_areas runs the real sources'
+    # carve on each generated body verbatim: the size min(int(body x holdout_frac), val_cap), the start
+    # from rng_for("data.holdout.<key>", seed) -- one child stream per area, keyed by name (Q-DATA-6)
+    # -- the block REMOVED from the body, its seam and its overlap reading, the val-cap tally, and the
+    # 0-byte refusal. The judge's variant (generate the held-out text from a separate rng child and
+    # leave the body whole, so the stream does not move) was rejected in SR0: it is a second holdout
+    # law, and its block is a continuation drawn after the body rather than a sample of it.
+    # BUILT OFF, AND 04-Q5 RULES IT ON. At 1 every synthetic area trains on a body a block shorter,
+    # so the stream every default run draws changes and no run before the change pairs with one after
+    # it; the flip therefore lands last and alone, after SR0's bit-identity (§8 3.1), and pending
+    # fleets that pair with earlier runs pin it to 0 (04-Q5's pin rule). At 0 the synthetic branch runs
+    # the statements it ran before this lever existed, in order, and mints no data.holdout child.
+    # THE RESUME RULE (restore_stream_state). A checkpoint whose record for an area is key None and
+    # size 0 -- what a synthetic run at 0 writes -- is ADMITTED against a synthetic block now, counted
+    # per area in data.holdout_admitted; the parent trained on those bytes, so an admitted block is
+    # text the lineage has seen. The reverse (a block then, none now) is refused naming this lever,
+    # and the same record against a REAL block, a change of source, stays refused. A CONTINUING
+    # mid-epoch resume across an admission is refused by the root, because the redrawn stream is not
+    # the one the parent was reading.
+    # A BOOL, WITH THE BOOL BRANCH'S KNOWN HAZARD (see `resample`): DATA_SYNTH_HOLDOUT=flase reads as on.
 
     val_cap = Lever(4000000, "Maximum bytes of held-out tail kept per area.", U.BYTES)
     # Census: VAL_CAP -> DATA_VAL_CAP, mis-tagged misc, and the row the adversarial reviewer cites by

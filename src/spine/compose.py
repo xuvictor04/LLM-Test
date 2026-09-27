@@ -70,6 +70,7 @@ tree that may name os.environ (check O1), and build() warns loudly when it is ha
 registry.unread_env then has no mapping to scan and a misspelled knob is silently the default. Pass
 the process environment in from the entry point.
 """
+import hashlib
 
 # NOT `from spine.assemble import build, render`, and not a re-export of anything.
 #
@@ -349,7 +350,11 @@ ASSEMBLY_ORDER = (
                                               "AFTER open_areas because it refuses on the holdout "
                                               "offsets open_areas just produced, and BEFORE "
                                               "data_plan so the plan is computed against the "
-                                              "restored split. A refusal: it yields nothing"),
+                                              "restored split. A refusal, with one admission (a "
+                                              "record of key None, size 0 against a block now: "
+                                              "Q-DATA-9, which the root warns of), and it yields "
+                                              "nothing a later row takes: the record's area names "
+                                              "land on Areas.parent_names in place"),
     ("vocab",     "TOK",   "build_vocabulary","(area_heads=Areas.bodies, seed=RUN.seed, soft_cap=CAP's "
                                               "`vocab_start` lever, readable off the frozen Config "
                                               "at any point -- NOT CAP's "
@@ -466,7 +471,12 @@ ASSEMBLY_ORDER = (
                                               "run_windows TOGETHER, so the ratio is checkable by "
                                               "eye. It is here and not in RUN.bench_summary, which "
                                               "can reach none of the five and returns None when "
-                                              "bench is off (Q-DATA-8)",
+                                              "bench is off (Q-DATA-8). A CONTINUING MID-EPOCH "
+                                              "RESUME replays the checkpoint's segmentation log in "
+                                              "place of this cut (Q-RUN-16), and first compares "
+                                              "the redrawn stream's digest with the one the log's "
+                                              "first event recorded, refusing a mismatch and a "
+                                              "hold-out admission before the replay (Q-DATA-9)",
                                               "ids -- Segmentation.ids, which TOK.on_window takes "
                                               "one window of; positions -- Segmentation.byte_pos "
                                               "under MEM.write's spelling, TRUE BYTE OFFSETS and "
@@ -2290,7 +2300,10 @@ def _stop_if_refused(sysm):
     """Raise RefusedRun when the System carries a refusal. Called at the three points compose()
     takes one: after the config-only RUN/WORLD refusals (before any model tensor), after
     CAP.startup_refusals (which needs the built population, so it can only follow allocation),
-    and after the restore and finished-resume refusals, before the SIG warm-up."""
+    and after the restore and finished-resume refusals, before the SIG warm-up. AND AT A FOURTH,
+    ONLY ON A CONTINUING MID-EPOCH RESUME (2026-09-27, Q-DATA-9): at the `segment` stage, before
+    the log's replay, where a hold-out admission or a redrawn stream that is not the parent's is
+    refused -- neither needs the model, and the replay would cut the parent's log over other text."""
     if sysm.refusals:
         raise RefusedRun(sysm, sysm.stage)
 
@@ -2310,13 +2323,47 @@ def plan():
     return ASSEMBLY_ORDER, LOOP_ORDER
 
 
-def _seg_event(vocab, kind, at=None):
+def _stream_digest(stream):
+    """A digest of one epoch's DATA.Stream -- its bytes and its segment table -- for the segmentation
+    log, so a continuing resume can tell whether it redrew the stream its parent was reading.
+
+    WHY IT EXISTS (2026-09-27, Q-DATA-9). The log replays the parent's cut and splices over whatever
+    stream the `stream` row redrew, and until this digest the only check was the rebuilt LENGTH
+    against the saved one (the `epoch0` stage). A redraw that moved the bytes and kept the window
+    count trained on other text at the saved cursor with nothing said; one that moved the count died
+    on a RuntimeError naming no lever. The fresh log and stage E's roll record this in the epoch's
+    first event, and a continuing resume compares it before it replays anything.
+
+    WHAT IS HASHED: Stream.bytes; then, per segment, its start (8 bytes, little-endian), its area
+    label (utf-8) and a separator; then the stream's length. Stream.labels is one label PER BYTE,
+    constant within a segment, so the segment table covers the bytes and every label exactly at
+    O(segments) cost -- and a stream that moved only one segment's label digests apart. blake2b under
+    its own `person`, so it cannot collide with the tree's other blake2b uses.
+    """
+    h = hashlib.blake2b(digest_size=16, person=b"data.stream")
+    h.update(stream.bytes)
+    for s in stream.splice_starts:
+        h.update(int(s).to_bytes(8, "little"))
+        h.update(str(stream.labels[int(s)]).encode("utf-8"))
+        h.update(b"\x00")
+    h.update(len(stream.bytes).to_bytes(8, "little"))
+    return h.hexdigest()
+
+
+def _seg_event(vocab, kind, at=None, stream=None):
     """One entry of the per-epoch segmentation log (03b S0b): what was cut, where, at which view,
-    and the BPE-dropout stream's state just before the cut, so a resume can cut it again exactly."""
+    and the BPE-dropout stream's state just before the cut, so a resume can cut it again exactly.
+
+    THE EPOCH'S FIRST EVENT ALSO CARRIES `stream` (2026-09-27, Q-DATA-9): _stream_digest of the
+    Stream it cuts, passed by the two places that open a log -- compose's fresh log and stage E's
+    roll. A splice cuts the same Stream again and carries none. No draw and no counter: a dict key."""
     r = getattr(vocab, "dropout_rng", None)
     size, gone = tok_api.view_of(vocab)
-    return {"kind": kind, "at": None if at is None else int(at), "view": [size, list(gone)],
-            "rng": None if r is None else (r._r.getstate(), int(r._draws))}
+    event = {"kind": kind, "at": None if at is None else int(at), "view": [size, list(gone)],
+             "rng": None if r is None else (r._r.getstate(), int(r._draws))}
+    if stream is not None:
+        event["stream"] = _stream_digest(stream)
+    return event
 
 
 def _set_dropout_state(vocab, state):
@@ -2351,7 +2398,8 @@ def compose(environ=None, *, restored=None):
     System.stage on the partially built record naming how far it got -- so the failure says which
     package owes what rather than "something is missing". Raises RefusedRun when a startup refusal
     is taken, at the first of three points past which the refusal would otherwise be built over
-    (see _stop_if_refused), so a returned System never carries a refusal. Raises
+    (see _stop_if_refused; a continuing mid-epoch resume has a fourth, at the `segment` stage), so
+    a returned System never carries a refusal. Raises
     spine/gate.py::NotBuilt from the package that owns a declared-and-not-built arm.
 
     `environ` is passed straight to spine.assemble.build. Pass the process environment: build()
@@ -2418,6 +2466,22 @@ def compose(environ=None, *, restored=None):
     if "DATA" in saved:
         sysm.stage = "restore.data"
         data_api.restore_stream_state(data, sysm.areas, saved["DATA"])
+        # THE ONE HOLD-OUT ADMISSION IS SAID, BEFORE THE FIRST WINDOW (2026-09-27, Q-DATA-9; the
+        # Q-DOM-1 precedent). DATA counts and names it and prints nothing; the root holds the
+        # warnings. What the operator must hear is the contamination: the parent trained on every
+        # byte of each admitted block.
+        _adm = list(sysm.areas.counters.get("data.holdout_admitted_names") or ())
+        if _adm:
+            sysm.warnings.append(
+                f"DATA_SYNTH_HOLDOUT ADMITTED {len(_adm)} AREA(S) THE CHECKPOINT HELD NOTHING OUT "
+                f"OF: {', '.join(_adm)} (data.holdout_admitted, Q-DATA-9). The parent recorded key "
+                f"None and size 0 for each -- DATA_SOURCE=synthetic at DATA_SYNTH_HOLDOUT=0 -- and "
+                f"this run carves a block out of each under the real sources' law, so each of those "
+                f"bodies is a block shorter than the parent's. THE PARENT TRAINED ON THOSE BYTES: "
+                f"every admitted block is text this lineage has seen, so a held-out reading on it "
+                f"is not a clean held-out number for the lineage. The admission holds at an epoch "
+                f"boundary, where the epoch is drawn fresh; a continuing mid-epoch resume across it "
+                f"is refused at the `segment` stage.")
 
     # -- 5. the vocabulary, which MEASURES bytes/token --------------------------------------------
     # Ordered here and not earlier because build_vocabulary needs the corpus, and ordered before
@@ -2481,12 +2545,83 @@ def compose(environ=None, *, restored=None):
     _spos = ((saved.get("RUN") or {}).get("clock") or {}) if restored is not None else {}
     if (_slog and int(_slog.get("epoch", -1)) == int(restored.epoch)
             and int(_spos.get("in_epoch") or 0) > 0 and _spos.get("windows_in_epoch") is not None):
+        _where = (f"CKPT_RESUME={sysm.resume_src!r} continues epoch {int(restored.epoch)} "
+                  f"mid-epoch (window {int(_spos['in_epoch'])} of {int(_spos['windows_in_epoch'])})")
+        # BOTH CHECKS BELOW STOP HERE, BEFORE THE REPLAY AND BEFORE ANY ALLOCATION (2026-09-27,
+        # Q-DATA-9): a refusal that depends on neither the model nor a restore row has no reason to
+        # wait for the second stop, and the replay itself would cut the parent's log over other text.
+        # (a) A HOLD-OUT ADMISSION ACROSS A CONTINUING RESUME IS REFUSED BY NAME. An admitted body
+        # is a block shorter than the parent's, so this epoch's redraw is not the stream the parent
+        # was reading; the digest below would refuse it too, but only this names the lever.
+        _adm = list(sysm.areas.counters.get("data.holdout_admitted_names") or ())
+        if _adm:
+            sysm.refusals.append(
+                f"{_where}, and DATA admitted a held-out block the checkpoint did not hold for "
+                f"{len(_adm)} area(s) ({', '.join(_adm)}; data.holdout_admitted, Q-DATA-9). At "
+                f"DATA_SYNTH_HOLDOUT=1 each of those bodies is a block shorter than the parent's, so "
+                f"the stream the `stream` row redrew is not the one the parent was reading, and the "
+                f"log's replay would cut the parent's segmentation over other text. Resume with "
+                f"DATA_SYNTH_HOLDOUT=0 to continue this epoch exactly, or resume at an epoch "
+                f"boundary (the final save of a finished run, or run.py --max-windows at the "
+                f"epoch's end), where the child draws its epoch fresh and the admission holds.")
+            _stop_if_refused(sysm)
+        # (b) THE REDRAWN STREAM MUST BE THE PARENT'S, AND THE LOG SAYS WHICH ONE THAT WAS: the digest
+        # its first event carries (_stream_digest). (c) A LOG FROM BEFORE THE DIGEST says nothing,
+        # so the resume warns once and keeps the rebuilt-length check at the `epoch0` stage, and
+        # this process's copy of the log records ITS stream, which is the one a later continuing
+        # resume from this process must redraw.
+        _events = list(_slog["events"])
+        _have = _stream_digest(sysm.stream)
+        _want = _events[0].get("stream") if _events else None
+        if _want is None:
+            sysm.warnings.append(
+                f"{_where} from a segmentation log that carries no stream digest (written before "
+                f"2026-09-27, Q-DATA-9), so whether the stream redrawn for it is the one the parent "
+                f"was reading cannot be checked here. The rebuilt-length check still runs; a redraw "
+                f"that keeps the window count trains on the saved cursor whatever it holds. This "
+                f"process's log records its own stream from here on.")
+            if _events:
+                _events[0] = dict(_events[0], stream=_have)
+        elif _want != _have:
+            sysm.refusals.append(
+                f"{_where}, and the stream the `stream` row redrew for it is not the one the parent "
+                f"was reading: its digest is {_have} and the checkpoint's segmentation log recorded "
+                f"{_want} (the bytes and the segment table, spine/compose.py::_stream_digest; "
+                f"Q-DATA-9). The log's replay would cut the parent's segmentation over other text "
+                f"and continue at the saved cursor as if nothing had moved. The draw is shaped by "
+                f"RUN_SEED, the DATA levers and, on DATA_SOURCE=real, the corpus on disk; this run "
+                f"has RUN_SEED={int(run.seed)} "
+                f"DATA_SOURCE={data.source} DATA_DIR={data.dir} DATA_AREAS={data.areas} "
+                f"DATA_N_PROCESSES={int(data.n_processes)} DATA_CORPUS_CAP={int(data.corpus_cap)} "
+                f"DATA_HOLDOUT_FRAC={float(data.holdout_frac)} DATA_VAL_CAP={int(data.val_cap)} "
+                f"DATA_SYNTH_HOLDOUT={int(bool(data.synth_holdout))} "
+                f"DATA_STREAM_BYTES={int(data.stream_bytes)} DATA_SEG_MIN={int(data.seg_min)} "
+                f"DATA_SEG_MAX={int(data.seg_max)} DATA_SEG_CONTIG={int(bool(data.seg_contig))} "
+                f"DATA_DRAW={data.draw} DATA_RESAMPLE={int(bool(data.resample))} "
+                f"DATA_PHASE_SCHED={data.phase_sched!r} DATA_PHASES={int(data.phases)} "
+                f"DATA_PHASE_LIVE={int(data.phase_live)}. Resume with the parent's values, or at an "
+                f"epoch boundary, where the child draws its epoch fresh."
+                # AT DATA_SEG_CONTIG=1 THE DIGEST REFUSES WITH EVERY LEVER UNCHANGED, and the
+                # sentence has to say so or it sends the operator hunting for a lever that did not
+                # move: the checkpointed cursors are the ones AFTER the parent drew this epoch
+                # (draw_stream advances them for the whole epoch at the draw), so the redraw starts
+                # past the parent's segments. Driven at ae70638, the tree before this ruling: that
+                # resume (tests/test_continuation.py's BASE, saved at window 60) died at the
+                # rebuilt-length check, 317 windows against 316, before this refusal existed.
+                + (" AT DATA_SEG_CONTIG=1 THIS REFUSAL IS EXPECTED WITH EVERY LEVER UNCHANGED: the "
+                   "checkpointed read cursors are the ones after the parent drew this epoch, so "
+                   "the redraw starts past the parent's segments, and a continuing mid-epoch "
+                   "resume cannot rebuild that stream on this tree." if bool(data.seg_contig)
+                   else ""))
+            _stop_if_refused(sysm)
         sysm.segmentation = _replay_segmentation(tok, sysm.vocab, sysm.stream, _slog)
-        sysm.seg_log = {"epoch": int(_slog["epoch"]), "events": list(_slog["events"])}
+        sysm.seg_log = {"epoch": int(_slog["epoch"]), "events": _events}
         sysm.resume_pos = (int(_spos["in_epoch"]), int(_spos["windows_in_epoch"]))
     else:
+        # THE EPOCH'S FIRST EVENT CARRIES THE STREAM'S DIGEST (2026-09-27, Q-DATA-9), which a
+        # continuing resume of this epoch compares with its redraw before it replays the log.
         sysm.seg_log = {"epoch": 0 if restored is None else int(restored.epoch),
-                        "events": [_seg_event(sysm.vocab, "tokenize")]}
+                        "events": [_seg_event(sysm.vocab, "tokenize", stream=sysm.stream)]}
         sysm.segmentation = tok_api.tokenize(
             tok, sysm.vocab, sysm.stream.bytes, sysm.stream.labels,
             regularize=True, seed=int(run.seed))

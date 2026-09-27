@@ -31,6 +31,7 @@ here was never asked, and no counter in any report can say so on its own.
 |---|---|
 | `DATA_RESAMPLE` | Redraw a fresh stream from the areas at the start of every epoch instead of replaying the same bytes. |
 | `DATA_SEG_CONTIG` | Read each area in order instead of seeking to a random offset every segment, so the only boundaries left are the text's own. |
+| `DATA_SYNTH_HOLDOUT` | Hold out a block per area on DATA_SOURCE=synthetic, under the real sources' law: min(DATA_HOLDOUT_FRAC x body, DATA_VAL_CAP) bytes, a seeded contiguous block removed from the body. Off, the synthetic source holds nothing out. |
 | `FAB_GROW_ON_MEM_PRESSURE` | Let the memory-pressure signal make fabric growth eligible, instead of only being printed. |
 | `FAB_LR_OWN` | Put each expert on its own cyclical learning-rate schedule, clocked from its own use count. |
 | `FAB_NORM_ONLY` | Control arm: keep the fabric's normalization, remove nodes and routing from the forward pass. |
@@ -42,7 +43,7 @@ here was never asked, and no counter in any report can say so on its own.
 | `RUN_PROFILE` | Per-component wall-clock attribution of the training step, rendered at the end of the run and in the throughput summary. |
 | `WORLD_FEEDBACK` | Condition the base LM on the forecast (h += world_proj(forecast)) instead of leaving the world model as an unused side head. |
 
-12 levers ship False.
+13 levers ship False.
 
 **Numeric levers that ship 0.** Zero is this tree's documented OFF sentinel in most of these places
 and a legitimate value in some, so the help text is quoted rather than summarised. `spine/lever.py`
@@ -84,7 +85,7 @@ DISARMED — which the cadence audit reports as a different state from starved.
 
 ## 2. Every lever, by package
 
-268 levers across 13 packages.
+269 levers across 13 packages.
 
 
 ### CAP (7 levers)
@@ -109,7 +110,7 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `CKPT_EVERY` | `0` | Windows |  | How often a mid-run checkpoint is written, in windows elapsed since the last one; 0 disables periodic saving, leaving the final save and SIGUSR1. |
 | `CKPT_RESUME` | `''` | path |  | Checkpoint to continue training from -- a run directory or a .pt file; empty starts from scratch. |
 
-### DATA (18 levers)
+### DATA (19 levers)
 
 | lever | default | unit | accepts | what it is |
 |---|---|---|---|---|
@@ -130,6 +131,7 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `DATA_SEG_MIN` | `700` | bytes |  | Shortest spliced segment drawn from one area before the stream switches. |
 | `DATA_SOURCE` | `'synthetic'` | name | choices `'real'`, `'synthetic'` | Which stream the run trains on: `real` splices the corpora under DATA_DIR, `synthetic` generates from Markov processes. |
 | `DATA_STREAM_BYTES` | `120000` | bytes |  | Bytes of stream one epoch draws from the areas. |
+| `DATA_SYNTH_HOLDOUT` | `False` | on/off |  | Hold out a block per area on DATA_SOURCE=synthetic, under the real sources' law: min(DATA_HOLDOUT_FRAC x body, DATA_VAL_CAP) bytes, a seeded contiguous block removed from the body. |
 | `DATA_VAL_CAP` | `4000000` | bytes |  | Maximum bytes of held-out tail kept per area. |
 
 ### DOM (29 levers)

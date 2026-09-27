@@ -19,7 +19,7 @@ WIRES READ:  <comma-separated d_ fields, or "none">
 DID IT FIRE: <the counters that prove the mechanism executed, in G4's three states>
 ```
 
-`tests/test_contract.py` parses those blocks. **All 268** of the declared levers are named by at
+`tests/test_contract.py` parses those blocks. **All 269** of the declared levers are named by at
 least one stub as read by it — **261, not 259, since 2026-09-02: there are now TWO CENSUS
 AMENDMENTS, `OPT_GRAD_CLIP` under Q-OPT-3 and `MEM_JUDGE_FRAC` under Q-MEM-8** (see
 `.rework/CENSUS.md`, section `amendments`, which holds both and states that the census's 328 is
@@ -482,7 +482,7 @@ Each section: purpose, public surface, what it receives and from whom, state, ch
 The full prose — every measured defect, every line number — lives in the stub docstrings, which are
 the normative text. This is the index.
 
-### DATA — `src/data/api.py` (18 levers)
+### DATA — `src/data/api.py` (19 levers)
 
 Owns the only bytes the system sees and the only split it is honestly measured on. Goal B needs a
 **non-stationary** stream: `phase_sched` is not a parameter of the continual-learning experiment, it
@@ -497,16 +497,34 @@ Owns the only bytes the system sees and the only split it is honestly measured o
 
 **Wires read:** none. **State:** per-area read cursors (load-bearing across epochs), holdout block
 offsets and sizes, `bytes_present`/`bytes_taken`, the counter vector — all checkpointed. The cached
-`Stream` at `resample=False` is **not**: it is rebuilt from `(seed, epoch)`.
+`Stream` at `resample=False` is **not**: it is rebuilt from `(seed, epoch)`. Nor is
+`Areas.parent_names`, the area list the resumed checkpoint recorded, which `restore_stream_state`
+fills in place from the record on every resume (empty on a fresh run; Q-DATA-9).
 **Counters:** `data.area_open`, `corpus_cap_trip`, `holdout_block`, `val_cap_trip`, `area_refused`,
 `stream_draw`, `segment`, `contig_wrap`, `resample`, `phase_entered`, `phase_resolved`,
 `state_written/restored/refused` (with `state_written_here`, the process twin of the lineage
-`state_written`, Q-CKPT-4), and three Gates (`exposure_max`, `exposure_skew`,
-`splice_window`).
+`state_written`, Q-CKPT-4), `holdout_admitted` with `holdout_admitted_names` (Q-DATA-9), and three
+Gates (`exposure_max`, `exposure_skew`, `splice_window`). **Printed at R since 2026-09-27**, in the
+root's `DATA(areas.counters)`, `DATA(areas.gates)`, `DATA(plan.counters)` and `DATA(stream.counters)`
+rows beside the older `DATA(stream.gates)` (Q-DATA-9); before that no row printed them.
 
-Five levers (`dir`, `corpus_cap`, `holdout_frac`, `val_cap`, `seg_contig`) are **arm-dead** under
-`source="synthetic"`, and `n_processes` under `source="real"`. That is a declared arm reported
-through a Gate, not an unread lever.
+**The synthetic source's held-out law is a lever (2026-09-27, Q-DATA-9).** At `synth_holdout=True`
+`open_areas` runs the real sources' carve on each generated body **verbatim** — size, per-area child
+stream, removal, seam, overlap, val-cap tally, and the 0-byte refusal (whose message then names
+`DATA_SYNTH_HOLDOUT` too). At `False`, the build default until 04-Q5's flip, it holds nothing out,
+as before, and the OFF record's `why` names `DATA_SYNTH_HOLDOUT=0`. **The resume admits one move:** a
+record of key None and size 0 against a synthetic block now (a real one is a change of source and
+stays refused), counted **per area** in `data.holdout_admitted` (a four-area parent admits 4), each
+admitted area's `seg_contig` cursor mapped onto the carved body (below the block unchanged, past it
+down by the block's size, inside it to the block's offset), and the parent's training on the
+block's bytes said in a warning. A block then and none now is refused naming `DATA_SYNTH_HOLDOUT`.
+`data.holdout_overlap` is this run's reading and is no longer overwritten by the parent's.
+
+Two levers (`dir`, `corpus_cap`) are **arm-dead** under `source="synthetic"`, and two more
+(`holdout_frac`, `val_cap`) are there at `synth_holdout=False` only; `n_processes` and `synth_holdout`
+are arm-dead under `source="real"`. That is a declared arm reported through a Gate, not an unread
+lever. (`seg_contig` was listed here as arm-dead under `source="synthetic"` until 2026-09-27, and it
+is not: `draw_stream` reads it on both sources.)
 **Where they are called (§3):** `draw_stream` is the first statement of stage `E` **and** an
 `ASSEMBLY_ORDER` row for epoch 0, called UNCONDITIONALLY so `dat.resample` is a state this package
 REPORTS rather than a branch the caller takes; `restore_stream_state` is a row immediately after
@@ -1260,6 +1278,15 @@ each remaining restore immediately after its own package's constructor.
 `:4413-4468` fired only after the tokenizer had resolved and the corpus had been pulled, so a
 `FAB_NMAX` change arrived as five tensor shapes naming no knob, on a warm GPU.
 
+**A continuing mid-epoch resume checks its stream before it replays the log (2026-09-27,
+Q-DATA-9).** At the `segment` stage — after the `stream` row redraws the resumed epoch, before
+`_replay_segmentation` cuts the parent's log over it — the root raises `RefusedRun` (a fourth stop,
+on this path only) on a hold-out admission (`data.holdout_admitted` > 0, naming
+`DATA_SYNTH_HOLDOUT=0` or an epoch-boundary resume) and on a redrawn stream whose digest
+(`_stream_digest`: the bytes and the segment table) differs from the one the log's first event
+recorded, naming the draw-shaping levers. A log written before the digest warns once and keeps the
+rebuilt-length check at the `epoch0` stage; the child's copy of the log then records its own stream.
+
 **`WORLD.load_into` is strictly before `OPT.build`.** `WORLD.manage` mints parameters mid-run
 through `add_param_group`, so a checkpoint taken after growth has more groups than a freshly built
 optimizer; replaying the population first is what lets OPT be built with the **same** group
@@ -1662,7 +1689,7 @@ been fixed is a real outcome and acting on it writes a second wrong sentence. **
 The union of the five `levers_unconsumed` lists was **15**. Thirteen of them were EVAL's, and all
 thirteen were given a declared reader by writing the P6 instrument signatures into
 `src/eval/api.py`. **The last two were FAB's, and as of 2026-09-02 this table is EMPTY: every one of
-the 268 declared levers is named `LEVERS READ:` by a stub.** Neither of the two was dropped, and
+the 269 declared levers is named `LEVERS READ:` by a stub.** Neither of the two was dropped, and
 neither was given a fake reader; each was ruled, and the ruling is what produced the reader.
 
 | lever | env name | why it has no reader | disposition |
@@ -2098,7 +2125,9 @@ derives `data.stream.e0` itself, so **`RNG_SUBSYSTEMS` does not change**. The ke
 lowercased with every character outside `[a-z0-9_]` replaced by `_`, and a key collision is the same
 startup refusal as the label collision in Q-DATA-4 — which is precisely the objection `rng.py` raises
 against normalising a name, answered at startup instead of papered over. **Whoever rules Q-EVAL-9
-should know this half is now done.**
+should know this half is now done.** *(2026-09-27, Q-DATA-9: the normalisation is
+`spine/derive.py::stream_key`, which `data/api.py::_holdout_key` delegates to, so SR0's probe keys
+its EVAL draw by the same rule without importing DATA.)*
 
 **Two additions, both counters rather than levers.** `data.holdout_seam` — removing a *middle* block
 leaves exactly one manufactured discontinuity per area in a body `seg_contig=True` reads in order,
@@ -5302,10 +5331,11 @@ fresh 10-window `CKPT_DIR=''` run, 1 and 1 on every package's pair). **Ruling:**
 key. OPT's build seed is removed, and `CAP.counters` prints the twin only once the ledger holds it.
 `spine/loop.py::_save` builds the payload only where `System.saving` is True; `CKPT.save` is still
 called and still counts `refused_off`. `spine/loop.py::_report` renders the armed state over one table,
-`_SAVE_COUNTS` (the ten rows). With saving on, each row's lineage count and twin read 0 when nothing is
-counted yet. With saving off nothing is added, and every twin is ABSENT. The root renders it because
-only the root holds both facts: it records `saving_on`, and it is the only caller of the state_dicts.
-That is the shape of `part.n_retok_events`, which the root seeds, and of TOK's rotation rows, which it
+`_SAVE_COUNTS` (the ten rows; eleven since Q-DATA-9, 2026-09-27, which gave DATA's pair an R row).
+With saving on, each row's lineage count and twin read 0 when nothing is counted yet. With saving off
+nothing is added, and every twin is ABSENT. The root renders it because only the root holds both
+facts: it records `saving_on`, and it is the only caller of the state_dicts. That is the shape of
+`part.n_retok_events`, which the root seeds, and of TOK's rotation rows, which it
 re-reads (Q-TOK-13's 1.1 correction). A `CKPT.dir` wire was not taken: it needs one wire per receiving
 package, eight or nine, and the budget has six left (19 of 25 spent). Nor was a build or restore
 argument taken: that is a frozen-signature move in eight packages for a report twin. **The twin,
@@ -5961,6 +5991,133 @@ shape the unit decides spares, which the default shape never let it do. That is 
 counters fire, and the arms separate where the spare is consulted. It says nothing about which arm
 manages domains better. The end losses (1.947 ON, 2.039 OFF) are one seed on CPU.
 
+### Q-DATA-9 — the synthetic source's held-out block, its one resume admission, and the stream a continuing resume replays — **RESOLVED 2026-09-27 (Proposal 05 §8 3.1; register 04-Q5; Proposal 04 §1 item 7 and SR0): `DATA_SYNTH_HOLDOUT`, BUILT `False` — 04-Q5 RULES IT ON, AND THE FLIP LANDS LAST AND ALONE; ONE RESUME ADMISSION, COUNTED PER AREA; A CONTINUING MID-EPOCH RESUME REFUSED ACROSS IT AND ACROSS A REDRAWN STREAM (A DIGEST IN `seg_log`); `Areas.parent_names`; `derive.stream_key`; DATA's ROWS AT R. ⚠ ONE NEW LEVER, A CENSUS AMENDMENT. NO SIGNATURE MOVES, NO WIRE**
+**What was asked.** The synthetic source held nothing out (`open_areas` set `n_hold = 0` on it), so
+no held-out number could be read on the shipped default source: not SR0's retention probe, not E1's
+primary reading, not the focusbed readings goal B is decided on. 04-Q5 rules `DATA_SYNTH_HOLDOUT`
+ON, built at SR0 under the real sources' law, with the one resume admission (key None, size 0 → n,
+counted as `data.holdout_admitted`), and names the pin rule for fleets that pair with earlier runs.
+Proposal 04 rejected the judge's variant (held-out text drawn from a separate child, bodies left
+whole) as a second holdout law whose block is a continuation drawn after the body, not a sample of
+it.
+
+**The ruling, as built.**
+* **The lever and the law.** `DATA_SYNTH_HOLDOUT` (U.FLAG, `src/data/levers.py` §4 beside
+  `holdout_frac`; a census amendment, the tenth: the old generator had no switch). At `True`,
+  `open_areas` runs the real sources' carve on each generated body **verbatim**: min(int(body ×
+  `DATA_HOLDOUT_FRAC`), `DATA_VAL_CAP`) bytes, the start from `rng_for("data.holdout.<key>", seed)`
+  (one child per area, keyed by name, Q-DATA-6), the block removed from the body, its seam gate and
+  overlap reading, the val-cap tally, and the 0-byte refusal, whose message on this source also names
+  `DATA_SYNTH_HOLDOUT`. `data.holdout_block` and `data.val_cap_trip` take the real arm. At the
+  shipped stream a synthetic area is generated at 60,000 bytes and holds out 3,000, training on a
+  57,000-byte body (the generator sizes each area at twice what the sampler needs, so the floor is
+  never near). At `False` the synthetic branch runs the statements it ran before, in order, and mints
+  no `data.holdout.<key>` child; its OFF record keeps key None, offset 0, size 0, seam None, and its
+  `why` reads *"DATA_SYNTH_HOLDOUT=0 holds nothing out on this source"* (it read *"source=synthetic
+  holds nothing out"*, which the lever made untrue); the two gates read UNREACHABLE naming
+  `DATA_SYNTH_HOLDOUT=0`. On a real source the lever is inert.
+* **Built OFF, ruled ON.** At ON every synthetic body is a block shorter, so every default run's
+  stream changes and no run before the change pairs with one after it. The flip is therefore its own
+  commit, last, after SR0's bit-identity (§8 3.1), with 04-Q5's pins for the fleets that pair with
+  earlier runs.
+* **The one admission** (`restore_stream_state`). A record of key None **and** size 0 against a
+  block now **on the synthetic source** is admitted: all three fields move, and no across-the-boundary
+  number is broken, because the parent had no block for one to read. **Synthetic only, which is
+  narrower than 04-Q5's words and is its move:** only a synthetic run at 0 writes that record (a real
+  area's empty block is refused in `open_areas`), so the same record against a *real* block is a change
+  of source under the same area names. Taken literally, the admission would have let that through;
+  driven at ae70638 it is refused (a two-area synthetic parent resumed at `DATA_SOURCE=real` names
+  the moved offset), and it still is. **The unit is the area**: each admitted area counts one in
+  `data.holdout_admitted` and is named in `data.holdout_admitted_names`, so a four-area parent admits
+  4 and SR0's written "`data.holdout_admitted` 1" is the single-area case. Both keys are ABSENT on a
+  fresh run and read 0 and `[]` on a resume that reaches the comparison. **The parent trained on
+  every byte of an admitted block**, so it is text the lineage has seen, not a clean held-out sample:
+  the root prints that in one warning naming the areas, before the first window (the Q-DOM-1
+  precedent; DATA prints nothing). **The read cursor is mapped, not copied**, because it indexed the
+  whole body: below the block it stays, past it it moves down by the block's size, inside it (text
+  now held out) it moves to the block's offset, the first byte after the block in the carved body,
+  reduced mod the carved length as `draw_stream` stores it (`data/api.py::_carved_cursor`). **The
+  reverse is refused naming `DATA_SYNTH_HOLDOUT`**: a block in the record and none now would train
+  on the text the parent held out. Every other move of a recorded block is refused as before.
+* **`Areas.parent_names`** (a list field, default empty, filled in place by the restore): the
+  record's area names, in its order. It is the one place a later build can ask which areas a parent
+  trained on; §8 3.1's probe and §8 3.3's parent rehearsal are the builds that will read it, and
+  nothing reads it yet.
+* **`data.holdout_overlap` survives the restore.** It is a reading of this run's blocks, which
+  `open_areas` computed a moment before, and the restore copied the parent's over it: an admitted
+  child read *"no block to measure"* beside its block, and an add-an-area child lost the new area's
+  reading. Driven at ae70638, a real-source parent over `eng` and a child over `eng,py`
+  (`DATA_CORPUS_CAP=200000`): the child's own `{'eng': 0.0741, 'py': 0.1142}` became `{'eng':
+  0.0741}` at the restore. The skip list gains it, with the admission pair. `data.area_added`,
+  whose docstring promised "0 on an ordinary resume", is now seeded 0 there; it was ABSENT, and the
+  new report row made the difference visible.
+* **A continuing mid-epoch resume checks its stream before replaying the log** (`spine/compose.py`,
+  the `segment` stage; §3.3). (a) An admission there is refused by name, `RefusedRun` naming
+  `DATA_SYNTH_HOLDOUT=0` or an epoch-boundary resume, because an admitted body is a block shorter and
+  the redraw is not the stream the parent was reading. (b) Otherwise the redrawn stream's digest is
+  compared with the one the log's first event recorded, and a mismatch is refused naming the
+  draw-shaping levers with this run's values (and, on a real source, the corpus on disk). (c) A log
+  written before the digest warns once and keeps the rebuilt-length check at the `epoch0` stage, and
+  the child's copy of the log records its own stream. Both refusals raise at the `segment` stage, a
+  fourth stop on this path only
+  (Q-RUN-13's three are unchanged): neither needs the model, and the replay would cut the parent's
+  log over other text. **The digest** (`_stream_digest`) is blake2b over `Stream.bytes`, then per
+  segment its start (8 bytes, little-endian), its area label and a separator, then the stream's
+  length. `Stream.labels` is one label per byte and constant within a segment, so the segment table
+  covers bytes and labels exactly at O(segments) cost. `_seg_event(vocab, kind, at=None,
+  stream=None)` writes it as the `stream` key of the epoch's first event, at compose's fresh log and
+  at stage E's roll; a splice carries none. It is a dict key in `LOOP.seg_log`: no draw and no
+  counter.
+* **`derive.stream_key(label)`** is the one normalisation of an area label into an rng key
+  (lowercased, every character outside `[a-z0-9_]` → `_`). `data/api.py::_holdout_key` delegates to
+  it, and SR0's probe keys its pinned draw per area and half by the same function (the register's
+  C11 halves are EVAL's, drawn from each block, and are §8 3.1's probe build, not this one). DATA
+  and EVAL may not import each other, so a second copy would be two answers to "which stream is this
+  area's".
+* **DATA's rows at R.** `spine/loop.py::_report` prints `DATA(areas.counters)`,
+  `DATA(areas.gates)` (through `spine/gate.py::three_state`), `DATA(plan.counters)` and
+  `DATA(stream.counters)` beside the older `DATA(stream.gates)`, read off the records as MEM's and
+  TOK's are. `_SAVE_COUNTS` gains DATA's pair, so `data.state_written` and its twin print (k + j, j)
+  under the build 1.6 rule, and Q-CKPT-4's table has eleven rows. Until these rows, "PRINTED" in
+  DATA's own DID IT FIRE lines (`data.area_added`, the overlap reading) had nothing behind it.
+
+**What the default changes.** No training number. At `DATA_SYNTH_HOLDOUT=0` the synthetic branch runs
+the statements it ran before and draws nothing new; the digest is computed off the drawn stream and
+changes no draw; the restore's skip changes one reading, equal to the recorded one for a carried
+area; and the new refusals fire only where the tree before this ruling trained on bytes other than
+the parent's or died unnamed at the rebuilt-length check. `tests/test_baseline.py`'s six workloads
+reproduce their fixtures. The report gains four rows, and their integer counters are listed as new,
+never compared: every leg lists `data.segment`, `data.phase_resolved` and `data.phase_name_resolved`;
+a leg with saving on adds the `data.state_written` pair; a resumed child adds the restore's own,
+`data.state_restored`, `data.area_added` and `data.holdout_admitted`.
+
+**Recorded, not repaired: a continuing mid-epoch resume at `DATA_SEG_CONTIG=1` cannot continue.**
+`draw_stream` advances each area's cursor for the whole epoch when it draws it, so the checkpointed
+cursors are the ones after the parent's draw, and the child's redraw of that epoch starts past the
+parent's segments. Driven at ae70638 (tests/test_continuation.py's base at `DATA_SEG_CONTIG=1`, saved
+at window 60): the child died at the rebuilt-length check, 317 windows against 316, naming no lever.
+The digest now refuses it at the `segment` stage, and the message says the refusal is expected with
+every lever unchanged at `DATA_SEG_CONTIG=1`. A boundary resume is unaffected. The repair (the
+epoch-start cursors in the log) is a change to the log's format and is left to the owner.
+
+**What CPU establishes:** operation only. `tests/test_holdout.py` (new): H1, at 0 the synthetic
+bodies are the generated text whole with no `data.holdout.<key>` child, the OFF record compares as
+before, and on a real source the carve equals the law recomputed from disk for three areas, a slash
+entry among them, with the lever inert there; H2, at 1 each shipped area holds out 3,000 of 60,000
+bytes at the offset `rng_for('data.holdout.<key>', seed).randint(0, 57000)` draws (seed 0: eng
+41591, py 39908, num 37668, c 53336; seed 1 differs in all four), adding a fifth area at the same
+per-area size moves no block, the val cap binds, and `DATA_HOLDOUT_FRAC=0.0` is refused naming all
+three levers; H3, the admission per area (4, and 1 for a single-area parent, through compose from a
+finished parent too), the cursor map (hand-computed, and on the cursors a `DATA_SEG_CONTIG=1` parent
+saved), `Areas.parent_names`, the warning, the R row and the overlap; H4, the reverse, a doctored
+offset and a synthetic parent resumed at `DATA_SOURCE=real` refused; H5, the continuing refusals (0 → 1 with and without a digest, `DATA_SEG_MAX` 1800 →
+1700), one segment's label changing the digest, an exact continuation that reads the admission pair
+0, and a digest-stripped log that warns once and continues exactly, all again at epoch 1, where stage
+E wrote the log; H6, `tests/test_continuation.py`'s `plain` and `mint_then_act` shapes continue
+exactly at 1; H7, `derive.stream_key` is `_holdout_key`. `tests/test_continuation.py` S10 reads
+eleven rows. Whether a held-out reading on these blocks measures anything is §8 3.1's probe and the
+GPU readings after it.
+
 ### Q-RUN-11 — a resume drew epoch 0's stream whatever epoch it resumed in — **RESOLVED 2026-09-24: THE `stream` ROW DRAWS `Snapshot.epoch`**
 The `stream` row passed `epoch=0` unconditionally. Driven at `RUN_EPOCHS=2 DATA_RESAMPLE=1`: the
 parent's epoch-1 draw hashed `65cd298845`; its child, resumed at epoch 1, drew `cfacafbe13` (epoch
@@ -6320,6 +6477,9 @@ before a refused run stops). **Two declared-and-not-built arms** composed with 0
 naming the lever before allocating — the owning package, the `FAB_HOP_MODE=transition` precedent
 (Q-FAB-1), and run.py already prints `NotBuilt` as `REFUSED:` with exit 2. **Rejected:** a string on
 `System.refusals` written by the root (the root would be re-deriving a package's arm).
+*(2026-09-27, Q-DATA-9: a continuing mid-epoch resume has a fourth stop, at the `segment` stage,
+before the log's replay — a hold-out admission and a redrawn stream that is not the parent's are
+refused there, since neither needs the model. The three above are unchanged.)*
 
 ### Q-RUN-14 — a non-finite loss stepped the optimizer and nothing stopped a non-finite checkpoint — **RESOLVED 2026-09-24: THE LOOP STOPS BEFORE THE STEP; `CKPT.save` SCANS THE PAYLOAD; THE LAST FINITE STATE IS KEPT. NOT A DIVERGENCE ALARM**
 Driven before: one flush with a nan loss stepped AdamW on nan gradients, **8 of 8** LM tensors went
@@ -6388,7 +6548,7 @@ on existing rulings:** gate `fab.on` at `FAB_ON=0` (ruled a switch read false, `
 | K1 | every name this document declares exists in the tree **with the signature it claims** | rename a parameter; drop a function |
 | K2 | `spine.compose` imports and `compose()` raises **only `NotImplementedError`, from a stub** | a typo in the root surfaces as `AttributeError`/`TypeError`, not as a missing body |
 | K3 | no package imports another (O10 restated at the contract boundary) | add `from fabric import api` to `src/memory/` |
-| K4 | every one of the 268 declared levers is named `LEVERS READ:` by a stub, or is in the UNCONSUMED table above **with a reason** | declare a lever and give it no reader |
+| K4 | every one of the 269 declared levers is named `LEVERS READ:` by a stub, or is in the UNCONSUMED table above **with a reason** | declare a lever and give it no reader |
 | K5 | every `d_` field the ledger declares is read by a stub in its own package, and no stub reads an undeclared one | add a wire nobody consumes |
 | K6 | every entry point is **named by a row** in `ASSEMBLY_ORDER` or `LOOP_ORDER`, or is in `compose.DEFERRED_ENTRY_POINTS` with a reason | declare a mechanism the root never calls; or leave a deferral in place after a row starts naming it — the check reads that table **backwards** and reports the stale entry |
 | K7 | the root reads only names a package **declares** off a Config | `int(lm.depth)` where LM declares `layers` — a crash at whatever stage reaches it, invisible while an earlier stub raises first |
