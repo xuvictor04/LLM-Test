@@ -93,31 +93,49 @@ is pinned here, on a fleet whose every number is chosen.
       only a log with no act window falls back to every notification x cooldown.
   F18 ONE FLEET PER OUT (2026-09-27: a second paste of the launch line started a second fleet, whose launch
       moved the first one's OUT from under it): a launch into a live OUT is refused -- exit 2, nothing
-      moved, the live fleet named with where it is and how to watch and stop it -- and the live fleet ends
-      rc 0 in its own block, its pid the one STATE names; a run.py of a fleet from before the lock, writing
-      under OUT, is found in /proc and refused the same way, and once it is gone the dead fleet is moved aside.
+      moved, the live fleet named with where it is and how to watch and stop it, by absolute paths that
+      work from any terminal -- and the live fleet ends rc 0 in its own block, its pid the one STATE names;
+      a run.py of a fleet from before the lock, writing under OUT, is found in /proc and refused the same
+      way, and once it is gone the dead fleet is moved aside.
   F19 THE HEARTBEAT: a line every HB_EVERY seconds through the smoke, a calibration step and the fleet,
       naming the stage and the runs starting on the CPU and training; each step's line when its runs start,
       saying they build on the CPU first, and the startup the smoke measured (run.py's '=== composed'
-      line); HEARTBEAT and heartbeat.log; every run unbuffered and running the fleet's copy of run.py.
+      line); HEARTBEAT and heartbeat.log; every run unbuffered and running the fleet's copy of run.py. The
+      fleet sizes itself by the cores, not by the OMP_NUM_THREADS=1 its environment exports (the review of
+      2026-09-27: GNU nproc reported 1, and the fleet ran one run at a time).
   F20 A STOP WRITES ITS BLOCK: TERM, HUP and INT in a calibration step exit 128+n with 'STOPPED by SIG<x>
       during calibration k=1' in the log and the block, the runs stopped, nothing left, the archive packed;
-      under nohup a HUP is ignored and the fleet runs on; at DEVICE=cuda (nvidia-smi and MPS stood in) the
-      stop quits MPS, and the daemon never held the lock.
+      the INT as a terminal's Ctrl-C sends it, to the whole process group (the review of 2026-09-27: each
+      run_job died of it, its run.py -- ignoring INT -- trained on as an orphan holding the lock, and the
+      fleet said STOPPED): the run is stopped and booked rc=143, the lock is free; a `| tee` launch whose
+      tee dies with the group still stops whole -- rc 129, SUMMARY's STOPPED line, the archive (a dead pipe
+      raised SIGPIPE, which cut the stop short at rc 0); under nohup a HUP is ignored and the fleet runs on;
+      at DEVICE=cuda (nvidia-smi and MPS stood in) the stop quits MPS, and the daemon never held the lock.
+      A TERM in the analysis waits for it, and the fleet ends FINISHED with its analysis block (it was
+      replaced by 'STOPPED BEFORE THE ANALYSIS'); an analysis that fails ends STOPPED, never FINISHED, its
+      block saying 'STOPPED AT THE ANALYSIS: the analysis failed'.
   F21 --status's VERDICT AND EXIT CODE: RUNNING 0, FINISHED 1, STOPPED 3 with its reason, NO FLEET 2; DEAD 4
       after SIGKILL of the shell (its heartbeat watcher says so, stops the runs, writes the block) and of the
       whole fleet (no end recorded); a reused pid is not RUNNING; a fleet from before STATE reads off its
-      block; STALLED 5 when nothing moves for --stall-min.
+      block, FINISHED only when SUMMARY shows it ended its own analysis (a block --analyze wrote over a fleet
+      killed part-way leaves it DEAD); STALLED 5 when nothing moves for --stall-min; an ended fleet whose run
+      still runs lists it.
   F22 PULL SAFETY: in a scratch git checkout, gpu_world.sh rewritten in place and run.py and src/ replaced
       mid-fleet change nothing -- rc 0, every run on $OUT/code/run.py, the commit and the copy's sha256 in
       SUMMARY (the launch before the copy died on a syntax error with no block) -- and --status and
       --analyze from the checkout read the fleet as ever.
   F23 THE DASHBOARD (tools/fleet_dash.sh): live frames with the verdict, the stage, each run starting on CPU
       then training with its windows; FINISHED on the finished fleet; --line; --html writes dashboard.html
-      and nothing else into OUT; --serve serves that page and only it.
+      and nothing else into OUT; --serve serves that page and only it; run under a terminal, its page holds
+      no colour code. A run's rate never counts its startup: a sample taken while it was on the CPU is no
+      baseline (the since-training average is used, 50~), one taken while it trained is, at its log's
+      times; a run whose run.py ended with its final line but whose rc is not booked yet reads finishing,
+      not VANISHED; the CPU line is this container's, the load the host's.
   F24 THE LAUNCHER (tools/gpu_launch.sh): its checks FAIL clearly with their fixes (EXP unset; no GPU at
       DEVICE=cuda) and --go then launches nothing; --go at DEVICE=cpu from a shell that exits at once leaves
-      a fleet in its own session that runs to its end and its block; a second --go FAILs on it.
+      a fleet in its own session that runs to its end and its block, and prints commands by absolute path;
+      a second --go FAILs on it; an exported OMP_NUM_THREADS is said, not a WARN; an ended fleet whose run
+      still runs is a FAIL whose fix is --stop.
 """
 import glob
 import json
@@ -742,10 +760,14 @@ try:
     # checks of a live fleet (F18-F24); unset, it answers as before. With STUB_CUDA the torch probe says yes.
     binp = os.path.join(TMP, "bin")
     stub = os.path.join(TMP, "stub", "run.py")
+    # STUB_ANALYSIS_SLEEP / STUB_ANALYSIS_KILL hold up or SIGKILL the retok analysis (`python3 - retok ...`),
+    # for F20's stop in the analysis and its failed analysis.
     write(os.path.join(binp, "python3"),
           f'#!/bin/bash\nif [[ "${{1:-}}" == run.py || "${{1:-}}" == */run.py ]]; then export STUB_RUNPY="$1"; shift; '
           f'exec "{sys.executable}" "{stub}" "$@"; fi\n'
           f'if [[ "${{1:-}}" == -c && "${{2:-}}" == *torch.cuda.is_available* && -n "${{STUB_CUDA:-}}" ]]; then exit 0; fi\n'
+          f'if [[ "${{1:-}}" == - && "${{2:-}}" == retok && -n "${{STUB_ANALYSIS_SLEEP:-}}" ]]; then sleep "$STUB_ANALYSIS_SLEEP"; fi\n'
+          f'if [[ "${{1:-}}" == - && "${{2:-}}" == retok && -n "${{STUB_ANALYSIS_KILL:-}}" ]]; then kill -9 $$; fi\n'
           f'exec "{sys.executable}" "$@"\n')
     os.chmod(os.path.join(binp, "python3"), 0o755)
     write(stub, r'''import json, os, sys, time
@@ -1463,13 +1485,35 @@ esac
         for s_ in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
             signal.signal(s_, signal.SIG_DFL)
 
-    def fleet(out, log, argv=("bash", SCRIPT), cwd=ROOT, **env):
-        """A launch in the background, its output in `log` (the fleet log STATE names)."""
+    def dfl_group():
+        # ... and in a process group of its own, as a terminal's foreground job is: a Ctrl-C or a hang-up
+        # reaches every process in it, which os.killpg reproduces.
+        dfl()
+        os.setpgid(0, 0)
+
+    def fleet(out, log, argv=("bash", SCRIPT), cwd=ROOT, group=False, **env):
+        """A launch in the background, its output in `log` (the fleet log STATE names); with `group`, in a
+        process group of its own."""
         fh = open(log, "w")
         e = dict(BASE, PATH=env10["PATH"], OUT=out)
         e.update(env)
         return subprocess.Popen(list(argv), cwd=cwd, env=clean_env(**e), stdout=fh, stderr=subprocess.STDOUT,
-                                preexec_fn=dfl), fh
+                                preexec_fn=dfl_group if group else dfl), fh
+
+    def lock_free(out):
+        """Nothing holds the fleet's lock, <OUT>.lock (an orphaned run inherits it)."""
+        import fcntl
+        try:
+            fd_ = os.open(out + ".lock", os.O_RDWR)
+        except OSError:
+            return True
+        try:
+            fcntl.flock(fd_, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except OSError:
+            return False
+        finally:
+            os.close(fd_)
 
     def done(p_, fh, timeout=300):
         try:
@@ -1499,7 +1543,8 @@ esac
           "idle, and how to watch and stop it",
           up and p18.returncode == 2 and "A FLEET IS ALREADY RUNNING IN" in p18.stdout and "its lock" in p18.stdout
           and "#####  RUNNING  #####" in p18.stdout and "stage      smoke" in p18.stdout
-          and "bash tools/fleet_dash.sh" in p18.stdout and "gpu_world.sh --stop" in p18.stdout
+          and f"watch it:  bash {DASH} {os.path.realpath(o18)}" in p18.stdout
+          and f"stop it:   EXP=retok OUT={o18} bash {SCRIPT} --stop" in p18.stdout
           and "on the CPU" in p18.stdout and not glob.glob(o18 + ".20*")
           and open(os.path.join(o18, "SUMMARY.txt")).readline() == first18,
           f"rc {p18.returncode}; {p18.stdout[:400]!r}")
@@ -1532,8 +1577,8 @@ esac
           f"seen {seen}; rc {p18b.returncode}/{p18c.returncode}; {p18b.stdout[:300]!r}")
 
     # ---- F19: the heartbeat and the step lines -----------------------------------------------------------
-    # PAR auto with LADDER 1: a smoke, one calibration step, the fleet. OMP_NUM_THREADS=1 makes nproc 1, so
-    # the ceiling is 1 and the ladder stops at k=1.
+    # PAR auto with LADDER 1: a smoke, one calibration step, the fleet. clean_env exports OMP_NUM_THREADS=1,
+    # which GNU nproc reports instead of the cores; the fleet sizes itself by the cores all the same.
     o19 = os.path.join(TMP, "f19", "gpu_retok_out")
     log19, book19 = os.path.join(TMP, "f19.log"), os.path.join(TMP, "f19_book.jsonl")
     p19, f19 = fleet(o19, log19, HB_EVERY=1, LADDER="1", CAL_WINDOWS=20, STUB_BOOK=book19, STUB_STARTUP="2",
@@ -1566,8 +1611,8 @@ esac
           "SUMMARY; the smoke measures that startup (run.py's '=== composed ... startup took') and the later steps "
           "quote it",
           all(x in S19 and x in L19 for x in ("4 run(s) start ", "Each builds on the CPU first",
-                                               "k=1: 1 run(s) x 20 windows start ", "on the CPU first (the GPU reads idle)",
-                                               "each spends ~2."))
+                                               "k=1: 1 run(s) x 20 windows start ", "on the CPU first (the GPU reads idle;",
+                                               "longer when the CPU is shared", "each spends ~2."))
           and re.search(r"^  startup: each smoke run built on the CPU for 2\.\d s \(median of 4;", S19, re.M) is not None
           and st_of(o19).get("startup_s", "").startswith("2."),
           str([ln for ln in S19.splitlines() if "CPU" in ln]))
@@ -1583,32 +1628,90 @@ esac
           and len(recs19) >= 10 and all(r["unbuffered"] == "1" for r in recs19)
           and {r["runpy"] for r in recs19} == {os.path.join(os.path.realpath(o19), "code", "run.py")},
           f"{len(recs19)} runs; {sorted({r['runpy'] for r in recs19})}")
+    # THE CORES, NOT OMP_NUM_THREADS: this box's cores as nproc counts them without the OMP variables, then
+    # the cgroup quota where it is lower -- the script's own rule -- whatever the exported OMP_NUM_THREADS=1.
+    ncore = int(subprocess.run(["nproc"], capture_output=True, text=True,
+                               env={k: v for k, v in os.environ.items() if not k.startswith("OMP_")}).stdout)
+
+    def quota19():
+        try:
+            a_, b_ = open("/sys/fs/cgroup/cpu.max").read().split()
+            return None if a_ == "max" else int(a_) / int(b_)
+        except (OSError, ValueError):
+            pass
+        try:
+            a_ = int(open("/sys/fs/cgroup/cpu/cpu.cfs_quota_us").read())
+            b_ = int(open("/sys/fs/cgroup/cpu/cpu.cfs_period_us").read())
+            return None if a_ <= 0 else a_ / b_
+        except (OSError, ValueError):
+            return None
+
+    q19 = quota19()
+    cores19 = max(1, int(q19)) if q19 and max(1, int(q19)) < ncore else ncore
+    check(f"F19 the fleet sizes itself by this box's cores ({cores19}), not by the OMP_NUM_THREADS=1 it was launched "
+          "with (GNU nproc reports that instead of the cores: the fleet ran one run at a time)",
+          f"=== {cores19} CPU core(s), 0 GPU(s), device=cpu" in S19
+          and f"=== ceiling: {max(1, cores19 - 1)} by CPU" in S19,
+          str([ln for ln in S19.splitlines() if "core" in ln or "ceiling" in ln]))
 
     # ---- F20: a stop writes its block ------------------------------------------------------------------
+    # TERM TO THE SHELL, as --stop sends it; INT AND HUP TO THE WHOLE PROCESS GROUP, as a terminal sends a
+    # Ctrl-C and a hang-up (the review of 2026-09-27: INT to the shell's pid alone never met the run_job it
+    # killed, so this check passed while a Ctrl-C left the run training as an orphan).
     for sig, name, want in ((signal.SIGTERM, "TERM", 143), (signal.SIGHUP, "HUP", 129), (signal.SIGINT, "INT", 130)):
         o20 = os.path.join(TMP, f"f20{name}", "gpu_retok_out")
         log20 = os.path.join(TMP, f"f20{name}.log")
-        p20, f20 = fleet(o20, log20, HB_EVERY=1, LADDER="1", CAL_WINDOWS=40, STUB_STARTUP="0.5", STUB_WSLEEP="0.3",
-                         STUB_PROG="5", STUB_MAXW="12")
+        grp = name != "TERM"
+        p20, f20 = fleet(o20, log20, group=grp, HB_EVERY=1, LADDER="1", CAL_WINDOWS=40, STUB_STARTUP="0.5",
+                         STUB_WSLEEP="0.3", STUB_PROG="5", STUB_MAXW="12")
         ready = wait_for(lambda: st_of(o20).get("step") == "k=1"
                          and training(os.path.join(o20, "cal", "k1", "cal.s1001.log"))())
-        os.kill(p20.pid, sig)
+        if grp:
+            os.killpg(p20.pid, sig)
+        else:
+            os.kill(p20.pid, sig)
         rc20 = done(p20, f20)
         L20 = open(log20).read()
         b20 = "\n".join(block_of(L20) or [])
         gone = wait_for(lambda: not own(o20), 10)
         done20 = open(os.path.join(o20, "cal", "k1", "_done.txt")).read() if os.path.exists(
             os.path.join(o20, "cal", "k1", "_done.txt")) else ""
-        check(f"F20 SIG{name} during a calibration step stops the fleet with a reason: exit {want}, 'STOPPED by "
-              f"SIG{name} ... during calibration k=1' in its log and its block, STATE end=stopped, its run stopped "
-              "(its _done line rc=143) and nothing of it left running, and the archive packed",
+        check(f"F20 SIG{name} {'to the whole process group' if grp else 'to the shell'} during a calibration step stops "
+              f"the fleet with a reason: exit {want}, 'STOPPED by SIG{name} ... during calibration k=1' in its log and "
+              "its block, STATE end=stopped, its run stopped by the fleet and booked (its _done line rc=143), nothing "
+              "of it left running, the lock free, and the archive packed",
               ready and rc20 == want and re.search(rf"^!! gpu_world\.sh STOPPED by SIG{name} at \d\d:\d\d:\d\dZ during "
                                                    rf"calibration k=1 \(pid {p20.pid}\)$", L20, re.M) is not None
+              and re.search(r"^   stopping 1 run\(s\): pid \d+$", L20, re.M) is not None
               and f"STOPPED BEFORE THE ANALYSIS: stopped by SIG{name} during calibration k=1" in b20
               and st_of(o20).get("end") == "stopped" and st_of(o20).get("rc") == str(want)
-              and "cal.s1001 rc=143" in done20 and gone
+              and "cal.s1001 rc=143" in done20 and gone and lock_free(o20)
               and glob.glob(os.path.join(os.path.dirname(o20), "gpu_retok_*.tgz")),
-              f"ready {ready}; rc {rc20}; gone {gone}; {done20!r}; {L20[-300:]!r}")
+              f"ready {ready}; rc {rc20}; gone {gone}; lock free {lock_free(o20)}; {done20!r}; {L20[-300:]!r}")
+    # A `| tee log` LAUNCH WHOSE tee DIES WITH THE GROUP (a Ctrl-C, a closed terminal): the stop still writes
+    # SUMMARY's STOPPED line, the block and the archive, and STATE records rc 129 (a write to the dead pipe
+    # raised SIGPIPE, and bash ran its EXIT trap at once with $? = 0: no archive, rc=0).
+    o20t = os.path.join(TMP, "f20tee", "gpu_retok_out")
+    p20t, f20t = fleet(o20t, os.path.join(TMP, "f20tee.log"), group=True,
+                       argv=("bash", "-c", f'bash "{SCRIPT}" 2>&1 | tee "{o20t}.teelog" > /dev/null'),
+                       HB_EVERY=1, LADDER="1", CAL_WINDOWS=40, STUB_STARTUP="0.5", STUB_WSLEEP="0.3", STUB_PROG="5",
+                       STUB_MAXW="12")
+    ready = wait_for(lambda: st_of(o20t).get("step") == "k=1"
+                     and training(os.path.join(o20t, "cal", "k1", "cal.s1001.log"))())
+    pid20t = st_of(o20t).get("pid", "")
+    os.killpg(p20t.pid, signal.SIGHUP)
+    done(p20t, f20t)
+    ended20t = wait_for(lambda: st_of(o20t).get("end") == "stopped", 60)
+    gone20t = wait_for(lambda: not own(o20t), 10)
+    S20t = open(os.path.join(o20t, "SUMMARY.txt")).read()
+    check("F20 a `bash gpu_world.sh 2>&1 | tee log` launch hung up with its tee: its stop is not cut short by the dead "
+          "pipe -- SUMMARY's 'STOPPED by SIGHUP' line, the run booked rc=143, STATE rc=129, the block and the archive",
+          ready and ended20t and f"STOPPED by SIGHUP" in S20t and f"(pid {pid20t})" in S20t
+          and st_of(o20t).get("rc") == "129"
+          and "cal.s1001 rc=143" in open(os.path.join(o20t, "cal", "k1", "_done.txt")).read()
+          and "STOPPED BEFORE THE ANALYSIS: stopped by SIGHUP" in open(os.path.join(o20t, "PASTE_BACK.txt")).read()
+          and glob.glob(os.path.join(os.path.dirname(o20t), "gpu_retok_*.tgz")) and gone20t,
+          f"ready {ready}; ended {ended20t}; gone {gone20t}; {st_of(o20t)}")
     # UNDER nohup A HANG-UP IS IGNORED -- bash cannot trap a signal ignored at entry -- and the fleet runs on.
     o20n = os.path.join(TMP, "f20nohup", "gpu_retok_out")
     p20n, f20n = fleet(o20n, os.path.join(TMP, "f20nohup.log"), argv=("nohup", "bash", SCRIPT), PAR=5, HB_EVERY=1,
@@ -1703,6 +1806,62 @@ for _ in range(100):
           and "STOPPED by SIGTERM" in open(os.path.join(TMP, "f20cuda.log")).read(),
           f"ready {ready}; rc {rc20c}; {mb!r}")
 
+    def archived_block(out):
+        """PASTE_BACK.txt as the archive beside OUT holds it ('' without one)."""
+        for a_ in glob.glob(os.path.join(os.path.dirname(out), "gpu_retok_*.tgz")):
+            with tarfile.open(a_) as tf:
+                try:
+                    return tf.extractfile(os.path.basename(out) + "/PASTE_BACK.txt").read().decode()
+                except KeyError:
+                    return ""
+        return ""
+
+    # A TERM IN THE ANALYSIS (a --stop at the wrong moment): bash holds the trap until the analysis -- held
+    # up 3 s here -- ends; the block and the archive follow, and the fleet ends FINISHED (the review of
+    # 2026-09-27: the stop replaced the finished block, and the archive's, with 'STOPPED BEFORE THE ANALYSIS').
+    o20a = os.path.join(TMP, "f20ana", "gpu_retok_out")
+    p20a, f20a = fleet(o20a, os.path.join(TMP, "f20ana.log"), PAR=1, HB_EVERY=1, STUB_ANALYSIS_SLEEP="3",
+                       STUB_STARTUP="0.2", STUB_WSLEEP="0.05", STUB_MAXW="12")
+    inana = wait_for(lambda: st_of(o20a).get("phase") == "analysis", 120)
+    time.sleep(0.5)
+    os.kill(p20a.pid, signal.SIGTERM)
+    rc20a = done(p20a, f20a)
+    L20a = open(os.path.join(TMP, "f20ana.log")).read()
+    pb20a = open(os.path.join(o20a, "PASTE_BACK.txt")).read() if os.path.exists(os.path.join(o20a, "PASTE_BACK.txt")) else ""
+    check("F20 a TERM during the analysis waits the seconds it takes: rc 0, STATE end=finished naming the signal, the "
+          "block and the archived block the analysis's own (its DECISION), and the log saying the signal came",
+          inana and rc20a == 0 and st_of(o20a).get("end") == "finished"
+          and "a SIGTERM that came during the analysis waited for them" in st_of(o20a).get("reason", "")
+          and "DECISION:" in pb20a and "STOPPED" not in pb20a and archived_block(o20a) == pb20a
+          and re.search(r"^!! SIGTERM at \d\d:\d\d:\d\dZ during the analysis: every run has ended", L20a, re.M) is not None,
+          f"in analysis {inana}; rc {rc20a}; {st_of(o20a).get('reason')}; {pb20a[:200]!r}")
+    # AN ANALYSIS THAT DIES -- SIGKILLed here, as the OOM killer would -- ends the fleet STOPPED, never FINISHED
+    # (the review of 2026-09-27: the pipeline's status was tee's, and the fleet said FINISHED, "its block
+    # written", with no PASTE_BACK.txt); --analyze then reads the runs again, and fails loudly when it fails.
+    o20f = os.path.join(TMP, "f20fail", "gpu_retok_out")
+    p20f, f20f = fleet(o20f, os.path.join(TMP, "f20fail.log"), PAR=1, HB_EVERY=1, STUB_ANALYSIS_KILL="1",
+                       STUB_STARTUP="0.2", STUB_WSLEEP="0.05", STUB_MAXW="12")
+    rc20f = done(p20f, f20f)
+    pb20f = open(os.path.join(o20f, "PASTE_BACK.txt")).read() if os.path.exists(os.path.join(o20f, "PASTE_BACK.txt")) else ""
+    s20f = status(o20f)
+    check("F20 an analysis killed ends the fleet STOPPED, not FINISHED: exit 1, STATE end=stopped naming the failed "
+          "analysis, the block 'STOPPED AT THE ANALYSIS: the analysis failed (exit 137: killed by signal 9...' with "
+          "--analyze as the way on, --status STOPPED (3), and the archive",
+          rc20f == 1 and st_of(o20f).get("end") == "stopped"
+          and "the analysis failed (exit 137" in st_of(o20f).get("reason", "")
+          and "STOPPED AT THE ANALYSIS: the analysis failed (exit 137: killed by signal 9" in pb20f
+          and "gpu_world.sh --analyze reads them again" in pb20f and archived_block(o20f) == pb20f
+          and s20f[0] == 3 and "the analysis failed" in s20f[1],
+          f"rc {rc20f}; {st_of(o20f)}; {pb20f[-300:]!r}")
+    a20k = gw("--analyze", EXP="retok", OUT=o20f, PATH=env10["PATH"], STUB_ANALYSIS_KILL="1")
+    pb20k = open(os.path.join(o20f, "PASTE_BACK.txt")).read()
+    a20g = gw("--analyze", EXP="retok", OUT=o20f, PATH=env10["PATH"])
+    check("F20 ... --analyze whose analysis dies says so and exits 1, leaving the block and the archive as they were; "
+          "run again, it writes the analysis block",
+          a20k.returncode == 1 and "!! the analysis FAILED (exit 137" in a20k.stdout and pb20k == pb20f
+          and a20g.returncode == 0 and "DECISION:" in "\n".join(block_of(a20g.stdout) or []),
+          f"{a20k.returncode} {a20g.returncode}; {a20k.stdout[-300:]!r}")
+
     # ---- F21: --status says RUNNING, STALLED, FINISHED, STOPPED, DEAD or NO FLEET, by its exit code -----------
     s_run = st19.get("fleet", (None, ""))
     s_fin = status(o19)
@@ -1779,6 +1938,46 @@ for _ in range(100):
           k21c[0] == 4 and k21d[0] == 3 and "a smoke arm failed" in k21d[1]
           and quiet and k21e.returncode == 5 and "#####  STALLED  #####" in k21e.stdout,
           f"{k21c[0]} {k21d[0]} {k21e.returncode}")
+    # A FLEET FROM BEFORE STATE WITH AN ANALYSIS BLOCK: FINISHED only if its SUMMARY shows it ended its own
+    # analysis ('---- fleet finished', then '=== wrote .../SUMMARY.txt'); a block --analyze wrote over a fleet
+    # killed in its calibration leaves it DEAD (the review of 2026-09-27: it read FINISHED, "runs: 0 of 0").
+    blk = "==== PASTE THIS BACK ====\nruns: 0 of 0 ended rc=0, every one\nDECISION: UNDECIDED\n==== END ====\n"
+    o21f = os.path.join(TMP, "f21f", "gpu_retok_out")
+    write(os.path.join(o21f, "SUMMARY.txt"), "=== gpu_world.sh  2026-09-27T10:56:02Z  commit ae70638\n"
+                                             "---- 1. smoke: every arm, seed 0, 60 windows, all at once\n"
+                                             "---- calibration: k copies of the shipped defaults for 600 windows\n"
+                                             "    k=1  aggregate 50.000 windows/s  (50.00 per run)  failed 0\n")
+    os.makedirs(os.path.join(o21f, "cal", "k2"))
+    write(os.path.join(o21f, "PASTE_BACK.txt"), blk)
+    k21f = status(o21f)
+    o21g = os.path.join(TMP, "f21g", "gpu_retok_out")
+    summary(o21g, seeds="0")
+    with open(os.path.join(o21g, "SUMMARY.txt"), "a") as fh:
+        fh.write(f"=== wrote {o21g}/SUMMARY.txt\n")
+    write(os.path.join(o21g, "PASTE_BACK.txt"), blk)
+    k21g = status(o21g)
+    check("F21 a fleet from before STATE killed in its calibration and analysed afterwards by --analyze reads DEAD (4), "
+          "saying so; one whose SUMMARY shows it ended its own analysis reads FINISHED (1)",
+          k21f[0] == 4 and "#####  DEAD  #####" in k21f[1] and "it died during calibration k=2" in k21f[1]
+          and "written afterwards, by --analyze" in k21f[1] and k21g[0] == 1 and "#####  FINISHED  #####" in k21g[1],
+          f"{k21f[0]} {k21g[0]}; {k21f[1][:400]!r}")
+    # AN ENDED FLEET WHOSE RUN STILL RUNS (a run orphaned when its fleet was stopped) lists it, and says --stop
+    # clears it. The stray carries the fleet's GW_FLEET_OUT, as every run of a fleet does; F24 reuses it.
+    o21i = os.path.join(TMP, "f21i", "gpu_retok_out")
+    summary(o21i, seeds="0")
+    write(os.path.join(o21i, "STATE"), f"pid=999999999\npid_start=1\nphase=stopping\nend=stopped\nrc=130\n"
+                                       f"reason=stopped by SIGINT during calibration k=1\nstep_dir={o21i}/cal/k1\n")
+    os.makedirs(os.path.join(o21i, "cal", "k1"), exist_ok=True)
+    stray21 = subprocess.Popen([os.path.join(binp, "python3"), "run.py", "--max-windows", "500", "--loss-curve",
+                                os.path.join(o21i, "cal", "k1", "cal.s1001.json")], cwd=TMP, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, env=clean_env(PATH=env10["PATH"], STUB_WSLEEP="2",
+                                                                         STUB_MAXW="500", GW_FLEET_OUT=o21i))
+    seen21 = wait_for(lambda: ("run" in [k for _, k in own(o21i)]), 30)
+    k21i = status(o21i)
+    check("F21 an ended fleet (STOPPED) whose run still runs lists that process and says --stop clears it",
+          seen21 and k21i[0] == 3 and "but 1 of its process(es) still run: gpu_world.sh --stop clears them" in k21i[1]
+          and f" processes  1 still running for it: {stray21.pid} (run)" in k21i[1],
+          k21i[1][:600])
 
     # ---- F22: pull safety -------------------------------------------------------------------------------
     # A SCRATCH CHECKOUT (a git repository of this tree's gpu_world.sh, run.py, src/ and the dashboard). Mid-
@@ -1876,6 +2075,93 @@ for _ in range(100):
     sp.wait()
     check("F23 --serve PORT serves that page, and only it, on 0.0.0.0 (a fleet file asked for is a 404)",
           served and code_other == 404, f"served {served}; /SUMMARY.txt -> {code_other}")
+    # UNDER A TERMINAL the frame is painted, and the page is not (the review of 2026-09-27: html.escape kept the
+    # colour codes, and a browser showed '[1;42;97m  #####  RUNNING').
+    import select
+    os.remove(os.path.join(o19, "dashboard.html"))
+    mfd, sfd = os.openpty()
+    hp2 = subprocess.Popen(["bash", DASH, "--html", "--every", "1", o19], stdin=subprocess.DEVNULL, stdout=sfd,
+                           stderr=sfd, env=clean_env())
+    os.close(sfd)
+    tty23, t23 = b"", time.time()
+    while time.time() - t23 < 20 and not (b"\x1b[1;44;97m" in tty23
+                                           and os.path.exists(os.path.join(o19, "dashboard.html"))):
+        if select.select([mfd], [], [], 0.2)[0]:
+            try:
+                tty23 += os.read(mfd, 65536)
+            except OSError:
+                break
+    time.sleep(0.3)
+    hp2.terminate()
+    hp2.wait()
+    os.close(mfd)
+    page2 = open(os.path.join(o19, "dashboard.html")).read() if os.path.exists(os.path.join(o19, "dashboard.html")) else ""
+    check("F23 run in a terminal, the dashboard paints its frame and --html still writes a page with no colour code",
+          b"\x1b[1;44;97m" in tty23 and "\x1b" not in page2 and "#####  FINISHED  #####" in page2,
+          f"{len(tty23)} bytes on the terminal; {page2.count(chr(27))} ESC in the page")
+
+    # A RUN'S RATE NEVER COUNTS ITS STARTUP (the review of 2026-09-27: a sample taken while a run was still
+    # building on the CPU was its baseline, and the first minutes read 2-5x slow). A synthetic calibration
+    # step whose STATE names this test (so it reads RUNNING): cal.s1001 is a live stand-in whose log says it
+    # built for 20 s from t0 and then printed its [501 windows] line 10 s into its training (50 windows/s);
+    # cal.s1002 and k0.s0 ended with their final line, their rc not booked yet.
+    o23 = os.path.join(TMP, "f23r", "gpu_retok_out")
+    sd23 = os.path.join(o23, "cal", "k1")
+    os.makedirs(sd23)
+    me_start = open("/proc/self/stat").read().rsplit(")", 1)[1].split()[19]
+    live23 = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)", "run.py", TMP], cwd=TMP)
+    gone23 = subprocess.Popen([sys.executable, "-c", "pass"], cwd=TMP)
+    gone23.wait()
+    T23 = int(time.time()) - 30
+    write(os.path.join(o23, "STATE"),
+          f"pid={os.getpid()}\npid_start={me_start}\nexp=retok\nphase=cal\nstep=k=1\nstep_dir={sd23}\nstep_runs=3\n"
+          f"step_windows=600\nsince={T23}\nhb_every=30\nlaunch_t={T23 - 60}\n")
+    write(os.path.join(sd23, "_started.txt"), "".join(f"{t_} pid={p_} t0={T23} cap=600 target=600\n" for t_, p_ in
+                                                     (("cal.s1001", live23.pid), ("cal.s1002", gone23.pid),
+                                                      ("k0.s0", gone23.pid))))
+    head23 = ("=== run.py pid 1 started 12:00:00Z: importing torch and composing\n=== device=cpu amp=off\n"
+              "=== composed: stage=assembled, 0 refusal(s), 0 warning(s); startup took 20.0 s (imports and compose), "
+              "training starts now\n")
+    prog23 = "".join(f"[{i} windows] loss=2.0000 opt_steps={i} n_live=2049 vocab=600 uncalled=0\n" for i in range(101, 502, 100))
+    fin23 = "=== 600 windows, 600 flushes, 600 optimizer steps, 1 epoch(s) in 12.0s (50 w/s)\n"
+    write(os.path.join(sd23, "cal.s1001.log"), head23 + prog23)
+    write(os.path.join(sd23, "cal.s1002.log"), head23 + prog23 + fin23)
+    write(os.path.join(sd23, "k0.s0.log"), head23 + prog23 + fin23)
+    for n_ in ("cal.s1001.log", "cal.s1002.log", "k0.s0.log"):
+        os.utime(os.path.join(sd23, n_), (T23 + 30, T23 + 30))
+    # (a) the only sample was taken while cal.s1001 was still on the CPU (windows 0): no baseline, the
+    #     since-training average instead, 501 / (30 - 20) = 50.1~ (the sample would have said 501 / 25 = 20).
+    write(os.path.join(o23, "HEARTBEAT"), "[hb] a line\n" + json.dumps(
+        {"t": T23 + 5, "hist": [[T23 + 5, {"cal/k1/cal.s1001": 0}, 0, {}]]}) + "\n")
+    fa23 = subprocess.run(["bash", DASH, "--once", o23], capture_output=True, text=True, timeout=60).stdout
+    la23 = subprocess.run(["bash", DASH, "--line", o23], capture_output=True, text=True, timeout=60).stdout
+    # (b) a sample taken while it trained (201 windows, its log written at 24 s): measured from there, at the
+    #     log's times, 300 / 6 = 50.0 (against the sample's own time it would read 300 / ~5 = 60).
+    write(os.path.join(o23, "HEARTBEAT"), "[hb] a line\n" + json.dumps(
+        {"t": T23 + 25, "hist": [[T23 + 25, {"cal/k1/cal.s1001": 201}, 201, {"cal/k1/cal.s1001": T23 + 24}]]}) + "\n")
+    fb23 = subprocess.run(["bash", DASH, "--once", o23], capture_output=True, text=True, timeout=60).stdout
+    live23.kill()
+    live23.wait()
+    row = lambda fr, tag: next((ln for ln in fr.splitlines() if ln.startswith(f" {tag} ")), "")
+    check("F23 a run's rate never counts its startup: with only a sample from its CPU phase it is the since-training "
+          "average (50.1~, where the sample said 20), and from a sample taken while it trained it is measured at its "
+          "log's times (50.0); the aggregate is the training runs' sum",
+          re.search(r" 501/600 +50\.1~ ", row(fa23, "cal.s1001")) is not None and "50.1 windows/s aggregate" in fa23
+          and re.search(r" 501/600 +50\.0 ", row(fb23, "cal.s1001")) is not None and "50.0 windows/s aggregate" in fb23,
+          f"{row(fa23, 'cal.s1001')!r} {row(fb23, 'cal.s1001')!r}")
+    check("F23 a run whose run.py ended with its final line, its rc not booked yet, reads finishing -- k0's while its "
+          "kept checkpoints are indexed -- never VANISHED, and the heartbeat counts it so",
+          "finishing (its rc next)" in row(fa23, "cal.s1002") and "finishing (indexing ckpts)" in row(fa23, "k0.s0")
+          and " runs       3 in this step: 0 starting on CPU, 1 training, 0 done, 2 finishing, 0 failed" in fa23
+          and "VANISHED" not in fa23 and "vanished" not in fa23
+          and "3 run(s): 0 on CPU, 1 training (w 501-501/600), 0 done, 2 finishing, 0 failed" in la23,
+          f"{row(fa23, 'cal.s1002')!r}; {la23[:300]!r}")
+    cpu23 = next((ln for ln in fa23.splitlines() if ln.startswith(" CPU ")), "")
+    check("F23 the CPU line is this container's own use against its cores (or says it could not be measured); "
+          "/proc/loadavg is shown only as the host's load",
+          ("cores busy in this container" in cpu23 or "this container's use not measured" in cpu23)
+          and ("host load" in cpu23 or not os.path.exists("/proc/loadavg")) and "(1 min) on" not in cpu23,
+          cpu23)
 
     # ---- F24: the launcher ------------------------------------------------------------------------------
     o24 = os.path.join(TMP, "f24", "gpu_retok_out")
@@ -1905,16 +2191,41 @@ for _ in range(100):
                            env=clean_env(**dict(e24, EXP="retok")))
     fin24 = wait_for(lambda: st_of(o24).get("end") == "finished", 120)
     L24 = open(log24).read() if os.path.exists(log24) else ""
+    r24 = os.path.realpath(o24)
     check("F24 --go (DEVICE=cpu) launches detached and says RUNNING with the pid STATE names; the invoking shell exits "
-          "and the fleet runs on in its own session (setsid) to its end, its block in the appended log",
+          "and the fleet runs on in its own session (setsid) to its end, its block in the appended log; the commands "
+          "it prints name the checkout by its absolute path, so they work from any terminal",
           "LAUNCHER-RC=0" in sh24.stdout and f"=== RUNNING: pid {pid24} " in sh24.stdout and alive24 and sid_ok
-          and "bash tools/fleet_dash.sh" in sh24.stdout and "PASTE_BACK.txt" in sh24.stdout
+          and f"watch it (a second terminal):  bash {DASH} {r24}" in sh24.stdout
+          and f"one look, any time:            EXP=retok OUT={o24} bash {SCRIPT} --status" in sh24.stdout
+          and f"stop it (it writes its block): EXP=retok OUT={o24} bash {SCRIPT} --stop" in sh24.stdout
+          and f"when it has ended, paste back: cat {r24}/PASTE_BACK.txt" in sh24.stdout
           and fin24 and block_of(L24) is not None and "tools/gpu_launch.sh --go (EXP=retok" in L24,
-          f"pid {pid24} alive {alive24} sid {sid_ok} fin {fin24}; {sh24.stdout[-500:]!r}")
+          f"pid {pid24} alive {alive24} sid {sid_ok} fin {fin24}; {sh24.stdout[-700:]!r}")
     check("F24 ... and a second --go while it runs FAILs on the running fleet, with the commands to watch and stop it, "
           "and launches nothing",
           again.returncode == 1 and f"FAIL a fleet is RUNNING in {o24}" in again.stdout and "!! NOT LAUNCHED" in again.stdout
-          and "gpu_world.sh --stop" in again.stdout, again.stdout[-600:])
+          and f"bash {SCRIPT} --stop" in again.stdout, again.stdout[-600:])
+    # AN EXPORTED OMP_NUM_THREADS (clean_env exports 1) IS SAID, NOT A WARN (the review of 2026-09-27: --go
+    # launched past the WARN into a fleet sized at one core, and the fix it printed was then refused); the
+    # fleet sizes itself by the cores (F19).
+    check("F24 an exported OMP_NUM_THREADS=1 is said, not a WARN: the launcher names the cores the fleet sizes itself "
+          "by and that OMP_NUM_THREADS is ignored for that",
+          "WARN OMP_NUM_THREADS" not in sh24.stdout and "PASS cores the fleet sizes its parallelism by: " in sh24.stdout
+          and "OMP_NUM_THREADS/OMP_THREAD_LIMIT set here (1) are ignored for that" in sh24.stdout,
+          [ln for ln in sh24.stdout.splitlines() if "OMP" in ln or "cores" in ln])
+    # AN ENDED FLEET WHOSE RUN STILL RUNS (F21's stray, carrying its GW_FLEET_OUT) is a FAIL whose fix is --stop:
+    # it PASSed as "not running", and --go then launched into gpu_world.sh's refusal (the review of 2026-09-27).
+    or24 = subprocess.run(["bash", LAUNCHER, "--go"], cwd=TMP, capture_output=True, text=True, timeout=300,
+                          env=clean_env(**dict(e24, EXP="retok", OUT=o21i, LOG=os.path.join(TMP, "f21i.log"))))
+    stray21.kill()
+    stray21.wait()
+    check("F24 an ended fleet whose run still runs FAILs the launcher's check, its fix --stop, and --go launches nothing",
+          or24.returncode == 1 and f"FAIL {o21i} holds a STOPPED fleet that is not running, but 1 of its process(es) "
+                                   f"still run (pid {stray21.pid})" in or24.stdout
+          and f"fix: EXP=retok OUT={o21i} bash {SCRIPT} --stop" in or24.stdout and "!! NOT LAUNCHED" in or24.stdout
+          and not glob.glob(o21i + ".20*"),
+          or24.stdout[-700:])
 finally:
     # NOTHING THESE CHECKS STARTED OUTLIVES THEM: a process carrying a GW_FLEET_OUT under TMP (a fleet, its
     # runs, its heartbeat) or naming TMP on its command line (a stand-in run, a dashboard) is killed.

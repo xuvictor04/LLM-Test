@@ -86,7 +86,14 @@
 #     here and in the block, pack the archive, quit MPS, and exit 128+n; any other exit that wrote no
 #     block (a set -u slip, a failed command) writes one naming the command. Under nohup HUP stays
 #     ignored -- bash cannot trap a signal ignored at entry -- which is what keeps a closed terminal
-#     harmless.
+#     harmless. A Ctrl-C reaches the WHOLE process group, not just this shell: each run's run_job ignores
+#     INT and HUP, so the stop TERMs the run and its run_job books it, and a run orphaned all the same is
+#     found by the GW_FLEET_OUT it carries (2026-09-27 review: a Ctrl-C killed every run_job, and its
+#     run.py, which ignores INT, trained on as an orphan holding the lock while the fleet said STOPPED).
+#     A dead output pipe (`| tee log`, its reader gone with the terminal) stops nothing: SIGPIPE is ignored
+#     and SUMMARY is written first. In the analysis nothing runs any more, so a stop there waits the
+#     seconds the analysis, the block and the archive take, and the fleet ends FINISHED; an analysis that
+#     fails ends STOPPED, with its block saying so, never FINISHED.
 #   * PULL SAFETY: the fleet runs its OWN COPY. A launch copies this script, run.py, src/ and
 #     tools/fleet_dash.sh into $OUT/code and re-executes the copy, which works in the checkout as
 #     before; every run is `python3 $OUT/code/run.py` on $OUT/code/src. A `git pull` during the fleet --
@@ -300,6 +307,9 @@ else
   CODE_DIR=$PWD
 fi
 DASH="$CODE_DIR/tools/fleet_dash.sh"
+# THE COMMANDS THIS SCRIPT PRINTS FOR THE OWNER NAME THE CHECKOUT BY ITS ABSOLUTE PATH (2026-09-27 review):
+# a second terminal opens in /workspace or /root, where `bash tools/fleet_dash.sh` is "No such file".
+GW_HOME=$PWD
 
 # ---------------------------------------------------------------- the arms
 arm_env() {  # the lever settings that define each arm; an arm this does not know is refused
@@ -1676,7 +1686,13 @@ def wrap(exp, archive):
 
 # ------------------------------------------------------------------------------------------ fail
 def fail(exp, archive, reason, logs):
-    lines = head(exp) + [f"STOPPED BEFORE THE ANALYSIS: {reason}"]
+    # A STOP IN THE ANALYSIS PHASE SAYS SO (2026-09-27 review): the analysis itself failed, or the shell
+    # died in it, after every run had ended; STATE's phase (its last line) tells the two apart.
+    phase = ""
+    for ln in rd(os.path.join(OUT, "STATE")).splitlines():
+        if ln.startswith("phase="):
+            phase = ln[6:]
+    lines = head(exp) + [f"STOPPED {'AT' if phase == 'analysis' else 'BEFORE'} THE ANALYSIS: {reason}"]
     for lg in logs:
         t = [x.rstrip()[:160] for x in rd(lg).splitlines() if x.strip()]
         lines += [f"--- {os.path.relpath(lg, OUT) if lg.startswith(OUT) else lg} (last 8 lines)"] + ["    " + x for x in t[-8:]]
@@ -1847,7 +1863,9 @@ archive_path() {  # beside OUT, named for the fleet's LAUNCH date, so --analyze 
 paste_back() {  # print the owner's block (EXP=retok's analysis wrote it; the others are wrapped here)
   [[ "$EXP" == retok ]] || gw_py wrap "$OUT" "$EXP" "$(archive_path)"
   echo
-  cat "$OUT/PASTE_BACK.txt" 2>/dev/null
+  # A MISSING BLOCK IS SAID, NOT SWALLOWED (2026-09-27 review: `cat 2>/dev/null` printed nothing at all)
+  if [[ -f "$OUT/PASTE_BACK.txt" ]]; then cat "$OUT/PASTE_BACK.txt" 2>/dev/null
+  else echo "!! no block was written: $OUT/PASTE_BACK.txt is missing (the errors above say why)"; fi
 }
 pack() {  # everything under OUT but checkpoints (and the fleet's code copy), into the archive the owner keeps
   local a p b rc
@@ -1865,11 +1883,11 @@ pack() {  # everything under OUT but checkpoints (and the fleet's code copy), in
     echo "!! could not pack $a"
   fi
 }
-fail_back() {  # reason [log...] : a stop before the analysis still ends in a block and an archive
+fail_back() {  # reason [log...] : a stop before (or in) the analysis still ends in a block and an archive
   GW_BLOCKED=1; GW_FAIL_REASON=$1
   gw_hb_stop                # no heartbeat line lands inside the block
   gw_py fail "$OUT" "$EXP" "$(archive_path)" "$@"
-  echo
+  echo 2>/dev/null
   cat "$OUT/PASTE_BACK.txt" 2>/dev/null
   pack
 }
@@ -1884,6 +1902,10 @@ fail_back() {  # reason [log...] : a stop before the analysis still ends in a bl
 # never replaced: a replaced file would hand the next launch a fresh, unlocked one.
 LOCKF=${OUT%/}; LOCKF="${LOCKF:-.}.lock"
 _cmdenv="EXP=$EXP "; [[ -n "$_OUT_GIVEN" ]] && _cmdenv="${_cmdenv}OUT=$OUT "
+# ...AND THEY WORK FROM ANY DIRECTORY: the script and the dashboard by absolute path (GW_HOME, above), the
+# dashboard given OUT's absolute path; gpu_world.sh cds to its checkout, where a relative OUT resolves.
+GW_CMD="${_cmdenv}bash $(printf %q "$GW_HOME/gpu_world.sh")"
+GW_WATCH="bash $(printf %q "$GW_HOME/tools/fleet_dash.sh") $(printf %q "$(realpath -m -- "$OUT")")"
 
 gw_flock() {  # fd: an exclusive lock on it, taken without waiting (0 = taken, 1 = held by another)
   if command -v flock > /dev/null 2>&1; then flock -n "$1"; return; fi
@@ -1917,7 +1939,7 @@ gw_refuse_live() {  # why [process rows]: a launch finds a live fleet in OUT
     echo "!! A FLEET IS ALREADY RUNNING IN $OUT: $1."
   else
     echo "!! THE FLEET IN $OUT IS NOT RUNNING, BUT PROCESSES IT STARTED STILL ARE ($1): runs orphaned when"
-    echo "!! its shell was killed keep writing into OUT. ${_cmdenv}bash gpu_world.sh --stop clears them."
+    echo "!! its shell was killed keep writing into OUT. $GW_CMD --stop clears them."
   fi
   echo "!! Nothing was started and nothing was moved (a second launch into a live OUT is what moved the"
   echo "!! 2026-09-27 retok fleet's directory out from under it)."
@@ -1926,9 +1948,9 @@ gw_refuse_live() {  # why [process rows]: a launch finds a live fleet in OUT
   echo "   The card can read 0% while it runs: every smoke and calibration step starts its runs on the CPU"
   echo "   (python and torch, corpus, tokenizer, stream, model) before they use the GPU. Judge it by --status"
   echo "   or the heartbeat, never by nvidia-smi or a quiet log, and never by launching again."
-  echo "   watch it:  bash tools/fleet_dash.sh $OUT"
-  echo "   one look:  ${_cmdenv}bash gpu_world.sh --status"
-  echo "   stop it:   ${_cmdenv}bash gpu_world.sh --stop      (it writes its block; launch again after)"
+  echo "   watch it:  $GW_WATCH"
+  echo "   one look:  $GW_CMD --status"
+  echo "   stop it:   $GW_CMD --stop      (it writes its block; launch again after)"
 }
 
 # STATE: key=value lines, the whole file rewritten (a tmp file, then mv) by the fleet's shell at every
@@ -1988,10 +2010,37 @@ gw_kids() {  # kind ... | all: this shell's descendants of those kinds, one pid 
 }
 gw_hb_stop() {  # the heartbeat watcher ends (a no-op where there is none, and in the watcher itself)
   [[ -n "${HB_PID:-}" ]] || return 0
+  local i s
   kill "$HB_PID" 2>/dev/null
-  wait "$HB_PID" 2>/dev/null
+  # POLLED, NEVER `wait $HB_PID` (2026-09-27 review): a Ctrl-C or a hang-up reaches the whole process group,
+  # so the watcher has often died of it already, and bash's wait for that pid inside the stop's trap then
+  # blocked until ANOTHER child ended -- a run, minutes away -- so the stop found its runs finished. Gone
+  # or a zombie ends the look; 5 s bound it.
+  for i in $(seq 1 50); do
+    s=$(gw_proc "$HB_PID") || break
+    [[ "${s%% *}" == Z ]] && break
+    sleep 0.1
+  done
   HB_PID=""
   return 0
+}
+# THIS FLEET'S RUNS THAT ARE NO DESCENDANT OF ITS SHELL (2026-09-27 review). A Ctrl-C at a terminal reaches
+# the whole process group: a run_job (an asynchronous subshell of a shell that traps INT, so bash resets
+# INT to its default there) died of it, while its run.py -- started in the background, so ignoring INT --
+# trained on, adopted by init: no descendant any more, never stopped, holding the lock after the fleet
+# said STOPPED. run_job now ignores INT and HUP (below); a run orphaned all the same (a run_job killed
+# some other way) is found as the watcher finds one, by the GW_FLEET_OUT it carries.
+gw_own_runs() {
+  bash "$DASH" --scan own "${GW_FLEET_OUT:-$OUT}" 9>&- 2>/dev/null | awk -F'\t' '$2 == "run" { print $1 }'
+}
+# gw_kids KIND and the orphaned runs, each pid once. The two scans run one after the other, never beside a
+# pipeline's other end: the descendants' scan lists every process of this shell's but its own ancestors,
+# so a `sort` running beside it read as a process of the fleet still to wait for.
+gw_left() {  # kind ... | all
+  local a b
+  a=$(gw_kids "$@")
+  b=$(gw_own_runs)
+  printf '%s\n' $a $b | sort -un
 }
 gw_stop_children() {  # the heartbeat and the sampler; then this fleet's runs (TERM) and up to 30 s for each
                       # run_job to write its _done line; then TERM and KILL whatever of this shell's is left
@@ -1999,17 +2048,17 @@ gw_stop_children() {  # the heartbeat and the sampler; then this fleet's runs (T
   : > "$OUT/.stopping" 2>/dev/null         # run_job skips its keep_index: --analyze indexes what is left
   gw_hb_stop
   [[ -n "${SMI_PID:-}" ]] && kill "$SMI_PID" 2>/dev/null
-  left=$(gw_kids run)
+  left=$(gw_left run)
   if [[ -n "$left" ]]; then
-    echo "   stopping $(wc -w <<< "$left") run(s): pid $(echo $left)"
+    say "   stopping $(wc -w <<< "$left") run(s): pid $(echo $left)"
     kill -TERM $left 2>/dev/null
   fi
   for i in $(seq 1 60); do
-    left=$(gw_kids all)
+    left=$(gw_left all)
     [[ -z "$left" ]] && break
     sleep 0.5
   done
-  if [[ -n "$left" ]]; then kill -TERM $left 2>/dev/null; sleep 1; left=$(gw_kids all); fi
+  if [[ -n "$left" ]]; then kill -TERM $left 2>/dev/null; sleep 1; left=$(gw_left all); fi
   [[ -n "$left" ]] && kill -KILL $left 2>/dev/null
   rm -f "$OUT/.stopping"
   return 0
@@ -2023,22 +2072,38 @@ gw_mps_quit() {  # this fleet's MPS daemon, once, after its runs are gone (quit 
 }
 gw_on_signal() {  # INT | TERM | HUP: stop the runs, say why here and in the block, pack, exit 128+n
   local sig=$1 n where
-  if [[ -n "${GW_STOPPING:-}" ]]; then echo "!! SIG$sig again: the fleet is already stopping (pid $$)"; return 0; fi
+  if [[ -n "${GW_STOPPING:-}" ]]; then echo "!! SIG$sig again: the fleet is already stopping (pid $$)" 2>/dev/null; return 0; fi
+  # IN THE ANALYSIS NOTHING RUNS ANY MORE (2026-09-27 review). bash holds a trap until the command in the
+  # foreground ends, so a --stop here waited for the analysis and then replaced its finished block, and the
+  # archive's, with "STOPPED BEFORE THE ANALYSIS". The analysis, the block and the archive take seconds:
+  # the signal is noted and they finish, and the fleet ends FINISHED.
+  if [[ "${ST[phase]:-}" == analysis ]]; then
+    [[ -n "${GW_LATE_SIG:-}" ]] || say "!! SIG$sig at $(date -u +%H:%M:%SZ) during the analysis: every run has ended, so the" \
+      "fleet finishes its analysis, its block and its archive first (seconds), then exits (pid $$)"
+    GW_LATE_SIG=${GW_LATE_SIG:-SIG$sig}
+    return 0
+  fi
   GW_STOPPING=SIG$sig
+  # A SECOND Ctrl-C DOES NOT CUT THE STOP SHORT: it reaches the whole process group, and killed the
+  # python writing the block or the tar packing the archive. From here INT and HUP are ignored, by this
+  # shell and by what it starts; a second TERM still says "again".
+  trap '' INT HUP
   case "$sig" in INT) n=2 ;; HUP) n=1 ;; *) n=15 ;; esac
+  GW_RC=$(( 128 + n ))                     # gw_on_exit records this, whatever $? says by then
   where=$(gw_where)
   say ""
   say "!! gpu_world.sh STOPPED by SIG$sig at $(date -u +%H:%M:%SZ) during $where (pid $$)"
   gw_state phase=stopping since="$(date +%s)" reason="stopped by SIG$sig during $where"
   gw_stop_children
   fail_back "stopped by SIG$sig during $where" $(gw_step_logs)
-  exit $(( 128 + n ))
+  exit "$GW_RC"
 }
 gw_on_exit() {  # every exit of the fleet's shell: say why when nothing did, and leave no process behind
   local rc=$? cmd=$BASH_COMMAND where
+  rc=${GW_RC:-$rc}
   # a second Ctrl-C or TERM must not cut the cleanup short (it is bounded: 30 s for the runs, 60 for MPS)
   trap - EXIT
-  trap '' INT TERM HUP
+  trap '' INT TERM HUP PIPE
   if [[ -z "${GW_FINISHED:-}" && -z "${GW_BLOCKED:-}" ]]; then
     where=$(gw_where)
     say ""
@@ -2050,7 +2115,8 @@ gw_on_exit() {  # every exit of the fleet's shell: say why when nothing did, and
   fi
   gw_mps_quit
   if [[ -n "${GW_FINISHED:-}" ]]; then
-    gw_state phase=done end=finished rc="$rc" ended="$(date +%s)" reason="its analysis and its block are written"
+    gw_state phase=done end=finished rc="$rc" ended="$(date +%s)" \
+      reason="its analysis and its block are written${GW_LATE_SIG:+ (a $GW_LATE_SIG that came during the analysis waited for them)}"
   else
     gw_state end=stopped rc="$rc" ended="$(date +%s)" reason="${GW_FAIL_REASON:-exit $rc}"
   fi
@@ -2124,7 +2190,7 @@ if [[ "${1:-}" == --analyze ]]; then
   [[ -f "$OUT/SUMMARY.txt" ]] || { echo "!! no $OUT/SUMMARY.txt: nothing to analyse here (OUT=$OUT)"; exit 1; }
   if gw_is_live; then
     echo "!! a fleet is running in $OUT: --analyze would write into it. Wait for it to end, or stop it"
-    echo "   (${_cmdenv}bash gpu_world.sh --stop), which writes its block. Nothing was written."
+    echo "   ($GW_CMD --stop), which writes its block. Nothing was written."
     exit 2
   fi
   [[ -d "$OUT/code/src" ]] && ROOT_DIR=$(cd "$OUT/code" && pwd -P)   # the fleet's own code unpickles its copies
@@ -2141,7 +2207,15 @@ if [[ "${1:-}" == --analyze ]]; then
     keep_index "$OUT/ckpt/keep" "$_t" "$_launch" > "$OUT/ckpt/keep/$_t.index.log" 2>&1
   done
   analyze "$OUT" "$_dev" "$_mps" "${_par:-1}" "$(nproc)" | tee "$OUT/ANALYSIS.txt"
+  _arc=${PIPESTATUS[0]}
   echo "=== wrote $OUT/ANALYSIS.txt"
+  # AN ANALYSIS THAT FAILED WRAPS AND PACKS NOTHING (2026-09-27 review: the pipeline's status was tee's):
+  # the block and the archive already on disk are left as they were.
+  if [[ "$_arc" != 0 ]]; then
+    echo "!! the analysis FAILED (exit $_arc; its error is above): ANALYSIS.txt holds what it printed, and"
+    echo "   $OUT/PASTE_BACK.txt and the archive were left as they were. Nothing was packed."
+    exit 1
+  fi
   paste_back
   pack
   exit 0
@@ -2157,7 +2231,7 @@ if [[ "${1:-}" == --status ]]; then
   bash "$DASH" --status "$OUT" 9>&-
   _v=$?
   [[ "$_v" == 2 && -z "$_EXP_GIVEN" && -z "$_OUT_GIVEN" ]] \
-    && echo "   (EXP was not given, so this read $OUT, EXP=world's; the retok fleet is EXP=retok bash gpu_world.sh --status)"
+    && echo "   (EXP was not given, so this read $OUT, EXP=world's; the retok fleet is EXP=retok bash $(printf %q "$GW_HOME/gpu_world.sh") --status)"
   exit "$_v"
 fi
 
@@ -2172,7 +2246,7 @@ if [[ "${1:-}" == --stop ]]; then
     kill -TERM "$_pid"
     for _i in $(seq 1 "${STOP_WAIT:-300}"); do gw_alive "$_pid" "$_pst" || break; sleep 1; done
     if gw_alive "$_pid" "$_pst"; then
-      echo "!! pid $_pid still runs after ${STOP_WAIT:-300} s: kill -9 $_pid, then ${_cmdenv}bash gpu_world.sh --stop again"
+      echo "!! pid $_pid still runs after ${STOP_WAIT:-300} s: kill -9 $_pid, then $GW_CMD --stop again"
       exit 1
     fi
     cat "$OUT/PASTE_BACK.txt" 2>/dev/null
@@ -2245,8 +2319,9 @@ if [[ "$GW_PRIVATE" != 1 ]]; then
       echo "!! ANOTHER FLEET IS RUNNING ON THIS MACHINE'S GPU, under another OUT. Nothing was started:"
       echo "$_other" | head -6 | sed 's/^/     /'
       echo "   Two fleets on one card measure each other: the calibration, the rates and the ETA of both would"
-      echo "   be wrong. Watch it (bash tools/fleet_dash.sh <its OUT>), wait for it, or stop it (bash gpu_world.sh"
-      echo "   --stop with its EXP and OUT). ALLOW_CONCURRENT=1 runs this one beside it anyway."
+      echo "   be wrong. Watch it (bash $(printf %q "$GW_HOME/tools/fleet_dash.sh") <its OUT>), wait for it, or stop"
+      echo "   it (bash $(printf %q "$GW_HOME/gpu_world.sh") --stop with its EXP and OUT). ALLOW_CONCURRENT=1 runs this one"
+      echo "   beside it anyway."
       exit 2
     fi
   fi
@@ -2321,7 +2396,16 @@ fi
 mkdir -p "$OUT/logs" "$OUT/curves" "$OUT/smoke" "$OUT/cal"
 S="$OUT/SUMMARY.txt"
 : > "$S"
-say() { echo "$*" | tee -a "$S"; }
+# A DEAD OUTPUT PIPE STOPS NOTHING (2026-09-27 review). Launched as `bash gpu_world.sh 2>&1 | tee log`, a
+# Ctrl-C or a closed terminal takes the tee with it, and the next write to the dead pipe raised SIGPIPE:
+# say's tee died before SUMMARY got the "STOPPED by" line, then the shell's own echo made bash run its
+# EXIT trap at once with $? = 0 -- no archive, rc=0 in STATE, the stop cut short. By the same mechanism,
+# `nohup bash gpu_world.sh | tee log` would end at its first write after the terminal closed and took the
+# tee with it. SIGPIPE is ignored from here on (a write to the dead pipe fails and the fleet goes on; a tee
+# then keeps writing its files), and say writes SUMMARY first. What this shell starts inherits the ignore:
+# python ignores SIGPIPE by itself anyway, and the MPS daemon is started with the default restored.
+trap '' PIPE
+say() { printf '%s\n' "$*" >> "$S"; printf '%s\n' "$*" 2>/dev/null; }
 
 # ---------------------------------------------------------------- preflight
 # ONE FLEET, ONE COMMIT: a checkout that differs from its commit where the runs read (src, run.py, this
@@ -2339,9 +2423,12 @@ say "=== gpu_world.sh  $LAUNCH  commit $COMMIT$DIRTY"
 say "=== code: this fleet runs its own copy, $CODE_DIR (gpu_world.sh, run.py, src/, tools/fleet_dash.sh;" \
   "sha256 ${GW_CODE_SUM:-?}), taken from commit $COMMIT$DIRTY at launch: a git pull during the fleet reaches none of it"
 gw_fleet_start
-say "=== pid $$; watch it: bash tools/fleet_dash.sh $OUT | one look: ${_cmdenv}bash gpu_world.sh --status |" \
-  "stop it: ${_cmdenv}bash gpu_world.sh --stop"
-NCPU=$(nproc)
+say "=== pid $$; watch it: $GW_WATCH | one look: $GW_CMD --status | stop it: $GW_CMD --stop"
+# THE CORES, NEVER OMP_NUM_THREADS (2026-09-27 review): GNU nproc reports OMP_NUM_THREADS (capped by
+# OMP_THREAD_LIMIT) when either is set, so an OMP_NUM_THREADS=1 exported in the launching shell sized a
+# fleet at one core -- ceiling 1, PAR 1, one run at a time. Emptied, nproc ignores them. Every run sets
+# OMP_NUM_THREADS=1 for itself (run_job).
+NCPU=$(OMP_NUM_THREADS= OMP_THREAD_LIMIT= nproc)
 # nproc READS THE CPU AFFINITY MASK, AND IN A CONTAINER THAT IS USUALLY THE HOST'S CORES. The cgroup
 # QUOTA is what this container may actually use. The first version of this script sized its
 # parallelism off nproc alone and put far more runs on the box than it had CPU for.
@@ -2399,8 +2486,9 @@ if [[ "$DEVICE" == cuda && "$MPS" != 0 ]] && command -v nvidia-cuda-mps-control 
   export CUDA_MPS_PIPE_DIRECTORY="$_ob/mps/pipe" CUDA_MPS_LOG_DIRECTORY="$_ob/mps/log"
   mkdir -p "$CUDA_MPS_PIPE_DIRECTORY" "$CUDA_MPS_LOG_DIRECTORY"
   # THE DAEMON OUTLIVES A KILLED FLEET, SO IT NEVER HOLDS THE LOCK (9>&-). Every exit quits it, after the
-  # runs are gone (gw_on_exit); a daemon a SIGKILLed fleet left is quit by the next launch.
-  if nvidia-cuda-mps-control -d 9>&- 2>/dev/null; then
+  # runs are gone (gw_on_exit); a daemon a SIGKILLed fleet left is quit by the next launch. It starts with
+  # SIGPIPE at its default, as before this shell ignored it.
+  if ( trap - PIPE; exec nvidia-cuda-mps-control -d ) 9>&- 2>/dev/null; then
     MPS_ON=1; say "=== CUDA MPS started (kernels from different runs execute concurrently)"
     gw_state mps_pipe="$CUDA_MPS_PIPE_DIRECTORY"
   else
@@ -2422,6 +2510,12 @@ MPS_CAP=0
 # EXP=retok's k0 runs with a CKPT_DIR get the kept-checkpoint watcher beside them, and their index
 # after them, before the _done.txt line.
 run_job() {  # name seed windows gpu arm-env...
+  # A Ctrl-C OR A CLOSED TERMINAL REACHES THE WHOLE PROCESS GROUP, AND run_job OUTLIVES IT (2026-09-27
+  # review): run_job runs in the background of a shell that traps INT and HUP, so bash resets both to their
+  # defaults here, and a Ctrl-C killed it while its run.py -- started in the background, so ignoring INT --
+  # trained on as an orphan. Ignoring both, run_job stays to book its run when the fleet's stop TERMs it
+  # (its run inherits the ignore; TERM, which the stop sends, is never ignored here).
+  trap '' INT HUP
   local name="$1" seed="$2" win="$3" gpu="$4"; shift 4
   local tag="$name.s$seed"
   local log="$OUT/logs/$tag.log" t0=$(date +%s)
@@ -2514,12 +2608,16 @@ fi
 # EACH STEP SAYS WHEN ITS RUNS START, AND THAT THEY START ON THE CPU (2026-09-27): a fresh run.py
 # imports torch and builds its corpus, tokenizer, stream and model before it touches the GPU, so the
 # card reads idle for that long at the start of every smoke and calibration step, and the step's
-# own line prints only when it ends. The smoke measures the startup on this machine (below).
+# own line prints only when it ends. The smoke measures the startup on this machine (below). At the
+# retok shape a run took 15-16 s on the 4-core CPU box, one alone or four at once on an idle box (the
+# smoke measured 16.2 s, median of 4), and 66-71 s each when another job's tests shared that CPU (2026-09-27
+# review; its ~28 s for four at once did not reproduce on the idle box): the startup takes the CPU it gets.
 HB_NOTE=""; (( HB_EVERY > 0 )) && HB_NOTE="; a heartbeat line every $HB_EVERY s until then"
 gw_step smoke smoke "$OUT/smoke" "${#JOBS[@]}" "$SMOKE_WINDOWS"
 say "    ${#JOBS[@]} run(s) start $(date -u +%H:%M:%SZ). Each builds on the CPU first -- python and torch, corpus," \
-  "tokenizer, stream, model: ~14 s on the 4-core CPU box, and this smoke measures it here -- and only then" \
-  "uses the GPU, so nvidia-smi reads idle until they train. The step's result prints when it ends$HB_NOTE."
+  "tokenizer, stream, model: 15-30 s on the 4-core CPU box, longer when the CPU is shared, and this smoke" \
+  "measures it here -- and only then uses the GPU, so nvidia-smi reads idle until they train. The step's result" \
+  "prints when it ends$HB_NOTE."
 JOB_DIR="$OUT/smoke" CURVE_DIR="$OUT/smoke" run_fleet "${#JOBS[@]}"
 if grep -q "rc=[1-9]" "$OUT/smoke/_done.txt"; then
   say "!! a smoke arm FAILED -- stopping before the fleet:"
@@ -2584,7 +2682,8 @@ STARTUP_S=""
 if [[ -n "$STARTUP" ]]; then
   read -r STARTUP_S _smin _smax _sn <<< "$STARTUP"
   say "  startup: each smoke run built on the CPU for ${STARTUP_S} s (median of $_sn; ${_smin}-${_smax} s) before its" \
-      "first window: the GPU idles that long at the start of every calibration step"
+      "first window: the GPU idles about that long at the start of every calibration step, longer when the CPU" \
+      "is shared"
   gw_state startup_s="$STARTUP_S"
 fi
 # THE KEPT-CHECKPOINT TRIPWIRE: the smoke's k0 saved at SMOKE_WINDOWS/2, so the watcher and the index
@@ -2639,8 +2738,9 @@ if [[ "$PAR" == auto ]]; then
     d="$OUT/cal/k$k"; mkdir -p "$d"
     JOBS=(); for j in $(seq 1 "$k"); do add_job "cal $(( 1000 + j )) $CAL_WINDOWS"; done
     gw_step cal "k=$k" "$d" "$k" "$CAL_WINDOWS"
-    say "    k=$k: $k run(s) x $CAL_WINDOWS windows start $(date -u +%H:%M:%SZ): ~${STARTUP_S:-14} s on the CPU first" \
-        "(the GPU reads idle), then the training; the step's line prints when it ends"
+    say "    k=$k: $k run(s) x $CAL_WINDOWS windows start $(date -u +%H:%M:%SZ): ~${STARTUP_S:-15-30} s on the CPU first" \
+        "(the GPU reads idle; the smoke's figure, longer when the CPU is shared), then the training; the step's" \
+        "line prints when it ends"
     JOB_DIR="$d" CURVE_DIR="$d" run_fleet "$k"
     # A RUN THAT WROTE NO _done LINE COUNTS AS FAILED (2026-09-27): the count was the _done lines minus the
     # runs with a summary line, which a killed run_job turned negative -- read as "no failure" -- and a
@@ -2761,8 +2861,8 @@ PY
 say "---- 2. fleet started $(date -u +%H:%M:%SZ)"
 gw_step fleet "" "$OUT/logs" "${#JOBS[@]}" "$WINDOWS"
 gw_state par="$PAR" runs_total="${#JOBS[@]}" windows="$WINDOWS"
-say "    ${#JOBS[@]} run(s), $PAR at a time; each spends ~${STARTUP_S:-14} s on the CPU before it trains. The fleet's" \
-    "own line prints when its last run ends$HB_NOTE; bash tools/fleet_dash.sh shows every run."
+say "    ${#JOBS[@]} run(s), $PAR at a time; each spends ~${STARTUP_S:-15-30} s on the CPU before it trains. The fleet's" \
+    "own line prints when its last run ends$HB_NOTE; $GW_WATCH shows every run."
 SMI_PID=""
 if [[ "$DEVICE" == cuda ]]; then
   # THE SAMPLER NEVER HOLDS THE LOCK (9>&-): it runs until it is killed, and a SIGKILLed fleet cannot.
@@ -2784,11 +2884,31 @@ fi
 
 # ---------------------------------------------------------------- 5. analysis, the block, the archive
 # THE HEARTBEAT ENDS HERE: nothing runs any more, and no heartbeat line may land inside the block.
+# A STOP NOW WAITS THE SECONDS THE REST TAKES (2026-09-27 review): gw_on_signal notes an INT, TERM or HUP
+# in this phase and returns, and the analysis, the block and the archive's tar run with INT and HUP
+# ignored, so a Ctrl-C or a closed terminal that reaches the whole process group cannot cut them short.
+# FINISHED ONLY WITH ITS BLOCK (2026-09-27 review): the pipeline's status was tee's, so an analysis that
+# raised, or that the OOM killer took, still ended FINISHED, "its block written", with no PASTE_BACK.txt.
+# Such a fleet now ends STOPPED, its block saying the analysis failed, and --analyze reads its runs again.
 gw_step analysis "" "$OUT" 0 0
 gw_hb_stop
-analyze "$OUT" "$DEVICE" "$MPS_ON" "$PAR" "$NCPU" | tee "$OUT/ANALYSIS.txt" >> "$S"
+rm -f "$OUT/PASTE_BACK.txt"
+( trap '' INT HUP; analyze "$OUT" "$DEVICE" "$MPS_ON" "$PAR" "$NCPU" | tee "$OUT/ANALYSIS.txt"; exit "${PIPESTATUS[0]}" ) >> "$S"
+_arc=$?
 say "=== wrote $S"
 cat "$S" | sed -n '/^=== RUNS/,$p'
-paste_back
-pack
+[[ "$_arc" == 0 ]] && ( trap '' INT HUP; paste_back )
+if [[ "$_arc" != 0 || ! -s "$OUT/PASTE_BACK.txt" ]]; then
+  if [[ "$_arc" != 0 ]]; then
+    _why="the analysis failed (exit $_arc"
+    (( _arc > 128 )) && _why="$_why: killed by signal $(( _arc - 128 ))$( (( _arc == 137 )) && echo ', the OOM killer?')"
+    _why="$_why; its error is in the fleet log)"
+  else
+    _why="the analysis wrote no block ($OUT/PASTE_BACK.txt is missing: a full disk? its error is in the fleet log)"
+  fi
+  say "!! THE FLEET IS NOT FINISHED: $_why. Every run had ended; $GW_CMD --analyze reads them again."
+  fail_back "$_why; every run had ended, and $GW_CMD --analyze reads them again"
+  exit 1
+fi
+( trap '' INT HUP; pack )
 GW_FINISHED=1

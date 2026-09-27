@@ -4,16 +4,20 @@
 # ==================================================================================================
 # The retok fleet of 2026-09-27 was stopped by hand because nothing said it was alive. The card read
 # 0% most of its first minutes: every smoke and calibration step starts fresh run.py processes that
-# build on the CPU (python and torch, corpus, tokenizer, stream, model: ~14 s measured on the 4-core
-# CPU box) before they touch the GPU, and the fleet log printed one line per step, at its end. This
-# answers "is it doing anything?". Run it in a second terminal:
+# build on the CPU (python and torch, corpus, tokenizer, stream, model: 15-16 s at the retok shape on the
+# 4-core CPU box, one run alone or four at once, and several times that when other work shares the CPU)
+# before they touch the GPU, and the fleet log printed one line per step, at its end. This answers "is it
+# doing anything?".
+# Run it in a second terminal, from any directory (/workspace/LLM-Test is the owner's checkout):
 #
-#     bash tools/fleet_dash.sh                    # the live fleet beside this checkout (else the newest),
+#     bash /workspace/LLM-Test/tools/fleet_dash.sh   # the live fleet beside this checkout (else the newest),
 #                                                 # redrawn every 5 s
 #     bash tools/fleet_dash.sh gpu_retok_out      # that fleet (a path, relative to here or to the checkout)
 #     bash tools/fleet_dash.sh --once             # one frame and exit: paste it into the chat
 #     bash tools/fleet_dash.sh --html             # + writes $OUT/dashboard.html each tick, which reloads
-#                                                 #   itself: open it in a browser or a file viewer
+#                                                 #   itself: open it in a browser or a file viewer (the
+#                                                 #   page's text is plain: the terminal's colour codes
+#                                                 #   are left out of it)
 #     bash tools/fleet_dash.sh --serve 8080       # + serves that page on http://<this box>:8080/ (0.0.0.0)
 #     bash tools/fleet_dash.sh --every 10 --stall-min 5 --no-color
 # Ctrl-C ends the dashboard; the fleet keeps running. Plain text and ANSI colour only (no curses), so
@@ -27,25 +31,37 @@
 #             --stall-min minutes (default 5) in the smoke, the calibration or the fleet. The 2026-09-24
 #             fleet wrote a progress line every ~40 s at its slowest, so 5 minutes of nothing is a hang;
 #   FINISHED  it wrote its analysis and its block;
-#   STOPPED   it stopped with a reason (a signal, a tripwire, a failed smoke, the disk); its block says it;
+#   STOPPED   it stopped with a reason (a signal, a tripwire, a failed smoke or analysis, the disk); its
+#             block says it;
 #   DEAD      no reason: the pid is gone and STATE records no end, or the heartbeat watcher saw the shell
 #             vanish (SIGKILL, the OOM killer and a container stop kill without a trap);
 #   NO FLEET  nothing in OUT; the fleets beside it are listed.
+# An ended fleet whose processes still run (runs orphaned when it was killed) lists them: a launch into
+# its OUT is refused until `gpu_world.sh --stop` clears them.
 # A fleet launched by a gpu_world.sh from before STATE is read off its SUMMARY.txt, its PASTE_BACK.txt
-# and the processes still running for it.
+# and the processes still running for it. It is FINISHED only if SUMMARY shows it ended its own analysis
+# ('---- fleet finished' and '=== wrote .../SUMMARY.txt'): a block written afterwards by --analyze on a
+# fleet killed part-way leaves it DEAD (2026-09-27 review: it read FINISHED, "runs: 0 of 0").
 #
 # UNDER IT: the stage and the time in it; each run of the current step -- starting on CPU (its log has
-# no '=== device=' / '=== composed' line yet), training, done, FAILED, VANISHED -- with its windows so
-# far out of its target, its windows/s and when it started; runs alive, done and failed; the aggregate
-# windows/s; the ETA of the step, and in the fleet phase of the fleet, wave by wave over PAR slots; GPU
-# utilisation and memory (nvidia-smi, when present), the CPU load against the cores this box may use,
-# the free disk; the age of the fleet log's last line, of the last heartbeat and of the newest run
-# output; and the fleet log's last 3 lines (heartbeat lines aside: the frame already says what they say).
+# no '=== device=' / '=== composed' line yet), training, finishing (its run ended and its run_job is
+# still at work: k0's kept checkpoints are indexed before its rc is booked), done, FAILED, VANISHED
+# (gone with no rc and no final line) -- with its windows so far out of its target, its windows/s and
+# when it started; runs alive, done and failed; the aggregate windows/s (the sum of the training runs'
+# rates); the ETA of the step, and in the fleet phase of the fleet, wave by wave over PAR slots; GPU
+# utilisation and memory (nvidia-smi, when present); the CPU THIS CONTAINER uses, in cores, off its
+# cgroup's CPU time, against the cores it may use (/proc/loadavg, printed beside it as the host's load,
+# counts every container on the host); the free disk; the age of the fleet log's last line, of the last
+# heartbeat and of the newest run output; and the fleet log's last 3 lines (heartbeat lines aside: the
+# frame already says what they say).
 # A run's windows come from its '[N windows]' progress lines (RUN.PROGRESS_WINDOWS: every 100 windows,
 # so every ~2 s at the calibrated 42-50 windows/s per run and every ~40 s at the 2026-09-24 fleet's
 # slowest) and from its '=== N windows' summary line; before window 101 a training run shows <101.
-# Rates are measured between frames and against the samples gpu_world.sh keeps in $OUT/HEARTBEAT,
-# else averaged since the run began training (marked ~).
+# A run's rate is measured from a sample in which it was already past a progress line -- a frame of
+# this dashboard, or one gpu_world.sh keeps in $OUT/HEARTBEAT -- to its latest line, each at the time
+# its log was written, over at most the last 5 minutes; without one it is averaged since the run began
+# training (marked ~). A sample taken while the run was still building on the CPU is never its baseline
+# (2026-09-27 review: that counted the startup as training, and the first minutes read 2-5x slow).
 #
 # IT READS $OUT/STATE, HEARTBEAT, SUMMARY.txt, PASTE_BACK.txt, cal/table.txt, the step's _started.txt,
 # _done.txt and run logs, the fleet log STATE names, /proc, nvidia-smi and the disk. IT WRITES NOTHING
@@ -57,7 +73,8 @@
 #   --status OUT     one frame, no colour, and an exit code: 0 RUNNING, 1 FINISHED, 2 NO FLEET,
 #                    3 STOPPED, 4 DEAD, 5 STALLED (alive = 0 or 5). `bash gpu_world.sh --status`.
 #   --line OUT       one heartbeat line; with --sample a second line, the JSON sample the next line
-#                    measures its rates against, which gpu_world.sh keeps in $OUT/HEARTBEAT.
+#                    measures its rates and the container's CPU against, which gpu_world.sh keeps in
+#                    $OUT/HEARTBEAT.
 #   --scan own|card|desc OUT_OR_PID   processes, one line each (pid, kind, command line):
 #                    own  everything carrying GW_FLEET_OUT=OUT, and a gpu_world.sh launch from before
 #                         the lock, or a run.py, writing under OUT;
@@ -405,20 +422,33 @@ def verdict(out):
             return {"verdict": "NO FLEET", "why": f"nothing in {out}", "out": out}
         pb = rd(os.path.join(out, "PASTE_BACK.txt"))
         ph, step, sd = summary_phase(out, S)
+        # ITS OWN LAST WRITE: SUMMARY's. A block --analyze wrote later is no sign of life (2026-09-27 review:
+        # it made a dead fleet the dashboard's default pick).
         v = {"phase": ph, "step": step, "step_dir": sd, "old": True, "out": out,
-             "updated": max(mtime(os.path.join(out, "SUMMARY.txt")) or 0,
-                            mtime(os.path.join(out, "PASTE_BACK.txt")) or 0)}
+             "updated": mtime(os.path.join(out, "SUMMARY.txt")) or 0}
         m = re.match(r"=== gpu_world\.sh\s+(\S+)\s+commit\s*(\S*)", S)
         if m:
             v["launch"], v["commit"] = m.group(1), m.group(2)
         live = [r for r in scan("own", out) if r[1] in ("shell", "run")]
+        # FINISHED ONLY IF THE FLEET ITSELF ENDED ITS ANALYSIS: that script's SUMMARY closes with
+        # '---- fleet finished ...' and then '=== wrote .../SUMMARY.txt'. A block and no such end is one
+        # --analyze wrote afterwards over a fleet killed part-way (2026-09-27 review: it read FINISHED).
+        ended = "---- fleet finished" in S and re.search(r"^=== wrote \S*SUMMARY\.txt$", S, re.M) is not None
         if live:
             v.update(verdict="RUNNING", why=f"{len(live)} process(es) of a gpu_world.sh from before STATE",
                      pid=live[0][0], procs=live)
         elif "==== PASTE THIS BACK ====" in pb:
-            m = re.search(r"^STOPPED BEFORE THE ANALYSIS: (.*)$", pb, re.M)
-            v.update(verdict="STOPPED", why=m.group(1)) if m else \
+            m = re.search(r"^STOPPED (?:BEFORE|AT) THE ANALYSIS: (.*)$", pb, re.M)
+            if m:
+                v.update(verdict="STOPPED", why=m.group(1))
+            elif ended:
                 v.update(verdict="FINISHED", why="its block is written")
+            else:
+                where = {"smoke": "the smoke", "cal": f"calibration {step}", "fleet": "the fleet",
+                         "analysis": "the analysis"}.get(ph, "the setup")
+                v.update(verdict="DEAD", why=f"no process of it runs and it recorded no end: it died during {where} "
+                                             f"(a gpu_world.sh from before STATE); its block was written afterwards, "
+                                             f"by --analyze")
         else:
             v.update(verdict="DEAD", why="no process of it runs and it wrote no block (a gpu_world.sh from "
                                          "before STATE, which recorded no end)")
@@ -429,13 +459,19 @@ def verdict(out):
               "windows", "startup_s", "launch_t"):
         v[k] = num(v.get(k))
     end = st.get("end")
-    if end == "finished":
-        v.update(verdict="FINISHED", why=st.get("reason") or "its analysis and its block are written")
-    elif end == "stopped":
-        v.update(verdict="STOPPED", why=st.get("reason") or "?")
-    elif end == "died":
-        v.update(verdict="DEAD", why=st.get("reason") or "its shell vanished")
-    elif st.get("host") and st["host"] != os.uname().nodename:
+    here = not st.get("host") or st["host"] == os.uname().nodename
+    if end in ("finished", "stopped", "died"):
+        v.update(verdict={"finished": "FINISHED", "stopped": "STOPPED", "died": "DEAD"}[end],
+                 why=st.get("reason") or {"finished": "its analysis and its block are written",
+                                          "stopped": "?", "died": "its shell vanished"}[end])
+        # AN ENDED FLEET WHOSE RUNS STILL RUN SAYS SO (2026-09-27 review: a Ctrl-C left a run training, holding
+        # the lock, under a STOPPED that listed nothing); its shell, still exiting, is not counted.
+        live = [r for r in scan("own", out) if r[1] in ("shell", "run") and str(r[0]) != str(st.get("pid"))] \
+            if here else []
+        if live:
+            v.update(procs=live, why=v["why"] + f"; but {len(live)} of its process(es) still run: gpu_world.sh "
+                                                "--stop clears them")
+    elif not here:
         hb = mtime(os.path.join(out, "HEARTBEAT"))
         fresh = hb is not None and now - hb < 3 * (v.get("hb_every") or 30) + 10
         v.update(verdict="RUNNING" if fresh else "DEAD",
@@ -453,7 +489,7 @@ def verdict(out):
         v.update(verdict="DEAD", procs=live,
                  why=f"its shell (pid {st.get('pid')}) is gone and STATE records no end: it was killed without "
                      "a trap (SIGKILL, the OOM killer, a container stop)"
-                     + (f"; {len(live)} of its process(es) still run" if live else ""))
+                     + (f"; {len(live)} of its process(es) still run: gpu_world.sh --stop clears them" if live else ""))
     return v
 
 
@@ -568,6 +604,14 @@ def step_runs(v):
                     r["state"], r["phase"], r["windows"] = "training", "train", r["windows"] or 0
                 else:
                     r["state"], r["phase"] = f"starting on CPU ({dur(now - r['t0'])})", "cpu"
+            elif info.get("final") is not None:
+                # ITS RUN ENDED, WITH ITS FINAL LINE, AND ITS run_job IS STILL AT WORK: k0's kept checkpoints
+                # are swept and indexed (a torch import, two loads of each copy) before its rc is booked
+                # (2026-09-27 review: this read VANISHED, like a crash, in every smoke and at every k0's end).
+                r["state"], r["phase"] = ("finishing (indexing ckpts)" if tag.startswith("k0.")
+                                          else "finishing (its rc next)"), "post"
+                if info.get("loop_s"):
+                    r["rate"] = info["final"] / info["loop_s"]
             else:
                 r["state"] = "VANISHED (no rc)"
         if r["t0"] and r["startup"] is not None:
@@ -578,40 +622,63 @@ def step_runs(v):
 
 # ------------------------------------------------------------------------------------------ rates and ETA
 def load_hist(out):
-    """The samples gpu_world.sh keeps in HEARTBEAT: [(t, {key: windows}, total)], oldest first."""
+    """The samples gpu_world.sh keeps in HEARTBEAT: [(t, {key: windows}, total, {key: log mtime})], oldest
+    first (a sample from before the mtimes were kept has {} there)."""
     for ln in reversed(rd(os.path.join(out, "HEARTBEAT")).splitlines()):
         if ln.startswith("{"):
             try:
-                return [(float(a), dict(b), int(c)) for a, b, c in json.loads(ln).get("hist", [])]
-            except (ValueError, TypeError):
+                return [(float(e[0]), dict(e[1]), int(e[2]), dict(e[3]) if len(e) > 3 else {})
+                        for e in json.loads(ln).get("hist", [])]
+            except (ValueError, TypeError, IndexError):
                 return []
     return []
 
 
+def load_cpu(out):
+    """The container's CPU sample gpu_world.sh keeps in HEARTBEAT: (t, cpu seconds, cgroup file), or None."""
+    for ln in reversed(rd(os.path.join(out, "HEARTBEAT")).splitlines()):
+        if ln.startswith("{"):
+            try:
+                c = json.loads(ln).get("cpu")
+                return (float(c[0]), float(c[1]), str(c[2])) if c else None
+            except (ValueError, TypeError, IndexError):
+                return None
+    return None
+
+
 def apply_rates(rows, key, hist, now):
-    """Each run's windows/s and the aggregate, against the oldest sample of the last RATE_SPAN seconds
-    that knows this step; a run with no such sample is averaged since it began training."""
+    """Each training run's windows/s and the aggregate, the sum of those rates. A run's rate runs from the
+    oldest sample of the last RATE_SPAN seconds in which it was already past a progress line (windows > 0
+    there) to its latest line, each at the time its log was written (a sample without that time: the
+    sample's own time, to now), over at least 5 s. A SAMPLE FROM WHILE IT WAS STILL ON THE CPU IS NEVER
+    ITS BASELINE (2026-09-27 review): it counted the startup as training, so every calibration step and
+    the fleet's first minutes read 2-5x slow, the ETA as many times too long. A run with no such sample is
+    averaged since it began training (windows / (its log's time - its start + startup), marked ~)."""
     cur = {f"{key}/{r['tag']}": (r.get("windows") or 0) for r in rows}
-    total, agg = sum(cur.values()), None
-    for t, runs, tot in hist:
-        if not 5 <= now - t <= RATE_SPAN or not any(k in runs for k in cur):
-            continue
-        agg = max(0.0, (total - tot) / (now - t))
-        for r in rows:
-            k = f"{key}/{r['tag']}"
-            if not r.get("done") and k in runs and cur[k] > runs[k]:
-                r["rate"] = (cur[k] - runs[k]) / (now - t)
-        break
+    total = sum(cur.values())
     for r in rows:
-        if r.get("rate") is None and not r.get("done") and r.get("windows") and r.get("t_train") and r.get("mtime"):
-            if r["mtime"] - r["t_train"] > 1:
-                r["rate"], r["rate_avg"] = r["windows"] / (r["mtime"] - r["t_train"]), True
-    if agg is None:
-        live = [r["rate"] for r in rows if r.get("rate") and not r.get("done")]
-        agg = sum(live) if live else None
+        k = f"{key}/{r['tag']}"
+        if r.get("phase") != "train" or not cur[k]:
+            continue
+        for t, runs, _tot, mts in hist:                  # oldest first
+            b = runs.get(k) or 0
+            if not 0 < b < cur[k] or not 5 <= now - t <= RATE_SPAN:
+                continue
+            t0_, t1_ = (mts[k], r.get("mtime") or now) if mts.get(k) else (t, now)
+            if t1_ - t0_ >= 5:
+                r["rate"] = (cur[k] - b) / (t1_ - t0_)
+                break
+    for r in rows:
+        if r.get("rate") is None and r.get("phase") == "train" and r.get("windows") and r.get("t_train") \
+                and r.get("mtime") and r["mtime"] - r["t_train"] > 1:
+            r["rate"], r["rate_avg"] = r["windows"] / (r["mtime"] - r["t_train"]), True
+    live = [r["rate"] for r in rows if r.get("rate") and r.get("phase") == "train"]
+    agg = sum(live) if live else None
     if not total:                    # no run past its first progress line (window 101): not measured, not 0
         agg = None
-    return total, agg, {"t": now, "runs": cur, "total": total}
+    return total, agg, {"t": now, "runs": cur, "total": total,
+                        "mt": {f"{key}/{r['tag']}": r["mtime"] for r in rows
+                               if r.get("phase") == "train" and r.get("mtime") and cur[f"{key}/{r['tag']}"]}}
 
 
 def step_eta(rows, v, now):
@@ -625,7 +692,7 @@ def step_eta(rows, v, now):
     startup = v.get("startup_s") or 15.0
     ends = []
     for r in rows:
-        if r.get("done") or r.get("state", "").startswith("VANISHED"):
+        if r.get("done") or r.get("phase") == "post" or r.get("state", "").startswith("VANISHED"):
             continue
         target, w = r.get("target") or 0, r.get("windows") or 0
         if r.get("phase") == "cpu":
@@ -683,10 +750,68 @@ def cores():
 
 
 def load():
+    """The 1-minute load average. /proc/loadavg IS NOT PER CONTAINER: it counts every container on the host,
+    so it is shown as the host's, beside this container's own CPU (cpu_busy)."""
     try:
         return float(open("/proc/loadavg").read().split()[0])
     except (OSError, ValueError, IndexError):
         return None
+
+
+def cg_cpu(pid=None):
+    """(CPU seconds used so far, the file read) by the cgroup `pid` is in (this process's by default): cgroup
+    v2's cpu.stat usage_usec, else v1's cpuacct.usage; None where neither can be read. The path
+    /proc/<pid>/cgroup names is tried under the mount first (a cgroup namespace shared with the host), then
+    the mount's root (a container's own namespace, or its own v1 subtree mounted there)."""
+    try:
+        with open(f"/proc/{pid or 'self'}/cgroup") as fh:
+            lines = fh.read().splitlines()
+    except OSError:
+        lines = []
+    cands = []
+    for ln in lines:
+        h, _, rest = ln.partition(":")
+        ctl, _, path = rest.partition(":")
+        path = path.rstrip("/")
+        if h == "0" and not ctl:
+            cands += [("v2", f"{b}{path}/cpu.stat") for b in ("/sys/fs/cgroup", "/sys/fs/cgroup/unified")]
+            cands.append(("v2", "/sys/fs/cgroup/cpu.stat"))
+        elif "cpuacct" in ctl.split(","):
+            for d in dict.fromkeys((ctl, "cpuacct", "cpu,cpuacct")):
+                cands += [("v1", f"/sys/fs/cgroup/{d}{path}/cpuacct.usage"), ("v1", f"/sys/fs/cgroup/{d}/cpuacct.usage")]
+    cands += [("v2", "/sys/fs/cgroup/cpu.stat"), ("v1", "/sys/fs/cgroup/cpuacct/cpuacct.usage")]
+    for kind, path in cands:
+        try:
+            with open(path) as fh:
+                if kind == "v1":
+                    return int(fh.read()) / 1e9, path
+                for ln in fh:
+                    k, _, val = ln.partition(" ")
+                    if k == "usage_usec":
+                        return int(val) / 1e6, path
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def cpu_busy(v, prev, wait=True):
+    """(cores busy, the seconds measured over, the sample to keep) of the cgroup the fleet's shell is in
+    (else this process's): the change in its CPU time since `prev` -- (t, seconds, file), this dashboard's
+    last frame or the heartbeat's -- when that is 1-600 s old and read the same file, else over 0.5 s now
+    (only with `wait`). None where the cgroup's CPU time cannot be read."""
+    pid = v.get("pid") if alive(v.get("pid"), v.get("pid_start")) else None
+    t1, cur = time.time(), cg_cpu(pid)
+    if cur is None:
+        return None
+    if prev and prev[2] == cur[1] and 1 <= t1 - prev[0] <= 600 and cur[0] >= prev[1]:
+        return (cur[0] - prev[1]) / (t1 - prev[0]), t1 - prev[0], (t1, cur[0], cur[1])
+    if not wait:
+        return None
+    time.sleep(0.5)
+    t2, c2 = time.time(), cg_cpu(pid)
+    if c2 is None or c2[1] != cur[1] or c2[0] < cur[0]:
+        return None
+    return (c2[0] - cur[0]) / (t2 - t1), t2 - t1, (t2, c2[0], c2[1])
 
 
 def disk(out):
@@ -715,6 +840,10 @@ def collect(out, mem):
     key = os.path.relpath(v.get("step_dir") or out, out)
     total, agg, sample = apply_rates(rows, key, mem.get("hist") or load_hist(out), now)
     v.update(rows=rows, total=total, agg=agg, sample=sample)
+    # THIS CONTAINER'S CPU, not the host's load (2026-09-27 review): measured over 0.5 s only when something
+    # of the fleet runs and no earlier sample is at hand
+    v["cpu"] = cpu_busy(v, mem.get("cpu") or load_cpu(out),
+                        wait=v["verdict"] in ("RUNNING", "STALLED") or bool(v.get("procs")))
     v["eta"] = step_eta(rows, v, now) if rows and v["verdict"] in ("RUNNING", "STALLED") else None
     hb = mtime(os.path.join(out, "HEARTBEAT"))
     v["hb_age"] = now - hb if hb else None
@@ -725,13 +854,20 @@ def collect(out, mem):
 
 
 def counts(rows):
-    c = {"cpu": 0, "train": 0, "done": 0, "failed": 0, "other": 0}
+    """cpu (starting), train, post (finishing: ended, rc not booked yet), done, failed, other (vanished)."""
+    c = {"cpu": 0, "train": 0, "post": 0, "done": 0, "failed": 0, "other": 0}
     for r in rows:
         if r.get("done"):
             c["done" if r.get("rc") == 0 else "failed"] += 1
         else:
-            c[{"cpu": "cpu", "train": "train"}.get(r.get("phase"), "other")] += 1
+            c[{"cpu": "cpu", "train": "train", "post": "post"}.get(r.get("phase"), "other")] += 1
     return c
+
+
+def ended_txt(c):
+    """', N done[, N finishing], N failed[, N vanished]', as the heartbeat and the frame say it."""
+    return (f", {c['done']} done" + (f", {c['post']} finishing" if c["post"] else "") + f", {c['failed']} failed"
+            + (f", {c['other']} vanished" if c["other"] else ""))
 
 
 def stage_short(v):
@@ -773,10 +909,7 @@ def line(v, now):
         n = f"{int(v['runs_total'])} run(s), PAR {int(v.get('par') or 0)}" \
             if v.get("phase") == "fleet" and v.get("runs_total") else f"{len(rows)} run(s)"
         wtxt = "" if not tw else (f" (w <101/{tgt})" if max(tw) == 0 else f" (w {min(tw)}-{max(tw)}/{tgt})")
-        seg = (f"{n}: {c['cpu']} on CPU, {c['train']} training" + wtxt
-               + f", {c['done']} done, {c['failed']} failed")
-        if c["other"]:
-            seg += f", {c['other']} vanished"
+        seg = f"{n}: {c['cpu']} on CPU, {c['train']} training" + wtxt + ended_txt(c)
         if v.get("phase") == "fleet" and v.get("runs_total"):
             q = max(0, int(v["runs_total"]) - len(rows))
             seg += f", {q} queued" if q else ""
@@ -790,9 +923,11 @@ def line(v, now):
     g = gpu()
     if g:
         parts.append("GPU " + g)
-    ld = load()
-    if ld is not None:
-        parts.append(f"load {ld:.1f}/{cores()[0]}")
+    cb, ld = v.get("cpu"), load()
+    if cb:
+        parts.append(f"CPU {cb[0]:.1f}/{cores()[0]} cores busy")
+    elif ld is not None:
+        parts.append(f"host load {ld:.1f}")
     if v.get("newest"):
         parts.append(f"newest run output {dur(now - v['newest'])} ago")
     if V != "RUNNING":
@@ -840,8 +975,8 @@ def frame(v, now, width=100):
     if hist:
         L.append(f"            {hist}")
     if v.get("startup_s"):
-        L.append(f"            each run first builds on the CPU for ~{v['startup_s']:.0f} s (measured in the smoke):"
-                 " the GPU reads idle then")
+        L.append(f"            each run first builds on the CPU for ~{v['startup_s']:.0f} s (measured in the smoke;"
+                 " longer when the CPU is shared): the GPU reads idle then")
     rows = v.get("rows") or []
     book = rd(os.path.join(out, "logs", "_done.txt"))
     if book and v.get("phase") != "fleet":       # the fleet's runs, once the fleet has run (done, stopped)
@@ -851,8 +986,7 @@ def frame(v, now, width=100):
                  + (f", {bad} FAILED" if bad else ", every one rc=0") + f" ({os.path.join(out, 'logs', '_done.txt')})")
     if rows:
         c = counts(rows)
-        seg = (f" runs       {len(rows)} in this step: {c['cpu']} starting on CPU, {c['train']} training, "
-               f"{c['done']} done, {c['failed']} failed" + (f", {c['other']} vanished" if c["other"] else ""))
+        seg = f" runs       {len(rows)} in this step: {c['cpu']} starting on CPU, {c['train']} training" + ended_txt(c)
         tgt = sum(r.get("target") or 0 for r in rows)
         if v.get("phase") == "fleet" and v.get("runs_total"):
             q = max(0, int(v["runs_total"]) - len(rows))
@@ -872,8 +1006,14 @@ def frame(v, now, width=100):
             L.append("            every run of this step is still building on the CPU (corpus, tokenizer, stream, "
                      "model): the GPU reads idle until they train")
     L.append(f" GPU        {gpu() or 'no nvidia-smi on this machine'}")
-    ld, (nc, how) = load(), cores()
-    L.append(f" CPU        load {ld if ld is not None else '?'} (1 min) on {nc} cores ({how})")
+    ld, (nc, how), cb = load(), cores(), v.get("cpu")
+    host = f"host load {ld:.1f} (all containers)" if ld is not None else ""
+    if cb:
+        span = f"{cb[1]:.1f} s" if cb[1] < 10 else dur(cb[1])
+        L.append(f" CPU        {cb[0]:.1f} of {nc} cores busy in this container ({how}, last {span})"
+                 + (f"; {host}" if host else ""))
+    else:
+        L.append(f" CPU        {nc} cores ({how}); this container's use not measured" + (f"; {host}" if host else ""))
     dk = disk(out)
     L.append(f" disk       {dk:,.1f} GB free at {out}" if dk is not None else " disk       ?")
     ages = []
@@ -912,8 +1052,14 @@ def frame(v, now, width=100):
     return "\n".join(L)
 
 
+ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
 def page(v, text):
+    """The --html / --serve page. ITS TEXT IS PLAIN (2026-09-27 review): a dashboard run in a terminal paints
+    its frame, and html.escape kept the colour codes, so a browser showed '[1;42;97m  #####  RUNNING'."""
     V = v["verdict"]
+    text = ANSI.sub("", text)
     bg = {"RUNNING": "#1b5e20", "STALLED": "#8d6e00", "FINISHED": "#0d47a1", "STOPPED": "#b71c1c",
           "DEAD": "#b71c1c", "NO FLEET": "#555555"}[V]
     return ("<!doctype html><html><head><meta charset='utf-8'>"
@@ -962,8 +1108,10 @@ if MODE == "line":
         hist = [h for h in load_hist(OUT) if now - h[0] <= RATE_SPAN * 2]
         s = v.get("sample")
         if s:
-            hist.append((s["t"], s["runs"], s["total"]))
-        print(json.dumps({"t": round(now, 3), "hist": [[round(t, 3), r, n] for t, r, n in hist[-HIST_MAX:]]},
+            hist.append((s["t"], s["runs"], s["total"], s["mt"]))
+        cb = v.get("cpu")
+        print(json.dumps({"t": round(now, 3), "hist": [[round(t, 3), r, n, m] for t, r, n, m in hist[-HIST_MAX:]],
+                          "cpu": [round(cb[2][0], 3), cb[2][1], cb[2][2]] if cb else None},
                          separators=(",", ":")))
     sys.exit(0)
 
@@ -980,7 +1128,9 @@ def tick():
     s = v.get("sample")
     if s:
         MEM["hist"] = [h for h in (MEM.get("hist") or load_hist(OUT)) if now - h[0] <= RATE_SPAN + 60]
-        MEM["hist"].append((s["t"], s["runs"], s["total"]))
+        MEM["hist"].append((s["t"], s["runs"], s["total"], s["mt"]))
+    if v.get("cpu"):
+        MEM["cpu"] = v["cpu"][2]
     text = frame(v, now)
     if HTML:
         b = write_page(OUT, v, text) or page(v, text)

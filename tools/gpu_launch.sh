@@ -9,6 +9,7 @@
 #
 #     EXP=retok bash tools/gpu_launch.sh          # the checks: PASS / WARN / FAIL, each FAIL with its fix
 #     EXP=retok bash tools/gpu_launch.sh --go     # the checks, then the launch, confirmed alive
+# (from the checkout; from anywhere else, by its path: EXP=retok bash /workspace/LLM-Test/tools/gpu_launch.sh)
 #
 # EXP IS REQUIRED here (gpu_world.sh's default, world, is the 2026-09-24 experiment, already decided).
 # Every other knob -- WINDOWS, SEEDS, EXTRA, PAR, MPS, OUT, KEEP_CKPT, RETOK_ARMS, DEVICE, ... -- is
@@ -20,18 +21,24 @@
 # PyPI's wheels up to 2.10 are CPU-only; on x86_64 a CUDA build below it is a WARN -- torch
 # 2.8.0+cu128 passed the 2026-09-27 smoke, its tripwires and five calibration steps on the H200);
 # nvidia-smi and whether something already uses the card; the MPS binary (a WARN: without it runs
-# time-slice) and an MPS daemon already running; OMP_NUM_THREADS (GNU nproc reports it instead of the
-# cores, and the fleet sizes its parallelism by nproc); the free disk against the kept checkpoints'
-# estimate (EXP=retok keeps k0's saves: about 2 x CKPT_MB, 125 MB measured, per file); the branch
-# and whether it is at origin's head, and a dirty tree; and a fleet already RUNNING in OUT -- a FAIL,
-# with the commands to watch or stop it -- or, at DEVICE=cuda, under another OUT on this machine.
-# DEVICE=cpu skips the GPU checks (a CPU fleet: an operation check only).
+# time-slice) and an MPS daemon already running; the cores the fleet will size itself by (the cgroup
+# quota where it is lower; OMP_NUM_THREADS, which GNU nproc reports instead of the cores, is ignored by
+# the fleet's sizing since the 2026-09-27 review: it was a WARN here that --go launched past, into a
+# fleet sized at one core); the free disk against the kept checkpoints' estimate (EXP=retok keeps k0's
+# saves: about 2 x CKPT_MB, 125 MB measured, per file); the branch and whether it is at origin's head,
+# and a dirty tree; a fleet already RUNNING in OUT -- a FAIL, with the commands to watch or stop it --
+# or processes of an ended one still running there (runs orphaned when it was killed: a FAIL, since
+# gpu_world.sh would refuse the launch; --stop clears them); and, at DEVICE=cuda, a fleet under another
+# OUT on this machine. DEVICE=cpu skips the GPU checks (a CPU fleet: an operation check only). Every
+# command it prints names the checkout by its absolute path, so it works from any terminal.
 #
 # --go LAUNCHES DETACHED: `setsid nohup bash gpu_world.sh >> LOG 2>&1 < /dev/null &` -- its own session,
 # so no terminal close or logout reaches it, HUP ignored, no stdin, and the log APPENDED to, never
 # truncated (LOG, default <EXP>_fleet.log in the checkout). It then watches for WAIT_S seconds (20):
 # a fleet that exits in that time is reported with its log's tail; one that runs is confirmed from
-# its $OUT/STATE (the same pid) and the commands to watch, look, stop and paste back are printed.
+# its $OUT/STATE (the same pid) and the commands to watch, look, stop and paste back are printed. A
+# launch still in its own checks after WAIT_S (copying its code, telling a dead fleet's MPS daemon to
+# quit: up to 30 s) gets up to 60 s more while its pid lives, before it is reported.
 # It refuses to launch while any check FAILs, and it never deletes anything. FETCH=0 skips the `git
 # fetch` behind the origin check (30 s at most without a network).
 set -u
@@ -58,6 +65,13 @@ case "$EXP_SET" in retok) _o=gpu_retok_out ;; world_epoch) _o=gpu_world_epoch_ou
 OUT=${OUT:-$_o}
 LOG=${LOG:-${EXP_SET:-fleet}_fleet.log}
 CMDENV="EXP=${EXP_SET:-<exp>} "; [[ "$OUT" != "$_o" ]] && CMDENV="${CMDENV}OUT=$OUT "
+# THE COMMANDS IT PRINTS WORK FROM ANY DIRECTORY (2026-09-27 review): a second terminal opens in
+# /workspace or /root, where `bash tools/fleet_dash.sh` is "No such file". gpu_world.sh cds to its
+# checkout, so the relative OUT in CMDENV still resolves there.
+GWC="${CMDENV}bash $(printf %q "$ROOT/gpu_world.sh")"
+DASHC="bash $(printf %q "$ROOT/tools/fleet_dash.sh")"
+OUT_ABS=$(realpath -m -- "$OUT")
+LOG_ABS=$(realpath -m -- "$LOG")
 
 echo "=== gpu_launch.sh $(date -u +%Y-%m-%dT%H:%M:%SZ) in $ROOT"
 echo "    EXP=${EXP_SET:-(unset)} WINDOWS=${WINDOWS:-(default)} SEEDS='${SEEDS:-(default)}' EXTRA='${EXTRA:-}'" \
@@ -69,7 +83,7 @@ case "$EXP_SET" in
   world_epoch) if [[ "${GO_WORLD_EPOCH:-0}" == 1 ]]; then pass "EXP=world_epoch (GO_WORLD_EPOCH=1)"
                else fail "EXP=world_epoch is sized, not run, until SR0 (gpu_world.sh refuses it)" "EXP=retok"; fi ;;
   "") fail "EXP is not set: say which fleet (gpu_world.sh's default, world, is the decided 2026-09-24 experiment)" \
-           "EXP=retok bash tools/gpu_launch.sh$([[ $GO == 1 ]] && echo ' --go')" ;;
+           "EXP=retok bash $(printf %q "$ROOT/tools/gpu_launch.sh")$([[ $GO == 1 ]] && echo ' --go')" ;;
   *) fail "EXP='$EXP_SET' is not an experiment gpu_world.sh runs (world, retok, world_epoch)" "EXP=retok" ;;
 esac
 
@@ -141,7 +155,7 @@ else
       pass "nvidia-smi: $(awk -F', *' '{printf "%s%s (%s MiB)", (NR>1?"; ":""), $2, $3}' <<< "$SMI")"
       BUSY=$(awk -F', *' '$4 > 1024 || $5 > 5 {printf "GPU %s: %s%% busy, %s MiB used; ", $1, $5, $4}' <<< "$SMI")
       [[ -n "$BUSY" ]] && warn "something already uses the card: ${BUSY%; }" \
-        "look before launching: nvidia-smi, and bash tools/fleet_dash.sh (a fleet already running?)"
+        "look before launching: nvidia-smi, and $DASHC (a fleet already running?)"
     fi
   fi
   if [[ "${MPS:-auto}" == 0 ]]; then
@@ -162,14 +176,21 @@ for d in sorted(os.listdir("/proc")):
     if d.isdigit() and os.path.basename(a[0].decode(errors="replace")) == "nvidia-cuda-mps-control" and b"-d" in a[1:]:
         print(d)' 2>/dev/null)
   [[ -n "$MPSD" ]] && warn "an MPS control daemon already runs (pid $(echo $MPSD)): a running fleet's, or one a killed fleet left" \
-    "if no fleet runs (bash tools/fleet_dash.sh), gpu_world.sh quits the one it left in OUT; any other: echo quit | CUDA_MPS_PIPE_DIRECTORY=<its pipe dir> nvidia-cuda-mps-control"
+    "if no fleet runs ($DASHC), gpu_world.sh quits the one it left in OUT; any other: echo quit | CUDA_MPS_PIPE_DIRECTORY=<its pipe dir> nvidia-cuda-mps-control"
 fi
-if [[ -n "${OMP_NUM_THREADS:-}${OMP_THREAD_LIMIT:-}" ]]; then
-  warn "OMP_NUM_THREADS/OMP_THREAD_LIMIT is set (${OMP_NUM_THREADS:-}${OMP_THREAD_LIMIT:+ / $OMP_THREAD_LIMIT}): GNU nproc reports it instead of the cores, and the fleet sizes its parallelism by nproc (it sets one thread per run itself)" \
-       "unset OMP_NUM_THREADS OMP_THREAD_LIMIT"
-else
-  pass "OMP_NUM_THREADS unset (nproc reports $(nproc) core(s); the cgroup quota, if lower, sizes the fleet)"
-fi
+# THE CORES THE FLEET SIZES ITSELF BY, as gpu_world.sh reads them: nproc with OMP_NUM_THREADS and
+# OMP_THREAD_LIMIT emptied (GNU nproc reports them instead of the cores), then the cgroup quota where it is
+# lower. An exported OMP_NUM_THREADS was a WARN here that --go launched past, into a fleet sized at one
+# core and PAR 1, and the fix it printed was refused by then (2026-09-27 review); the fleet now ignores it
+# for the sizing and gives every run OMP_NUM_THREADS=1 itself, so it is only said.
+NCORE=$(OMP_NUM_THREADS= OMP_THREAD_LIMIT= nproc)
+QUOTA=$(awk '$1 != "max" && $2 > 0 { q = int($1 / $2); print (q > 0 ? q : 1) }' /sys/fs/cgroup/cpu.max 2>/dev/null)
+[[ -n "$QUOTA" ]] || QUOTA=$(awk 'NR == FNR { q = $1; next } q > 0 && $1 > 0 { x = int(q / $1); print (x > 0 ? x : 1) }' \
+                               /sys/fs/cgroup/cpu/cpu.cfs_quota_us /sys/fs/cgroup/cpu/cpu.cfs_period_us 2>/dev/null)
+if [[ "$QUOTA" =~ ^[0-9]+$ && "$QUOTA" -lt "$NCORE" ]]; then SIZE="$QUOTA, the cgroup quota (nproc reports $NCORE)"
+else SIZE="$NCORE (nproc)"; fi
+pass "cores the fleet sizes its parallelism by: $SIZE$([[ -n "${OMP_NUM_THREADS:-}${OMP_THREAD_LIMIT:-}" ]] \
+  && echo "; OMP_NUM_THREADS/OMP_THREAD_LIMIT set here (${OMP_NUM_THREADS:-}${OMP_THREAD_LIMIT:+ / $OMP_THREAD_LIMIT}) are ignored for that, and every run gets OMP_NUM_THREADS=1")"
 
 # ------------------------------------------------------------------------------------------ the disk
 _p=$OUT; while [[ ! -d "$_p" ]]; do _p=$(dirname "$_p"); done
@@ -233,23 +254,34 @@ fi
 # ------------------------------------------------------------------------------------------ a fleet already running
 ST=$(bash gpu_world.sh --status 2>/dev/null)
 STV=$?
+# PROCESSES OF THE FLEET IN OUT THAT STILL RUN, AS gpu_world.sh's LAUNCH GATE FINDS THEM (runs and shells
+# carrying its GW_FLEET_OUT, or a launch from before the lock writing under OUT). An ended fleet's
+# orphaned runs PASSed here as "not running" and --go then launched into gpu_world.sh's refusal, "THE
+# FLEET EXITED within 1 s" (2026-09-27 review): it is a FAIL, with --stop as its fix.
+LEFT=$(bash tools/fleet_dash.sh --scan own "$OUT" 2>/dev/null | awk -F'\t' '$2 == "run" || $2 == "shell" { print $1 }')
 case "$STV" in
   0|5) fail "a fleet is RUNNING in $OUT ($(grep -m1 -o '#####  [A-Z ]*  #####' <<< "$ST" | tr -d '#' | xargs)): launching again would be refused" \
-            "watch it: bash tools/fleet_dash.sh $OUT | look: ${CMDENV}bash gpu_world.sh --status | stop it: ${CMDENV}bash gpu_world.sh --stop" ;;
-  2) pass "no fleet in $OUT yet" ;;
+            "watch it: $DASHC $(printf %q "$OUT_ABS") | look: $GWC --status | stop it: $GWC --stop" ;;
   *) V=$(grep -m1 -o '#####  [A-Z ]*  #####' <<< "$ST" | tr -d '#' | xargs)
-     pass "$OUT holds a ${V:-previous} fleet, not running: the launch moves it aside whole, as $OUT.<its launch stamp> (nothing is deleted)" ;;
+     if [[ -n "$LEFT" ]]; then
+       fail "$OUT holds a ${V:-previous} fleet that is not running, but $(wc -w <<< "$LEFT") of its process(es) still run (pid $(echo $LEFT)): runs orphaned when it was killed or interrupted, and gpu_world.sh refuses a launch while they run" \
+            "$GWC --stop   (it stops them; then launch again)"
+     elif [[ "$STV" == 2 ]]; then
+       pass "no fleet in $OUT yet"
+     else
+       pass "$OUT holds a ${V:-previous} fleet, not running: the launch moves it aside whole, as $OUT.<its launch stamp> (nothing is deleted)"
+     fi ;;
 esac
 if [[ "$DEVICE" != cpu && "${ALLOW_CONCURRENT:-0}" != 1 ]]; then
   OTHER=$(bash tools/fleet_dash.sh --scan card "$OUT" 2>/dev/null)
   [[ -n "$OTHER" ]] && fail "another fleet runs on this machine's GPU: $(cut -f3 <<< "$OTHER" | head -2 | tr '\n' ' ')" \
-    "wait for it or stop it (bash gpu_world.sh --stop with its EXP/OUT); ALLOW_CONCURRENT=1 runs both anyway"
+    "wait for it or stop it (bash $(printf %q "$ROOT/gpu_world.sh") --stop with its EXP/OUT); ALLOW_CONCURRENT=1 runs both anyway"
 fi
 command -v setsid > /dev/null 2>&1 || warn "setsid not found: the fleet stays in this terminal's session (nohup still ignores the hang-up)" "apt-get install util-linux"
 
 echo "=== $NP PASS, $NW WARN, $NF FAIL"
 if [[ "$GO" != 1 ]]; then
-  (( NF == 0 )) && echo "    ready: ${CMDENV}bash tools/gpu_launch.sh --go" || echo "    fix the FAILs, then run this again"
+  (( NF == 0 )) && echo "    ready: ${CMDENV}bash $(printf %q "$ROOT/tools/gpu_launch.sh") --go" || echo "    fix the FAILs, then run this again"
   exit $(( NF > 0 ))
 fi
 if (( NF > 0 )); then
@@ -285,22 +317,34 @@ for _i in $(seq 1 "$WAIT_S"); do
     exit 1
   fi
 done
+# A LAUNCH STILL IN ITS OWN CHECKS has written no STATE yet (its code copy; the quit it sends a dead
+# fleet's MPS daemon, up to 30 s): up to 60 s more, while its pid lives.
+if ! st_alive && kill -0 "$PID" 2>/dev/null; then
+  echo "    (no STATE yet after $WAIT_S s: the launch is still in its checks; waiting up to 60 s more)"
+  for _i in $(seq 1 60); do sleep 1; st_alive && break; kill -0 "$PID" 2>/dev/null || break; done
+fi
 if ! st_alive; then
-  echo "!! pid $PID runs, but no fresh $OUT/STATE names a live fleet after $WAIT_S s. The end of $LOG:"
+  if kill -0 "$PID" 2>/dev/null; then
+    echo "!! pid $PID runs, but no fresh $OUT/STATE names a live fleet after $(( $(date +%s) - T0 )) s. The end of $LOG:"
+  else
+    echo "!! THE FLEET EXITED within $(( $(date +%s) - T0 )) s. The end of $LOG:"
+  fi
   tail -n 15 "$LOG" | sed 's/^/    /'
   exit 1
 fi
 PID=$(st_pid)
 echo "=== RUNNING: pid $PID for $(( $(date +%s) - T0 )) s, confirmed by $OUT/STATE; phase $(sed -n 's/^phase=//p' "$OUT/STATE" | tail -1)"
 cat <<EOF
-    watch it (a second terminal):  bash tools/fleet_dash.sh $OUT
-    one look, any time:            ${CMDENV}bash gpu_world.sh --status
-    the log:                       tail -n 20 $LOG
-    stop it (it writes its block): ${CMDENV}bash gpu_world.sh --stop
-    when it has ended, paste back: cat $OUT/PASTE_BACK.txt
+    Each command below works from any terminal and any directory.
+    watch it (a second terminal):  $DASHC $(printf %q "$OUT_ABS")
+    one look, any time:            $GWC --status
+    the log:                       tail -n 20 $(printf %q "$LOG_ABS")
+    stop it (it writes its block): $GWC --stop
+    when it has ended, paste back: cat $(printf %q "$OUT_ABS/PASTE_BACK.txt")
     For its first minutes the card reads 0% for a stretch of every step: each smoke and calibration
-    run builds on the CPU (python and torch, corpus, tokenizer, stream, model) before it uses the GPU.
-    The log prints a heartbeat line every ${HB_EVERY:-30} s. Judge it by the dashboard or --status, never by
+    run builds on the CPU (python and torch, corpus, tokenizer, stream, model: 15-30 s, longer when the
+    CPU is shared; the smoke prints the figure measured here) before it uses the GPU. The log
+    prints a heartbeat line every ${HB_EVERY:-30} s. Judge it by the dashboard or --status, never by
     nvidia-smi or a quiet terminal, and do not launch it again or git pull while it runs.
 EOF
 exit 0
