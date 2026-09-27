@@ -1500,6 +1500,14 @@ esac
         return subprocess.Popen(list(argv), cwd=cwd, env=clean_env(**e), stdout=fh, stderr=subprocess.STDOUT,
                                 preexec_fn=dfl_group if group else dfl), fh
 
+    def txt(path):
+        """A file's text, '' where it is missing (a check reads a file a regressed fleet did not write)."""
+        try:
+            with open(path, errors="replace") as fh_:
+                return fh_.read()
+        except OSError:
+            return ""
+
     def lock_free(out):
         """Nothing holds the fleet's lock, <OUT>.lock (an orphaned run inherits it)."""
         import fcntl
@@ -1708,8 +1716,8 @@ esac
           "pipe -- SUMMARY's 'STOPPED by SIGHUP' line, the run booked rc=143, STATE rc=129, the block and the archive",
           ready and ended20t and f"STOPPED by SIGHUP" in S20t and f"(pid {pid20t})" in S20t
           and st_of(o20t).get("rc") == "129"
-          and "cal.s1001 rc=143" in open(os.path.join(o20t, "cal", "k1", "_done.txt")).read()
-          and "STOPPED BEFORE THE ANALYSIS: stopped by SIGHUP" in open(os.path.join(o20t, "PASTE_BACK.txt")).read()
+          and "cal.s1001 rc=143" in txt(os.path.join(o20t, "cal", "k1", "_done.txt"))
+          and "STOPPED BEFORE THE ANALYSIS: stopped by SIGHUP" in txt(os.path.join(o20t, "PASTE_BACK.txt"))
           and glob.glob(os.path.join(os.path.dirname(o20t), "gpu_retok_*.tgz")) and gone20t,
           f"ready {ready}; ended {ended20t}; gone {gone20t}; {st_of(o20t)}")
     # UNDER nohup A HANG-UP IS IGNORED -- bash cannot trap a signal ignored at entry -- and the fleet runs on.
@@ -1827,7 +1835,7 @@ for _ in range(100):
     os.kill(p20a.pid, signal.SIGTERM)
     rc20a = done(p20a, f20a)
     L20a = open(os.path.join(TMP, "f20ana.log")).read()
-    pb20a = open(os.path.join(o20a, "PASTE_BACK.txt")).read() if os.path.exists(os.path.join(o20a, "PASTE_BACK.txt")) else ""
+    pb20a = txt(os.path.join(o20a, "PASTE_BACK.txt"))
     check("F20 a TERM during the analysis waits the seconds it takes: rc 0, STATE end=finished naming the signal, the "
           "block and the archived block the analysis's own (its DECISION), and the log saying the signal came",
           inana and rc20a == 0 and st_of(o20a).get("end") == "finished"
@@ -1842,7 +1850,7 @@ for _ in range(100):
     p20f, f20f = fleet(o20f, os.path.join(TMP, "f20fail.log"), PAR=1, HB_EVERY=1, STUB_ANALYSIS_KILL="1",
                        STUB_STARTUP="0.2", STUB_WSLEEP="0.05", STUB_MAXW="12")
     rc20f = done(p20f, f20f)
-    pb20f = open(os.path.join(o20f, "PASTE_BACK.txt")).read() if os.path.exists(os.path.join(o20f, "PASTE_BACK.txt")) else ""
+    pb20f = txt(os.path.join(o20f, "PASTE_BACK.txt"))
     s20f = status(o20f)
     check("F20 an analysis killed ends the fleet STOPPED, not FINISHED: exit 1, STATE end=stopped naming the failed "
           "analysis, the block 'STOPPED AT THE ANALYSIS: the analysis failed (exit 137: killed by signal 9...' with "
@@ -1854,7 +1862,7 @@ for _ in range(100):
           and s20f[0] == 3 and "the analysis failed" in s20f[1],
           f"rc {rc20f}; {st_of(o20f)}; {pb20f[-300:]!r}")
     a20k = gw("--analyze", EXP="retok", OUT=o20f, PATH=env10["PATH"], STUB_ANALYSIS_KILL="1")
-    pb20k = open(os.path.join(o20f, "PASTE_BACK.txt")).read()
+    pb20k = txt(os.path.join(o20f, "PASTE_BACK.txt"))
     a20g = gw("--analyze", EXP="retok", OUT=o20f, PATH=env10["PATH"])
     check("F20 ... --analyze whose analysis dies says so and exits 1, leaving the block and the archive as they were; "
           "run again, it writes the analysis block",
