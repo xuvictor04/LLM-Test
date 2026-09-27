@@ -1692,7 +1692,9 @@ def state(valve):
     WIRES READ: none
     DID IT FIRE: valve.counters["cap.state_written"] (LINEAGE since 2026-09-27: it travels as the
                  payload's `state_written`, counting the save that writes it) and
-                 valve.counters["cap.state_written_here"] (THIS PROCESS's; never restored). THE
+                 valve.counters["cap.state_written_here"] (THIS PROCESS's; never restored, and
+                 ABSENT until this process's first save -- CAP.counters prints it only from then
+                 on, and the R report prints it 0 where saving is on and none has happened). THE
                  FIRST KEY IS NAMED BECAUSE THE RECORD HAS NO FIELD FOR IT: this line used to read
                  `valve.state_written`, which is neither a declared field of Valve nor produced
                  anywhere, so the one signal saying the checkpoint carried the valve's earned state
@@ -1924,9 +1926,6 @@ def counters(cap: Config, valve):
         # wrote or restored valve state, which is a different fact from having written it zero
         # times, and `.get(..., 0)` would hide the difference.
         "cap.state_written": int(led.get("cap.state_written", 0)),
-        # THE PROCESS TWIN OF THE LINEAGE COUNT ABOVE (2026-09-27, register
-        # LOW-RESUME-SAVED-COUNTERS): the pair reads (lineage, this process) after a resume.
-        "cap.state_written_here": int(led.get("cap.state_written_here", 0)),
         "cap.state_restored": int(led.get("cap.state_restored", 0)),
         "cap.state_refused": int(led.get("cap.state_refused", 0)),
         # THE BLOCK-REASON HISTOGRAM IS THE POINT OF THIS CALL. round11 pinned 42,425 against a
@@ -1937,4 +1936,12 @@ def counters(cap: Config, valve):
                               if k.startswith("cap.block.")},
         "cap.clamp": clamp,
     }
+    # THE PROCESS TWIN OF THE LINEAGE COUNT cap.state_written (2026-09-27, register
+    # LOW-RESUME-SAVED-COUNTERS): the pair reads (lineage, this process) after a resume. PRINTED
+    # ONLY ONCE THE LEDGER HOLDS IT, since build 1.6's review: `.get(..., 0)` printed 0 -- "armed,
+    # did not fire" -- on a run whose saving was off, where the other packages' twins read ABSENT.
+    # This call cannot tell whether saving is on (CKPT's answer); spine/loop.py::_report prints the
+    # twin 0 where it is and this process has not saved yet (_SAVE_COUNTS there).
+    if "cap.state_written_here" in led:
+        out["cap.state_written_here"] = int(led["cap.state_written_here"])
     return out

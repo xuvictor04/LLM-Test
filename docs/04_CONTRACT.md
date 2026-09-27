@@ -540,7 +540,8 @@ re-segmentation fired scored **4.364 against 2.175** held-out b/B.
 `_due`). **Where each crosses a checkpoint:** the merges and the measured `bytes_per_token` in the
 vocabulary FILE (`save_vocabulary`), which a resume replays and whose recorded `bytes_per_token` it
 **adopts** rather than re-measuring (Q-TOK-13), with the file's own ordinal, `vocab_saved`, which a
-replaying resume restores as `tok.vocab_saved` (Q-CKPT-4); `prov`, `retired`, `soft_cap`, `v0`, the tally and
+replaying resume restores as `tok.vocab_saved` (Q-CKPT-4), and since build 1.6's review a
+`TOK_MODE=bytes` resume too, reading that one key; `prov`, `retired`, `soft_cap`, `v0`, the tally and
 `tally_seen` (exactly, as parallel int arrays) and the counters in `payload['TOK']` (`vocab_state`),
 put back by `restore_vocab` after its merge-count refusal. The match-table revision `rev` is
 per-process and deliberately not carried. A save/load round trip **used to undo every retirement**
@@ -4958,7 +4959,10 @@ precedent:** both entry points **return before seeding** on that arm, as at `FAB
 manage and grow families are ABSENT; the build gates `fab.growth_armed`, `fab.cull_gate` and
 `fab.depth_advance` read UNREACHABLE naming `FAB_NORM_ONLY=1` (the default arm's lines are
 byte-identical); a resume re-renders none of them (`_refresh_build_predictions` returns on that
-arm); and `fab.births` / `fab.rescued` are ABSENT by clause (3)'s rule. The experts stay in the
+arm); and `fab.births` / `fab.rescued` are ABSENT by clause (3)'s rule. That departs from the
+register row's wording, which gives the known answer as `fab.births` 0 (stated 2026-09-27, build
+1.6's review): the answer is met as `Population.births` == 0, which W7 asserts on the record, while
+the counter is ABSENT because growth cannot happen on this arm. The experts stay in the
 optimizer and the checkpoint — the arm's point is unchanged, and `FAB.own_lr_scale`, which the ruling
 does not name, is left as it was. **After**, on the same configuration: 256 live, no birth, the
 family ABSENT, and the loss curve **identical** to the unfixed tree's for all 100 windows (the
@@ -5021,22 +5025,25 @@ FAB_SLOTS=512`) read **k − 1 + j = 4** on
 `store.n_state_dicts`, `tok.state_written` and `tok.vocab_saved` (each copied its ledger into the
 payload before counting the save), **k + j = 5** on `opt.ckpt.saved` (bumped first), and **j = 2** on
 `part.n_state_dicts` and `cap.state_written` (their ledgers do not travel). **Ruling:** each package's
-save counter is **lineage-cumulative and counts the save that writes it** — bumped before the ledger
+save counter is **lineage-cumulative and counts the save that writes it** (and, OWED, a save CKPT
+refuses as non-finite: the correction below) — bumped before the ledger
 is copied, as `opt.ckpt.saved` always was — and beside it sits a **process-local twin**, the same
 name with `_here`, which no restore touches: `lm.ckpt.saved`, `opt.ckpt.saved`, `sig.state_written`,
 `fab.state_written`, `world.state_written`, `store.n_state_dicts`, `part.n_state_dicts`,
 `cap.state_written`, `tok.state_written`, `tok.vocab_saved` and `data.state_written`, each with its
-`_here`. The names are the packages' own (renaming to `*.ckpt.saved` would drop report names a
-fixture reads); the register's `*` names the role. **DOM's and CAP's ledgers still do not travel** —
-each is the record of what this open or this build resolved — so each payload carries this one count
-(`payload['DOM']['n_state_dicts']`, `payload['CAP']['state_written']`), put back by
+`_here` (ABSENT before its process saves, and 0 or ABSENT in the report by whether saving is on:
+the correction below). The names are the packages' own (renaming to `*.ckpt.saved` would drop
+report names a fixture reads); the register's `*` names the role. **DOM's and CAP's ledgers still
+do not travel** — each is the record of what this open or this build resolved — so each payload
+carries this one count (`payload['DOM']['n_state_dicts']`, `payload['CAP']['state_written']`), put back by
 `DOM.open_partition` and `CAP.restore`. **TOK's vocabulary file is written after its blob**
 (`spine/loop.py::_save`), so a blob's `tok.vocab_saved` is always one file short; the file is the
 record that knows itself, so `TOK.save_vocabulary` writes its **ordinal in the lineage** into the
 file (key `vocab_saved`), `build_vocabulary`'s replay puts it on the ledger, and `TOK.restore_vocab`
 keeps it over the blob's count — so a blob from the lineage's first save, which carries no count at
 all, restores 1. A file older than the key, or a resume at `TOK_MODE=bytes` (which reads no file),
-leaves the blob's count standing, one short. The file gains one key and older trees ignore it.
+leaves the blob's count standing, one short (the `TOK_MODE=bytes` half is repaired in the correction
+below). The file gains one key and older trees ignore it.
 **The R stage precedes the final save**, so a report shows (k + j, j) with j the saves before R,
 and the final blob holds exactly one more than the report on these keys — `tok.vocab_saved`
 excepted, for the reason above. That is a deliberate exception to
@@ -5052,6 +5059,63 @@ Three neighbours that are **not** this pair: `opt.encoder_steps_here` is an olde
 test clears it for each System that stands for its own process; and CKPT's own per-route record and
 the loop's `CKPT.save: N checkpoint(s) written by this process` line count this process. Known answer:
 `tests/test_continuation.py` S10. In §2, DATA's and TOK's counter lists name the twins.
+**CORRECTED 2026-09-27 (build 1.6's review) — one rule for the twin, `TOK_MODE=bytes` at k + j, and a
+refused save still counted (OWED).** (i) *The twins disagreed about what ABSENT means.* No package can
+tell whether saving is on. That is `CKPT.saving_on`'s answer, recorded once as `System.saving`, and
+TOK's `d_vocab_save_path` cannot tell either (it reads `off.dyntok.json` at `CKPT_DIR=off`). Two
+packages guessed. OPT seeded `opt.ckpt.saved_here` 0 at build and `CAP.counters` printed
+`cap.state_written_here` 0 for a missing key, while the other eight printed ABSENT until their first
+save. So the register's (k + j, j) failed at j = 0, which is the case at the shipped `CKPT_EVERY=0`,
+whose one save follows R. Driven at be2382a (the review's scratch `stage1/review/saved_j0.py`): a child
+resumed from a 30-window `CKPT_EVERY=0` parent (k = 1), with `CKPT_DIR` set, read `(1, ABSENT)` on eight
+rows after 10 windows and `(1, 0)` on OPT and CAP. With `CKPT_DIR=''` OPT and CAP read 0 ("armed, did
+not fire") beside eight ABSENT, and S10's grandchild check asserted that split as correct. A saving-off
+run's final save also built the payload after the report, although CKPT refuses at saving off before it
+reads one. So every package's ledger ended the run one save up with nothing written (driven: after a
+fresh 10-window `CKPT_DIR=''` run, 1 and 1 on every package's pair). **Ruling:** no package seeds either
+key. OPT's build seed is removed, and `CAP.counters` prints the twin only once the ledger holds it.
+`spine/loop.py::_save` builds the payload only where `System.saving` is True; `CKPT.save` is still
+called and still counts `refused_off`. `spine/loop.py::_report` renders the armed state over one table,
+`_SAVE_COUNTS` (the ten rows). With saving on, each row's lineage count and twin read 0 when nothing is
+counted yet. With saving off nothing is added, and every twin is ABSENT. The root renders it because
+only the root holds both facts: it records `saving_on`, and it is the only caller of the state_dicts.
+That is the shape of `part.n_retok_events`, which the root seeds, and of TOK's rotation rows, which it
+re-reads (Q-TOK-13's 1.1 correction). A `CKPT.dir` wire was not taken: it needs one wire per receiving
+package, eight or nine, and the budget has six left (19 of 25 spent). Nor was a build or restore
+argument taken: that is a frozen-signature move in eight packages for a report twin. **The twin,
+stated:** on a ledger, `<key>_here` is ABSENT until its process's first save and never crosses a resume.
+In the R report it is 0 where saving is on and no save preceded R, and ABSENT where saving is off.
+**Residue, stated:** at saving off the lineage keys stay each package's own. `opt.ckpt.saved` and
+`cap.state_written` print 0 (`tests/_baseline_fixture.json` pins both at the default), and the other
+eight print ABSENT on a fresh run. A restored lineage count prints on every package. **After**, same
+scratch: the j = 0 child reads `(1, 0)` on all ten rows, a child resumed from a 3-save parent's
+`ckpt.pt.prev` at j = 0 reads `(2, 0)`, and a fresh saving run at `CKPT_EVERY=0` reads `(0, 0)`. A
+`CKPT_DIR=''` resume reads `(1, ABSENT)` and ends with every ledger's lineage count as restored, and a
+fresh `CKPT_DIR=''` run has no twin on any row or ledger. (ii) *`TOK_MODE=bytes` read `tok.vocab_saved`
+one short, and this entry did not mark it owed.* That arm replays nothing, so it never opened the
+parent's file, and the blob's count stood: parent k = 2 and child j = 1 at `TOK_MODE=bytes
+CKPT_EVERY=20` (`saved_j0.py bytes`) read (3, 1) on nine rows and (2, 1) on `tok.vocab_saved`.
+**Repair:** `build_vocabulary`'s bytes arm reads the one key `vocab_saved` from `d_vocab_read_path` when
+the file exists (`tok/api.py::_file_ordinal`; nothing is replayed), and `restore_vocab` keeps any count
+on the ledger before its restore, which at compose only that read or the replay arm can have put there.
+After: (3, 1) on all ten. A missing file, which this arm never needed and still does not refuse without,
+or a file older than the key, leaves the blob's count one short, as on the replay arm. (iii) *A refused
+save is counted — OWED.* Each state_dict counts before CKPT scans the payload, so a save `CKPT.save`
+refuses as non-finite writes nothing and is still counted on every package's lineage count and twin.
+Driven (the review's scratch `stage1/review/saved_refused.py`): with a NaN in `fabric.A`,
+`loop._save(..., 'periodic')` returned False with no file, and every package read 1 and 1. (i) repairs
+the saving-off half. The non-finite half is not repaired: taking the count back needs each package told
+after the write (a new entry point in each) or the root rewriting ten ledgers, one of them LM's
+module-private tally. So "counts the save that writes it", above, reads **counts every payload built for
+a save: each written save, and each save refused as non-finite (OWED)**. The twin then reads one more
+than the loop's `CKPT.save: N checkpoint(s) written by this process` line for each refusal, and the loop
+warns each one. "Exactly one more than the report" holds for the final blob when no earlier save was
+refused. `tok.vocab_saved` is not affected, because the root writes the file only after CKPT wrote. (iv)
+S10 now also drives j = 0 (the grandchild at `CKPT_EVERY=0`, and a fresh saving run), saving off (a
+resume and a fresh run) and `TOK_MODE=bytes`. Its grandchild check asserts that no twin is on any
+ledger, and it pins (iii) as it stands. No lever, wire, signature, entry point or LOOP_ORDER row moved.
+At the default (saving off) the report prints the same counters, less the two twins be2382a listed as
+new.
 
 ### Q-OPT-8 — a MAY_WIDEN resume dropped every AdamW moment — **RESOLVED 2026-09-24: A DIM-0 WIDENING IS RESTORED WITH ZERO-PADDED MOMENTS; EVERY OTHER SHAPE CHANGE IS STILL REFUSED**
 The geometry gate admits `fab.slots`, `fab.cap` and `lm.vocab_slots` widening, `LM.load_state` and

@@ -2009,7 +2009,9 @@ def state_dict(dom: Config, part):
     LEVERS READ: levels (the unit stamped as `comp_unit`; otherwise a pure read of `part`)
     WIRES READ: none
     DID IT FIRE: part.n_state_dicts (LINEAGE: it travels as the payload's `n_state_dicts` and
-                 counts the save that writes it), part.n_state_dicts_here (THIS PROCESS's)
+                 counts the save that writes it), part.n_state_dicts_here (THIS PROCESS's;
+                 ABSENT until this process saves -- the R report prints it 0 where saving is on,
+                 spine/loop.py::_SAVE_COUNTS)
     """
     dom = dom.owned_by("DOM")
     # BUMPED FIRST, SO THE BLOB COUNTS ITSELF (2026-09-27, register LOW-RESUME-SAVED-COUNTERS; see

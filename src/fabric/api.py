@@ -5063,7 +5063,8 @@ def counters(fab: Config, pop):
     # fab.births 0 and fab.rescued 0 -- G4's "armed, did not fire" -- beside gate fab.growth_armed
     # UNREACHABLE and manage returning before it seeds. On the off arm they are left out, and on
     # the FAB_NORM_ONLY=1 arm too (2026-09-27), where grow_check and manage return at the same
-    # place.
+    # place. The register row LOW-FAB_NORM_ONLY-GROWS words its known answer as "fab.births 0"; on
+    # that arm it is met as Population.births == 0 with this key ABSENT, as Q-FAB-11's note states.
     if pop.on and not bool(fab.norm_only):
         out["fab.births"] = int(pop.births)
         out["fab.rescued"] = int(pop.rescued)
@@ -5184,7 +5185,9 @@ def state_dict(fab: Config, pop):
     LEVERS READ: none
     WIRES READ: none
     DID IT FIRE: fab.state_written (LINEAGE, and it counts the save that writes it),
-                 fab.state_written_here (THIS PROCESS's; load_state_dict never restores it)
+                 fab.state_written_here (THIS PROCESS's; load_state_dict never restores it;
+                 ABSENT until this process saves -- the R report prints it 0 where saving is on,
+                 spine/loop.py::_SAVE_COUNTS)
     """
     fab = fab.owned_by("FAB")
     # BUMPED BEFORE THE LEDGER IS COPIED, SO A BLOB COUNTS ITSELF, with a process twin the restore

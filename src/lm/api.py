@@ -1353,7 +1353,8 @@ def state_dict(lm: Config, model, geom):
     WIRES READ: none
     DID IT FIRE: lm.ckpt.saved (LINEAGE: it crosses a resume with the rest of the tally and counts
                  the save that writes it), lm.ckpt.saved_here (THIS PROCESS's saves; load_state
-                 never restores it)
+                 never restores it; ABSENT until this process saves -- the R report prints it 0
+                 where saving is on, spine/loop.py::_SAVE_COUNTS)
     """
     lm = lm.owned_by("LM")
     # BUMPED BEFORE THE TALLY IS COPIED, SO A BLOB COUNTS ITSELF (2026-09-27, register
@@ -1361,6 +1362,10 @@ def state_dict(lm: Config, model, geom):
     # than the lineage had made, and a child resumed from it reported k-1+j beside OPT's k+j
     # (opt.ckpt.saved always bumped first). The `_here` twin is this process's alone: load_state
     # skips it, so the pair reads (lineage, process) and a resume cannot confuse the two.
+    # WHAT IT COUNTS IS THIS CALL, WHICH THE ROOT MAKES ONLY TO SAVE (build 1.6's review): with
+    # saving off spine/loop.py::_save no longer builds a payload, but a payload CKPT.save then
+    # refuses as non-finite was counted here first and is not taken back -- OWED,
+    # docs/04_CONTRACT.md Q-CKPT-4.
     _bump("lm.ckpt.saved")
     _bump("lm.ckpt.saved_here")
     out = {

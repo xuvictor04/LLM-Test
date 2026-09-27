@@ -502,6 +502,10 @@ def _save(sysm, clock, reason, suffix=""):
     non-finite payload) returns before CKPT touches a file, so the two rotations happen in the same
     save or not at all. Calling save_vocabulary first, as the C rows list it, would rotate the
     vocabulary for a checkpoint CKPT then refuses.
+
+    AND THE PAYLOAD IS NOT BUILT WITH SAVING OFF (2026-09-27, build 1.6's review): each package's
+    state_dict counts the save it is called for, so building a payload CKPT will refuse as off
+    counted a save no file holds. See the body.
     """
     # THE RECORDED MANIFEST IS THE LIVE ONE PLUS WORLD'S GROWN COUNT, AND THE OVERLAY WAS MISSING.
     # compose.py's C row for WORLD.geometry: "IT IS THE OVERLAY, NOT THE RECORD ... the one thing
@@ -552,8 +556,18 @@ def _save(sysm, clock, reason, suffix=""):
     # CKPT.Retention.state names the consequence in advance. CKPT.save gained a DEFAULTED
     # `best_state` keyword for it, with a counter pair, because a defaulted argument is invisible
     # to K10.
+    # THE PAYLOAD IS BUILT ONLY WHERE SAVING IS ON (2026-09-27, build 1.6's review). Building it
+    # runs every package's state_dict, and each of those counts a save -- its lineage count and its
+    # `_here` twin -- before CKPT is asked. At saving off CKPT.save refuses before it reads the
+    # payload (saving_on is its first test), so every package ended a saving-off run holding one
+    # save that never happened, bumped after the report had printed the key ABSENT. System.saving is
+    # the predicate the `persist` row records for every save site; CKPT.save is still called and
+    # still asks saving_on itself, so refused_off counts exactly as before. A NON-FINITE REFUSAL IS
+    # NOT COVERED: CKPT can scan only a payload that exists, so a save refused that way stays
+    # counted by every package (OWED, docs/04_CONTRACT.md Q-CKPT-4).
+    _built = _payload(sysm) if getattr(sysm, "saving", True) else {}
     try:
-        wrote = ckpt_api.save(sysm.configs["CKPT"], payload=_payload(sysm),
+        wrote = ckpt_api.save(sysm.configs["CKPT"], payload=_built,
                               geometry=recorded, step=int(clock.step),
                               epoch=int(clock.epoch), reason=reason,
                               best_state=(None if sysm.retention is None
@@ -1705,6 +1719,9 @@ def run(sysm, *, max_windows=None, progress=True):
     # follows it, and a blob that did not count itself would restore one save short. tok.vocab_saved
     # is not among them: it counts vocabulary FILES, which _save writes after the blob, so each
     # file records its own ordinal and tok/api.py::restore_vocab takes it from the file it replays.
+    # "COUNTS THE SAVE THAT WRITES IT" HAS ONE EXCEPTION, OWED (2026-09-27, build 1.6's review): a
+    # save CKPT.save refuses for a non-finite payload was counted as the payload was built, before
+    # the scan, and nothing takes it back -- see _save and Q-CKPT-4. Each one is warned below.
     # ONE elapsed_s FOR BOTH, MEASURED HERE. RUN.bench_summary's throughput and RunResult.elapsed_s
     # were read at two different instants with a 130MB torch.save between them, so the run length
     # the report quoted and the one the throughput was computed from disagreed by the cost of the
@@ -1797,7 +1814,9 @@ def run(sysm, *, max_windows=None, progress=True):
     # THE SAVE LINE COUNTS THIS PROCESS (2026-09-27, register LOW-RESUME-SAVED-COUNTERS): on a
     # resume "this run" read as the lineage, which is what each package's save count now carries.
     # Their `_here` twins are this process's too, but the report took them BEFORE the final save
-    # below, so they read one fewer than this line whenever that save was written.
+    # below, so they read one fewer than this line whenever that save was written -- and one more
+    # for each earlier save CKPT refused as non-finite, which this line does not count and the
+    # twins do (OWED, see _save).
     return RunResult(
         windows=int(c["step"]), windows_here=int(c["step"]) - start_step,
         opt_steps=int(c["opt_steps"]), flushes=int(c["flushes"]),
@@ -1831,6 +1850,24 @@ _R_MISSING = (
     "EVAL.*: the whole package is deferred; its holdout probe has no logits_fn that spans "
     "FAB.forward, which is the same missing join that deferred FAB.contribution.",
 )
+
+# THE TEN SAVE COUNTS AND THE R ROWS THAT PRINT THEM (2026-09-27, build 1.6's review; Q-CKPT-4).
+# Each package's state_dict counts the save it is called for -- the lineage count and its `_here`
+# twin -- and no package can tell whether saving is on: that is CKPT.saving_on's answer, recorded
+# once as System.saving, and the root is the only caller of the state_dicts. Two packages guessed.
+# OPT seeded its twin 0 at build and CAP.counters printed 0 for a missing one, while the other eight
+# printed ABSENT, so one report read "armed, did not fire" and "unreachable" for the same fact, and
+# a resumed child at the default CKPT_EVERY=0 (whose only save follows R) failed the register's
+# (k + j, j) at j = 0. Now no package seeds either key, and _report renders the armed state from
+# System.saving: PRESENT-and-0 on every row when saving is on and nothing has been counted, ABSENT
+# when it is off. DATA's pair (data.state_written and its twin) has no R row and is read in the blob.
+_SAVE_COUNTS = (("LM.counters", "lm.ckpt.saved"), ("OPT.counters", "opt.ckpt.saved"),
+                ("SIG.counters", "sig.state_written"), ("FAB.counters", "fab.state_written"),
+                ("WORLD(w.counters)", "world.state_written"),
+                ("MEM(store.counters)", "store.n_state_dicts"),
+                ("DOM(part.counters)", "part.n_state_dicts"), ("CAP.counters", "cap.state_written"),
+                ("TOK(vocab.counters)", "tok.state_written"),
+                ("TOK(vocab.counters)", "tok.vocab_saved"))
 
 
 def _report(sysm, elapsed_s, ctx):
@@ -1996,6 +2033,17 @@ def _report(sysm, elapsed_s, ctx):
             "consumed_by": "nothing in training: the histogram is read only by this R-stage row; "
                            "its blend into a prediction belongs to the deferred eval battery",
         }
+    # THE SAVE COUNTS' ARMED STATE, RENDERED BY THE ROOT BECAUSE ONLY THE ROOT KNOWS IT (2026-09-27,
+    # build 1.6's review; see _SAVE_COUNTS). setdefault, so a count this process or its lineage
+    # already holds prints as it stands. With saving off nothing is added: every `_here` twin is
+    # ABSENT (no package seeds one, and _save builds no payload), while a lineage count restored
+    # from a parent still prints, and OPT's and CAP's lineage keys keep the 0 their packages print.
+    if bool(getattr(sysm, "saving", False)):
+        for _row, _key in _SAVE_COUNTS:
+            _r = out.get(_row)
+            if isinstance(_r, dict):
+                _r.setdefault(_key, 0)
+                _r.setdefault(_key + "_here", 0)
     if sysm.retention is not None:
         out["CKPT.Retention.counters"] = sysm.retention.counters()
     # THE CLOCK'S OWN BOOK, WHICH _CALLS HAS LONG LISTED AS AN R CALL AND NOTHING RENDERED UNTIL

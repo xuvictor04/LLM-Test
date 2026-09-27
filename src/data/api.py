@@ -1646,7 +1646,9 @@ def stream_state(dat: Config, areas):
     LEVERS READ: none (accounting only)
     WIRES READ: none
     DID IT FIRE: data.state_written (LINEAGE, and it counts the save that writes it),
-                 data.state_written_here (THIS PROCESS's; restore_stream_state never restores it)
+                 data.state_written_here (THIS PROCESS's; restore_stream_state never restores it;
+                 ABSENT until this process saves, and read in the blob: no R row prints DATA's
+                 counters)
     """
     dat = dat.owned_by("DATA")
     # BUMPED BEFORE THE COUNTERS ARE COPIED, SO A BLOB COUNTS ITSELF, with a process twin the

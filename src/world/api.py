@@ -971,7 +971,9 @@ def state_dict(world: Config, w):
     LEVERS READ: none
     WIRES READ: none
     DID IT FIRE: world.state_written (LINEAGE, and it counts the save that writes it),
-                 world.state_written_here (THIS PROCESS's; load_into never restores it)
+                 world.state_written_here (THIS PROCESS's; load_into never restores it; ABSENT
+                 until this process saves -- the R report prints it 0 where saving is on,
+                 spine/loop.py::_SAVE_COUNTS)
     """
     world = world.owned_by("WORLD")
     # BUMPED BEFORE THE COUNTERS ARE COPIED, SO A BLOB COUNTS ITSELF, with a process twin the

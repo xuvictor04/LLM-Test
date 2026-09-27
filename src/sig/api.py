@@ -1616,7 +1616,9 @@ def state_dict(sig: Config, st):
     LEVERS READ: none
     WIRES READ: none
     DID IT FIRE: sig.state_written (LINEAGE, and it counts the save that writes it),
-                 sig.state_written_here (THIS PROCESS's; load_state_dict never restores it)
+                 sig.state_written_here (THIS PROCESS's; load_state_dict never restores it;
+                 ABSENT until this process saves -- the R report prints it 0 where saving is on,
+                 spine/loop.py::_SAVE_COUNTS)
     """
     sig = sig.owned_by("SIG")
     # BUMPED BEFORE THE COUNTERS ARE COPIED, SO A BLOB COUNTS ITSELF, with a process twin the

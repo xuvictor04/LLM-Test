@@ -59,6 +59,11 @@ parent's exact stream and continue. Each check below pins one promise of that pa
       k + j and j across packages -- the child's final blob holds k + j + 1 (a blob counts itself),
       and a resume from that blob restores k + j + 1, tok.vocab_saved included; a resume from a
       lineage's first save, whose blob predates every vocabulary file, restores tok.vocab_saved 1.
+      AND ONE RULE FOR THE TWIN (build 1.6's review): no ledger carries one before its process
+      saves; the report prints (k + j, 0) at j = 0 with saving on (a grandchild at CKPT_EVERY=0, and
+      (0, 0) on a fresh saving run) and the twin ABSENT with saving off, where the run's final save
+      no longer builds a payload and so counts nothing; TOK_MODE=bytes reads (k + j, j) on
+      tok.vocab_saved too. A save CKPT refuses as non-finite is still counted (OWED, pinned).
   S11 PERIODIC SAVES CHANGE NO NUMBER AND LAND ON THE ACT WINDOWS (Proposal 05 §8 1.5, register note
       retok fleet (1)): S4's two runs rebuilt with CKPT_EVERY at the act cadence reproduce their
       no-save loss curves exactly, act at the same windows, and leave the periodic save at the last
@@ -704,6 +709,10 @@ finally:
 # which stands for its own process. No R-stage row prints DATA's counters, so DATA is read in the
 # blob, which counts itself and so holds one more than the report on every one of these keys but
 # tok.vocab_saved, whose file is written after the blob.
+# THE TWIN'S RULE, AFTER BUILD 1.6's REVIEW: a package writes its `_here` twin at its process's
+# first save and seeds none, and the R report prints it 0 where saving is on
+# (spine/loop.py::_SAVE_COUNTS, from System.saving) and ABSENT where it is off. The review drove the
+# split this replaced at j = 0 (the shipped CKPT_EVERY=0) and at saving off; both are checked below.
 from lm import api as lm_api                                       # noqa: E402
 
 TMP10 = tempfile.mkdtemp(prefix="s10_saved_")
@@ -723,6 +732,27 @@ def _pairs(res):
     return out
 
 
+# THE TEN PACKAGES' LEDGERS, READ OFF THE SYSTEM (LM's is the process-global tally), with DATA's,
+# which no R row prints. The twin names are the ten above plus DATA's.
+_TWIN_KEYS = frozenset([key + "_here" for _, key in _S10] + ["data.state_written_here"])
+
+
+def _ledgers(s):
+    return {"lm": lm_api._COUNTS, "opt": s.optimizer.counters, "sig": s.sig.counters,
+            "fab": s.fabric.counters, "world": s.world.counters, "mem": s.store.counters,
+            "dom": s.partition.counters, "cap": s.valve.counters, "tok": s.vocab.counters,
+            "data": s.areas.counters}
+
+
+def _twins_on_ledgers(s):
+    return sorted(kk for d in _ledgers(s).values() for kk in d if kk in _TWIN_KEYS)
+
+
+def _lineage_on_ledgers(s):
+    lin = {key for _, key in _S10} | {"data.state_written"}
+    return {kk: v for d in _ledgers(s).values() for kk, v in d.items() if kk in lin}
+
+
 try:
     lm_api._COUNTS.clear()
     p10 = build(CKPT_DIR=TMP10 + "/p", CKPT_EVERY=20)
@@ -735,8 +765,9 @@ try:
     pp, pc = _pairs(rp10), _pairs(rc10)
     bad_p = {kk: v for kk, v in pp.items() if v != (k - 1, k - 1)}
     bad_c = {kk: v for kk, v in pc.items() if v != (k + j, j)}
-    check(f"S10 setup: the parent saved k >= 2 times and the child j >= 1 times before its report",
-          k >= 2 and j >= 1, f"k {k}, j {j}")
+    check(f"S10 setup: the parent saved k >= 2 times and the child j >= 1 times before its report, "
+          f"and the ten rows here are the ten spine/loop.py::_SAVE_COUNTS renders",
+          k >= 2 and j >= 1 and tuple(_S10) == tuple(loop._SAVE_COUNTS), f"k {k}, j {j}")
     check("S10 a fresh parent's report reads (k - 1, k - 1) on every package: lineage == process, "
           "the final save following the report", not bad_p, f"k {k}; off: {bad_p}")
     check("S10 THE KNOWN ANSWER: the child reports (k + j, j) on every package -- the lineage "
@@ -762,8 +793,11 @@ try:
           f"want {k + j + 1}: {held}; data _here {dc.get('data.state_written_here')}; tok.vocab_saved "
           f"{blob['TOK']['counters'].get('tok.vocab_saved')}")
     # AND A GRANDCHILD READ FROM THAT BLOB RESTORES k + j + 1 -- tok.vocab_saved included, because
-    # the vocabulary file it replays records its own ordinal -- with every process twin absent until
-    # it saves (seeded 0 on OPT, and CAP's report reads 0).
+    # the vocabulary file it replays records its own ordinal -- with no process twin on any of the
+    # ten ledgers: none crosses a resume, and since build 1.6's review no package seeds one either.
+    # OPT's build seeded its twin 0 and CAP.counters printed 0 for a missing one, while the other
+    # eight read ABSENT, and this check asserted that split as correct. Whether saving is armed is
+    # the root's to say (System.saving), so it is the R report that prints it: see j = 0 below.
     lm_api._COUNTS.clear()
     g10 = build(CKPT_RESUME=TMP10 + "/c", CKPT_DIR=TMP10 + "/g", CKPT_EVERY=0)
     gl = {"lm.ckpt.saved": lm_api._COUNTS.get("lm.ckpt.saved"),
@@ -772,19 +806,62 @@ try:
           "part.n_state_dicts": g10.partition.counters.get("part.n_state_dicts"),
           "cap.state_written": g10.valve.counters.get("cap.state_written"),
           "tok.vocab_saved": g10.vocab.counters.get("tok.vocab_saved")}
-    twins = {"lm": lm_api._COUNTS.get("lm.ckpt.saved_here", "ABSENT"),
-             "opt": g10.optimizer.counters.get("opt.ckpt.saved_here"),
-             "fab": g10.fabric.counters.get("fab.state_written_here", "ABSENT"),
-             "tok": g10.vocab.counters.get("tok.vocab_saved_here", "ABSENT")}
+    twins = _twins_on_ledgers(g10)
     check("S10 a resume from the child's blob restores k + j + 1 on every save count, "
-          "tok.vocab_saved included, and no process twin crosses",
-          all(v == k + j + 1 for v in gl.values())
-          and twins == {"lm": "ABSENT", "opt": 0, "fab": "ABSENT", "tok": "ABSENT"},
-          f"want {k + j + 1}: {gl}; twins {twins}")
-    # THE LINEAGE'S FIRST SAVE: its blob was written before any vocabulary file, so it carries no
-    # tok.vocab_saved at all, and the file the resume replays records ordinal 1.
+          "tok.vocab_saved included, and no process twin is on any package's ledger (none crosses, "
+          "none is seeded)",
+          all(v == k + j + 1 for v in gl.values()) and not twins,
+          f"want {k + j + 1}: {gl}; twins on the ledgers {twins}")
+    # THE REGISTER'S ANSWER AT j = 0 (build 1.6's review), the shipped CKPT_EVERY=0's case: the
+    # grandchild's one save is the final one, after R, so its report must read (k + j + 1, 0) on
+    # every package -- saving armed, nothing saved yet. Unfixed, eight rows printed the twin ABSENT
+    # and OPT and CAP printed 0.
+    rg10 = loop.run(g10, max_windows=5, progress=False)
+    bad_g = {kk: v for kk, v in _pairs(rg10).items() if v != (k + j + 1, 0)}
+    check("S10 j = 0: a grandchild at CKPT_EVERY=0 with CKPT_DIR set reports (k + j + 1, 0) on "
+          "every package -- saving armed, no save before its report -- and saves once, after it",
+          not bad_g and _saves(rg10) == 1,
+          f"want ({k + j + 1}, 0); off: {bad_g}; saves {_saves(rg10)}")
+    # AND SAVING OFF, ON THE SAME BLOB: CKPT_DIR='' reports (k + j + 1, ABSENT) on every package
+    # and ends with every lineage count as restored and no twin on any ledger. The final "save" at
+    # saving off built the payload after the report, so every package used to count one save CKPT
+    # refused as off; spine/loop.py::_save no longer builds it there.
     lm_api._COUNTS.clear()
-    loop.run(build(CKPT_DIR=TMP10 + "/one", CKPT_EVERY=0), max_windows=5, progress=False)
+    x10 = build(CKPT_RESUME=TMP10 + "/c", CKPT_DIR="")
+    rx10 = loop.run(x10, max_windows=5, progress=False)
+    bad_x = {kk: v for kk, v in _pairs(rx10).items() if v != (k + j + 1, "ABSENT")}
+    xl = _lineage_on_ledgers(x10)
+    twins_x = _twins_on_ledgers(x10)
+    check("S10 saving off: the same blob resumed with CKPT_DIR='' reports (k + j + 1, ABSENT) on "
+          "every package, writes nothing, and ends the run with every lineage count as restored "
+          "and no process twin on any ledger (its final save built no payload)",
+          not bad_x and _saves(rx10) == 0 and len(xl) == 11
+          and all(v == k + j + 1 for v in xl.values())
+          and not twins_x,
+          f"off: {bad_x}; saves {_saves(rx10)}; ledgers after {xl}; twins {twins_x}")
+    # A FRESH RUN AT SAVING OFF, the default and tests/test_baseline.py's workload: every twin
+    # ABSENT on every row and every ledger. The lineage keys are the packages' own there: OPT seeds
+    # opt.ckpt.saved 0 at build and CAP.counters prints cap.state_written 0, and the baseline
+    # fixture pins both, while the other eight print ABSENT -- a residue Q-CKPT-4 states.
+    lm_api._COUNTS.clear()
+    f10 = build(CKPT_DIR="")
+    pf = _pairs(loop.run(f10, max_windows=3, progress=False))
+    twin_f = {kk: v[1] for kk, v in pf.items() if v[1] != "ABSENT"}
+    lin_f = {kk: v[0] for kk, v in pf.items() if v[0] != "ABSENT"}
+    check("S10 saving off on a fresh run: every process twin is ABSENT on every row (OPT's and "
+          "CAP's printed 0) and on every ledger after the run; of the lineage keys only OPT's and "
+          "CAP's print, at 0",
+          not twin_f and not _twins_on_ledgers(f10)
+          and lin_f == {"opt.ckpt.saved": 0, "cap.state_written": 0},
+          f"twins {twin_f}; lineage printed {lin_f}; twins on the ledgers {_twins_on_ledgers(f10)}")
+    # THE LINEAGE'S FIRST SAVE: its blob was written before any vocabulary file, so it carries no
+    # tok.vocab_saved at all, and the file the resume replays records ordinal 1. Its own report is
+    # the fresh run's j = 0 case: (0, 0) on every package, saving armed and nothing saved.
+    lm_api._COUNTS.clear()
+    r1 = loop.run(build(CKPT_DIR=TMP10 + "/one", CKPT_EVERY=0), max_windows=5, progress=False)
+    bad_1 = {kk: v for kk, v in _pairs(r1).items() if v != (0, 0)}
+    check("S10 j = 0 on a fresh run: a saving run whose only save follows its report reads (0, 0) "
+          "on every package", not bad_1 and _saves(r1) == 1, f"off: {bad_1}; saves {_saves(r1)}")
     first = torch.load(TMP10 + "/one/ckpt.pt", map_location="cpu", weights_only=False)
     lm_api._COUNTS.clear()
     o10 = build(CKPT_RESUME=TMP10 + "/one", CKPT_DIR=TMP10 + "/one_c", CKPT_EVERY=0)
@@ -796,6 +873,43 @@ try:
           f"blob {first['payload']['TOK']['counters'].get('tok.vocab_saved', 'ABSENT')}; restored "
           f"{o10.vocab.counters.get('tok.vocab_saved')}, state_written "
           f"{o10.vocab.counters.get('tok.state_written')}")
+    # AT TOK_MODE=bytes (build 1.6's review): that arm replays no merge and read no vocabulary file,
+    # so a bytes-mode child restored the blob's tok.vocab_saved, one file short, and read
+    # (k + j - 1, j) on it beside (k + j, j) on the other nine. build_vocabulary now reads the
+    # parent file's ordinal on that arm too.
+    lm_api._COUNTS.clear()
+    kb = _saves(loop.run(build(TOK_MODE="bytes", CKPT_DIR=TMP10 + "/bp", CKPT_EVERY=20),
+                         max_windows=30, progress=False))
+    lm_api._COUNTS.clear()
+    rbc = loop.run(build(TOK_MODE="bytes", CKPT_RESUME=TMP10 + "/bp", CKPT_DIR=TMP10 + "/bc",
+                         CKPT_EVERY=20), max_windows=30, progress=False)
+    jb = _saves(rbc) - 1
+    bad_b = {kk: v for kk, v in _pairs(rbc).items() if v != (kb + jb, jb)}
+    check("S10 at TOK_MODE=bytes the child reports (k + j, j) on every package, tok.vocab_saved "
+          "included (the arm reads the parent file's ordinal, and replays nothing)",
+          kb >= 2 and jb >= 1 and not bad_b, f"k {kb}, j {jb}; off: {bad_b}")
+    # OWED, PINNED AS IT STANDS (build 1.6's review; docs/04_CONTRACT.md Q-CKPT-4): a save CKPT.save
+    # refuses for a non-finite payload is still counted by every package, because the payload, and
+    # each count in it, is built before CKPT can scan it. No file is written and the loop warns, but
+    # the twins then read one save more than the 'CKPT.save: N' line. A repair makes this check
+    # fail, and replaces it.
+    lm_api._COUNTS.clear()
+    n10 = build(CKPT_DIR=TMP10 + "/nan")
+    with torch.no_grad():
+        n10.fabric.A.view(-1)[0] = float("nan")
+    _n0 = len(loop._save_refused)
+    wrote10 = loop._save(n10, n10.clock, "periodic")
+    refused10 = loop._save_refused[_n0:]
+    del loop._save_refused[_n0:]
+    check("S10 OWED, pinned as it stands: a save CKPT refuses as non-finite writes no file and is "
+          "recorded as refused, and every package still counts it (fab.state_written_here and "
+          "lm.ckpt.saved_here 1)",
+          not wrote10 and not os.path.exists(TMP10 + "/nan/ckpt.pt") and len(refused10) == 1
+          and n10.fabric.counters.get("fab.state_written_here") == 1
+          and lm_api._COUNTS.get("lm.ckpt.saved_here") == 1,
+          f"wrote {wrote10}; refused {len(refused10)}; fab twin "
+          f"{n10.fabric.counters.get('fab.state_written_here')}, lm twin "
+          f"{lm_api._COUNTS.get('lm.ckpt.saved_here')}")
 finally:
     shutil.rmtree(TMP10, ignore_errors=True)
 

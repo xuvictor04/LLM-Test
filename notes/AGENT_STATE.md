@@ -164,6 +164,10 @@ Updated 2026-09-26 (the decision register, Proposal 05) on `rm-predict-DC` (the 
   (Q-CKPT-4); FAB_NORM_ONLY=1 grows, culls and merges nothing (Q-FAB-11).
 - OWED from 1.6: FAB_LR_OWN's table reaches no parameter, so 04-Q11 (b)'s sweep arm is inert until a
   consumer exists (a frozen-signature move; docs/04_CONTRACT.md §3.7).
+- OWED from 1.6's review: a save CKPT.save refuses as non-finite is still counted on every package's
+  save count and `_here` twin, because each state_dict counts before CKPT scans the payload
+  (Q-CKPT-4's correction; tests/test_continuation.py S10 pins it as it stands). With saving off no
+  payload is built any more, so that half is fixed.
 - Q-TOK-13 is open.
 - gpu_world.sh calibrates on 150 windows at EXP=world, before the first manage pass at window 501, so
   its ETA can still miss per-pass costs; `--status` gives the live ETA. EXP=retok and EXP=world_epoch

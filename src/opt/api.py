@@ -1436,7 +1436,11 @@ def build(opt: Config, *, param_groups, run_windows):
         "opt.clip.armed_no_clip": 0,
         "opt.shift.notifications": 0,
         "opt.ckpt.saved": 0,
-        "opt.ckpt.saved_here": 0,
+        # opt.ckpt.saved_here IS NOT SEEDED (2026-09-27, build 1.6's review): whether saving is on
+        # is CKPT's answer, which this build cannot read, and a 0 here read "armed, did not fire" on
+        # a run whose saving was off, beside eight packages printing their twins ABSENT.
+        # state_dict writes it at this process's first save, and spine/loop.py::_report prints it 0
+        # where saving is on and none has happened yet (_SAVE_COUNTS there).
         "opt.ckpt.loaded": 0,
         "opt.ckpt.refused": 0,
         "opt.ckpt.horizon_changed": 0,
@@ -3217,7 +3221,9 @@ def state_dict(opt: Config, st):
     WIRES READ: none
     DID IT FIRE: opt.ckpt.saved (LINEAGE: restored with the rest of the ledger, and bumped before
                  the ledger is copied, so a blob counts the save that writes it),
-                 opt.ckpt.saved_here (THIS PROCESS's saves: seeded 0 by build, never restored)
+                 opt.ckpt.saved_here (THIS PROCESS's saves: never restored, and not seeded by build
+                 since 2026-09-27 -- written here at the first save; the R report prints it 0
+                 where saving is on and ABSENT where it is off, spine/loop.py::_SAVE_COUNTS)
     """
     opt = opt.owned_by("OPT")
     # THE ONE PACKAGE THAT ALREADY COUNTED ITS OWN BLOB, and the rule the other nine now follow
@@ -3466,8 +3472,8 @@ def load_state(opt: Config, st, saved, *, continuing=False):
         if key.startswith("opt.build."):
             continue
         # THIS PROCESS'S SAVES ARE ITS OWN (2026-09-27, register LOW-RESUME-SAVED-COUNTERS):
-        # opt.ckpt.saved carries the lineage, and its `_here` twin stays at build's 0 until this
-        # process saves.
+        # opt.ckpt.saved carries the lineage, and its `_here` twin stays ABSENT until this process
+        # saves (build seeds none since 2026-09-27; see there).
         if key == "opt.ckpt.saved_here":
             continue
         # THE ENCODER'S RATE-WRITE TALLY RETURNS ONLY TO A BUILD THAT SEEDED IT: a parent with an

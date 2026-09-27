@@ -2968,7 +2968,9 @@ def state_dict(mem: Config, store):
     LEVERS READ: none (a pure read of `store`)
     WIRES READ: none
     DID IT FIRE: store.n_state_dicts (LINEAGE, and it counts the save that writes it),
-                 store.n_state_dicts_here (THIS PROCESS's; open_store never restores it)
+                 store.n_state_dicts_here (THIS PROCESS's; open_store never restores it; ABSENT
+                 until this process saves -- the R report prints it 0 where saving is on,
+                 spine/loop.py::_SAVE_COUNTS)
     """
     mem = mem.owned_by("MEM")
     # BUMPED BEFORE THE COUNTERS ARE COPIED, SO A BLOB COUNTS ITSELF, with a process twin the

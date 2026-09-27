@@ -254,6 +254,9 @@ def w6():
 def w7():
     # THE REGISTER'S KNOWN ANSWER THROUGH THE LOOP: on this configuration the unfixed tree grew expert
     # 257 at window 81 (a regression burst) and ran three manage passes on the control arm.
+    # The row's "fab.births 0" is checked on the record (Population.births), because the report's
+    # fab.births is ABSENT on this arm by Q-FAB-11 (3) -- growth cannot happen here -- and that
+    # departure from the row's wording is stated in Q-FAB-11's 2026-09-27 note.
     sysm = build(FAB_NORM_ONLY=1, FAB_N0=256, FAB_SLOTS=512, FAB_GRACE=1, FAB_MANAGE_EVERY=25)
     fab_ids = {id(t) for t in (sysm.fabric.A, sysm.fabric.B, sysm.fabric.halt_b)}
     in_opt = sum(1 for t in sysm.base_params if id(t) in fab_ids)
