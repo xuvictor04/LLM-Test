@@ -1689,7 +1689,10 @@ def splice(tok: Config, vocab, seg, data, labels=None, *, at, regularize=False, 
     WIRES READ: none
     DID IT FIRE: tok.retok_mid_epoch, tok.retok (the act is a re-segmentation, counted with the
                  roll's), tok.byte_fallback, tok.dropout_skip (ABSENT at dropout 0.0),
-                 tok.retok_empty_tail (the cursor was on the last unit, nothing to splice)
+                 tok.retok_empty_tail (the cursor was on the last unit, nothing to splice);
+                 tok.bpt_tail, A READING and not a count (bytes per token over the tail the last
+                 splice cut, 03b-16.33's SIG-width gauge: ABSENT until an act measures it and on
+                 every arm where no act can run; tok.retok_mid_epoch is its fire record)
     """
     tok = tok.owned_by("TOK")
     at = int(at)
@@ -1710,6 +1713,18 @@ def splice(tok: Config, vocab, seg, data, labels=None, *, at, regularize=False, 
     counts = {"skip": 0, "byte": 0}
     tail_ids, tail_pos = _segment(vocab, data, dropout=drop, stream=stream, start=b, counts=counts,
                                   view=view)
+    # THE TAIL'S OWN BYTES PER TOKEN, AS A READING (2026-09-26, Q-RUN-17; 03b-16.33's SIG-width
+    # gauge): the bytes this call re-segmented over the ids it cut them into, rounded to six places
+    # as FAB rounds its growth readings. The spliced record's bytes_per_token below averages the
+    # consumed prefix in; this is the part the rest of the epoch will read, at the vocabulary as it
+    # now stands. WRITTEN ONLY WHEN A TAIL WAS CUT -- the empty-tail return above leaves it alone,
+    # as fab.spawn_gap is left alone when its test did not run -- so it holds the last act's value
+    # and is ABSENT until an act measures one. derive.bytes_per_token is the tree's one estimator
+    # and refuses zero tokens; past that return the tail holds at least one. A resume's log replay
+    # (spine/compose.py::_replay_segmentation) splices again at the recorded views and writes the
+    # same value, so a resumed run reads its parent's last act.
+    vocab.counters["tok.bpt_tail"] = round(
+        _derive.bytes_per_token(len(data) - b, len(tail_ids)), 6)
     vocab.counters["tok.retok"] = vocab.counters.get("tok.retok", 0) + 1
     vocab.counters["tok.retok_mid_epoch"] = vocab.counters.get("tok.retok_mid_epoch", 0) + 1
     vocab.counters["tok.byte_fallback"] = (vocab.counters.get("tok.byte_fallback", 0)
@@ -2033,7 +2048,12 @@ def mint_burst(tok: Config, vocab, *, step):
                  add-an-area run), tok.mint_exhausted,
                  tok.mint_bursts (ONE PER CALL, bumped on entry and seeded by on_window on the
                  online arm -- the count spine/loop.py's gated-call-site report prints, because
-                 tok.due_mint counts windows and the root ORs a batch of them into one call)
+                 tok.due_mint counts windows and the root ORs a batch of them into one call);
+                 tok.mint_wait_windows and tok.mint_waited (the windows each id minted here waited
+                 for the re-segmentation that brought it into the stream, summed, and how many ids
+                 that sum covers -- seeded and written by the ROOT, the only thing that sees both an
+                 id's birth and the act or epoch roll that re-segments it; ABSENT where no id can
+                 be minted or no re-segmentation can follow, docs/04_CONTRACT.md Q-RUN-17)
     """
     tok = tok.owned_by("TOK")
     ceiling = int(tok.d_vocab_ceiling)                   # WIRE READ HERE -- the hard row count

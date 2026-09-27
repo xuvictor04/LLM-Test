@@ -33,6 +33,11 @@ repository root as `python3 tests/test_fabric_internals.py`; exit 0 = every chec
       the 2026-09-24 GPU fleet at ~2.5 windows/s per run from window 501 on. _merge_pairs is one
       tensor pass and must return the scalar loop's list EXACTLY -- same floats, same order, same
       tie-breaks -- on random, clustered, tied and exactly-at-threshold similarity matrices.
+  I11 the blackout had pass counters and no WINDOWS count, so a quiet loss inside it read 0 however
+      long it held growth off (2026-09-26, Q-RUN-17). fab.blackout_windows credits the windows each
+      check that finds it open covers -- one per check at batch 1, the whole flush above it, never
+      a window before the stamp, counted from the stamp when a checkpoint carries no previous
+      check -- and is ABSENT at FAB_GROW=0 and FAB_COOLDOWN=0, where no stamp can block growth.
 
 WHAT THIS FILE CANNOT CATCH: whether the new baselines make a LONG run better. That is a GPU-length
 measurement the owner runs; these checks pin the arithmetic each repair promises.
@@ -396,6 +401,77 @@ def _merge_pairs_scalar(sim, merge_dist):
     return pairs
 
 
+def check_i11_blackout_windows_counts_windows():
+    """fab.blackout_windows credits (max(previous check, stamp), this check] on each check that finds
+    the blackout open (Q-RUN-17): one per check at batch 1, the whole flush above it, never a window
+    before the stamp; counted from the stamp when no previous check is on record; ABSENT where no
+    stamp can block growth; and `checked_at` crosses a state_dict round trip."""
+    findings, seen = [], []
+    caps = type("Caps", (), {"experts": 10**6, "headroom": lambda self, n: 10**6})()
+    sig = torch.zeros(SIG_D)
+
+    def at(c, pop, w, shift):
+        FAB.grow_check(c["FAB"], pop, flush_loss=torch.tensor(5.0), step_windows=U.Windows(w),
+                       soft_cap=caps, memory_pressure=None, signature=sig,
+                       shift_at=None if shift is None else U.Windows(shift))
+        return pop.counters.get("fab.blackout_windows", "ABSENT")
+
+    c = cfg(FAB_COOLDOWN=40)
+    pop = population(c)
+    # (1) ARMED, NOTHING STAMPED: present-and-0, and shift_notifications says why.
+    for w in (1, 2, 3):
+        got = at(c, pop, w, None)
+    if got != 0 or pop.counters.get("fab.shift_notifications") != 0:
+        findings.append(f"armed with no stamp: fab.blackout_windows {got!r}, notifications "
+                        f"{pop.counters.get('fab.shift_notifications')!r}; want 0 and 0")
+    # (2) ONE PER CHECK AT BATCH 1: a stamp at 10, checks at 11..15.
+    for w in range(11, 16):
+        got = at(c, pop, w, 10)
+    if got != 5:
+        findings.append(f"stamp 10, checks 11..15: {got!r}, want 5")
+    seen.append(f"batch 1: {got}")
+    # (3) THE WHOLE FLUSH ABOVE BATCH 1: checks at 31 and 47 add 16 each; the check at 63 is 53
+    # windows past the stamp, outside the 40-window cooldown, and adds nothing.
+    got31, got47, got63 = at(c, pop, 31, 10), at(c, pop, 47, 10), at(c, pop, 63, 10)
+    if (got31, got47, got63) != (21, 37, 37):
+        findings.append(f"batch-16 checks 31/47/63: {(got31, got47, got63)}, want (21, 37, 37)")
+    seen.append(f"batch 16: {got31}, {got47}, {got63}")
+    # (4) NEVER A WINDOW BEFORE THE STAMP: a stamp at 80 first seen at the check at 96, 33 windows
+    # after the previous check (63), credits 81..96 only.
+    got = at(c, pop, 96, 80)
+    if got != 53:
+        findings.append(f"stamp 80 first seen at 96 after a check at 63: {got!r}, want 53 (+16)")
+    seen.append(f"after a gap: {got}")
+    # (7) checked_at CROSSES A ROUND TRIP; (5) A CHECKPOINT WITHOUT IT COUNTS FROM THE STAMP.
+    sd = FAB.state_dict(c["FAB"], pop)
+    same = population(c, seed=99)
+    FAB.load_state_dict(c["FAB"], same, sd, sidecar=sd["sidecar"])
+    if same.growth.get("checked_at") != 96:
+        findings.append(f"checked_at after a round trip: {same.growth.get('checked_at')!r}, want 96")
+    old = {k: v for k, v in sd.items()}
+    old["growth"] = {k: v for k, v in sd["growth"].items() if k != "checked_at"}
+    older = population(c, seed=98)
+    FAB.load_state_dict(c["FAB"], older, old, sidecar=sd["sidecar"])
+    was = int(older.counters.get("fab.blackout_windows", 0))
+    got = at(c, older, 116, 100)
+    if older.growth.get("checked_at") != 116 or got - was != 16:
+        findings.append(f"a checkpoint without checked_at, stamp 100, first check 116: +{got - was}, "
+                        f"want +16 counted from the stamp")
+    seen.append(f"older checkpoint: +{got - was}")
+    # (6) ABSENT WHERE NO STAMP CAN BLOCK GROWTH.
+    for env in ({"FAB_GROW": 0, "FAB_COOLDOWN": 40}, {"FAB_COOLDOWN": 0}):
+        c6 = cfg(**env)
+        p6 = population(c6)
+        for w in range(11, 16):
+            got = at(c6, p6, w, 10)
+        if got != "ABSENT" or p6.counters.get("fab.shift_notifications") != 1:
+            findings.append(f"{env}: fab.blackout_windows {got!r} after a stamp, want ABSENT "
+                            f"(notifications {p6.counters.get('fab.shift_notifications')!r})")
+        seen.append(f"{env}: {got}")
+    return _report("I11", "fab.blackout_windows counts the windows each blocked check covers",
+                   not findings, "; ".join(seen), findings)
+
+
 def check_i10_merge_pairs_match_the_scalar_scan():
     findings = []
     g = torch.Generator().manual_seed(10)
@@ -445,6 +521,7 @@ CHECKS = (
     check_i8_build_gates_are_predictions,
     check_i9_shift_warm_rewarms_n_steps,
     check_i10_merge_pairs_match_the_scalar_scan,
+    check_i11_blackout_windows_counts_windows,
 )
 
 

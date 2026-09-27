@@ -20,6 +20,12 @@ measured wrong, or not delivered at all, and nothing in tests/ could see it:
   T2  TOK SEEDED ITS CADENCE COUNTERS ON ARMS THAT CANNOT MINT (fixed, bytes), and tok.due_merged at
       batch_windows=1. Both are ABSENT there now.
   T3  THE GATED REPORT COUNTED DUES, NOT CALLS, and printed a static "(TOK_PROBATION_USES=0 ...)".
+  T4  THE MINT WAIT (2026-09-26, Q-RUN-17) IS CLOSED BY EVERY RE-SEGMENTATION, acts and the roll
+      alike, exactly once per id: on the two-epoch run tok.mint_waited plus the stranded count is
+      tok.mint. It is ABSENT where nothing can be minted (TOK_GROW_EVERY=0), and T2's fixed arm
+      carries neither it nor tok.bpt_tail.
+  T5  PER-FLUSH BYTES ABOVE BATCH 1 (Q-RUN-17): at OPT_BATCH_WINDOWS=4 RunResult.flush_bytes has one
+      entry per loss and sums to loop.bytes_scored.
   C1  CAP.counters' cap.clamp said "an armed arm has room" at CAP_TARGETS=off; an untargeted arm's
       origin read as the sentinel's.
 """
@@ -111,6 +117,14 @@ check("T1 retoks are performed mid-epoch or refused as no-ops; none deferred, no
       _mid >= 1 and _mid == _acts and _drop == 0 and "tok.retok_deferred" not in tc,
       f"mid_epoch {_mid}, acts {_acts}, noop {_noop}, dropped {_drop}, "
       f"deferred {tc.get('tok.retok_deferred', 'ABSENT')}")
+_strand = next((int(w.split()[1]) for w in res.warnings
+                if "minted AFTER THE LAST RE-SEGMENTATION" in w), 0)
+check("T4 acts and the roll close every mint wait exactly once: tok.mint_waited + the stranded "
+      "count = tok.mint, both wait keys present",
+      "tok.mint_wait_windows" in tc and "tok.mint_waited" in tc and int(tc.get("tok.mint", 0)) > 0
+      and int(tc["tok.mint_waited"]) + _strand == int(tc["tok.mint"]),
+      f"waited {tc.get('tok.mint_waited', 'ABSENT')} + stranded {_strand} vs mint "
+      f"{tc.get('tok.mint')}; windows {tc.get('tok.mint_wait_windows', 'ABSENT')}")
 check("D3 the R stage summarises DOM.prior over every live domain",
       "DOM.prior(live)" in res.report and "DOM.prior(0)" not in res.report
       and res.report["DOM.prior(live)"]["n_live"] == len(res.report["DOM.census"]["live"]),
@@ -133,6 +147,11 @@ check("D1 a roll whose match table did not move leaves DOM untold (n_retok_event
 check("T2 TOK_GROW_EVERY=0 seeds neither tok.due_mint nor tok.mint_bursts",
       not any(k in sysm.vocab.counters for k in ("tok.due_mint", "tok.mint_bursts")),
       str({k: sysm.vocab.counters.get(k, "ABSENT") for k in ("tok.due_mint", "tok.mint_bursts")}))
+check("T4 TOK_GROW_EVERY=0 arms no mint wait: tok.mint_wait_windows and tok.mint_waited ABSENT "
+      "although the roll re-segments",
+      not any(k in sysm.vocab.counters for k in ("tok.mint_wait_windows", "tok.mint_waited")),
+      str({k: sysm.vocab.counters.get(k, "ABSENT")
+           for k in ("tok.mint_wait_windows", "tok.mint_waited")}))
 
 # ---- D2: DOM.rekey follows DOM.observe, and never runs on the bigram arm ------------------------
 for mode in ("learned", "bigram"):
@@ -154,7 +173,8 @@ res = loop.run(sysm, max_windows=20, progress=False)
 tc = sysm.vocab.counters
 _off = [k for k in ("tok.tally", "tok.due_mint", "tok.due_retok", "tok.due_probation",
                     "tok.mint_frozen_at", "tok.due_merged", "tok.due_dropped", "tok.mint_bursts",
-                    "tok.probation_calls") if k in tc]
+                    "tok.probation_calls", "tok.mint_wait_windows", "tok.mint_waited",
+                    "tok.bpt_tail") if k in tc]
 check("T2 TOK_MODE=fixed seeds none of the online arm's cadence counters", not _off, str(_off))
 check("T2 TOK_MODE=fixed reports TOK.mint_burst and judge_probation UNREACHABLE",
       "UNREACHABLE" in gated_line(res, "TOK.mint_burst")
@@ -180,6 +200,13 @@ check("T3 the gated line prints the call count",
       gated_line(res, "TOK.mint_burst")[:80])
 check("T2 tok.due_merged is seeded when a flush holds more than one window",
       "tok.due_merged" in tc, str(tc.get("tok.due_merged")))
+_b4 = res.report.get("LOOP(flush books)") or {}
+check("T5 RunResult.flush_bytes at OPT_BATCH_WINDOWS=4: one entry per loss, summing to "
+      "loop.bytes_scored (never_backward 0)",
+      len(res.flush_bytes) == len(res.loss_curve) > 0 and res.never_backward == 0
+      and sum(res.flush_bytes) == _b4.get("loop.bytes_scored"),
+      f"{len(res.flush_bytes)} entries, {len(res.loss_curve)} losses, sum {sum(res.flush_bytes)} "
+      f"vs {_b4.get('loop.bytes_scored')}, never_backward {res.never_backward}")
 
 # ---- C1: the clamp gate and the untargeted arm's origin -----------------------------------------
 for targets in ("off", "vocab"):

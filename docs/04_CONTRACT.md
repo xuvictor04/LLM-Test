@@ -5123,6 +5123,49 @@ counters fire, a session resumes exactly. Which regime a post-training session s
 GPU question ([OWNER] O6). Driven: `tests/test_lr_continue.py` L1-L8, `tests/test_continuation.py` S2b,
 S8 and S5's regime case, `tests/test_prose_guards.py` G2.
 
+### Q-RUN-17 — instruments for the mid-epoch act's secondaries — **RESOLVED 2026-09-26 (Proposal 05 §8 1.3; PENDING-S0b-SECONDARIES, 03b-16.26, 03b-16.33): SIX READINGS, ONE NEW `RunResult` FIELD (`flush_bytes`) AND ONE DRIVER FLAG (`run.py --flush-bytes`). NO SIGNATURE MOVES, NO LEVER, NO WIRE; A DEFAULT RUN REPRODUCES THE BASELINE FIXTURE**
+The retok fleet (Proposal 05 note retok fleet (2)) reports secondaries beside its ship rule, and 03b
+named them before any of them could be read: the FAB growth blackout's share of windows, how long a
+minted id waits for the re-segmentation that brings it into the stream, the act's wall cost, bytes
+per token over the re-segmented tail (the SIG-width gauge), and bytes per flush so prequential
+bits/byte can be split by phase. Each is now read where its owner sees it:
+- **`fab.blackout_windows`** (FAB, `fabric/api.py::grow_check`): the WINDOWS whose flush's growth
+  check found the stamp's cooldown open, credited as (max(previous check, stamp), this check], so a
+  flush of several windows counts all of them and a window before the stamp never counts.
+  `fab.growth_blackout_suppressed.*` still count the refused ASKS. ABSENT at `FAB_ON=0`, `FAB_GROW=0`
+  or `FAB_COOLDOWN` ≤ 0, where no stamp can block growth; PRESENT-and-0 otherwise, read beside
+  `fab.shift_notifications`. `state_dict` carries the previous check's step (`checked_at`); a
+  checkpoint written before the key existed counts from the stamp. **This is 03b's
+  `fab.cooldown_windows`, under the one name the register uses; that name is retired.**
+- **`tok.mint_wait_windows` and `tok.mint_waited`** (in `vocab.counters`, seeded and written by the
+  ROOT, the only place that sees both an id's birth in `TOK.mint_burst` and the act or epoch roll
+  that re-segments it): the summed windows each minted id waited, and how many ids the sum covers.
+  A retired id is dropped uncounted (the cut did not bring it into the stream). The open waits
+  (`mint_open`, [id, born] pairs) cross a save in `payload['LOOP']['carried']`, so a continuation
+  closes its parent's waits. ABSENT unless `TOK_MODE` is online with `TOK_GROW_EVERY` > 0 and either
+  `TOK_RETOK_EVERY` > 0 or an epoch roll lies ahead.
+- **`loop.act_seconds` and `loop.act_remap_seconds`** (the loop's flush books, beside `loop.acts`):
+  wall seconds spent in mid-epoch acts, and the part spent re-cutting MEM's stored contexts inside
+  `_mem_remap_fn`. FLOATS, so `tests/test_baseline.py`'s integer channel never compares them; ABSENT
+  wherever `loop.acts` is (`TOK_RETOK_EVERY=0`).
+- **`tok.bpt_tail`** (TOK, `TOK.splice`): A READING, not a count: bytes per token over the tail the
+  last splice cut, at the vocabulary as it then stood (`derive.bytes_per_token`, six places). ABSENT
+  until an act cuts a tail; a resume's log replay splices again and writes the same value. The act's
+  warning line prints the tail's bytes/token before and after and against the build-time value SIG's
+  width was derived from (03b-16.33's trigger).
+- **`RunResult.flush_bytes`** and **`run.py --flush-bytes PATH`**: the bytes each flush's windows'
+  targets cover, one entry per `--loss-curve` entry, summing to `loop.bytes_scored` (with
+  `never_backward` 0). A separate file, because `tests/test_baseline.py` and `gpu_world.sh` read
+  `--loss-curve` as a flat list of floats. A driver argument, not a lever: it changes no computation.
+**What CPU establishes:** operation only. `tests/test_baseline.py` reproduces the fixture recorded at
+d32e2ce (80 losses, 247 integer counters; the new counters are listed as new). A cross-commit
+comparison against the base commit (scratch `stage1/actpath_trace.py`: cases with acts, dropout,
+`OPT_BATCH_WINDOWS=4`, two epochs, and resumes after an act and between a mint and an act) gives
+identical losses and parameter hashes. Known answers: `tests/test_continuation.py` S5 (open waits and
+the blackout split across a save) and S9 (each reading fires, equals its recomputation, and is ABSENT
+where disarmed), `tests/test_tok_dom_cap.py` T4-T5, `tests/test_fabric_internals.py` I11. What the
+readings say about retok cadences is the GPU fleet's question (§8 2.1).
+
 ### Q-RUN-11 — a resume drew epoch 0's stream whatever epoch it resumed in — **RESOLVED 2026-09-24: THE `stream` ROW DRAWS `Snapshot.epoch`**
 The `stream` row passed `epoch=0` unconditionally. Driven at `RUN_EPOCHS=2 DATA_RESAMPLE=1`: the
 parent's epoch-1 draw hashed `65cd298845`; its child, resumed at epoch 1, drew `cfacafbe13` (epoch
@@ -5527,7 +5570,7 @@ pass (`n_backward`, `opt.backward`) and drops its gradients before the save: sav
 but `finished` is tested before `rolled`, so the mid-run roll's warning was unreachable; a
 `max_windows` stop leaves one no roll counts (driven: `OPT_BATCH_WINDOWS=16`, 157 windows, 13 never
 reached a backward, and nothing said so). **Ruling:** one check after the loop covers both exits;
-`RunResult.never_backward` = `dropped_windows` + the batch a `max_windows` stop left; run.py prints
+`RunResult.flush_bytes` (Q-RUN-17) is the bytes behind each loss. `RunResult.never_backward` = `dropped_windows` + the batch a `max_windows` stop left; run.py prints
 it on its own line when non-zero, so the `=== N windows, …` line keeps the shape `sweep_gpu.sh`
 parses; `RUN.RunClock.counters` is rendered at R (it was in `_CALLS` and rendered nowhere).
 (b) **`RUN_PROFILE=1` was inert:** no span was opened and `bench_summary` got no Timing. **Ruling:**

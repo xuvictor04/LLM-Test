@@ -67,6 +67,7 @@ import torch
 
 from spine import units as U
 from spine import gate as _gate
+from spine import derive as _derive
 from train import api as run_api
 from data import api as data_api
 from tok import api as tok_api
@@ -398,6 +399,12 @@ class RunResult:
     # dropped at epoch rolls (RunClock dropped_windows, the finishing roll's included) plus one
     # left by a max_windows stop. 0 at OPT_BATCH_WINDOWS=1. run.py prints it when it is not 0.
     never_backward: int = 0
+    # THE BYTES EACH FLUSH SCORED (2026-09-26, Q-RUN-17): one entry per loss_curve entry, the bytes
+    # that flush's windows' targets cover, so a per-token loss can be read per byte flush by flush
+    # and placed on the stream. THIS PROCESS ONLY, like loss_curve. Its sum equals the LOOP book's
+    # loop.bytes_scored when never_backward is 0; a partial batch no flush trained is in that book
+    # and in no entry here. run.py --flush-bytes writes it beside --loss-curve.
+    flush_bytes: tuple = ()
 
 
 def _payload(sysm):
@@ -562,15 +569,20 @@ def _save(sysm, clock, reason, suffix=""):
     return wrote
 
 
-def _mem_remap_fn(tok_cfg, vocab, view):
+def _mem_remap_fn(tok_cfg, vocab, view, books=None):
     """The MEM remap for a pending act view (03b S0b), or None: each stored context -- token ids, left
     padded with 0 -- is decoded to its bytes (TOK.Vocabulary.decode) and cut again at `view`
-    (TOK.tokenize with no labels, which counts tok.segment_remap)."""
+    (TOK.tokenize with no labels, which counts tok.segment_remap).
+
+    `books`, when it holds loop.act_remap_seconds, takes the wall seconds this re-cut spent
+    (2026-09-26, Q-RUN-17): the act's MEM half, timed apart from its splice as the register asks.
+    Only the re-cut inside this closure is timed; MEM's own re-keying of what it returns is not."""
     if not view:
         return None
     v = (int(view[0]), tuple(int(x) for x in view[1]))
 
     def remap(rows):
+        _t0 = time.perf_counter()
         out = []
         for r in rows:
             k = 0
@@ -578,8 +590,31 @@ def _mem_remap_fn(tok_cfg, vocab, view):
                 k += 1
             out.append(tok_api.tokenize(tok_cfg, vocab, vocab.decode(r[k:]), view=v).ids
                        if k < len(r) else [])
+        if books is not None and "loop.act_remap_seconds" in books:
+            books["loop.act_remap_seconds"] += time.perf_counter() - _t0
         return out
     return remap
+
+
+def _close_mint_wait(vocab, open_births, step):
+    """Close every open mint wait at a re-segmentation (2026-09-26, Q-RUN-17): each id still open is
+    now in the stream, so the windows since its birth go into tok.mint_wait_windows and the id into
+    tok.mint_waited. `open_births` is None where the wait is not armed, and this does nothing.
+
+    A RETIRED ID IS DROPPED UNCOUNTED: TOK.judge_probation took it out of the match table before
+    the cut, so this re-segmentation did not bring it into the stream, and putting it back later is
+    a reinstatement, which TOK.mint_burst does not return as a mint. The list is emptied in place,
+    because `run` and `_flush` hold the same object: the flush appends births, the act closes them."""
+    if open_births is None:
+        return
+    gone = set(tok_api.view_of(vocab)[1])
+    for new_id, born in open_births:
+        if int(new_id) in gone:
+            continue
+        vocab.counters["tok.mint_wait_windows"] = (vocab.counters.get("tok.mint_wait_windows", 0)
+                                                   + (int(step) - int(born)))
+        vocab.counters["tok.mint_waited"] = vocab.counters.get("tok.mint_waited", 0) + 1
+    del open_births[:]
 
 
 def _window_bounds(ids, i, ctx):
@@ -798,9 +833,19 @@ def run(sysm, *, max_windows=None, progress=True):
         books["loop.owners_from_domain"] = 0
     # THE MID-EPOCH ACT'S DID-IT-FIRE (03b S0b). Armed when TOK's retok cadence is: PRESENT-and-0 is
     # "armed, no act ran"; ABSENT at TOK_RETOK_EVERY=0, where no act can be asked for.
+    # AND ITS COST, ON THE SAME PREDICATE (2026-09-26, Q-RUN-17): loop.act_seconds is the wall time
+    # of the stage-X block and loop.act_remap_seconds that of the MEM re-cut the next flush makes
+    # (spine/loop.py::_mem_remap_fn), timed apart as the register asks. They are WALL-CLOCK FLOATS,
+    # this process's only, never checkpointed, and never in the integer channel
+    # tests/test_baseline.py::COUNTER reads -- a seconds value differs on every run, so it is kept
+    # out of every book that anything compares exactly. Nothing synchronises a device around them,
+    # so the reading cannot slow the run: on CUDA they time the host's side of the act, and a sync
+    # inside either can absorb kernels the flush before it queued.
     if int(tok_cfg.retok_every) > 0:
         books["loop.acts"] = 0
         books["loop.acts_noop"] = 0
+        books["loop.act_seconds"] = 0.0
+        books["loop.act_remap_seconds"] = 0.0
     # THE BYTES THIS PROCESS'S WINDOWS SCORED, summed over each window's targets (03b S0b). The loss
     # curve is per token and an act changes how many tokens a byte span holds, so arms that act and
     # arms that do not compare only in bits per BYTE: sum(loss x targets) / ln 2 / this. Every window
@@ -835,6 +880,28 @@ def run(sysm, *, max_windows=None, progress=True):
         manage_losses = list(_car.get("manage_losses") or [])
         if _car.get("resegment_pending"):
             resegment = sysm.segmentation
+    # THE MINT WAIT (2026-09-26, Q-RUN-17): how many windows each id TOK.mint_burst returns waits for
+    # the re-segmentation that brings it into the stream -- a mid-epoch act or an epoch roll, which
+    # both cut at the vocabulary as it then stands (the mark _mint_at_last_roll keeps treats them
+    # alike). `mint_open` holds the open ones as [id, born]; `_flush` appends each burst's, and
+    # stages X and E close them through _close_mint_wait. ARMED where an id can be minted --
+    # TOK_MODE=online at TOK_GROW_EVERY > 0, the arm TOK.on_window seeds tok.mint_bursts on -- and
+    # something can close the wait: an act (TOK_RETOK_EVERY > 0) or a roll still ahead of this
+    # process. There tok.mint_wait_windows and tok.mint_waited are PRESENT-and-0 from the start;
+    # elsewhere both are ABSENT and mint_open is None. Seeded and written by the root, as
+    # tok.due_merged is, because only the root sees an id's birth and the cut that spends it.
+    # THE OPEN BIRTHS CROSS A SAVE IN loop_carried, so a continuing resume whose parent minted before
+    # its save and acts after it counts those waits exactly. Every other resume cuts its stream at
+    # the restored vocabulary, which already holds the parent's ids, so their waits end there
+    # uncounted: no act or roll of this run brought them in.
+    _rolls_ahead = int(_c_start["epochs_target"]) - int(_c_start["epoch"]) > 1
+    if (str(tok_cfg.mode) == "online" and int(tok_cfg.grow_every) > 0
+            and (int(tok_cfg.retok_every) > 0 or _rolls_ahead)):
+        vocab.counters.setdefault("tok.mint_wait_windows", 0)
+        vocab.counters.setdefault("tok.mint_waited", 0)
+        mint_open = [[int(m), int(w)] for m, w in ((_car or {}).get("mint_open") or [])]
+    else:
+        mint_open = None
 
     def _carry():
         """Mirror the loop-carried values onto the System for the checkpoint (03b S0b)."""
@@ -848,8 +915,17 @@ def run(sysm, *, max_windows=None, progress=True):
             "shift_at_windows": (None if getattr(sysm, "shift_at_windows", None) is None
                                  else int(sysm.shift_at_windows)),
             "shift_at_steps": (None if getattr(sysm, "shift_at_steps", None) is None
-                               else int(sysm.shift_at_steps))}
+                               else int(sysm.shift_at_steps)),
+            # THE OPEN MINT WAITS (Q-RUN-17), copied: the live list is emptied in place at a cut.
+            "mint_open": None if mint_open is None else [list(x) for x in mint_open]}
     batch = []
+    # THE BYTES EACH FLUSH SCORED (2026-09-26, Q-RUN-17), one entry per loss_curve entry, so the
+    # per-act spike can be normalised per byte and a reader can place each loss on the stream: the
+    # running sum from this process's first target byte, against DATA's phase bounds, is the
+    # per-phase reading. `batch_bytes` is the open flush's share of loop.bytes_scored, emptied with
+    # `batch` wherever `batch` is -- so a partial batch a roll discards is in loop.bytes_scored and
+    # in no entry here, and the two sums agree exactly when never_backward is 0.
+    flush_bytes, batch_bytes = [], 0
     ids = sysm.segmentation.ids
     stopped_early = False
     # WHICH EXIT ENDED THE LOOP, for the unflushed-batch accounting after it (F33, 2026-09-24).
@@ -911,8 +987,10 @@ def run(sysm, *, max_windows=None, progress=True):
         else:
             batch.append(bounds)
             _bp = sysm.segmentation.byte_pos
-            books["loop.bytes_scored"] += ((_bp[bounds[1]] if bounds[1] < len(_bp)
-                                            else len(sysm.stream.bytes)) - _bp[bounds[0] + 1])
+            _wb = ((_bp[bounds[1]] if bounds[1] < len(_bp)
+                    else len(sysm.stream.bytes)) - _bp[bounds[0] + 1])
+            books["loop.bytes_scored"] += _wb
+            batch_bytes += _wb
             # DOM.observe IS CALLED ONCE PER WINDOW, ABOVE THE BATCH EARLY-OUT, and that placement is
             # what makes `sustain` a Windows clock rather than a flush one -- domains/api.py::observe
             # says so, and `s.run` is incremented once per call. Putting it in the flush would divide
@@ -1151,7 +1229,7 @@ def run(sysm, *, max_windows=None, progress=True):
                         loss, per_window, probe_prev = _flush(
                             sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg,
                             vocab, clock, sysm.novelty, did, key_fn, sigs, dids, probe_prev,
-                            mem_pressure, resegment, live_domains, books)
+                            mem_pressure, resegment, live_domains, books, mint_open)
                 except _gate.NonFinite as _nf:
                     # THE LAST FINITE STATE IS KEPT IF IT IS FINITE, for the reason a raising R stage
                     # still saves (Q-RUN-9): a stop is a reason to distrust what comes next, not to
@@ -1194,11 +1272,14 @@ def run(sysm, *, max_windows=None, progress=True):
                 # for the consumer that names it.
                 sysm.novelty = per_window
                 batch, sigs, dids, samples = [], [], [], []
+                _flushed_bytes, batch_bytes = batch_bytes, 0
                 if loss is not None:
                     last_loss = loss
                     if curve == []:
                         first_loss = loss
                     curve.append(loss)
+                    # ONE ENTRY PER LOSS, SO THE TWO LISTS ARE READ SIDE BY SIDE (Q-RUN-17).
+                    flush_bytes.append(int(_flushed_bytes))
                     if loss == loss:
                         manage_losses.append(float(loss))
                 # ---- STAGE X: THE MID-EPOCH ACT (Q-RUN-8 option (a), 03b S0b). After the flush, with
@@ -1223,6 +1304,9 @@ def run(sysm, *, max_windows=None, progress=True):
                         if "loop.acts_noop" in books:
                             books["loop.acts_noop"] += 1
                     else:
+                        # THE ACT'S WALL TIME (Q-RUN-17): this branch only, because a refused no-op
+                        # above is not an act. Its MEM half is timed inside _mem_remap_fn.
+                        _t_act = time.perf_counter()
                         k0 = win_in_epoch * ctx
                         prev_n = len(ids)
                         # LOGGED BEFORE THE CUT, with the dropout stream's state, so a resume can
@@ -1263,14 +1347,36 @@ def run(sysm, *, max_windows=None, progress=True):
                         # growth test and OPT's re-warm read it as one, as they read a roll.
                         sysm.shift_at_windows = U.Windows(int(clock.step))
                         sysm.shift_at_steps = U.Steps(int(clock.opt_steps) + 1)
+                        # EVERY ID STILL WAITING IS IN THE STREAM FROM HERE ON (Q-RUN-17).
+                        _close_mint_wait(vocab, mint_open, int(clock.step))
                         _mint_at_last_roll = int(vocab.counters.get("tok.mint", 0))
                         if "loop.acts" in books:
                             books["loop.acts"] += 1
+                        # THE TAIL'S BYTES PER TOKEN BEFORE AND AFTER, ON THE ACT'S OWN LINE (Q-RUN-17),
+                        # so every act's reading survives although tok.bpt_tail keeps only the last.
+                        # The splice kept ids[:k0 + 1], so the tail starts at the same byte in the old
+                        # and the new segmentation, and `before` is prev_n's tail over those bytes.
+                        # Against the build-time vocab.bytes_per_token, the value SIG's width was
+                        # derived from (spine/compose.py::_signature_width), because that drift is
+                        # 03b-16.33's trigger. Skipped when the cursor was on the last unit: no tail
+                        # was cut, so there is nothing to read.
+                        _bpt = ""
+                        if prev_n > k0 + 1:
+                            _tb = len(sysm.stream.bytes) - int(sysm.segmentation.byte_pos[k0 + 1])
+                            _before = _derive.bytes_per_token(_tb, prev_n - (k0 + 1))
+                            _after = float(vocab.counters["tok.bpt_tail"])
+                            _built = float(vocab.bytes_per_token)
+                            _bpt = (f" Tail bytes/token {_before:.4f} -> {_after:.4f} "
+                                    f"({100.0 * (_after / _before - 1.0):+.1f}%), "
+                                    f"{100.0 * (_after / _built - 1.0):+.1f}% against the build-time "
+                                    f"{_built:.4f} SIG's width was derived from.")
                         warnings.append(
                             f"loop: mid-epoch act at window {int(tick.step)}: re-segmented the "
                             f"unconsumed tail at vocabulary size {int(vocab.size())} "
                             f"({prev_n} -> {len(ids)} ids; this epoch now holds {n_new} windows, "
-                            f"{int(clock.counters()['in_epoch'])} read).")
+                            f"{int(clock.counters()['in_epoch'])} read)." + _bpt)
+                        if "loop.act_seconds" in books:
+                            books["loop.act_seconds"] += time.perf_counter() - _t_act
 
             # THE PERIODIC CHECKPOINT, THROUGH THE SAME Cadences EVERY OTHER GATE USES. A 53-minute
             # run finished with `ckpt checks=0` -- the gate was never EVALUATED, so nothing was written
@@ -1339,6 +1445,7 @@ def run(sysm, *, max_windows=None, progress=True):
                     f"index the previous epoch's segmentation. At OPT_BATCH_WINDOWS=1 this cannot "
                     f"happen; above 1 it costs up to batch_windows-1 windows per epoch.")
             batch, sigs, dids, samples = [], [], [], []
+            batch_bytes = 0
             win_in_epoch = 0
             # probe_prev IS DROPPED FOR THE SAME REASON ONE LAYER OVER: a tensor of token ids under
             # a segmentation that has just been replaced, which MEM.read would encode as current.
@@ -1359,6 +1466,9 @@ def run(sysm, *, max_windows=None, progress=True):
             sysm.segmentation = tok_api.tokenize(
                 tok_cfg, vocab, sysm.stream.bytes, sysm.stream.labels,
                 regularize=True, seed=int(run_cfg.seed))
+            # THE ROLL CLOSES EVERY OPEN MINT WAIT, AS AN ACT DOES (Q-RUN-17): it cut the new epoch at
+            # the vocabulary as it now stands, so each id still waiting is in the stream from here.
+            _close_mint_wait(vocab, mint_open, int(clock.step))
             ids = sysm.segmentation.ids
             # SIG'S STREAM IS RE-RESOLVED, because _signature_stream returns Stream.bytes or
             # Segmentation.ids and the roll has just replaced both. A stale binding would train the
@@ -1486,6 +1596,7 @@ def run(sysm, *, max_windows=None, progress=True):
             + f"). At OPT_BATCH_WINDOWS=1 this cannot happen; above 1 it costs up to "
               f"batch_windows-1 windows per exit.")
     batch, sigs, dids, samples = [], [], [], []
+    batch_bytes = 0
 
     # THE FINAL SAVE, UNCONDITIONALLY, WHATEVER ENDED THE RUN. A run that stops because the epoch
     # finished, because max_windows was reached, or because the stream ran out has all done the
@@ -1573,8 +1684,10 @@ def run(sysm, *, max_windows=None, progress=True):
         raise
     # THE DRIVER'S OWN BOOK. An empty dict is a statement too -- neither mechanism was reachable on
     # this arm (batch_windows=1 and a routed fabric) -- so it is printed with that sentence rather
-    # than as nothing.
-    report["LOOP(flush books)"] = dict(books) if books else (
+    # than as nothing. The act's two wall-clock readings are printed to six places, as FAB prints
+    # its growth readings; a float never reads as an integer counter line (Q-RUN-17).
+    report["LOOP(flush books)"] = {k: (round(v, 6) if isinstance(v, float) else v)
+                                   for k, v in books.items()} if books else (
         "no key is reachable on this arm: loop.flush_mixed_domain needs OPT_BATCH_WINDOWS > 1 and "
         "loop.owners_from_domain needs FAB_ON=0 or FAB_NORM_ONLY=1")
 
@@ -1627,7 +1740,7 @@ def run(sysm, *, max_windows=None, progress=True):
             f"final one together); 0 means CKPT_DIR names no directory and saving is off",),
         report=report,
         cadence_ledger=cadences.ledger(), warnings=tuple(warnings),
-        never_backward=never_backward)
+        never_backward=never_backward, flush_bytes=tuple(flush_bytes))
 
 
 # ---- THE R STAGE: the did-it-fire surfaces, asked through the entry points that own them --------
@@ -1848,7 +1961,7 @@ def _periods_of(sysm):
 
 def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, vocab, clock,
            novelty, domain_id, key_fn, sigs, dids, probe_prev, mem_pressure, resegment,
-           live_domains, books):
+           live_domains, books, mint_open=None):
     cfg_world = sysm.configs["WORLD"]
     cfg_dom = sysm.configs["DOM"]
     cfg_mem = sysm.configs["MEM"]
@@ -2255,6 +2368,10 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     # UNREACHABLE rather than armed -- which is precisely what that counter was declared to
     # distinguish. The same stamp is re-delivered on every later flush and grow_check counts it
     # ONCE (it read 158 for one roll until 2026-09-24, one per flush after it).
+    # SINCE 03b S0b TWO ARE DRIVEN (corrected 2026-09-26, Q-RUN-17): the mid-epoch act in `run`
+    # (stage X) performs the retok and stamps both twins as the roll does, so the paragraph above
+    # holds for a run that neither acts nor rolls. How many windows the blackout then held is
+    # fab.blackout_windows, which grow_check keeps beside its pass counters.
     # THE RECORD IS BOUND AND ITS GATES KEPT (2026-09-24). This was a bare expression statement, so
     # GrowReport's per-call gates -- the arithmetic of the call that evaluated them -- reached no
     # report. ONLY THE GATES TUPLE is kept, on System.grow_gates, and spine/loop.py::_report renders
@@ -2371,7 +2488,8 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     with _timing.span("flush/mem.maintain"):
         mem_api.maintain(cfg_mem, sysm.store, now=now_w, key_fn=key_fn,
                          probe_contexts=probe_prev, resegment=resegment,
-                         remap=_mem_remap_fn(tok_cfg, vocab, getattr(sysm, "mem_remap", None)))
+                         remap=_mem_remap_fn(tok_cfg, vocab, getattr(sysm, "mem_remap", None),
+                                             books))
     sysm.mem_remap = None
 
     # ---- THE EVENT-DRIVEN ROWS: what THIS BATCH'S Dues made due ---------------------------------
@@ -2387,6 +2505,10 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
             # says so ("BIRTH STEPS ARE FLUSH-ALIGNED") and probation_deadline compares
             # `step - birth` with both in Windows, so nothing raises.
             mints = tok_api.mint_burst(tok_cfg, vocab, step=now_w2)
+            # EACH NEW ID'S WAIT OPENS AT ITS BIRTH (Q-RUN-17) and closes at the next act or roll.
+            # The returned list is exactly what tok.mint counted; a reinstatement is never in it.
+            if mints and mint_open is not None:
+                mint_open.extend([int(m.new_id), int(now_w2)] for m in mints)
             if mints:
                 # AND THE MODEL IS TOLD, IN THE SAME FLUSH, WHICH IS NOT OPTIONAL. lm/levers.py
                 # calls this goal B's row-level case: "a freshly minted token id points at a

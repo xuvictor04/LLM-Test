@@ -454,13 +454,18 @@ class Population:
         # windows, parent_max over the last `birth_win` births. `spawned_seen` is the fab.spawned
         # count as of the previous check, which is how fabric/api.py::grow_check charges a
         # spawn-by-specification birth against the newborn budget it did not go through.
+        # `checked_at` is the step of the previous grow_check (2026-09-26, Q-RUN-17), so a flush
+        # whose check finds the blackout open credits fab.blackout_windows with the windows it
+        # covers and not merely one pass. NO GROWTH DECISION READS IT. state_dict carries it, and
+        # load_state_dict's update keeps this None for a checkpoint written before the key existed,
+        # which grow_check then counts from the stamp.
         # A PLAIN DICT AND NOT A CLASS, deliberately: every value is a float, an int, a string, None
         # or a list of pairs, so state_dict can write it and load_state_dict can read it back
         # without a second record type that torch.save would pickle by reference to this module.
         self.growth = {
             "fast": None, "slow": None, "dev": 0.0, "n": 0,
             "state": "W", "t0": None, "last": None, "last_regr": None,
-            "births": [], "spawned_seen": 0,
+            "births": [], "spawned_seen": 0, "checked_at": None,
         }
         # None AND NOT 0.0: competence here is a LOSS (lower is better, self_organize.py:3694 spares
         # on `comp[d] < comp_glob`), so a population EMA seeded at zero would read as a population
@@ -4225,7 +4230,12 @@ def grow_check(fab: Config, pop, *, flush_loss, step_windows, soft_cap, memory_p
                  invisible to K10), fab.growth_blackout_suppressed (asks the
                  blackout actually refused, split by leg so a suppressed REGRESSION is not filed
                  under a suppressed stall -- the two keep separate cooldown clocks above for the
-                 same reason)
+                 same reason), fab.blackout_windows (the WINDOWS whose flush's growth check found
+                 the blackout open, where the pass counters count only the asks it refused;
+                 ABSENT at FAB_ON=0, FAB_GROW=0 or FAB_COOLDOWN <= 0, where no stamp can block
+                 growth, and PRESENT-and-0 otherwise, read beside fab.shift_notifications, whose 0
+                 says no stamp ever arrived. The register's one name for it; 03b's
+                 fab.cooldown_windows is retired, docs/04_CONTRACT.md Q-RUN-17)
     ELEVEN MORE KEYS THE BODY WRITES, DECLARED HERE FOR THE REASON fabric/api.py::forward gives: a
     key in the report that the contract does not admit to producing is the same defect as a declared
     key nothing writes, and the count is taken in both directions.
@@ -4313,6 +4323,14 @@ def grow_check(fab: Config, pop, *, flush_loss, step_windows, soft_cap, memory_p
                "fab.grow_recover_passes", "fab.grow_warmup_refused",
                "fab.newfrac_spent_on_spawn"):
         counters.setdefault(_k, 0)
+    # THE BLACKOUT'S WINDOWS COUNT IS SEEDED ONLY WHERE A STAMP CAN BLOCK GROWTH, which is why it is
+    # not in the loop above with its pass-counting siblings (2026-09-26, Q-RUN-17). At FAB_GROW=0
+    # neither leg is evaluated, so no stamp blocks anything; at FAB_COOLDOWN <= 0 the blackout never
+    # opens, because a check at or after the stamp is never fewer than zero windows from it. ABSENT
+    # there is this ledger's spelling of unreachable. Where it is PRESENT-and-0, whether a stamp
+    # ever arrived is fab.shift_notifications' question, and the growth_blackout Gate prints it.
+    if grow_on and cool_n > 0:
+        counters.setdefault("fab.blackout_windows", 0)
     _bump(counters, "fab.grow_checks")
     counters["fab.cap_lift_period"] = int(lift_period)
 
@@ -4355,6 +4373,21 @@ def grow_check(fab: Config, pop, *, flush_loss, step_windows, soft_cap, memory_p
         since_shift = int(step - U.Windows(int(g["shift_seen"])))
         if since_shift < cool_n:
             blackout_open, blackout_left = True, cool_n - since_shift
+    # WINDOWS, NOT PASSES (2026-09-26, Q-RUN-17). fab.growth_blackout_suppressed.* count the ASKS the
+    # blackout refused, so a quiet loss inside it reads 0 there however long it stayed open; the
+    # windows count is the share a fleet reads against its blackout alarm. A check that finds the
+    # blackout open credits the windows its flush covers, (max(previous check, stamp), this check]:
+    # one per check at OPT_BATCH_WINDOWS=1, the whole flush above it, and never a window before
+    # the stamp -- after a roll the first check can be a batch past it, and the windows the roll
+    # discarded were never in any flush. With no previous check on record (a checkpoint older than
+    # `checked_at`) it counts from the stamp. The step is recorded whatever the verdict, so the
+    # next check knows where this one stopped.
+    if blackout_open and grow_on and cool_n > 0:
+        _prev = g.get("checked_at")
+        _from = (int(g["shift_seen"]) if _prev is None
+                 else max(int(_prev), int(g["shift_seen"])))
+        _bump(counters, "fab.blackout_windows", max(0, step_n - _from))
+    g["checked_at"] = step_n
 
     # ---- the other door's births, charged against this door's budget ----------------------------
     # SPAWN WRITES INTO THE POOL INSIDE `forward`, BEFORE THIS ENTRY POINT SEES THE FLUSH, so it
@@ -4624,10 +4657,11 @@ def grow_check(fab: Config, pop, *, flush_loss, step_windows, soft_cap, memory_p
              reason="" if int(counters["fab.shift_notifications"]) > 0 else
                     "NO SHIFT HAS BEEN STAMPED: shift_at is a defaulted keyword, which is invisible "
                     "to K10, and 0 notifications means the blackout cannot open at all -- not that "
-                    "it was armed and no shift happened. ONE of the three stamping sites is driven: "
-                    "the root stamps the epoch roll (RUN_EPOCHS > 1), so a run that takes no roll "
-                    "before it ends has nothing to black out; TOK.mint_burst's retok is deferred to "
-                    "that same roll and OPT's LR restart stamps nothing."),
+                    "it was armed and no shift happened. TWO of the three stamping sites are "
+                    "driven: the root stamps the epoch roll (RUN_EPOCHS > 1) and the mid-epoch act "
+                    "that performs TOK.mint_burst's retok (TOK_RETOK_EVERY > 0, once the match "
+                    "table has moved), so a run that takes neither before it ends has nothing to "
+                    "black out; OPT's LR restart stamps nothing."),
         Gate("fab.grow_mem_pressure", mem_eligible,
              value=f"FAB_GROW_ON_MEM_PRESSURE={mem_on}, memory_pressure={memory_pressure!r}",
              threshold="MEM's own verdict, already compared against MEM_PRESSURE_THRESH",

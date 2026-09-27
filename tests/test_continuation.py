@@ -25,7 +25,11 @@ parent's exact stream and continue. Each check below pins one promise of that pa
       uninterrupted run's losses for those n2 windows exactly -- with no act, with a save between a
       mint and the next act (the critic's blocking case), with a save after an act, and at
       TOK_DROPOUT > 0 -- and under a non-default OPT_LR_CONTINUE, which a same-length resume never
-      anchors (Q-OPT-12).
+      anchors (Q-OPT-12). THE S0b SECONDARIES CONTINUE TOO (Q-RUN-17): the child's per-flush bytes
+      are the uninterrupted run's, and fab.blackout_windows, tok.mint_wait_windows / tok.mint_waited
+      and tok.bpt_tail equal its own; a mint before the save is waited across it into the child's
+      act (the open births ride loop_carried), and a save inside the blackout splits its windows
+      between parent and child (growth['checked_at'] rides FAB's state).
   S7  THE OLDER GENERATION RESUMES TOO (register LOW-Q-TOK-13-PREV, Proposal 05 §8 1.1): a parent
       that saved twice, with a mint between the saves, is resumed from '<dir>/ckpt.pt.prev' and its
       continuation equals the uninterrupted run's losses exactly, because TOK.save_vocabulary
@@ -36,6 +40,14 @@ parent's exact stream and continue. Each check below pins one promise of that pa
       OPT_HORIZON_REVISE=False still acts, and every revision an act asked for is declined and
       counted -- no revision logged, opt.horizon.revise_inert 1, opt.horizon.revise_declined equal to
       the acts that changed the epoch's length -- while S4's default run did log them.
+  S9  THE S0b SECONDARIES (Proposal 05 §8 1.3, Q-RUN-17), on S4's two runs, each against a number
+      computed here from something else the run left behind: fab.blackout_windows from the acts'
+      warning lines and FAB_COOLDOWN; tok.mint_wait_windows / tok.mint_waited from Vocabulary.prov,
+      with every mint waited or stranded; loop.act_seconds / loop.act_remap_seconds as floats that
+      tests/test_baseline.py::COUNTER can never read as an integer counter; tok.bpt_tail from the
+      final segmentation, and on the act's own line; RunResult.flush_bytes summing to
+      loop.bytes_scored; and run.py --flush-bytes beside --loss-curve. On the TOK_RETOK_EVERY=0 run
+      each is ABSENT, or armed and 0 where the ledger says so.
 
 WHAT THIS FILE CANNOT SEE: whether live retokenization helps a long run. That is the owner-scale
 ship-rule measurement 03b S0b names (prequential bits/byte, 3 paired seeds).
@@ -44,6 +56,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 
@@ -87,6 +100,43 @@ def books(res):
     reachable on the arm, which reads here as no books."""
     b = res.report.get("LOOP(flush books)")
     return b if isinstance(b, dict) else {}
+
+
+# ---- the S0b secondaries' known answers, computed apart from the code that counts them (S9, S5) ---
+def act_windows(res):
+    """The windows the run's acts fired at, off each act's own warning line."""
+    return [int(m.group(1)) for w in res.warnings
+            for m in [re.match(r"loop: mid-epoch act at window (\d+):", w)] if m]
+
+
+def blackout_expected(acts, end, cooldown):
+    """fab.blackout_windows at batch 1 with acts as the only stamps: each act blacks out the checks
+    after it, up to the next act (whose own flush still checks under the old stamp), the run's end,
+    or cooldown - 1 windows, whichever comes first."""
+    return sum(min(cooldown - 1, (acts[i + 1] if i + 1 < len(acts) else end) - a)
+               for i, a in enumerate(acts))
+
+
+def mint_wait_expected(vocab, cuts):
+    """(tok.mint_wait_windows, tok.mint_waited) off Vocabulary.prov: every id minted online and not
+    retired waits from its birth to the first re-segmentation at or after it (an id born in an act's
+    own flush waits 0); one no cut reached is stranded and counted in neither."""
+    total = n = 0
+    for tid, entry in vocab.prov.items():
+        rec = tok_api._prov_online(entry)
+        if rec is None or int(tid) in vocab.retired:
+            continue
+        after = [a for a in cuts if a >= rec[0]]
+        if after:
+            total, n = total + after[0] - rec[0], n + 1
+    return total, n
+
+
+def stranded(res):
+    """The count the loop's 'minted AFTER THE LAST RE-SEGMENTATION' warning names, 0 without one."""
+    m = next((re.match(r"loop: (\d+) token\(s\) were minted AFTER THE LAST", w) for w in res.warnings
+              if "minted AFTER THE LAST RE-SEGMENTATION" in w), None)
+    return int(m.group(1)) if m else 0
 
 
 # ---- S1: the clock ------------------------------------------------------------------------------
@@ -230,30 +280,79 @@ def continuation(tag, n1, n2, **env):
     a, b = ru.loss_curve[n1:n1 + n2], rc.loss_curve[:n2]
     same = len(a) == len(b) == n2 and all(x == y for x, y in zip(a, b))
     diff = next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), None)
-    return same, cont, diff, books(ru), books(rp), books(rc)
+    return same, cont, diff, books(ru), books(rp), books(rc), \
+        {"u": u, "ru": ru, "p": p, "rp": rp, "c": c, "rc": rc, "n1": n1, "n2": n2}
+
+
+# THE S0b SECONDARIES CROSS THE SAVE (Q-RUN-17). Only the new readings are compared between the
+# child and the uninterrupted run: tok.retok_mid_epoch, tok.retok and tok.byte_fallback already
+# differ across a continuing resume, because the log replay splices again after restore_vocab put
+# the parent's counts back (recorded in Q-RUN-17, not repaired here).
+_SECONDARY = ("tok.mint_wait_windows", "tok.mint_waited", "tok.bpt_tail")
+
+
+def secondaries_cross(tag, x):
+    u, ru, c, rc, n1, n2 = x["u"], x["ru"], x["c"], x["rc"], x["n1"], x["n2"]
+    fu, fc = u.fabric.counters, c.fabric.counters
+    tv = {k: (u.vocab.counters.get(k, "ABSENT"), c.vocab.counters.get(k, "ABSENT"))
+          for k in _SECONDARY}
+    check(f"S5 {tag}: the secondaries continue too -- the child's per-flush bytes are the "
+          f"uninterrupted run's, and fab.blackout_windows and the tok.mint_wait / tok.bpt_tail "
+          f"readings equal its own",
+          tuple(rc.flush_bytes) == tuple(ru.flush_bytes[n1:n1 + n2]) and len(rc.flush_bytes) == n2
+          and fc.get("fab.blackout_windows", "ABSENT") == fu.get("fab.blackout_windows", "ABSENT")
+          and all(a == b for a, b in tv.values()),
+          f"flush_bytes equal {tuple(rc.flush_bytes) == tuple(ru.flush_bytes[n1:n1 + n2])}; "
+          f"blackout u {fu.get('fab.blackout_windows', 'ABSENT')} c "
+          f"{fc.get('fab.blackout_windows', 'ABSENT')}; {tv}")
 
 
 try:
-    same, cont, diff, bu, _, _ = continuation("plain", 60, 40)
+    same, cont, diff, bu, _, _, x = continuation("plain", 60, 40)
     check("S5 no act: the resumed run continues the uninterrupted run's losses exactly",
           same and len(cont) == 1, f"first differing window {diff}")
-    same, cont, diff, bu, bp, bc = continuation("mint_then_act", 135, 30, TOK_GROW_EVERY=30,
-                                               TOK_RETOK_EVERY=150)
+    secondaries_cross("plain", x)
+    same, cont, diff, bu, bp, bc, x = continuation("mint_then_act", 135, 30, TOK_GROW_EVERY=30,
+                                                  TOK_RETOK_EVERY=150)
     check("S5 a save between a mint and the next act continues exactly, the act inside the child",
           same and int(bp.get("loop.acts", 0)) == 0 and int(bc.get("loop.acts", 0)) >= 1,
           f"first differing {diff}; acts parent {bp.get('loop.acts')} child {bc.get('loop.acts')}")
-    same, cont, diff, bu, bp, bc = continuation("after_act", 135, 25, TOK_GROW_EVERY=30,
-                                               TOK_RETOK_EVERY=40)
+    secondaries_cross("mint_then_act", x)
+    # THE NON-ZERO RESUME KNOWN ANSWER: ids the parent minted before its save wait across it for the
+    # child's act, so their windows are counted only if the open births crossed in loop_carried.
+    _open = (x["p"].loop_carried or {}).get("mint_open") or []
+    _want = mint_wait_expected(x["u"].vocab, act_windows(x["ru"]))
+    _cv = x["c"].vocab.counters
+    check("S5 mint_then_act: the parent's open mint waits cross the save and close at the child's "
+          "act -- tok.mint_wait_windows and tok.mint_waited equal the count off Vocabulary.prov, "
+          "and part of that sum was waited before the save",
+          len(_open) > 0 and _want[0] > 0
+          and (_cv.get("tok.mint_wait_windows"), _cv.get("tok.mint_waited")) == _want,
+          f"{len(_open)} open at the save; prov gives {_want}; child "
+          f"{(_cv.get('tok.mint_wait_windows'), _cv.get('tok.mint_waited'))}")
+    same, cont, diff, bu, bp, bc, x = continuation("after_act", 135, 25, TOK_GROW_EVERY=30,
+                                                  TOK_RETOK_EVERY=40)
     check("S5 a save after an act continues exactly (the log replays the splice)",
           same and int(bp.get("loop.acts", 0)) >= 1,
           f"first differing {diff}; acts parent {bp.get('loop.acts')}")
-    same, cont, diff, bu, bp, bc = continuation("dropout", 135, 25, TOK_GROW_EVERY=30,
-                                               TOK_RETOK_EVERY=40, TOK_DROPOUT=0.1)
+    secondaries_cross("after_act", x)
+    # MID-BLACKOUT: the parent saved inside the act's cooldown, so the child's first check credits
+    # one window from the parent's last check (growth['checked_at'] crossed), not from the stamp.
+    _bw = blackout_expected(act_windows(x["ru"]), int(x["ru"].windows),
+                            int(x["u"].configs["FAB"].cooldown))
+    _pb = x["p"].fabric.counters.get("fab.blackout_windows")
+    check("S5 after_act: a save inside the blackout splits fab.blackout_windows between parent and "
+          "child and the two add to the uninterrupted run's",
+          _bw > 0 and 0 < _pb < _bw and x["c"].fabric.counters.get("fab.blackout_windows") == _bw,
+          f"expected {_bw}; parent {_pb}; child {x['c'].fabric.counters.get('fab.blackout_windows')}")
+    same, cont, diff, bu, bp, bc, x = continuation("dropout", 135, 25, TOK_GROW_EVERY=30,
+                                                  TOK_RETOK_EVERY=40, TOK_DROPOUT=0.1)
     check("S5 at TOK_DROPOUT > 0 the continuation is exact (the dropout stream crosses the save)",
           same and int(bp.get("loop.acts", 0)) >= 1, f"first differing {diff}")
+    secondaries_cross("dropout", x)
     # A NON-DEFAULT CONTINUATION REGIME (Q-OPT-12): a resume at the parent's horizon is not a session
     # boundary, so no regime is anchored and the continuation stays bit-exact.
-    same, cont, diff, bu, bp, bc = continuation("regime", 60, 40, OPT_LR_CONTINUE="rewarm")
+    same, cont, diff, bu, bp, bc, x = continuation("regime", 60, 40, OPT_LR_CONTINUE="rewarm")
     check("S5 under OPT_LR_CONTINUE=rewarm a same-length resume continues exactly (no boundary, so "
           "nothing is anchored)", same and len(cont) == 1, f"first differing window {diff}")
 finally:
@@ -426,6 +525,92 @@ _g8 = r8.report.get("OPT.counters", {}).get("opt.horizon.revise") \
 check("S8 ... and the report's Gate opt.horizon.revise says UNREACHABLE and names the lever",
       _g8 is not None and not _g8.reachable and "OPT_HORIZON_REVISE=False" in _g8.reason,
       _g8.line()[:160] if _g8 is not None else sorted(r8.report)[:8])
+
+# ---- S9: the S0b secondaries (Proposal 05 §8 1.3, Q-RUN-17) --------------------------------------
+# S4's two runs again: s/r act (TOK_GROW_EVERY=30 TOK_RETOK_EVERY=40), s0/r0 cannot. Each reading is
+# checked against a number computed here from something else the run left behind, and ABSENT (or 0
+# where the ledger says 'armed') on the arm that cannot reach it.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from test_baseline import COUNTER                                  # noqa: E402
+
+_acts = act_windows(r)
+_fc, _fc0 = s.fabric.counters, s0.fabric.counters
+_bw = blackout_expected(_acts, int(r.windows), int(s.configs["FAB"].cooldown))
+check("S9 fab.blackout_windows counts the windows each act's stamp held growth off (one per check "
+      "at batch 1, to the next act, the run's end or the cooldown); armed and 0 at "
+      "TOK_RETOK_EVERY=0, where no stamp arrives",
+      bool(_acts) and _bw > 0 and _fc.get("fab.blackout_windows") == _bw
+      and _fc0.get("fab.blackout_windows") == 0 and _fc0.get("fab.shift_notifications") == 0,
+      f"acts {_acts}, expected {_bw}, got {_fc.get('fab.blackout_windows')}; retok 0: "
+      f"{_fc0.get('fab.blackout_windows', 'ABSENT')} with "
+      f"{_fc0.get('fab.shift_notifications')} notification(s)")
+_tc, _tc0 = s.vocab.counters, s0.vocab.counters
+_mw = mint_wait_expected(s.vocab, _acts)
+check("S9 tok.mint_wait_windows / tok.mint_waited equal the count off Vocabulary.prov, every mint "
+      "is waited or stranded, and both are ABSENT at TOK_RETOK_EVERY=0 on one epoch",
+      (_tc.get("tok.mint_wait_windows"), _tc.get("tok.mint_waited")) == _mw and _mw[1] > 0
+      and _tc.get("tok.mint_waited") + stranded(r) == _tc.get("tok.mint")
+      and "tok.mint_wait_windows" not in _tc0 and "tok.mint_waited" not in _tc0,
+      f"prov {_mw}; counted {(_tc.get('tok.mint_wait_windows'), _tc.get('tok.mint_waited'))}; "
+      f"stranded {stranded(r)}, tok.mint {_tc.get('tok.mint')}; retok 0: "
+      f"{_tc0.get('tok.mint_wait_windows', 'ABSENT')}, {_tc0.get('tok.mint_waited', 'ABSENT')}")
+_bk, _bk0 = books(r), books(r0)
+_as, _ar = _bk.get("loop.act_seconds"), _bk.get("loop.act_remap_seconds")
+_leak = [f"{k}={v!r}" for k in ("loop.act_seconds", "loop.act_remap_seconds") for v in
+         (_bk.get(k), 0.0) if COUNTER.match(f"       {k:<44} {v}")]
+check("S9 loop.act_seconds and loop.act_remap_seconds are wall-clock floats (the act ran and its MEM "
+      "re-cut ran), neither can enter test_baseline's integer channel, and both are ABSENT at "
+      "TOK_RETOK_EVERY=0",
+      isinstance(_as, float) and 0.0 < _as < float(r.elapsed_s) and isinstance(_ar, float)
+      and _ar > 0.0 and int(s.store.counters.get("store.n_remap_events", 0)) >= 1 and not _leak
+      and "loop.act_seconds" not in _bk0 and "loop.act_remap_seconds" not in _bk0,
+      f"act {_as!r}, remap {_ar!r} of {r.elapsed_s:.1f}s; COUNTER matched {_leak}; retok 0: "
+      f"{sorted(k for k in _bk0 if k.startswith('loop.act'))}")
+_k0 = _acts[-1] * int(s.configs["LM"].ctx)
+_seg = s.segmentation
+_tail = round((len(s.stream.bytes) - _seg.byte_pos[_k0 + 1]) / (len(_seg.ids) - (_k0 + 1)), 6)
+_last = [w for w in r.warnings if w.startswith(f"loop: mid-epoch act at window {_acts[-1]}:")]
+check("S9 tok.bpt_tail is the last act's tail bytes per token, printed on that act's line beside "
+      "the tail before it and the build-time value; ABSENT where no act ran",
+      _tc.get("tok.bpt_tail") == _tail and len(_last) == 1 and f"-> {_tail:.4f}" in _last[0]
+      and "against the build-time" in _last[0] and "tok.bpt_tail" not in _tc0,
+      f"counter {_tc.get('tok.bpt_tail')!r}, recomputed {_tail}; "
+      f"{_last[0][-150:] if _last else 'no act line'}")
+for _tag, _res in (("an act-firing run", r), ("TOK_RETOK_EVERY=0", r0)):
+    _fb = _res.flush_bytes
+    check(f"S9 RunResult.flush_bytes on {_tag}: one positive entry per loss, summing to "
+          f"loop.bytes_scored (never_backward 0)",
+          len(_fb) == len(_res.loss_curve) == int(_res.flushes) and all(int(v) > 0 for v in _fb)
+          and _res.never_backward == 0 and sum(_fb) == books(_res).get("loop.bytes_scored"),
+          f"{len(_fb)} entries, {len(_res.loss_curve)} losses, {_res.flushes} flushes; sum "
+          f"{sum(_fb)} vs {books(_res).get('loop.bytes_scored')}")
+# THE DRIVER FLAG, through run.py, beside --loss-curve (whose format stays a flat list of floats).
+TMP9 = tempfile.mkdtemp(prefix="s9_fb_")
+try:
+    _env = {k: v for k, v in os.environ.items() if k in ("PATH", "HOME", "LANG", "PYTHONPATH")}
+    _env.update(BASE)
+    _env.update({"RUN_DEVICE": "cpu", "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1"})
+    _lc, _fbp = os.path.join(TMP9, "curve.json"), os.path.join(TMP9, "bytes.json")
+    _p = subprocess.run([sys.executable, "run.py", "--max-windows", "6", "--quiet", "--loss-curve",
+                         _lc, "--flush-bytes", _fbp], cwd=os.path.abspath(_ROOT), env=_env,
+                        capture_output=True, text=True, timeout=900)
+    def _jload(path):
+        if not os.path.isfile(path):
+            return None
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    _curve, _bytes = _jload(_lc), _jload(_fbp)
+    _printed = re.search(r"^\s+loop\.bytes_scored\s+(\d+)\s*$", _p.stdout, re.M)
+    check("S9 run.py --flush-bytes writes one positive int per --loss-curve entry, summing to the "
+          "printed loop.bytes_scored",
+          _p.returncode == 0 and isinstance(_curve, list) and isinstance(_bytes, list)
+          and len(_curve) == len(_bytes) == 6 and all(isinstance(v, float) for v in _curve)
+          and all(isinstance(v, int) and v > 0 for v in _bytes) and _printed is not None
+          and sum(_bytes) == int(_printed.group(1)),
+          f"rc {_p.returncode}; curve {len(_curve or [])}, bytes {_bytes}; printed "
+          f"{_printed.group(1) if _printed else None}; {_p.stderr[-200:] if _p.returncode else ''}")
+finally:
+    shutil.rmtree(TMP9, ignore_errors=True)
 
 print(f"\n=== {len(FAILS)} failing ===")
 sys.exit(1 if FAILS else 0)
