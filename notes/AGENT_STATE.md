@@ -149,6 +149,13 @@ Updated 2026-09-26 (the decision register, Proposal 05) on `rm-predict-DC` (the 
   items built and reviewed (1bd51c5, 5bffd3f, 7728cd4, e8628e4). The retok fleet (§8 2.1) is READY
   and handed to the owner (notes/OWNER_BRIEF.md test 2). While it runs: Stage 3 (SR0 and the
   scored-system join, NEW-03) is the next build; the spike test's offline analysis waits for the fleet.
+- 2026-09-27, later: the owner stopped the first retok attempt. Nothing showed it was alive (every
+  step's runs build ~15 s on the CPU before touching the GPU), and a second paste had started a second
+  fleet. cd70ed1 adds the operation layer: one fleet per OUT (an flock beside OUT, plus a /proc
+  scan), $OUT/STATE with a verdict (`bash gpu_world.sh --status`), a heartbeat every 30 s, a block for
+  every stop (`--stop`), a private code copy in $OUT/code, tools/fleet_dash.sh (the dashboard) and
+  tools/gpu_launch.sh (checks, then `--go`). The brief's test 2 block now uses the launcher, and the
+  fleet waits on the owner's relaunch.
 0. Proposal 05 §8 orders everything: Stage 0 (owner rulings O1-O20; the fleet-archive reads; the
    k0_nuis pair; phase-traversal resizing), then Stage 1's small builds (vocab `.prev` rotation, DOM
    Levels, counters, OPT_LR_CONTINUE 'as_logged', gpu_world.sh kept checkpoints) before the owner's
