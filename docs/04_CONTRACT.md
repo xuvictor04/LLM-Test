@@ -4378,7 +4378,8 @@ whose view (`TOK.view_of`) has not moved is refused as a no-op (`tok.retok_noop`
 the archive's 2.189 b/B case had 22 of 23 retoks adding zero tokens. `tok.retok_deferred` and
 `tok.retok_satisfied_by_roll` are gone: nothing is deferred. **The measurement below is superseded by
 the ship-rule measurement 03b §13 S0b names** (prequential bits/byte, `TOK_RETOK_EVERY` {0, 3000, 1000},
-3 paired seeds, non-inferiority against a nuisance-seed control); until it runs, `TOK_RETOK_EVERY`
+3 paired seeds, non-inferiority against a nuisance-seed control; that rule is now O14's choice read by
+the ε rule per phase, 2026-09-27, below); until it runs, `TOK_RETOK_EVERY`
 keeps its shipped 3000 and runs past window 3000 change. Driven: `tests/test_continuation.py` S4.
 
 **2026-09-27 (register PENDING-GPU-RETOK-FLEET, note retok fleet (1); Proposal 05 §8 1.5): THE
@@ -4478,6 +4479,62 @@ F12 (`keep_sweep` over staged rings: a checkpoint whose vocabulary has not lande
 rotated, two missed saves, a save landing between the look and the link) and F13 (a killed
 `run_job`'s watcher exits). Run against the script before this correction, F2, F4, F7, F10 and F13
 fail and F12 passes: the sweep was right and had no known answer.
+**2026-09-27 (Proposal 05 O14 and O2; §8 1.5's owed items): THE RETOK FLEET'S DECISION IS O14's
+CHOICE, READ BY THE ε RULE PER PHASE, AND ITS BLACKOUT IS SPLIT WHERE THE POOL FILLS.** `analyze_retok`
+read 03b's rule: M = max over seeds |k0 − k0_nuis|, a cadence non-inferior when arm − k0 ≤ M at every
+seed, the lower mean among those shipping, and 0 shipping when none was. That rule carries no owner
+words, fails a harmless 3000 about 30% of the time at 3 seeds by the register's simulation, and its
+"ships 0" branch would end the act the owner approved. **Ruling (O14, read by O2's ε rule).** The
+endpoint is prequential bits/byte per phase: the stream's N equal byte ranges of `DATA_STREAM_BYTES`
+(`data_plan`'s bounds, N off each log's `data.phase_entered` gate), each flush placed by its run's
+cumulative per-flush bytes (`run.py --flush-bytes`), and a phase's value sum(loss × LM_CTX) / ln 2 /
+sum(bytes) over its flushes, the whole-run formula restricted to them, so a run's phases average,
+byte-weighted, back to its whole-run value. A fleet without the per-flush bytes is read whole-run as one
+phase, and the analysis says so. Per cadence and phase, the paired differences arm − k0 give one-sided
+t bounds, mean ± t × sd/√n, with the Student-t quantile computed in the script (the regularized
+incomplete beta and bisection; the GPU box has no numpy or scipy promised). A cadence **FAILs** if some
+phase's lower bound exceeds ε, the t taken at 1 − a/N (Bonferroni over the phases) with Holm's a across
+the cadences (the stronger evidence of harm at 0.05/2, the other at 0.05, none after the first that
+does not FAIL); it **PASSes** if every phase's one-sided 95% upper bound is at most ε; otherwise, and
+always at n < 2, it is **UNRESOLVED**. ε is the script's `EPS`, default 0.05 bits/byte, printed, and
+read when the analysis runs, so `--analyze` can read a fleet against another ε. 3000 is the incumbent:
+1000 replaces it only if 1000 does not FAIL and (3000 FAILs, or the one-sided 95% upper bound of the
+whole-run paired 1000 − 3000 is below 0); otherwise 3000 stays, UNRESOLVED readings included, and an
+incumbent that never acted is not read, so it stays. 0 is never shipped by the rule: when every cadence
+FAILs the DECISION is ESCALATE (the act stays ON at 3000 until the owner answers; the remedy arms run
+next, register O14). M and the per-arm means are printed as "reported, decides nothing (O14)", and the
+run-to-run line stays. The block carries each cadence's per-phase means and bounds, its verdict, ε, n,
+and the choice with its reason. `RETOK_INCUMBENT` (default 3000) names the incumbent for operation checks
+at a shorter shape; `EPS` and `RETOK_INCUMBENT` are the script's own knobs, clear of every package
+prefix. **The blackout split (O14, "Holds meanwhile").** The 2026-09-24 archive's pool reached
+`FAB_SLOTS` in 20 of 21 runs (median window 6,501), and past that growth is held by the ceiling whatever
+the acts do, so an unsplit C13 alarm would blame the acts for the capacity ceiling.
+`fab.blackout_windows` is now reported before and after the first progress line with n_live ≥
+`FAB_SLOTS` (read off the growth gate's text, else EXTRA, else 4096; a pool that never fills is all
+before), each part as a share of its own windows, with n_live at the end per arm, and C13's alarm reads
+the part before only. The counter is cumulative and no log carries a per-window series, so the split is
+an estimate built from the act windows: each act blacks out up to `FAB_COOLDOWN` windows from its window
+(a later act restarting it, as `grow_check`'s latest stamp does), those windows are counted either side
+of the fill, and the counter is split in that proportion; the analysis says so. **Driven:**
+`tests/test_gpu_world.py` F14 (the script's own t quantile against t(0.95, 2) = 2.919986, t(0.95, 4) =
+2.131847, t(0.975, 2) = 4.302653 and six more), F15 (a harmless cadence PASSes, a harmful one FAILs, a
+noisy one and one at n < 2 are UNRESOLVED, one harmful phase is enough to FAIL, Holm's levels and its
+stop, on the rule and on synthetic per-phase fleets), F16 (1000 replacing 3000 on each ground, 3000
+staying on UNRESOLVED readings and on 1000's FAIL, ESCALATE, UNDECIDED, the whole truth table, and 0
+never an answer) and F17 (the split, `FAB_SLOTS` off the gate text, a pool that never fills, and the
+alarm on the part before); F1, F2, F4 and F6 now hold the new rule. **On CPU (operation only),**
+`EXP=retok DEVICE=cpu WINDOWS=200 SEEDS='0 1' PAR=3 EXTRA='TOK_GROW_EVERY=30 FAB_SLOTS=2100'
+RETOK_ARMS='40 20' RETOK_INCUMBENT=40`: 9 runs rc=0, 4 phases off the logs' gate, and each run's
+phases averaged back to its whole-run value (k0.s0 6.398962). Phases 1 and 2, before the first act,
+read differences of exactly 0 against k0 at both seeds; k40 and k20 read UNRESOLVED at n = 2 (k20's
+phase 4: +0.0668, bounds −3.1976 and +0.4715); k20 − k40 over the whole run read +0.0259 with upper
+bound +0.2017, so the DECISION was "stays 40". M read 0.15957, reported. The pool reached 2100 by the
+first progress line (window 101) in every run, before any act, so every blackout window fell after
+it: k40 read 0.0% before and 78.8% after, with no alarm, where its unsplit 38.1% would have sounded one.
+At `WINDOWS=300 FAB_SLOTS=2180 KEEP_CKPT=0` the pool filled at window 201, between the acts at 121 and
+161 and those at 201-281. k40.s0's 174 blacked-out windows (from the act at 121 to its 295th window,
+the estimate's total, equal to the counter in all four act runs) split into 80 before, 39.8% of the 201
+windows before the fill, and 94 after, 100% of those after. The alarm sounded on the 39.8%.
 
 **THE QUESTION AS IT STOOD.**
 

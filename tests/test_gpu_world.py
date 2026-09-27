@@ -12,15 +12,17 @@ archive by hand. A wrong margin, a verdict that drifts between ANALYSIS.txt and 
 too long to copy, or an archive that carries checkpoints would each cost a GPU fleet to find, so each
 is pinned here, on a fleet whose every number is chosen.
 
-  F1  THE SHIP RULE: prequential bits/byte is sum(curve) x 128 / ln 2 / loop.bytes_scored; M is the
-      largest |k0 - k0_nuis|; a cadence within M at every seed is NON-INFERIOR, one past it at one
-      seed FAILS, and the lower mean among the non-inferior ships.
+  F1  THE SHIP RULE: prequential bits/byte is sum(curve) x 128 / ln 2 / loop.bytes_scored; without
+      per-flush bytes the eps rule reads the whole run as one phase and says so; M, the largest
+      |k0 - k0_nuis|, is reported and decides nothing; two harmless cadences PASS, and 3000 stays
+      because 1000 is not significantly better (O14, 2026-09-27: it was 03b's per-seed margin rule).
   F2  THE BLOCK: stdout carries it between the two delimiters, it equals $OUT/PASTE_BACK.txt, it holds
       the commit, the dirty flag, the card, NCPU, PAR, MPS, every arm's bits/byte at every seed, the
-      margin, the DECISION with its B-provisional label and a failed run with its last log line --
-      and it stays within 80 lines at 16 seeds with the cooldown arm, and at 60 and 72 seeds, where it
-      cuts: the per-seed rows are condensed to the ones the rule turns on, and the margin, the
-      DECISION and the alarms survive (build 1.5's review: they were truncated from the end).
+      rule's rows, M, the DECISION with its B-provisional label and a failed run with its last log
+      line -- and it stays within 80 lines at 16 seeds with the cooldown arm, and at 60 and 72 seeds,
+      where it cuts: the per-seed rows are condensed to the flagged ones (setting M, a cadence's
+      largest difference), and the rule, M, the DECISION and the alarms survive (build 1.5's review:
+      they were truncated from the end).
   F3  THE RATES are arithmetic: windows/s per arm is the mean of N / X over the seeds' '=== N windows
       ... in Xs' lines, the aggregate is every run's windows over the fleet's recorded seconds, and the
       ETA against the wall is those seconds over the ETA line's windows / rate, which past 1.5x names
@@ -34,8 +36,9 @@ is pinned here, on a fleet whose every number is chosen.
       arms' rates carry the act's own share of loop time and qualify their distance from a saving k0.
   F5  THE ARCHIVE: <name minus _out>_<launch date>.tgz beside OUT, with SUMMARY, the block, logs and
       curves, no member under ckpt/ and none ending .pt or .pt.*; tools/read_fleet_archive.sh reads it.
-  F6  TODAY'S REFUSALS STAND: an act arm with no act at any seed is NO ACT FIRED and never ships; with
-      no k0_nuis no cadence can ship, and the block is still written.
+  F6  AN ACT ARM WITH NO ACT AT ANY SEED is NO ACT FIRED and never ships, and an incumbent that did not
+      act is not read, so it stays; with no k0_nuis, M is not formed and still decides nothing, the
+      DECISION reads, and the block is written.
   F7  THE KEPT-CHECKPOINT INDEX, on torch-saved stand-ins: a copy is named for the step it holds and
       is coherent when its merge count equals its vocabulary's entries, INCOHERENT otherwise; the run's
       final save is dropped; the act windows it covers are counted off the act arms' logs; the resume
@@ -61,6 +64,19 @@ is pinned here, on a fleet whose every number is chosen.
       Every kept checkpoint sits beside its own vocabulary.
   F13 THE WATCHER ENDS WITH ITS run_job: killed, the watcher takes a last look and exits (build 1.5's
       review: it polled for ever).
+  F14 THE STUDENT-t QUANTILE, the script's own (its eps-rule block, exec'd by its markers): pure python,
+      held to t(0.95, 2) = 2.919986, t(0.95, 4) = 2.131847, t(0.975, 2) = 4.302653 and more.
+  F15 THE eps RULE (Proposal 05 O2, O14), on its own and on synthetic per-phase fleets: a harmless
+      cadence PASSes, a harmful one FAILs, a noisy one and one at n < 2 are UNRESOLVED; the Bonferroni
+      split over phases and Holm across the cadences (the stronger evidence at alpha/2, the other at
+      alpha, none after the first that does not FAIL); the block carries each arm's per-phase means and
+      bounds, its verdict, eps and n.
+  F16 O14's CHOICE: 1000 replaces 3000 when it is significantly better or when 3000 FAILs; 3000 stays
+      on UNRESOLVED readings and when 1000 FAILs; every cadence FAILing is ESCALATE; no act is
+      UNDECIDED; the whole truth table, and 0 is never an answer.
+  F17 THE BLACKOUT SPLIT where n_live first reaches FAB_SLOTS (O14): an estimate from the act windows and
+      the cooldown, each part over its own windows, FAB_SLOTS off the gate text, a pool that never fills
+      read as all before, n_live at the end per arm; C13's alarm reads the before-part only.
 """
 import glob
 import json
@@ -164,8 +180,10 @@ def preq(curve, nbytes):
 
 
 def run(out, name, seed, bpb, *, n=100, nbytes=18900, secs=10.0, win=None, acts=None, at=(),
-        counters=None, stopped=False, rc=0, last=None, curve=True, fbytes=None, tail=True, losses=None):
-    """One run's log, curve and _done.txt line. Returns the curve written (None without one)."""
+        counters=None, stopped=False, rc=0, last=None, curve=True, fbytes=None, tail=True, losses=None,
+        lines=(), cooldown=400):
+    """One run's log, curve and _done.txt line. Returns the curve written (None without one). `lines`
+    are further log lines (progress lines, gates), written after the counters."""
     tag = f"{name}.s{seed}"
     win = n if win is None else win
     c = curve_for(bpb, n, nbytes) if (curve and bpb is not None) else None
@@ -189,7 +207,8 @@ def run(out, name, seed, bpb, *, n=100, nbytes=18900, secs=10.0, win=None, acts=
     for k, v in cc.items():
         L.append(f"       {k:<44} {v}")
     L.append("       gate:fab.growth_blackout                     ('armed-but-zero', \"'3 notification(s)' vs "
-             "'cooldown=400 windows'\")")
+             f"'cooldown={cooldown} windows'\")")
+    L.extend(lines)
     if last:
         L.append(last)
     write(os.path.join(out, "logs", tag + ".log"), "\n".join(L) + "\n")
@@ -235,15 +254,27 @@ try:
     check("F1 --analyze exits 0 on a synthetic retok fleet", p.returncode == 0, p.stderr[-600:])
     check("F1 bits/byte is sum(curve) x 128 / ln 2 / loop.bytes_scored, as printed on the RUNS line",
           re.search(rf"k0\s+s0\s+100 flushes .*preq {re.escape(str(want))}\b", a1) is not None, f"want {want}")
-    check("F1 M is the largest |k0 - k0_nuis| (0.0001)",
-          "=== MARGIN M = max over 2 seed(s) |k0 - k0_nuis| = 0.00010 bits/byte ===" in a1)
-    check("F1 k3000 at -0.0002 every seed is NON-INFERIOR at every seed",
-          re.search(r"k3000\s+- k0 per seed: s0 -0\.00020\s+s1 -0\.00020 .*NON-INFERIOR at every seed", a1) is not None)
-    check("F1 k1000 at +0.0003 at s1 FAILS the margin",
-          re.search(r"k1000\s+- k0 per seed: s0 \+0\.00005\s+s1 \+0\.00030 .*FAILS the margin", a1) is not None)
-    check("F1 the lower mean among the non-inferior ships: TOK_RETOK_EVERY ships 3000",
-          "=== DECISION: TOK_RETOK_EVERY ships 3000 (lowest mean among the non-inferior; negative = the act "
-          "helps) ===" in a1)
+    check("F1 M is the largest |k0 - k0_nuis| (0.0001), reported beside the rule and deciding nothing (O14)",
+          "=== REPORTED, DECIDES NOTHING (O14): M = 0.00010 bits/byte (max over 2 seed(s) |k0 - k0_nuis|) ===" in a1
+          and re.search(r"k1000\s+- k0 per seed: s0 \+0\.00005\s+s1 \+0\.00030\s+mean \+0\.00018$", a1, re.M) is not None)
+    check("F1 without per-flush bytes the rule reads the whole run as a single phase, and says so",
+          "endpoint prequential bits/byte per phase: the WHOLE RUN as a single phase, because the per-flush bytes "
+          "(run.py --flush-bytes) are absent for k0.s0, k0.s1, k1000.s0, k1000.s1, k3000.s0, k3000.s1 ===" in a1)
+    # k3000 - k0 is -0.0002 at both seeds (sd 0: both bounds are the mean); k1000 - k0 is +0.00005 and
+    # +0.0003: mean 0.000175, SE 0.000125, one-sided 95% upper 0.000175 + t(0.95, 1) x 0.000125.
+    _up = 0.000175 + 6.313752 * 0.000125
+    check("F1 by the eps rule both cadences PASS at 2 seeds: every upper bound is within eps 0.05",
+          re.search(r"^  k3000 n=2 a=0\.0\d+: p1 -0\.0002 \[-0\.0002,-0\.0002\] -> PASS$", a1, re.M) is not None
+          and re.search(r"^  k1000 n=2 a=0\.0\d+: p1 \+0\.0002 \[-0\.\d+," + re.escape(f"{_up:+.4f}") + r"\] -> PASS$",
+                        a1, re.M) is not None,
+          str([l for l in a1.splitlines() if "-> " in l]))
+    # 1000 - 3000 whole run: +0.00025 and +0.0005, mean 0.000375, SE 0.000125.
+    _up13 = 0.000375 + 6.313752 * 0.000125
+    check("F1 3000 stays: neither FAILs, and 1000 is not significantly better (its whole-run upper bound "
+          "against 3000 is above 0)",
+          "=== DECISION: TOK_RETOK_EVERY stays 3000 (the incumbent; 0 is never shipped by the rule): k3000 PASS "
+          f"against k0; k1000 PASS, the whole-run 1000 - 3000 upper bound {_up13:+.4f} is not below 0 (ε 0.05 "
+          "bits/byte, n 2 seed(s)) ===" in a1, str([l for l in a1.splitlines() if "DECISION" in l]))
 
     # ---- F2: the block --------------------------------------------------------------------------
     b1 = block_of(p.stdout)
@@ -269,15 +300,18 @@ try:
           f"{len(rows)} seed rows")
     check("F2 the block holds the commit, the dirty flag, the card, NCPU, PAR and MPS",
           all(x in t2 for x in ("commit abc1234", "DIRTY", "NVIDIA H200", "NCPU 20", "PAR 12", "MPS on")))
-    check("F2 the block holds the margin and the DECISION with its B-provisional label",
-          "MARGIN M = 0.00010" in t2 and re.search(r"^DECISION: .*\[B-provisional\]$", t2, re.M) is not None)
+    check("F2 the block holds the rule's rows, M reported, and the DECISION with its B-provisional label",
+          "RULE (O14, O2): ε 0.05 bits/byte, incumbent 3000" in t2
+          and re.search(r"^  k1000 n=16 a=[\d.]+: p1 .* -> PASS$", t2, re.M) is not None
+          and "reported, decides nothing (O14): M = 0.00010 bits/byte" in t2
+          and re.search(r"^DECISION: TOK_RETOK_EVERY stays 3000 .*\[B-provisional\]$", t2, re.M) is not None)
     check("F2 the block names a failed run with its last log line",
           "FAILED k0_rerun.s0 rc=1: RuntimeError: boom at window 1234" in t2)
     check("F2 the cooldown arm is reported beside the rule, never as a ship candidate",
           "(beside the rule)" in t2 and "ships 1000_cd100" not in t2)
     # PAST ABOUT 60 SEEDS THE PER-SEED ROWS ARE CONDENSED, NOT THE VERDICT TRUNCATED (build 1.5's
-    # review). Seed 7's nuisance pair sets M (0.0003) and k1000 fails it at seed 11 (+0.0005): those
-    # two rows are what the rule turns on. Every other seed is within M at every act arm.
+    # review). Seed 7's nuisance pair sets M (0.0003) and seed 11 holds k1000's largest difference
+    # (+0.0005): those rows are flagged, with s0, where k3000's equal differences first reach their largest.
     for nseeds in (60, 72):
         o2b = os.path.join(TMP, f"f2b_{nseeds}", "gpu_retok_out")
         retok_fleet(o2b, seeds=tuple(range(nseeds)), cd=True, nuisv={7: 1.0003}, k1000={11: 1.0005})
@@ -289,16 +323,18 @@ try:
               and "cut to fit 80 lines" in t2b and "per-seed rows (condensed)" in t2b
               and b2b[-2].startswith("archive: ") and b2b[-1] == "==== END ====", f"{len(b2b)} lines")
         seedrows = re.findall(r"^  s(\d+) ", t2b, re.M)
-        more = re.search(r"^  \.\.\. (\d+) more seed row\(s\), each within the margin at every act arm: in "
-                         r"ANALYSIS\.txt's RUNS$", t2b, re.M)
-        check(f"F2 at {nseeds} seeds the per-seed rows keep the one that sets M (s7) and the one that fails "
-              f"it (s11), and count the rest",
+        more = re.search(r"^  \.\.\. (\d+) more seed row\(s\), none setting M, holding a cadence's largest "
+                         r"difference or missing a reading: in ANALYSIS\.txt's RUNS$", t2b, re.M)
+        check(f"F2 at {nseeds} seeds the per-seed rows keep the one that sets M (s7) and k1000's largest "
+              f"difference (s11), and count the rest",
               "7" in seedrows and "11" in seedrows and more is not None
               and int(more.group(1)) + len(seedrows) == nseeds, f"{len(seedrows)} rows; {more and more.group(0)}")
-        check(f"F2 at {nseeds} seeds the margin, both verdicts, the DECISION, the absent line and both "
+        check(f"F2 at {nseeds} seeds M, both cadences' rule rows, the DECISION, the absent line and both "
               f"BLACKOUT ALARMs survive the cut",
-              "MARGIN M = 0.00030" in t2b and "k1000 - k0 mean" in t2b and "FAILS the margin" in t2b
-              and re.search(r"^DECISION: TOK_RETOK_EVERY ships 3000 .*\[B-provisional\]$", t2b, re.M) is not None
+              "M = 0.00030 bits/byte" in t2b and "k1000 - k0 mean" in t2b
+              and re.search(rf"^  k1000 n={nseeds} a=[\d.]+: p1 .* -> PASS$", t2b, re.M) is not None
+              and re.search(rf"^  k3000 n={nseeds} a=[\d.]+: p1 .* -> PASS$", t2b, re.M) is not None
+              and re.search(r"^DECISION: TOK_RETOK_EVERY stays 3000 .*\[B-provisional\]$", t2b, re.M) is not None
               and "absent (§8 1.3 not in this tree)" in t2b
               and "BLACKOUT ALARM (C13): k3000" in t2b and "BLACKOUT ALARM (C13): k1000" in t2b,
               str([l for l in b2b if "DECISION" in l or "ALARM" in l]))
@@ -357,8 +393,8 @@ try:
     b4 = "\n".join(block_of(p4.stdout) or [])
     check("F4 with fab.blackout_windows at 45% of k1000's windows the BLACKOUT ALARM sounds with the "
           "COOLDOWN_ARM follow-up, in ANALYSIS and in the block",
-          "BLACKOUT ALARM (C13): k1000 blacks out 45.0% of its windows, above 20%: re-run with "
-          "COOLDOWN_ARM=100 (adds k1000_cd100" in a4 and "BLACKOUT ALARM (C13): k1000" in b4
+          "BLACKOUT ALARM (C13): k1000 blacks out 45.0% of its windows before the pool fills, above 20%: re-run "
+          "with COOLDOWN_ARM=100 (adds k1000_cd100" in a4 and "BLACKOUT ALARM (C13): k1000" in b4
           and "BLACKOUT ALARM (C13): k3000" not in a4)
     check("F4 the upper bound beside it is 1 x 400 / 1000 = 40.0%",
           "fab.shift_notifications x cooldown 400 / windows = 40.0%" in a4)
@@ -458,17 +494,21 @@ try:
     p6 = gw("--analyze", EXP="retok", OUT=o6)
     a6 = open(os.path.join(o6, "ANALYSIS.txt")).read()
     check("F6 an act arm with no act at any seed is NO ACT FIRED and never ships (a lower reading does not "
-          "make it a candidate)", "k3000  NO ACT FIRED at any seed" in a6
-          and "=== DECISION: TOK_RETOK_EVERY ships 1000" in a6)
+          "make it a candidate); the incumbent 3000 did not act, so it is not read and stays",
+          "k3000  NO ACT FIRED at any seed" in a6 and re.search(r"^  k1000 n=2 a=[\d.]+: .* -> PASS$", a6, re.M)
+          and "=== DECISION: TOK_RETOK_EVERY stays 3000 (the incumbent; 0 is never shipped by the rule): k3000 did "
+          "not act in these runs, so the incumbent is not read; k1000 PASS, not compared with the incumbent" in a6,
+          str([l for l in a6.splitlines() if "DECISION" in l]))
     o6b = os.path.join(TMP, "f6b", "gpu_retok_out")
     retok_fleet(o6b, nuis=False)
     p6b = gw("--analyze", EXP="retok", OUT=o6b)
     a6b = open(os.path.join(o6b, "ANALYSIS.txt")).read()
-    check("F6 with no k0_nuis no cadence can ship, the later sections still print, and the block is written",
-          p6b.returncode == 0 and "!! no paired k0 / k0_nuis seeds: the margin cannot be formed and no cadence "
-          "can ship" in a6b and "=== DECISION" not in a6b and "=== RATES" in a6b
+    check("F6 with no k0_nuis M is not formed and still decides nothing: the DECISION reads, the later sections "
+          "print, and the block is written",
+          p6b.returncode == 0 and "=== REPORTED, DECIDES NOTHING (O14): M cannot be formed: no paired k0 / k0_nuis "
+          "seeds ===" in a6b and "=== DECISION: TOK_RETOK_EVERY stays 3000" in a6b and "=== RATES" in a6b
           and os.path.exists(os.path.join(o6b, "PASTE_BACK.txt"))
-          and "DECISION: none -- no paired k0 / k0_nuis seeds" in open(os.path.join(o6b, "PASTE_BACK.txt")).read())
+          and "DECISION: TOK_RETOK_EVERY stays 3000" in open(os.path.join(o6b, "PASTE_BACK.txt")).read())
 
     # ---- F7: the kept-checkpoint index, on torch-saved stand-ins ---------------------------------
     import torch
@@ -889,6 +929,263 @@ esac
     check("F13 a watcher whose run_job was killed takes a last look and exits (it used to poll for ever)",
           "WATCHER-GONE" in r13.stdout and kept_pairs().get("ckpt-11") == "vocab-11",
           f"{r13.stdout.strip()}; {kept_pairs()}")
+
+    # ---- F14: the Student-t quantile, the script's own ----------------------------------------------
+    # THE eps RULE'S BLOCK, CUT OUT OF THE SCRIPT BY ITS MARKERS AND EXEC'D: what is tested is the code the
+    # GPU box runs, with `math` only (the box's python has no numpy or scipy promised).
+    _blk = re.search(r"^# >>> THE ε RULE.*?^# <<< THE ε RULE$", open(SCRIPT).read(), re.M | re.S)
+    ER = {"math": math}
+    exec(_blk.group(0), ER)
+    tq = ER["t_quantile"]
+    known = {(0.95, 2): 2.919986, (0.95, 4): 2.131847, (0.975, 2): 4.302653, (0.95, 1): 6.313752,
+             (0.975, 1): 12.706205, (0.99, 10): 2.763769, (0.95, 30): 1.697261, (0.995, 3): 5.840909,
+             (0.05, 4): -2.131847}
+    got = {k: tq(*k) for k in known}
+    check("F14 t_quantile holds the known values to 1e-6: t(0.95,2) 2.919986, t(0.95,4) 2.131847, t(0.975,2) "
+          "4.302653, and six more (df 1 to 30, both tails)",
+          all(abs(got[k] - v) < 1e-6 for k, v in known.items()),
+          str({k: round(v, 7) for k, v in got.items() if abs(v - known[k]) >= 1e-6}))
+    check("F14 ... and at a large df it approaches the normal quantile (t(0.95, 1e6) = 1.644855)",
+          abs(tq(0.95, 1e6) - 1.644855) < 1e-5 and abs(tq(0.5, 3)) < 1e-12)
+    _df2 = [(pp, (2 * pp - 1) / math.sqrt(2 * pp * (1 - pp))) for pp in (0.9, 0.99375, 0.999)]
+    check("F14 ... and at df 2 it equals the closed form (2p - 1) / sqrt(2p(1 - p)), deep in the tail too "
+          "(p 0.99375 is the Holm-Bonferroni level at a/2 over 4 phases)",
+          all(abs(tq(pp, 2) - want_) < 1e-7 * want_ for pp, want_ in _df2), str([(pp, tq(pp, 2)) for pp, _ in _df2]))
+
+    # ---- F15: the eps rule ---------------------------------------------------------------------------
+    rule, better_than, choose = ER["eps_rule"], ER["better_than"], ER["choose"]
+    HARMLESS = [0.001, -0.002, 0.0005]                  # mean -0.0002: the upper bound is well inside 0.05
+    HARMFUL = [0.30, 0.31, 0.29]                        # the lower bound, even at t(0.99375, 2), is above 0.05
+    NOISY = [0.10, -0.05, 0.02]                         # neither bound clears 0.05
+    r15 = rule({"kH": [HARMLESS] * 4, "kX": [HARMFUL] * 4, "kN": [NOISY] * 4, "k1": [[0.001]] * 4}, 0.05)
+    check("F15 a harmless cadence PASSes, a harmful one FAILs, a noisy one is UNRESOLVED, one at n < 2 is "
+          "UNRESOLVED (no bound can be formed)",
+          [r15[a]["verdict"] for a in ("kH", "kX", "kN", "k1")] == ["PASS", "FAIL", "UNRESOLVED", "UNRESOLVED"]
+          and r15["k1"]["phases"][0][2:] == (None, None), str({a: r15[a]["verdict"] for a in r15}))
+    _m, _se = sum(NOISY) / 3, math.sqrt(sum((x - sum(NOISY) / 3) ** 2 for x in NOISY) / 2 / 3)
+    _lv = r15["kN"]["level"]
+    check("F15 the bounds are mean -+ t x sd / sqrt(n): the upper at t(0.95, n-1), the lower at t(1 - a/N, n-1) "
+          "with Holm's a for the arm and N = 4 phases",
+          all(abs(lo - (_m - tq(1 - _lv / 4, 2) * _se)) < 1e-12 and abs(up - (_m + tq(0.95, 2) * _se)) < 1e-12
+              for _, _, lo, up in r15["kN"]["phases"]), str(r15["kN"]))
+    # HOLM: the stronger evidence of harm is tested at alpha/2, the other at alpha; and once one does
+    # not FAIL, none after it can. kA's one-phase p is 0.03 and kB's 0.04, by construction (sd = 0.01).
+    def at_p(pv, df=2):
+        m_ = 0.05 + tq(1 - pv, df) * 0.01 / math.sqrt(3)
+        return [m_ - 0.01, m_, m_ + 0.01]
+    r15b = rule({"kA": [at_p(0.03)], "kB": [at_p(0.04)]}, 0.05)
+    r15c = rule({"kB": [at_p(0.04)]}, 0.05)
+    r15d = rule({"kA": [HARMFUL], "kB": [[0.20, 0.22, 0.18]]}, 0.05)
+    check("F15 Holm across the cadences: the arm with the stronger evidence is tested at alpha/2, the other at "
+          "alpha, and both FAIL when both clear their levels",
+          (r15d["kA"]["level"], r15d["kB"]["level"]) == (0.025, 0.05)
+          and [r15d[a]["verdict"] for a in ("kA", "kB")] == ["FAIL", "FAIL"], str(r15d))
+    check("F15 ... Holm stops at the first arm that does not FAIL: kB (p 0.04) FAILs alone at alpha 0.05, but "
+          "beside kA (p 0.03, not FAILing at 0.025) it is UNRESOLVED, and says why",
+          r15c["kB"]["verdict"] == "FAIL" and r15b["kA"]["verdict"] == "UNRESOLVED"
+          and r15b["kB"]["verdict"] == "UNRESOLVED" and "Holm stopped" in r15b["kB"]["note"], str(r15b))
+    r15e = rule({"kA": [HARMLESS, HARMLESS, HARMLESS, HARMFUL]}, 0.05)
+    check("F15 one harmful phase is enough to FAIL, and every phase must be within eps to PASS",
+          r15e["kA"]["verdict"] == "FAIL" and rule({"kA": [HARMLESS] * 3 + [NOISY]}, 0.05)["kA"]["verdict"]
+          == "UNRESOLVED")
+
+    # A SYNTHETIC PER-PHASE FLEET: 4 phases of 10 flushes of 94,500 bytes (3,780,000, the summary's
+    # stream), each phase's losses chosen so its bits/byte is exact; k0 at 2.0, 2.1, 2.2, 2.3 plus a
+    # per-seed offset, each arm at k0 plus its own per-seed difference.
+    FB, PER = 94500, 10
+    K0 = {0: 0.0, 1: 0.01, 2: -0.01}
+
+    def run_ph(out, name, seed, ph, **kw):
+        losses = [ph[k] * LN2 * FB / CTX for k in range(len(ph)) for _ in range(PER)]
+        n = PER * len(ph)
+        return run(out, name, seed, None, n=n, win=kw.pop("win", 20000), nbytes=FB * n, losses=losses,
+                   fbytes=[FB] * n, lines=["       gate:data.phase_entered                      ('fired', '4 vs 4')"]
+                   + list(kw.pop("lines", ())), **kw)
+
+    def ph_fleet(out, arms, seeds=(0, 1, 2), acted=True):
+        """arms: {name: {seed: difference from k0 (every phase), or a list per phase}}."""
+        summary(out, seeds=" ".join(map(str, seeds)))
+        for s in seeds:
+            base = [2.0 + 0.1 * k + K0[s] for k in range(4)]
+            run_ph(out, "k0", s, base)
+            run_ph(out, "k0_nuis", s, [b + 0.001 * (s + 1) for b in base])
+            for a, d in arms.items():
+                dd = d[s] if isinstance(d[s], list) else [d[s]] * 4
+                run_ph(out, a, s, [b + x for b, x in zip(base, dd)], acts=(3 if acted else 0), at=(3001,))
+        return gw("--analyze", EXP="retok", OUT=out)
+
+    def per_seed(xs):
+        return dict(enumerate(xs))
+
+    def ana(out):
+        return (open(os.path.join(out, "ANALYSIS.txt")).read(), open(os.path.join(out, "PASTE_BACK.txt")).read())
+
+    ALL = {}                                             # every analysis and block, for F16's "never 0"
+    o15 = os.path.join(TMP, "f15", "gpu_retok_out")
+    p15 = ph_fleet(o15, {"k3000": per_seed(HARMLESS), "k1000": per_seed(NOISY)})
+    a15, b15 = ana(o15)
+    ALL["f15"] = a15 + b15
+    check("F15 on a fleet, each phase's paired difference is read off the per-flush bytes: 4 phases from the "
+          "logs' data.phase_entered gate, the harmless k3000 PASSes, the noisy k1000 is UNRESOLVED",
+          p15.returncode == 0 and "4 phases, DATA_STREAM_BYTES=3780000 cut into equal byte ranges (N from the "
+          "logs' data.phase_entered gate)" in a15
+          and re.search(r"^  k3000 n=3 a=[\d.]+: p1 -0\.0002 \[-0\.\d+,\+0\.\d+\] p2 -0\.0002 .* -> PASS$", a15, re.M)
+          and re.search(r"^  k1000 n=3 a=[\d.]+: p1 \+0\.0233 \[-0\.\d+,\+0\.1\d+\] .* -> UNRESOLVED$", a15, re.M),
+          str([l for l in a15.splitlines() if "-> " in l]) + p15.stderr[-300:])
+    check("F15 the block carries the rule: eps, the incumbent, each arm's n, Holm level, per-phase mean and "
+          "bounds, and its verdict, with the DECISION carrying eps and n",
+          "RULE (O14, O2): ε 0.05 bits/byte, incumbent 3000; per phase (4), arm - k0 paired over seeds" in b15
+          and len(re.findall(r"^  k(?:3000|1000) n=3 a=[\d.]+: p1 \S+ \[\S+\] p2 \S+ \[\S+\] p3 \S+ \[\S+\] p4 \S+ "
+                             r"\[\S+\] -> (?:PASS|UNRESOLVED)$", b15, re.M)) == 2
+          and re.search(r"^DECISION: .*\(ε 0\.05 bits/byte, n 3 seed\(s\)\)  \[B-provisional\]$", b15, re.M),
+          str([l for l in b15.splitlines() if "->" in l or "DECISION" in l]))
+    o15b = os.path.join(TMP, "f15b", "gpu_retok_out")
+    ph_fleet(o15b, {"k3000": per_seed(HARMLESS), "k1000": {s: [HARMLESS[s]] * 3 + [HARMFUL[s]] for s in (0, 1, 2)}})
+    a15b, b15b = ana(o15b)
+    ALL["f15b"] = a15b + b15b
+    check("F15 a cadence harmful in one phase only FAILs by that phase (p4), read on the fleet",
+          re.search(r"^  k1000 n=3 a=0\.025: p1 -0\.0002 .* p4 \+0\.3000 \[\+0\.2\d+,\+0\.3\d+\] -> FAIL$", a15b, re.M)
+          is not None, str([l for l in a15b.splitlines() if "-> " in l]))
+    o15c = os.path.join(TMP, "f15c", "gpu_retok_out")
+    ph_fleet(o15c, {"k3000": per_seed(HARMLESS), "k1000": per_seed(HARMLESS)}, seeds=(0,))
+    a15c, b15c = ana(o15c)
+    ALL["f15c"] = a15c + b15c
+    check("F15 at one seed every cadence is UNRESOLVED and 3000 stays",
+          re.search(r"^  k3000 n=1 a=[\d.]+: p1 \+0\.0010 \[-\] .* -> UNRESOLVED", a15c, re.M)
+          and re.search(r"^  k1000 n=1 .* -> UNRESOLVED", a15c, re.M)
+          and "=== DECISION: TOK_RETOK_EVERY stays 3000" in a15c, str([l for l in a15c.splitlines() if "->" in l]))
+
+    # ---- F16: O14's choice ------------------------------------------------------------------------------
+    CASES = {
+        # name: (k3000's differences, k1000's, the DECISION's start)
+        "replace_better": ([0.010, 0.012, 0.011], [0.000, 0.001, -0.001],
+                           "TOK_RETOK_EVERY ships 1000, replacing the incumbent 3000: k1000 PASS against k0, and the "
+                           "whole-run 1000 - 3000 upper bound "),
+        "replace_3000_fails": (HARMFUL, NOISY,
+                               "TOK_RETOK_EVERY ships 1000, replacing the incumbent 3000: k1000 UNRESOLVED against "
+                               "k0, and k3000 FAILs"),
+        "stays_1000_unresolved": (HARMLESS, NOISY,
+                                  "TOK_RETOK_EVERY stays 3000 (the incumbent; 0 is never shipped by the rule): k3000 "
+                                  "PASS against k0; k1000 UNRESOLVED, the whole-run 1000 - 3000 upper bound "),
+        "stays_3000_unresolved": (NOISY, HARMLESS,
+                                  "TOK_RETOK_EVERY stays 3000 (the incumbent; 0 is never shipped by the rule): k3000 "
+                                  "UNRESOLVED against k0; k1000 PASS, the whole-run 1000 - 3000 upper bound "),
+        "stays_1000_fails": (HARMLESS, HARMFUL,
+                             "TOK_RETOK_EVERY stays 3000 (the incumbent; 0 is never shipped by the rule): k3000 PASS "
+                             "against k0; k1000 FAILs"),
+        "escalate": ([0.20, 0.22, 0.21], HARMFUL,
+                     "ESCALATE: every cadence FAILs against k0 by the ε rule; the act stays ON at 3000 until the "
+                     "owner answers; the remedy arms run next (register O14) (ε 0.05 bits/byte, n 3 seed(s))"),
+    }
+    for cname, (d3, d1, want_) in CASES.items():
+        oc = os.path.join(TMP, "f16_" + cname, "gpu_retok_out")
+        pc = ph_fleet(oc, {"k3000": per_seed(d3), "k1000": per_seed(d1)})
+        ac, bc = ana(oc)
+        ALL[cname] = ac + bc
+        dl = [l for l in ac.splitlines() if l.startswith("=== DECISION: ")]
+        check(f"F16 {cname}: the DECISION reads '{want_[:60]}...', in ANALYSIS and in the block",
+              pc.returncode == 0 and len(dl) == 1 and dl[0].startswith("=== DECISION: " + want_)
+              and f"DECISION: {dl[0][len('=== DECISION: '):-len(' ===')]}  [B-provisional]" in bc,
+              str(dl) + pc.stderr[-300:])
+    # 1000 - 3000, whole run, in "replace_better": -0.010, -0.011, -0.012 (each phase alike).
+    _d = [-0.010, -0.011, -0.012]
+    _up16 = -0.011 + tq(0.95, 2) * math.sqrt(sum((x + 0.011) ** 2 for x in _d) / 2 / 3)
+    check("F16 'significantly better' is the one-sided 95% upper bound of the whole-run 1000 - 3000, below 0",
+          f"k1000 - k3000 whole run: mean -0.0110, one-sided 95% upper {_up16:+.4f} (n=3): below 0, significantly "
+          f"better" in ALL["replace_better"] and f"upper bound {_up16:+.4f} is below 0" in ALL["replace_better"])
+    o16u = os.path.join(TMP, "f16_undecided", "gpu_retok_out")
+    ph_fleet(o16u, {"k3000": per_seed(HARMLESS), "k1000": per_seed(HARMLESS)}, acted=False)
+    a16u, b16u = ana(o16u)
+    ALL["undecided"] = a16u + b16u
+    check("F16 with no act at any cadence the DECISION is UNDECIDED",
+          "=== DECISION: UNDECIDED -- no cadence acted in these runs" in a16u and "k3000  NO ACT FIRED" in a16u)
+    # THE WHOLE TRUTH TABLE, on choose() itself: every verdict pair and both 'better' readings.
+    table_ok, bad_rows = True, []
+    for v3 in ("PASS", "FAIL", "UNRESOLVED"):
+        for v1 in ("PASS", "FAIL", "UNRESOLVED"):
+            for bt_ in (False, True):
+                V = {"k3000": {"verdict": v3}, "k1000": {"verdict": v1}}
+                bt3 = {"k1000": (3, -0.01, -0.001 if bt_ else 0.002, bt_, 0.05)}
+                kind_, arm_, _why = choose(["k3000", "k1000"], V, bt3, "k3000")
+                want_k = ("escalate" if v3 == v1 == "FAIL" else
+                          "replace" if v1 != "FAIL" and (v3 == "FAIL" or bt_) else "stays")
+                want_a = {"escalate": None, "replace": "k1000", "stays": "k3000"}[want_k]
+                if (kind_, arm_) != (want_k, want_a) or arm_ in ("k0", "0"):
+                    table_ok = False
+                    bad_rows.append((v3, v1, bt_, kind_, arm_))
+    check("F16 O14's truth table on choose(): ESCALATE iff both FAIL; 1000 replaces 3000 iff 1000 does not FAIL "
+          "and (3000 FAILs or 1000 is significantly better); otherwise 3000 stays; 0 is never an answer",
+          table_ok and choose([], {}, {}, "k3000")[0] == "undecided", str(bad_rows))
+    never0 = {k: re.findall(r"(?:ships|stays) (\d+)", v) for k, v in ALL.items()}
+    check("F16 across every fleet above no DECISION ships or keeps 0",
+          all("0" not in v for v in never0.values()) and not any("ships 0" in v for v in ALL.values()), str(never0))
+
+    # ---- F17: the blackout split ---------------------------------------------------------------------
+    # 2000 windows, cooldown 400. k1000: acts at 101, 601, 1201, 1801, blacked out [101,501) [601,1001)
+    # [1201,1601) [1801,2000) = 1399 windows; the pool reaches FAB_SLOTS 4096 (the default: no gate text)
+    # at the progress line of window 1001, so 800 of them are before it (of 1001 windows) and 599 after
+    # (of 999). k3000: FAB_SLOTS 3000 off the growth gate's text, reached at window 201, acts at 1101 and
+    # 1601: all 799 after; unsplit it is 40% of the run, but its before-part is 0. k1000_cd100: cooldown
+    # 100, a pool that never fills (4000 of 4096), 350 windows: all before, 17.5%.
+    o17 = os.path.join(TMP, "f17", "gpu_retok_out")
+    summary(o17, seeds="0", windows=2000, stream=378000)
+
+    def prog(fill_at, top):
+        """Progress lines every 100 windows: n_live climbs from 2049 and holds at `top` from `fill_at` on."""
+        return [f"[{w} windows] loss=2.0000 opt_steps={w} n_live="
+                f"{top if fill_at is not None and w >= fill_at else min(top, 2049 + w // 100 * 100)} "
+                f"vocab=600 uncalled=0" for w in range(101, 2000, 100)]
+
+    run(o17, "k0", 0, 1.0, n=20, win=2000, nbytes=378000, counters={"fab.shift_notifications": 0, "fab.n_live": 4096},
+        lines=prog(1001, 4096))
+    run(o17, "k0_nuis", 0, 1.0001, n=20, win=2000, nbytes=378000, counters={"fab.shift_notifications": 0})
+    run(o17, "k1000", 0, 1.0, n=20, win=2000, nbytes=378000, acts=4, at=(101, 601, 1201, 1801),
+        counters=dict(OLD13, **{"fab.shift_notifications": 4, "fab.blackout_windows": 1399, "fab.n_live": 4096}),
+        lines=prog(1001, 4096))
+    run(o17, "k3000", 0, 1.0, n=20, win=2000, nbytes=378000, acts=2, at=(1101, 1601),
+        counters=dict(OLD13, **{"fab.shift_notifications": 2, "fab.blackout_windows": 799, "fab.n_live": 3000}),
+        lines=prog(201, 3000) + ["       gate:fab.growth                              ('armed-but-zero', "
+                                 "\"'0 asked, 0 grown, n_live=3000' vs 'soft cap headroom + new_frac=0.04 of 3000 "
+                                 "(FAB_N0=2048, FAB_SLOTS=3000)'\")"])
+    run(o17, "k1000_cd100", 0, 1.0, n=20, win=2000, nbytes=378000, acts=4, at=(101, 601, 1201, 1801), cooldown=100,
+        counters=dict(OLD13, **{"fab.shift_notifications": 4, "fab.blackout_windows": 350, "fab.n_live": 4000}),
+        lines=prog(None, 4000))
+    p17 = gw("--analyze", EXP="retok", OUT=o17)
+    a17, b17 = ana(o17)
+    # EACH ARM'S SPLIT ROW, the third of its SECONDARIES rows.
+    sp = {a: re.search(rf"^  {a} +acts [^\n]*\n[^\n]*\n +(blackout [^\n]*)$", a17, re.M)
+          for a in ("k1000", "k3000", "k1000_cd100")}
+    sp = {a: (m.group(1) if m else "") for a, m in sp.items()}
+    check("F17 the split: k1000 blacks out 79.9% of the windows before the pool fills (800 of 1001) and 60.0% of "
+          "those after (599 of 999), estimated from the act windows; the pool full at window 1001; n_live 4096",
+          p17.returncode == 0 and sp["k1000"] == (
+              f"blackout {100 * 800 / 1001:.1f}% of the windows before the pool fills, {100 * 599 / 999:.1f}% of those "
+              "after (estimated from the act windows); pool full (n_live >= FAB_SLOTS 4096) in 1/1 run(s) from window "
+              "1001; n_live at the end 4096 [4096-4096]"), sp["k1000"] + p17.stderr[-300:])
+    check("F17 FAB_SLOTS is read off the growth gate's text (3000, reached at window 201): k3000's 799 windows are "
+          "all after the fill",
+          sp["k3000"].startswith(f"blackout 0.0% of the windows before the pool fills, {100 * 799 / 1799:.1f}% of those "
+                                 "after (estimated from the act windows); pool full (n_live >= FAB_SLOTS 3000) in 1/1 "
+                                 "run(s) from window 201; n_live at the end 3000"), sp["k3000"])
+    check("F17 a pool that never fills is all before (350 of 2000 windows at cooldown 100), with no after-part",
+          sp["k1000_cd100"].startswith("blackout 17.5% of the windows before the pool fills, -% of those after; pool "
+                                       "full (n_live >= FAB_SLOTS 4096) in 0/1 run(s); n_live at the end 4000"),
+          sp["k1000_cd100"])
+    check("F17 C13's alarm reads the before-part only: k1000 (79.9% before) sounds; k3000, 40% of its run blacked "
+          "out but none of it before the fill, does not",
+          f"BLACKOUT ALARM (C13): k1000 blacks out {100 * 800 / 1001:.1f}% of its windows before the pool fills, above "
+          "20%" in a17 and "BLACKOUT ALARM (C13): k3000" not in a17 and "BLACKOUT ALARM (C13): k1000" in b17
+          and "blackout 40.0% of windows (fab.blackout_windows;" in a17,
+          str([l for l in a17.splitlines() if "ALARM" in l]))
+    check("F17 the analysis says the split is an estimate built from the act windows, and the block carries the "
+          "split and n_live per arm",
+          "the blackout split is an ESTIMATE built from the act windows: fab.blackout_windows is cumulative" in a17
+          and "BLACKOUT SPLIT where n_live first reaches FAB_SLOTS (each part over its own windows; C13 reads the part "
+              "before; ESTIMATED from the act windows x FAB_COOLDOWN" in b17
+          and f"  k1000 before {100 * 800 / 1001:.1f}% / after {100 * 599 / 999:.1f}% (est.); full (slots 4096) in 1/1 "
+              "run(s) from window 1001; n_live end 4096 [4096-4096]" in b17
+          and "  k0 before 0.0% / after 0.0%; full (slots 4096) in 1/1 run(s) from window 1001; n_live end 4096" in b17,
+          str([l for l in b17.splitlines() if "before" in l]))
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
 

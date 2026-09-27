@@ -90,11 +90,25 @@
 # EXP=retok RUNS 03b S0b's SHIP-RULE MEASUREMENT INSTEAD (2026-09-26): which TOK_RETOK_EVERY ships,
 # now that the mid-epoch act performs a retok. Arms k0 (0, the control: no act), k3000 (the shipped
 # value), k1000, and k0_nuis (0 again, with SIG_WARMUP=801 -- a small real perturbation neither the act
-# nor TOK reads, so |k0 - k0_nuis| per seed is the paired noise the margin is made of). Metric: each
-# run's PREQUENTIAL bits per byte, sum(per-flush loss x LM_CTX) / ln 2 / loop.bytes_scored -- every
-# window at RUN_EPOCHS=1 is scored before its update, and bits per byte does not move with the
-# segmentation, which is exactly what the arms change. Rule: M = max over seeds |k0 - k0_nuis|; a
-# cadence ships if (arm - k0) <= M at EVERY seed; among those the lower mean wins; if none, 0 ships.
+# nor TOK reads, so |k0 - k0_nuis| per seed is the paired noise floor). Metric: PREQUENTIAL bits per
+# byte, sum(per-flush loss x LM_CTX) / ln 2 / bytes -- every window at RUN_EPOCHS=1 is scored before
+# its update, and bits per byte does not move with the segmentation, which is exactly what the arms
+# change -- read PER PHASE: the stream's N equal byte ranges of DATA_STREAM_BYTES (data_plan's bounds;
+# N off each log's data.phase_entered gate), each flush placed by its run's cumulative per-flush bytes
+# (run.py --flush-bytes; absent, the whole run is read as one phase and the analysis says so).
+# THE RULE IS O14's, READ BY THE eps RULE (Proposal 05 O2, O14; 2026-09-27). Per cadence arm c and
+# phase p, the paired differences d(s) = c - k0 over the seeds with both runs give one-sided t bounds,
+# mean -+ t x sd / sqrt(n). c FAILS if some phase's LOWER bound exceeds EPS (default 0.05 bits/byte),
+# the t taken at 1 - a/N (Bonferroni over the phases) with Holm across the cadence arms (the arm with
+# the strongest evidence of harm at a = 0.05/2, the other at 0.05); c PASSES if every phase's one-sided
+# 95% UPPER bound is at most EPS; otherwise, and always at n < 2 seeds, it is UNRESOLVED. THE CHOICE:
+# 3000 is the incumbent (RETOK_INCUMBENT, the interim default). 1000 replaces it only if 1000 does not
+# FAIL and (3000 FAILs, or the one-sided 95% upper bound of the whole-run paired 1000 - 3000 is below
+# 0); otherwise 3000 stays, UNRESOLVED readings included. 0 is never shipped by the rule: if every
+# cadence FAILs, the DECISION is ESCALATE (the act stays ON at 3000 until the owner answers; the
+# remedy arms run next). M = max over seeds |k0 - k0_nuis| and the per-arm means are printed beside the
+# rule and decide nothing. RETOK_INCUMBENT exists for operation checks at a shorter shape (a CPU fleet
+# whose cadences are 40 and 20); the fleet's rule is O14's, at 3000.
 # RETOK_ARMS names the act cadences (arm k<c> each; default "3000 1000", today's arms in today's
 # order), and COOLDOWN_ARM=<v> adds k<fastest>_cd<v> at FAB_COOLDOWN=<v>, reported beside the rule and
 # never a ship candidate. CALIBRATION RUNS 600 WINDOWS HERE (CAL_WINDOWS; 150 at EXP=world), past FAB's
@@ -106,7 +120,15 @@
 # bytes per token per act, mint waits, the act's share of loop time, bits/byte per phase; §8 1.3's
 # counters where the tree has them and one "absent" line where it does not) with a BLACKOUT ALARM
 # above 20% of windows (C13) that orders COOLDOWN_ARM=100, and the KEPT CHECKPOINTS with their
-# coverage of the act windows. The verdict is labelled B-provisional (note retok fleet (3)), and
+# coverage of the act windows. THE BLACKOUT IS SPLIT WHERE THE POOL FILLS (O14; 2026-09-27): the
+# 2026-09-24 archive showed FAB's pool reaching FAB_SLOTS in 20 of 21 runs, after which growth is
+# held by the ceiling whatever the acts do. fab.blackout_windows is reported before and after the
+# first progress line ('[N windows] ... n_live=K') with n_live >= FAB_SLOTS (the log's gate text, else
+# EXTRA, else 4096; never filled, it is all before), n_live at the end is printed per arm, and C13's
+# alarm reads only the part before. The counter is cumulative and the log has no per-window series, so
+# the split is an ESTIMATE built from the act windows and FAB_COOLDOWN (each act blacks out up to a
+# cooldown from its window, a later act restarting it), and says so. The verdict is labelled
+# B-provisional (note retok fleet (3)), and
 # pre-Levels when this tree lacks DOM_LEVELS or the fleet turns it off (C12). IF THIS FLEET RUNS AFTER
 # SR0, 04-Q5's pin rule applies: its margin pairs with pre-SR0 runs, so SR0's build adds
 # DATA_SYNTH_HOLDOUT=0 EVAL_RETENTION_EVERY=0 DATA_TRUST=off to every retok run here.
@@ -115,6 +137,7 @@
 #     EXP=retok COOLDOWN_ARM=100 bash gpu_world.sh        # + k1000_cd100 (the blackout alarm's arm)
 #     EXP=retok KEEP_CKPT=0 bash gpu_world.sh             # no checkpoints: the spike test loses its control
 #     EXP=retok bash gpu_world.sh --analyze
+#     EXP=retok EPS=0.02 bash gpu_world.sh --analyze      # the same runs read against another eps
 #
 # EXP=world_epoch IS THE WORLD RE-RUN'S SHAPE, SIZED AND GUARDED BUT NOT RUN (register note WORLD 3-4,
 # §8 6.5). The 2026-09-24 fleet read phase 1 of a 20 MB stream and never saw an area arrive or fade.
@@ -133,7 +156,8 @@
 # the end of every fleet, every --analyze and every early stop prints ONE block, from
 # "==== PASTE THIS BACK ====" to "==== END ====", at most 80 lines, and writes it to
 # $OUT/PASTE_BACK.txt: the commit, the card, the shape, the failed runs, and the result (at EXP=retok
-# the per-seed bits/byte, the margin, the verdict, rates, secondaries and kept checkpoints). Paste it
+# the per-seed bits/byte, each cadence's per-phase bounds and verdict, eps, the choice and why, M
+# reported, rates, secondaries with the blackout split, and kept checkpoints). Paste it
 # into the chat. $OUT is then packed beside itself as <name>_<launch date>.tgz -- logs, curves, smoke,
 # calibration, SUMMARY, ANALYSIS, the block, KEPT.txt; never a checkpoint -- which the owner keeps
 # (the 2026-09-24 precedent, gpu_world_2026-09-24.tgz, and the layout tools/read_fleet_archive.sh reads).
@@ -194,6 +218,15 @@ KEEP_CKPT=${KEEP_CKPT:-$([[ "$EXP" == retok ]] && echo 1 || echo 0)}
 KEEP_POLL=${KEEP_POLL:-1}                  # seconds between the kept-checkpoint watcher's looks
 PIN_RETOK=${PIN_RETOK:-3000}               # EXP=world_epoch: the TOK_RETOK_EVERY every run pins
 GO_WORLD_EPOCH=${GO_WORLD_EPOCH:-0}
+# THE eps RULE'S TWO READING-TIME SETTINGS (EXP=retok's analysis; O2, O14). They are read when the
+# analysis runs, not recorded at launch, so --analyze can read the same runs against another eps; the
+# analysis prints both.
+EPS=${EPS:-0.05}                           # eps, bits/byte: a cadence FAILs past it, PASSes within it
+RETOK_INCUMBENT=${RETOK_INCUMBENT:-3000}   # the incumbent cadence (O14's interim default)
+[[ "$EPS" =~ ^([0-9]+\.?[0-9]*|\.[0-9]+)$ ]] && awk -v e="$EPS" 'BEGIN { exit !(e > 0) }' \
+  || { echo "!! EPS='$EPS' is not a positive number of bits/byte (the eps rule's budget). Nothing was started."; exit 2; }
+[[ "$RETOK_INCUMBENT" =~ ^[1-9][0-9]*$ ]] \
+  || { echo "!! RETOK_INCUMBENT='$RETOK_INCUMBENT' is not a positive cadence. Nothing was started."; exit 2; }
 # LM_CTX TURNS PER-TOKEN NATS INTO BITS PER BYTE, so the analysis must use the one the runs used: from
 # EXTRA, else from this environment (which the runs inherit), else the lever's default.
 CTX=$(echo " $EXTRA " | sed -n 's/.* LM_CTX=\([0-9][0-9]*\) .*/\1/p')
@@ -468,11 +501,12 @@ if dev == "cuda":
 PY
 }
 
-# THE RETOK SHIP RULE (EXP=retok), 03b S0b. Prequential bits/byte per run, paired by seed; then the
-# rates, the secondaries and the kept checkpoints, and the block to paste back -- ONE program, so the
-# verdict the block carries is the one ANALYSIS.txt printed, never a second reading of the logs.
+# THE RETOK SHIP RULE (EXP=retok): O14's choice, read by the eps rule (O2) on prequential bits/byte per
+# phase, paired by seed; then the rates, the secondaries and the kept checkpoints, and the block to
+# paste back -- ONE program, so the verdict the block carries is the one ANALYSIS.txt printed, never a
+# second reading of the logs.
 analyze_retok() {  # out device mps_on par ncpu
-  gw_py retok "$1" "$CTX" "$(archive_path)"
+  gw_py retok "$1" "$CTX" "$(archive_path)" "$EPS" "$RETOK_INCUMBENT"
 }
 
 # THE BLOCK AND ITS PARTS (Proposal 05 §8 1.5). Modes: retok (the analysis above, which also writes
@@ -654,8 +688,188 @@ def failures(runs, done, cap=8):
     return out
 
 
+# >>> THE ε RULE (Proposal 05 O2 and O14, 2026-09-27). tests/test_gpu_world.py F14-F16 exec this block
+# by its two marker lines, so it stays self-contained: `math` only -- the GPU box's python has no
+# numpy or scipy promised -- and no name from the rest of this program.
+def _betacf(a, b, x):
+    """The continued fraction of the incomplete beta function, by the modified Lentz method."""
+    tiny = 1e-300
+    c, d = 1.0, 1.0 - (a + b) * x / (a + 1.0)
+    d = 1.0 / (d if abs(d) > tiny else tiny)
+    h = d
+    for m in range(1, 1000):
+        m2 = 2 * m
+        for aa in (m * (b - m) * x / ((a - 1.0 + m2) * (a + m2)),
+                   -(a + m) * (a + b + m) * x / ((a + m2) * (a + 1.0 + m2))):
+            d = 1.0 + aa * d
+            d = 1.0 / (d if abs(d) > tiny else tiny)
+            c = 1.0 + aa / c
+            c = c if abs(c) > tiny else tiny
+            h *= d * c
+        if abs(d * c - 1.0) < 1e-15:
+            break
+    return h
+
+
+def betai(a, b, x):
+    """The regularized incomplete beta function I_x(a, b)."""
+    if x <= 0.0:
+        return 0.0
+    if x >= 1.0:
+        return 1.0
+    bt = math.exp(math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b) + a * math.log(x) + b * math.log1p(-x))
+    if x < (a + 1.0) / (a + b + 2.0):
+        return bt * _betacf(a, b, x) / a
+    return 1.0 - bt * _betacf(b, a, 1.0 - x) / b
+
+
+def t_sf(t, df):
+    """P(T > t) for Student's t with df degrees of freedom: I_{df/(df+t^2)}(df/2, 1/2) / 2 above 0."""
+    tail = 0.5 * betai(df / 2.0, 0.5, df / (df + t * t))
+    return tail if t >= 0 else 1.0 - tail
+
+
+def t_quantile(p, df):
+    """The p-quantile of Student's t with df degrees of freedom, by bisection on t_sf."""
+    if not 0.0 < p < 1.0:
+        raise ValueError(f"t_quantile: p={p} is not inside (0, 1)")
+    if p < 0.5:
+        return -t_quantile(1.0 - p, df)
+    lo, hi = 0.0, 1.0
+    while t_sf(hi, df) > 1.0 - p:
+        lo, hi = hi, 2.0 * hi
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        if t_sf(mid, df) > 1.0 - p:
+            lo = mid
+        else:
+            hi = mid
+        if hi - lo <= 1e-13 * hi:
+            break
+    return 0.5 * (lo + hi)
+
+
+def mean_se(xs):
+    """(n, mean, sd / sqrt(n)); the mean is None at n = 0 and the SE None at n < 2."""
+    n = len(xs)
+    if not n:
+        return 0, None, None
+    m = sum(xs) / n
+    if n < 2:
+        return n, m, None
+    return n, m, math.sqrt(sum((x - m) ** 2 for x in xs) / (n - 1) / n)
+
+
+def eps_rule(arms, eps, alpha=0.05):
+    """O14's harm reading, by the eps rule (O2). arms: {arm: one list per phase of the paired differences
+    arm - k0 over the seeds with both readings}. Per phase the one-sided 95% UPPER bound is
+    mean + t(0.95, n-1) x sd / sqrt(n), and the LOWER bound mean - t(1 - a/N, n-1) x sd / sqrt(n): a
+    Bonferroni split over the N phases, and Holm across the arms -- the arm with the strongest evidence
+    of harm (the smallest N x p of 'difference > eps' over its phases, uncapped so arms that cannot
+    FAIL are still ordered) is tested at alpha / K, the next at alpha / (K - 1), and so on, and once one
+    does not FAIL no later one can. FAIL if some phase's lower bound exceeds eps; PASS if every phase's
+    upper bound is at most eps; otherwise UNRESOLVED -- always so at n < 2, where no bound can be
+    formed. Returns {arm: dict(verdict, level, phases, note)} in Holm's order, phases being (n, mean,
+    lower, upper) with None where a bound cannot be formed."""
+    def p_harm(xs):
+        n, m, se = mean_se(xs)
+        if se is None:
+            return 1.0
+        if se == 0.0:
+            return 0.0 if m > eps else 1.0
+        return t_sf((m - eps) / se, n - 1)
+
+    nph = max([len(v) for v in arms.values()] or [1])
+    padj = {a: nph * min([p_harm(xs) for xs in ph] or [1.0]) for a, ph in arms.items()}
+    order = sorted(arms, key=lambda a: (padj[a], a))
+    out, holm_open = {}, True
+    for i, a in enumerate(order):
+        level = alpha / (len(order) - i)
+        rows = []
+        for xs in arms[a]:
+            n, m, se = mean_se(xs)
+            rows.append((n, m, None, None) if se is None else
+                        (n, m, m - t_quantile(1.0 - level / nph, n - 1) * se, m + t_quantile(0.95, n - 1) * se))
+        harm = any(lo is not None and lo > eps for _, _, lo, _ in rows)
+        fail = harm and holm_open
+        ok = bool(rows) and all(up is not None and up <= eps for _, _, _, up in rows)
+        note = ("a lower bound exceeds ε, but Holm stopped at an earlier arm that did not FAIL"
+                if harm and not holm_open else
+                "fewer than 2 paired seeds in some phase: no bound there" if any(n < 2 for n, _, _, _ in rows)
+                else "")
+        holm_open = holm_open and fail
+        out[a] = dict(verdict="FAIL" if fail else "PASS" if ok else "UNRESOLVED", level=level, phases=rows,
+                      note=note)
+    return out
+
+
+def better_than(diffs, alpha=0.05):
+    """'Significantly better' in O2's form: the one-sided upper bound of the paired whole-run difference
+    (challenger - incumbent) is below 0 -- at 95% for one challenger, Holm across several. diffs: {arm:
+    [the differences over the seeds with both runs]}. Returns {arm: (n, mean, upper, better, level)}."""
+    def p_better(xs):
+        n, m, se = mean_se(xs)
+        if se is None:
+            return 1.0
+        if se == 0.0:
+            return 0.0 if m < 0 else 1.0
+        return 1.0 - t_sf(m / se, n - 1)
+
+    order = sorted(diffs, key=lambda a: (p_better(diffs[a]), a))
+    out, holm_open = {}, True
+    for i, a in enumerate(order):
+        level = alpha / (len(order) - i)
+        n, m, se = mean_se(diffs[a])
+        up = None if se is None else m + t_quantile(1.0 - level, n - 1) * se
+        b = holm_open and up is not None and up < 0
+        holm_open = holm_open and b
+        out[a] = (n, m, up, b, level)
+    return out
+
+
+def choose(cadences, verdicts, better, inc):
+    """O14's choice. cadences: every cadence arm of the fleet (k<c>); verdicts: eps_rule's reading of the
+    ones that acted; better: better_than's reading of the acted challengers against the incumbent arm
+    `inc` (k3000). Returns (kind, arm, why), kind one of 'undecided' (no cadence acted), 'escalate' (every
+    cadence FAILs), 'replace' (arm replaces the incumbent) or 'stays' (the incumbent stays). A challenger
+    replaces the incumbent only if it does not FAIL and (the incumbent FAILs, or it is significantly
+    better); among several that qualify, the lowest upper bound against the incumbent. 0 is never an
+    answer: it is the control, and the rule never ships it."""
+    if not verdicts:
+        return "undecided", None, "no cadence acted in these runs"
+    if cadences and all(verdicts.get(a, {}).get("verdict") == "FAIL" for a in cadences):
+        return "escalate", None, "every cadence FAILs against k0 by the ε rule"
+    iv = verdicts.get(inc, {}).get("verdict")
+    chal = sorted(a for a in verdicts if a != inc)
+    bt = {c: better.get(c) or (0, None, None, False, None) for c in chal}
+    ok = [c for c in chal if verdicts[c]["verdict"] != "FAIL" and (iv == "FAIL" or bt[c][3])]
+    if ok:
+        c = min(ok, key=lambda a: (math.inf if bt[a][2] is None else bt[a][2], a))
+        b = bt[c]
+        why = (f"{c} {verdicts[c]['verdict']} against k0, and "
+               + (f"{inc} FAILs" if iv == "FAIL" else
+                  f"the whole-run {c[1:]} - {inc[1:]} upper bound {b[2]:+.4f} is below 0"))
+        return "replace", c, why
+    parts = []
+    if inc not in cadences:
+        parts.append(f"the fleet has no {inc} arm, so nothing is read against the incumbent")
+    elif iv is None:
+        parts.append(f"{inc} did not act in these runs, so the incumbent is not read")
+    else:
+        parts.append(f"{inc} {iv} against k0")
+    for c in chal:
+        b = better.get(c)
+        parts.append(f"{c} FAILs" if verdicts[c]["verdict"] == "FAIL" else
+                     f"{c} {verdicts[c]['verdict']}, " + (
+                         "not compared with the incumbent" if not b or iv is None else
+                         f"the whole-run {c[1:]} - {inc[1:]} upper bound "
+                         + ("cannot be formed (n < 2)" if b[2] is None else f"{b[2]:+.4f} is not below 0")))
+    return "stays", inc, "; ".join(parts)
+# <<< THE ε RULE
+
+
 # ------------------------------------------------------------------------------------------ retok
-def retok(ctx_arg, archive):
+def retok(ctx_arg, archive, eps, inc_cadence):
     # LM_CTX: what the fleet recorded at launch, else its EXTRA, else what this shell was given.
     ctx = int(sget(r"^=== plan: .*?LM_CTX (\d+)") or (re.search(r"(?:^| )LM_CTX=(\d+)", EXTRA) or [0, 0])[1]
               or ctx_arg)
@@ -687,12 +901,26 @@ def retok(ctx_arg, archive):
             else:
                 rise.append(int(am.group(2)) / int(am.group(3)) - 1.0); rise_kind = rise_kind or "ids"
         cd = re.search(r"cooldown=(\d+) windows", t)
+        # THE POOL'S TRAJECTORY (O14's blackout split): the progress lines' n_live every 100 windows, and
+        # FAB_SLOTS off the growth gate's text (any FAB_SLOTS= in the log failing that), else EXTRA's, else
+        # the lever's default 4096. The fill is the first progress window with n_live >= FAB_SLOTS.
+        prog = [(int(pw), int(pn)) for pw, pn in re.findall(r"^\[(\d+) windows\][^\n]*? n_live=(\d+)", t, re.M)]
+        sl = (re.search(r"^\s+gate:fab\.growth\s[^\n]*?FAB_SLOTS=(\d+)", t, re.M) or re.search(r"FAB_SLOTS=(\d+)", t)
+              or re.search(r"(?:^| )FAB_SLOTS=(\d+)", EXTRA))
+        slots = int(sl.group(1)) if sl else 4096
+        r_ = rep(t)
+        nl = fnum(r_.get("fab.n_live"))
+        # THE STREAM'S PHASE COUNT, off data_plan's own gate: "gate:data.phase_entered ('fired', 'E vs N')".
+        pe = re.search(r"^\s+gate:data\.phase_entered\s[^\n]*?'(\d+) vs (\d+)'", t, re.M)
         runs[(name, int(seed))] = dict(
             bpb=bpb, acts=acts.group(1) if acts else "-", n=len(curve or []), vocab=vocab[-1] if vocab else "?",
-            stopped="stopped at max_windows" in t, r=rep(t), curve=curve, fbytes=fbytes,
+            stopped="stopped at max_windows" in t, r=r_, curve=curve, fbytes=fbytes,
             win=int(w.group(1)) if w else None, secs=float(w.group(2)) if w else None,
             bytes=int(m.group(1)) if m else None, at=at, rise=rise, rise_kind=rise_kind,
-            cooldown=int(cd.group(1)) if cd else None)
+            cooldown=int(cd.group(1)) if cd else None, slots=slots,
+            fill=next((pw for pw, pn in prog if pn >= slots), None),
+            nlive=nl if nl is not None else (float(prog[-1][1]) if prog else None),
+            nph=int(pe.group(2)) if pe else None)
     names = {n for (n, s) in runs}
     ACT = sorted((n for n in names if re.fullmatch(r"k[1-9]\d*", n)), key=lambda a: -int(a[1:]))
     CD = sorted(n for n in names if re.fullmatch(r"k[1-9]\d*_cd\d+", n))
@@ -714,64 +942,168 @@ def retok(ctx_arg, archive):
         rerun = abs(a['bpb'] - b['bpb'])
         print(f"\n=== RUN-TO-RUN (k0 seed 0 twice): |diff| {rerun:.3g}")
     seeds = sorted({s for (n, s) in runs if n == "k0" and runs[(n, s)]["bpb"] is not None})
-    M = [abs(runs[("k0", s)]["bpb"] - runs[("k0_nuis", s)]["bpb"]) for s in seeds
-         if runs.get(("k0_nuis", s), {}).get("bpb") is not None]
-    verdicts, decision, margin = [], None, None
-    if not M:
-        # NO MARGIN, NO VERDICT -- but the rates, secondaries and kept checkpoints below still print.
-        print("\n!! no paired k0 / k0_nuis seeds: the margin cannot be formed and no cadence can ship")
-        decision = "none -- no paired k0 / k0_nuis seeds: the margin cannot be formed and no cadence can ship"
+
+    # ---------------------------------------------------------------- the endpoint: bits/byte per phase
+    # THE STREAM'S PHASES ARE DATA_STREAM_BYTES CUT INTO N EQUAL BYTE RANGES, phase k covering
+    # [round(k B / N), round((k + 1) B / N)) (data/api.py::data_plan, for a generated schedule and an
+    # explicit one alike). N is read off the logs' data.phase_entered gate, else EXTRA, else the default 4.
+    # Each flush is placed by its first byte, its run's cumulative per-flush bytes (run.py --flush-bytes),
+    # and a phase's bits/byte is sum(loss x LM_CTX) / ln 2 / sum(bytes) over its flushes: the whole-run
+    # formula above restricted to them, so the phases of a run whose flush bytes sum to
+    # loop.bytes_scored average, byte-weighted, to its whole-run value.
+    total = int(sget(r"DATA_STREAM_BYTES=(\d+)") or 0)
+    gate_n = [v["nph"] for v in runs.values() if v["nph"]]
+    if gate_n:
+        nph = max(sorted(set(gate_n)), key=gate_n.count)
+        nph_src = "the logs' data.phase_entered gate" + ("" if len(set(gate_n)) == 1 else
+                                                          f" (the runs disagree: {sorted(set(gate_n))})")
+    elif re.search(r"(?:^| )DATA_PHASE_SCHED=(\S+)", EXTRA):
+        nph = len(re.search(r"(?:^| )DATA_PHASE_SCHED=(\S+)", EXTRA).group(1).strip("'\"").split("|"))
+        nph_src = "EXTRA's DATA_PHASE_SCHED"
+    elif re.search(r"(?:^| )DATA_PHASES=(\d+)", EXTRA):
+        nph = max(2, int(re.search(r"(?:^| )DATA_PHASES=(\d+)", EXTRA).group(1)))
+        nph_src = "EXTRA's DATA_PHASES (floored at 2, as data_plan floors it)"
     else:
-        margin = max(M)
-        print(f"\n=== MARGIN M = max over {len(M)} seed(s) |k0 - k0_nuis| = {margin:.5f} bits/byte ===")
-        ships = {}
-        tested = 0
-        for arm in ACT:
-            d = {s: runs[(arm, s)]["bpb"] - runs[("k0", s)]["bpb"] for s in seeds
-                 if runs.get((arm, s), {}).get("bpb") is not None}
-            if not d: continue
-            fired = [s for s in seeds if runs.get((arm, s), {}).get("acts", "-") not in ("-", "0")]
-            if not fired:
+        nph, nph_src = 4, "the default DATA_PHASES (no log carries data.phase_entered)"
+
+    def phases(v):
+        c, fb = v["curve"], v["fbytes"]
+        if not (c and fb and len(c) == len(fb) and total):
+            return None
+        lo_n, lo_b, off = [0.0] * nph, [0] * nph, 0
+        for x, nb in zip(c, fb):
+            k = min(nph - 1, next((j for j in range(nph) if off < round((j + 1) * total / nph)), nph - 1))
+            lo_n[k] += x; lo_b[k] += nb; off += nb
+        return [lo_n[k] * ctx / L2 / lo_b[k] if lo_b[k] else None for k in range(nph)]
+
+    ph_of = {key: phases(v) for key, v in runs.items()}
+    fb_off = [f"{n}.s{s} ({sum(v['fbytes'])} vs {v['bytes']})" for (n, s), v in sorted(runs.items())
+              if v["fbytes"] and v["bytes"] is not None and sum(v["fbytes"]) != v["bytes"]]
+
+    # ---------------------------------------------------------------- the eps rule (O14, O2)
+    # A CADENCE THAT NEVER ACTED IS NOT TESTED: it is the control under another name.
+    ACTED = [a for a in ACT if any(runs.get((a, s), {}).get("acts", "-") not in ("-", "0") for s in seeds)]
+    rule_runs = [(n, s) for (n, s), v in runs.items() if (n == "k0" or n in ACTED) and v["bpb"] is not None]
+    no_ph = sorted(f"{n}.s{s}" for n, s in rule_runs if ph_of[(n, s)] is None)
+    rnph = 1 if no_ph else nph
+
+    def endpoint(key):
+        v = runs.get(key)
+        if not v or v["bpb"] is None:
+            return None
+        return [v["bpb"]] if rnph == 1 else ph_of[key]
+
+    rule_in = {}
+    for arm in ACTED:
+        per = [[] for _ in range(rnph)]
+        for s in seeds:
+            ea, e0 = endpoint((arm, s)), endpoint(("k0", s))
+            if ea is None or e0 is None:
+                continue
+            for p in range(rnph):
+                if ea[p] is not None and e0[p] is not None:
+                    per[p].append(ea[p] - e0[p])
+        rule_in[arm] = per
+    R = eps_rule(rule_in, eps)
+    INC = f"k{inc_cadence}"                  # the incumbent's arm
+    allseeds_ = sorted({s for (n, s) in runs})
+    wr = lambda a, s: runs.get((a, s), {}).get("bpb")
+    WD = {c: [wr(c, s) - wr(INC, s) for s in allseeds_ if wr(c, s) is not None and wr(INC, s) is not None]
+          for c in R if c != INC} if INC in R else {}
+    B = better_than({c: d for c, d in WD.items() if d})
+    kind, pick, why = choose(ACT, R, B, INC)
+    ns = sorted({max([len(xs) for xs in rule_in[a]] or [0]) for a in R})
+    ntxt = (f"{ns[0]}" if len(ns) == 1 else f"{ns[0]}-{ns[-1]}") if ns else "0"
+
+    def cell(p, row, n_arm):
+        n, m, lo, up = row
+        if m is None:
+            return f"p{p + 1} -"
+        return (f"p{p + 1} {m:+.4f} " + (f"[{lo:+.4f},{up:+.4f}]" if lo is not None else "[-]")
+                + (f" (n={n})" if n != n_arm else ""))
+
+    print()
+    if rnph > 1:
+        ph_head = (f"{rnph} phases, DATA_STREAM_BYTES={total} cut into equal byte ranges (N from {nph_src}), each "
+                   f"flush placed by its run's per-flush bytes")
+    elif no_ph:
+        # A RUN WITHOUT ITS FLUSH BYTES CANNOT BE CUT INTO PHASES, and the pairing needs every run read
+        # the same way: the rule then reads the whole run as one phase, and says so.
+        ph_head = ("the WHOLE RUN as a single phase, because the per-flush bytes (run.py --flush-bytes) are "
+                   "absent for " + ", ".join(no_ph[:6]) + (f" and {len(no_ph) - 6} more" if len(no_ph) > 6 else ""))
+    else:
+        ph_head = f"a single phase ({nph_src} gives 1)"
+    print(f"=== THE ε RULE (Proposal 05 O14, O2): ε = {eps:g} bits/byte; incumbent {INC[1:]} (the interim "
+          f"default); endpoint prequential bits/byte per phase: {ph_head} ===")
+    print(f"  d = arm - k0 per phase, paired over seeds: mean [lower bound at t(1 - a/{rnph}) with Holm's a across "
+          f"the cadences, one-sided 95% upper bound]; FAIL if a lower bound > ε, PASS if every upper bound <= "
+          f"ε, else UNRESOLVED (always at n < 2)")
+    rule_rows = []
+    for arm in ACT:
+        if arm not in ACTED:
+            if any(wr(arm, s) is not None for s in seeds):
                 print(f"  {arm:<6} NO ACT FIRED at any seed: the run is too short for this cadence to act, so it "
                       f"is the control under another name -- no evidence either way, not a pass")
-                verdicts.append(f"  {arm}: NO ACT FIRED at any seed -- no evidence either way, not a pass")
-                continue
-            tested += 1
-            ok = len(d) == len(seeds) and all(x <= margin for x in d.values())
-            mean_ = sum(d.values()) / len(d)
-            print(f"  {arm:<6} - k0 per seed: " + "  ".join(f"s{s} {x:+.5f}" for s, x in sorted(d.items()))
-                  + f"   mean {mean_:+.5f}   {'NON-INFERIOR at every seed' if ok else 'FAILS the margin'}")
-            verdicts.append(f"  {arm} - k0 mean {mean_:+.5f} over {len(d)} seed(s): "
-                            f"{'NON-INFERIOR at every seed' if ok else 'FAILS the margin'}")
-            if ok: ships[arm] = mean_
+                rule_rows.append(f"  {arm}: NO ACT FIRED at any seed -- no evidence either way, not a pass")
+            continue
+        r = R[arm]
+        n_arm = max([n for n, _, _, _ in r["phases"]] or [0])
+        body = " ".join(cell(p, row, n_arm) for p, row in enumerate(r["phases"]))
+        line = (f"  {arm} n={n_arm} a={r['level']:.3g}: {body} -> {r['verdict']}"
+                + (f" ({r['note']})" if r["note"] else ""))
+        print(line)
+        rule_rows.append(line)
+    for c, (n, m, up, b, level) in sorted(B.items()):
+        line = (f"  {c} - {INC} whole run: mean {m:+.4f}, one-sided {100 * (1 - level):.3g}% upper "
+                + (f"{up:+.4f}" if up is not None else "- (n < 2)") + f" (n={n}): "
+                + ("below 0, significantly better" if b else "not below 0"))
+        print(line)
+        rule_rows.append(line)
+    if fb_off:
+        line = (f"  !! per-flush bytes do not sum to loop.bytes_scored in {len(fb_off)} run(s), so a phase's "
+                f"bits/byte is over other bytes than the whole run's: {', '.join(fb_off[:4])}")
+        print(line)
+        rule_rows.append(line)
+
+    # M AND THE PER-ARM MEANS: REPORTED, AND THEY DECIDE NOTHING (O14). 03b's per-seed margin rule failed
+    # a harmless 3000 about 30% of the time at 3 seeds by simulation (revise/o11_15.py).
+    M = [abs(runs[("k0", s)]["bpb"] - runs[("k0_nuis", s)]["bpb"]) for s in seeds
+         if runs.get(("k0_nuis", s), {}).get("bpb") is not None]
+    margin = max(M) if M else None
+    print()
+    mline = (f"M = {margin:.5f} bits/byte (max over {len(M)} seed(s) |k0 - k0_nuis|)" if M else
+             "M cannot be formed: no paired k0 / k0_nuis seeds")
+    print(f"=== REPORTED, DECIDES NOTHING (O14): {mline} ===")
+    means = []
+    for arm in ACT + CD:
+        d = {s: wr(arm, s) - wr("k0", s) for s in seeds if wr(arm, s) is not None}
+        if not d:
+            continue
+        mean_ = sum(d.values()) / len(d)
+        cd_ = arm in CD
+        parent = arm.split("_cd")[0]
+        dp = [wr(arm, s) - wr(parent, s) for s in d if wr(parent, s) is not None] if cd_ else []
         # THE COOLDOWN ARM IS READ BESIDE THE RULE (C13): it prices the blackout, it is not a cadence.
-        for arm in CD:
-            parent = arm.split("_cd")[0]
-            d = {s: runs[(arm, s)]["bpb"] - runs[("k0", s)]["bpb"] for s in seeds
-                 if runs.get((arm, s), {}).get("bpb") is not None}
-            if not d: continue
-            dp = [runs[(arm, s)]["bpb"] - runs[(parent, s)]["bpb"] for s in d
-                  if runs.get((parent, s), {}).get("bpb") is not None]
-            line = (f"  {arm} - k0 per seed: " + "  ".join(f"s{s} {x:+.5f}" for s, x in sorted(d.items()))
-                    + f"   mean {sum(d.values()) / len(d):+.5f}"
-                    + (f"   vs {parent} {sum(dp) / len(dp):+.5f}" if dp else "")
-                    + f"   (FAB_COOLDOWN={arm.split('_cd')[1]}: beside the rule, not a ship candidate)")
-            print(line)
-            verdicts.append(f"  {arm} - k0 mean {sum(d.values()) / len(d):+.5f}"
-                            + (f", vs {parent} {sum(dp) / len(dp):+.5f}" if dp else "") + " (beside the rule)")
-        print()
-        if not tested:
-            dl = ("=== DECISION: UNDECIDED -- no cadence acted in these runs; raise WINDOWS past the first act "
-                  "(minting starts near window 120-200, the first act follows at the cadence) ===")
-        elif ships:
-            best = min(ships, key=ships.get)
-            dl = (f"=== DECISION: TOK_RETOK_EVERY ships {best[1:]} (lowest mean among the non-inferior; "
-                  f"negative = the act helps) ===")
-        else:
-            dl = ("=== DECISION: neither cadence is non-inferior; TOK_RETOK_EVERY ships 0 (the act still serves "
-                  "resume and, later, AUD) ===")
-        print(dl)
-        decision = dl[len("=== DECISION: "):-len(" ===")]
+        print(f"  {arm:<6} - k0 per seed: " + "  ".join(f"s{s} {x:+.5f}" for s, x in sorted(d.items()))
+              + f"   mean {mean_:+.5f}" + (f"   vs {parent} {sum(dp) / len(dp):+.5f}" if dp else "")
+              + (f"   (FAB_COOLDOWN={arm.split('_cd')[1]}: beside the rule, not a ship candidate)" if cd_ else ""))
+        means.append(f"{arm} - k0 mean {mean_:+.5f} over {len(d)} seed(s)"
+                     + (f", vs {parent} {sum(dp) / len(dp):+.5f}" if dp else "") + (" (beside the rule)" if cd_ else ""))
+    print()
+    tail_ = f" (ε {eps:g} bits/byte, n {ntxt} seed(s))"
+    if kind == "undecided":
+        decision = ("UNDECIDED -- no cadence acted in these runs; raise WINDOWS past the first act "
+                    "(minting starts near window 120-200, the first act follows at the cadence)")
+    elif kind == "escalate":
+        decision = (f"ESCALATE: every cadence FAILs against k0 by the ε rule; the act stays ON at {INC[1:]} until "
+                    f"the owner answers; the remedy arms run next (register O14)" + tail_)
+    elif kind == "replace":
+        decision = f"TOK_RETOK_EVERY ships {pick[1:]}, replacing the incumbent {INC[1:]}: {why}" + tail_
+    else:
+        decision = (f"TOK_RETOK_EVERY stays {INC[1:]} (the incumbent; 0 is never shipped by the rule): {why}"
+                    + tail_)
+    print(f"=== DECISION: {decision} ===")
+    verdicts = rule_rows + [f"reported, decides nothing (O14): {mline}"] + [f"  {x}" for x in means]
     print("    label: B-provisional -- provisional until SR0's held-out worst-area re-read passes "
           "(register note retok fleet (3))"
           + ("; pre-Levels -- re-run the k0 vs chosen-cadence pair after Levels (C12)" if "pre-Levels" in labels
@@ -905,26 +1237,58 @@ def retok(ctx_arg, archive):
         return mean([fnum(v["r"].get(key)) / v[den] for _, v in per_arm(arm)
                      if fnum(v["r"].get(key)) is not None and v[den]])
 
-    # PER PHASE: the stream's phases are DATA_STREAM_BYTES cut into DATA_PHASES equal byte ranges
-    # (data/api.py::data_plan), and each flush is placed by its first byte off the per-flush bytes.
-    total = int(sget(r"DATA_STREAM_BYTES=(\d+)") or 0)
-    nph, phase_note = 4, None
-    if "DATA_PHASE_SCHED" in EXTRA:
-        phase_note = "skipped: EXTRA sets DATA_PHASE_SCHED, so the phases are not equal quarters"
-    elif re.search(r"(?:^| )DATA_PHASES=(\d+)", EXTRA):
-        nph = max(2, int(re.search(r"(?:^| )DATA_PHASES=(\d+)", EXTRA).group(1)))
+    # THE BLACKOUT, SPLIT WHERE THE POOL FILLS (O14, "Holds meanwhile"; 2026-09-27). The 2026-09-24
+    # archive's pool reached FAB_SLOTS in 20 of 21 runs (median window 6,501), and past that growth is
+    # held by the ceiling whatever the acts do, so an unsplit alarm would blame the acts for it. The
+    # fill is the first progress line with n_live >= FAB_SLOTS; a run that never fills is all before.
+    # fab.blackout_windows is CUMULATIVE and no log carries a per-window series, so the split is an
+    # ESTIMATE built from the act windows: each act blacks out up to FAB_COOLDOWN windows from its window
+    # (a later act restarting it, as grow_check's latest stamp does), those windows are counted either
+    # side of the fill, and the counter is split in that proportion. Each part is read as a share of
+    # its own windows -- the before-part of the windows before the fill -- and C13's alarm reads only
+    # the before-part.
+    def cooldown_of(arm, v):
+        if v["cooldown"]:
+            return v["cooldown"]
+        m_ = re.fullmatch(r"k\d+_cd(\d+)", arm) or re.search(r"(?:^| )FAB_COOLDOWN=(\d+)", EXTRA)
+        return int(m_.group(1)) if m_ else 400
 
-    def phases(v):
-        c, fb = v["curve"], v["fbytes"]
-        if not (c and fb and len(c) == len(fb) and total):
-            return None
-        lo_n, lo_b, off = [0.0] * nph, [0] * nph, 0
-        for x, nb in zip(c, fb):
-            k = min(nph - 1, next((j for j in range(nph) if off < round((j + 1) * total / nph)), nph - 1))
-            lo_n[k] += x; lo_b[k] += nb; off += nb
-        return [lo_n[k] * ctx / L2 / lo_b[k] if lo_b[k] else None for k in range(nph)]
+    def split(arm, v):
+        """(before, after, how) in windows of fab.blackout_windows either side of the fill."""
+        bw_ = blackout(v)
+        if bw_ is None:
+            return None, None, None
+        if bw_ == 0:
+            return 0.0, (None if v["fill"] is None else 0.0), "zero"
+        if v["fill"] is None:
+            return bw_, None, "never full"
+        cdn, end = cooldown_of(arm, v), v["win"] or max(v["at"] or [0])
+        ivs = []
+        for a_ in sorted(v["at"]):
+            lo, hi = a_, min(a_ + cdn, end)
+            if hi <= lo:
+                continue
+            if ivs and lo <= ivs[-1][1]:
+                ivs[-1][1] = max(ivs[-1][1], hi)
+            else:
+                ivs.append([lo, hi])
+        tot = sum(hi - lo for lo, hi in ivs)
+        if tot <= 0:
+            # A COUNT WITH NO ACT WINDOW TO PLACE IT is left whole before the fill: the alarm reads more.
+            return bw_, None, "unsplit"
+        pre = sum(max(0, min(hi, v["fill"]) - lo) for lo, hi in ivs)
+        return bw_ * pre / tot, bw_ * (tot - pre) / tot, "estimated"
 
-    sec_rows, sec_short, phase_rows, alarms = [], [], [], []
+    def parts(arm, v):
+        """(before share, after share, how): each part over its own windows; after is None when never full."""
+        b_, a_, how = split(arm, v)
+        if b_ is None or not v["win"]:
+            return None, None, how
+        f_ = v["fill"] if v["fill"] is not None else v["win"]
+        pre, post = min(f_, v["win"]), v["win"] - min(f_, v["win"])
+        return (b_ / pre if pre else 0.0), (a_ / post if a_ is not None and post else None), how
+
+    sec_rows, sec_short, phase_rows, alarms, split_short, unsplit, any_est = [], [], [], [], [], [], False
     for arm in ORDER:
         rs = per_arm(arm)
         acts = cm(arm, "loop.acts")
@@ -935,6 +1299,29 @@ def retok(ctx_arg, archive):
         # the whole run (a short run's cooldowns overlap and overrun its end).
         ub = mean([min(1.0, fnum(v["r"].get("fab.shift_notifications")) * v["cooldown"] / v["win"]) for _, v in rs
                    if fnum(v["r"].get("fab.shift_notifications")) is not None and v["cooldown"] and v["win"]])
+        # ... AND OF THE BEFORE-PART: at most the notifications' cooldowns, and at most every window before
+        # the fill, as a share of those windows.
+        ubb = mean([min(1.0, fnum(v["r"].get("fab.shift_notifications")) * v["cooldown"]
+                        / (v["fill"] if v["fill"] is not None and v["fill"] < v["win"] else v["win"])) for _, v in rs
+                    if fnum(v["r"].get("fab.shift_notifications")) is not None and v["cooldown"] and v["win"]])
+        pt = [parts(arm, v) for _, v in rs]
+        bwb, bwa = mean([p[0] for p in pt]), mean([p[1] for p in pt])
+        est = any(p[2] == "estimated" for p in pt)
+        any_est = any_est or est
+        unsplit += [f"{arm}.s{s}" for (s, _), p in zip(rs, pt) if p[2] == "unsplit"]
+        fills = sorted(v["fill"] for _, v in rs if v["fill"] is not None)
+        nlv = [v["nlive"] for _, v in rs if v["nlive"] is not None]
+        sls = sorted({v["slots"] for _, v in rs})
+        full = (f"full (n_live >= FAB_SLOTS {'/'.join(map(str, sls))}) in {len(fills)}/{len(rs)} run(s)"
+                + (f" from window {fills[0]}" + (f"-{fills[-1]}" if fills[-1] != fills[0] else "") if fills else ""))
+        nltxt = (f"{mean(nlv):.0f} [{min(nlv):.0f}-{max(nlv):.0f}]" if nlv else "-")
+        split_row = (
+            f"  {'':<12} blackout {fmt(bwb and 100 * bwb, '.1f')}% of the windows before the pool fills, "
+            f"{fmt(bwa and 100 * bwa, '.1f')}% of those after" + (" (estimated from the act windows)" if est else "")
+            + f"; pool {full}; n_live at the end {nltxt}")
+        split_short.append(f"  {arm} before {fmt(bwb and 100 * bwb, '.1f')}% / after {fmt(bwa and 100 * bwa, '.1f')}%"
+                           + (" (est.)" if est else "") + f"; {full.replace('(n_live >= FAB_SLOTS', '(slots')}"
+                           f"; n_live end {nltxt}")
         waited, wwin = cm(arm, "tok.mint_waited"), cm(arm, "tok.mint_wait_windows")
         ash, rsh = share(arm, "loop.act_seconds", "secs"), share(arm, "loop.act_remap_seconds", "secs")
         # MEM'S RE-CUT SHARE: the entries an act's remap changed, over the store's capacity (n_opened).
@@ -957,6 +1344,7 @@ def retok(ctx_arg, archive):
             f"act {fmt(ash and 100 * ash, '.2f')}% of loop time (MEM re-cut {fmt(rsh and 100 * rsh, '.2f')}%); "
             f"MEM re-cut {fmt(recut and 100 * recut, '.1f')}% of the store's slots per act; tok.bpt_tail "
             f"{fmt(cm(arm, 'tok.bpt_tail'), '.4f')}")
+        sec_rows.append(split_row)
         if rise:
             sec_rows.append(f"  {'':<12} bytes/token rise per act ("
                             + ("the tail's, before -> after" if kind == "tail" else "whole-stream ids A/B - 1")
@@ -967,34 +1355,41 @@ def retok(ctx_arg, archive):
             f"{fmt(bw and 100 * bw, '.1f')}% (<= {fmt(ub and 100 * ub, '.1f')}%); act {fmt(ash and 100 * ash, '.2f')}% "
             f"of loop; MEM re-cut {fmt(recut and 100 * recut, '.1f')}%/act; bpt rise/act "
             + (" ".join(f"{100 * x:+.1f}" for x in rise[:8]) + ("..." if len(rise) > 8 else "") + "%" if rise else "-"))
-        ph = [phases(v) for _, v in rs]
+        ph = [ph_of[(arm, s)] for s, _ in rs]
         ph = [p for p in ph if p]
-        if ph and not phase_note:
+        if ph:
             phase_rows.append((arm, " ".join(fmt(mean([p[k] for p in ph]), '.4f') for k in range(nph)), len(ph)))
         if arm in ACT:
-            s_ = bw if bw is not None else ub
+            # C13 READS ONLY THE PART BEFORE THE POOL FILLS (O14): its share of the windows before the fill.
+            s_ = bwb if bwb is not None else ubb
             if s_ is not None and s_ > 0.20:
                 fastest = min(ACT, key=lambda x: int(x[1:]))
                 follow = (f"the cooldown arm {' '.join(CD)} is in this fleet: read its rows" if CD else
                           f"re-run with COOLDOWN_ARM=100 (adds {fastest}_cd100, FAB_COOLDOWN=100 at the fastest "
                           f"cadence)")
-                alarms.append(f"  BLACKOUT ALARM (C13): {arm} blacks out {100 * s_:.1f}% of its windows"
-                              + (" (upper bound)" if bw is None else "") + f", above 20%: {follow}")
+                alarms.append(f"  BLACKOUT ALARM (C13): {arm} blacks out {100 * s_:.1f}% of its windows before the "
+                              f"pool fills" + (" (upper bound)" if bwb is None else "")
+                              + f", above 20%: {follow}")
     print()
     print("=== SECONDARIES (per arm, mean over seeds; beside the rule, never in it -- register note secondaries) ===")
     for l in sec_rows:
         print(l)
-    if phase_note:
-        print(f"  bits/byte by phase: {phase_note}")
-    elif phase_rows:
+    if phase_rows:
         print(f"  by phase: the stream's {nph} equal byte ranges of DATA_STREAM_BYTES={total} (data_plan's "
-              f"bounds), each flush placed by its first byte:")
+              f"bounds; N from {nph_src}), each flush placed by its first byte:")
         for arm, vals, n in phase_rows:
             print(f"  {arm:<12} bits/byte by phase: {vals}  ({n} seed(s))")
+    est_note = (["  the blackout split is an ESTIMATE built from the act windows: fab.blackout_windows is "
+                 "cumulative and no log carries a per-window series, so each act is taken to black out up to "
+                 "FAB_COOLDOWN windows from its window (a later act restarting it), those windows are counted "
+                 "either side of the first progress line with n_live >= FAB_SLOTS, and the counter is split in "
+                 "that proportion"] if any_est else [])
+    unsplit_note = ([f"  blackout unsplit (a count and no act window to place it; all of it read as before the "
+                     f"fill): {' '.join(unsplit[:8])}" + (" ..." if len(unsplit) > 8 else "")] if unsplit else [])
     absent_lines = (([f"  {absent_head}: {', '.join(absent)}"] if absent else [])
                     + ([f"  unreachable in these runs (ABSENT from every log; the tree has them): {', '.join(unreach)}"]
                        if unreach else []))
-    for l in absent_lines + alarms:
+    for l in est_note + unsplit_note + absent_lines + alarms:
         print(l)
 
     # ---------------------------------------------------------------- kept checkpoints
@@ -1089,17 +1484,21 @@ def retok(ctx_arg, archive):
     t_head = ("bits/byte per seed  " + " ".join(f"{a:>{wd[a]}}" for a in arms_t) + "  |k0-nuis|"
               + "".join(f" {a + '-k0':>{max(10, len(a) + 3)}}" for a in diffs))
     t_rows = []                                   # (seed, row, flagged)
+    # EACH CADENCE'S LARGEST (arm - k0), the seed that most drives its upper bound up.
+    worst = set()
+    for a in ACT:
+        ds_ = {s: wr(a, s) - wr("k0", s) for s in allseeds if wr(a, s) is not None and wr("k0", s) is not None}
+        if ds_:
+            worst.add(max(ds_, key=lambda s: (ds_[s], -s)))
     for s in allseeds:
         g = lambda a: runs.get((a, s), {}).get("bpb")
         cells = " ".join(f"{fmt(g(a), '.5f'):>{wd[a]}}" for a in arms_t)
         nu = abs(g("k0") - g("k0_nuis")) if g("k0") is not None and g("k0_nuis") is not None else None
         ds = "".join(f" {fmt(g(a) - g('k0') if g(a) is not None and g('k0') is not None else None, '+.5f'):>{max(10, len(a) + 3)}}"
                      for a in diffs)
-        # A FLAGGED ROW is one the rule turns on: it sets M, an act arm fails the margin there, or a
-        # reading is missing. The condensed table keeps these first.
-        flag = (any(g(a) is None for a in arms_t)
-                or (margin is not None and (nu == margin
-                                            or any(g(a) - g("k0") > margin for a in ACT if g(a) is not None))))
+        # A FLAGGED ROW is one a reader looks for first: it sets M, it holds a cadence's largest difference
+        # from k0, or a reading is missing. The condensed table keeps these first.
+        flag = any(g(a) is None for a in arms_t) or (margin is not None and nu == margin) or s in worst
         t_rows.append((s, f"  s{s:<16} {cells}  {fmt(nu, '.5f'):>9}{ds}", flag))
 
     def table(n=None):
@@ -1114,25 +1513,32 @@ def retok(ctx_arg, archive):
         nf = sum(hid)
         return ([t_head] + [row for s, row, _ in t_rows if s in keep]
                 + [f"  ... {len(hid)} more seed row(s)"
-                   + (f", {nf} of them flagged (setting M, failing the margin or missing a reading)" if nf else
-                      ", each within the margin at every act arm" if margin is not None else "")
+                   + (f", {nf} of them flagged (setting M, holding a cadence's largest difference or missing a "
+                      f"reading)" if nf else ", none setting M, holding a cadence's largest difference or missing "
+                      "a reading")
                    + ": in ANALYSIS.txt's RUNS"])
     rr = [f"k0_rerun: k0 seed 0 twice, |diff| {rerun:.3g} bits/byte" + (" (BIT-EXACT)" if rerun == 0 else "")
           if rerun is not None else "k0_rerun: no pair (k0.s0 or k0_rerun.s0 has no reading)"]
-    verdict = ([f"MARGIN M = {margin:.5f} bits/byte (max over {len(M)} seed(s) |k0 - k0_nuis|)"] if margin is not None else [])
+    verdict = [f"RULE (O14, O2): ε {eps:g} bits/byte, incumbent {INC[1:]}; per phase ({rnph}"
+               + (", the whole run: per-flush bytes absent" if no_ph else "") + f"), arm - k0 paired over seeds: "
+               f"mean [lower at t(1 - a/{rnph}), Holm a; one-sided 95% upper]"]
     verdict += verdicts + [f"DECISION: {decision}  [{', '.join(labels)}]"]
     rates = ["RATES (post-fix rate at the retok shape; mean [min-max] over seeds"
              + ("; the k0 family's loop time includes its periodic saves" if saves else "") + "):"]
     agg_short = [l for l in agg] + [card]
     sec_head = ["SECONDARIES (mean over seeds; beside the rule):"]
-    sec_tail = absent_lines + alarms
+    sec_tail = unsplit_note + absent_lines + alarms
+    bo_short = ([f"BLACKOUT SPLIT where n_live first reaches FAB_SLOTS (each part over its own windows; C13 reads the "
+                 f"part before" + ("; ESTIMATED from the act windows x FAB_COOLDOWN, the counter being cumulative"
+                                   if any_est else "") + "):"] + split_short)
     ph_short = [f"  bits/byte by phase ({nph} equal byte ranges), {arm}: {vals}" for arm, vals, _ in phase_rows]
     emit([
         ("head", head("retok", labels) + failures(runs, done), 0),
         ("per-seed rows", table, 0),
         ("verdict", rr + verdict, 0),
         ("rates", rates, 0), ("per-arm rates", rate_short, 2), ("aggregate", agg_short, 0),
-        ("secondaries", sec_head, 0), ("per-arm secondaries", sec_short, 3), ("phases", ph_short, 4),
+        ("secondaries", sec_head, 0), ("per-arm secondaries", sec_short, 3), ("blackout split", bo_short, 2),
+        ("phases", ph_short, 4),
         ("absent and alarm", sec_tail, 0),
         ("kept checkpoints", kept_short, 1),
         ("archive", [archive_line(archive)], 0),
@@ -1171,7 +1577,7 @@ def fail(exp, archive, reason, logs):
 
 
 if MODE == "retok":
-    retok(int(sys.argv[3]), sys.argv[4])
+    retok(int(sys.argv[3]), sys.argv[4], float(sys.argv[5]), int(sys.argv[6]))
 elif MODE == "wrap":
     wrap(sys.argv[3], sys.argv[4])
 elif MODE == "fail":
