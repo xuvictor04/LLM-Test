@@ -52,9 +52,50 @@
 #     LONG=100000 bash gpu_world.sh                       # + one fb_on/fb_off pair (seed 0) that long
 #     PAR=12 MPS=0 FILL=0 bash gpu_world.sh               # manual parallelism, no MPS, no extra seeds
 #     KEEP_CKPT=1 bash gpu_world.sh                       # + one final checkpoint per run (below)
-#     bash gpu_world.sh --status                          # progress and time left; changes nothing
+#     bash gpu_world.sh --status                          # RUNNING / STALLED / FINISHED / STOPPED / DEAD,
+#                                                         # where it is and time left; changes nothing
+#     bash gpu_world.sh --stop                            # stop the running fleet; it writes its block
 #     bash gpu_world.sh --analyze                         # re-analyse what is on disk, paste back, pack
+#     bash tools/fleet_dash.sh                            # the dashboard, in a second terminal
+#     EXP=retok bash tools/gpu_launch.sh --go             # the checked launcher: the owner's one command
 #     cat gpu_world_out/SUMMARY.txt
+#
+# A FLEET SAYS IT IS ALIVE, AND ONLY ONE RUNS PER OUT (2026-09-27: the retok fleet was stopped by hand
+# because the card read idle and the log said nothing, and a second paste of the launch line had
+# started a second fleet whose launch moved the first one's OUT from under it):
+#   * ONE FLEET PER OUT. A launch takes an flock on <OUT>.lock, beside OUT (inside it, the lock would
+#     move with OUT), held by the fleet and every process it starts for as long as any of them runs. A
+#     launch that finds it held -- or finds a fleet the lock cannot see: a gpu_world.sh launched before
+#     it, or a run.py still writing under OUT -- refuses, moves nothing, and says which fleet is running,
+#     where it is, why the card may read idle, and how to watch or stop it. At DEVICE=cuda a fleet under
+#     ANOTHER OUT on the same machine is refused too (two fleets on one card measure each other; set
+#     ALLOW_CONCURRENT=1 to mean it). A dead fleet's OUT is moved aside as before, and the MPS daemon it
+#     left behind (a SIGKILL runs no trap) is told to quit.
+#   * $OUT/STATE, rewritten at every step: the shell's pid and its start time, the phase and step and
+#     when they began, and at the end how it ended. --status and tools/fleet_dash.sh read their verdict
+#     off it: RUNNING, STALLED (no run output for 5 minutes), FINISHED, STOPPED with the reason, or
+#     DEAD -- the pid gone with no end recorded, "died without a reason".
+#   * A HEARTBEAT: every HB_EVERY seconds (30; 0 turns it off) one line in this log -- the stage, its
+#     runs starting on the CPU / training / done / failed, windows, windows/s, the ETA, the GPU's
+#     utilisation and memory, the load -- also kept in $OUT/HEARTBEAT and $OUT/heartbeat.log. Each
+#     smoke, calibration and fleet step says when its runs START, and that they build on the CPU first
+#     (python and torch, corpus, tokenizer, stream, model: the startup the smoke measures and prints)
+#     so the card reads idle then. The watcher that prints the heartbeat also notices the shell vanish
+#     without a block (SIGKILL, the OOM killer): it says so here, stops the runs, writes the block.
+#   * A STOP WRITES ITS BLOCK. INT, TERM and HUP stop the runs, write "STOPPED by SIG<x> during <where>"
+#     here and in the block, pack the archive, quit MPS, and exit 128+n; any other exit that wrote no
+#     block (a set -u slip, a failed command) writes one naming the command. Under nohup HUP stays
+#     ignored -- bash cannot trap a signal ignored at entry -- which is what keeps a closed terminal
+#     harmless.
+#   * PULL SAFETY: the fleet runs its OWN COPY. A launch copies this script, run.py, src/ and
+#     tools/fleet_dash.sh into $OUT/code and re-executes the copy, which works in the checkout as
+#     before; every run is `python3 $OUT/code/run.py` on $OUT/code/src. A `git pull` during the fleet --
+#     or an editor, cp or scp rewriting this file in place, which a running bash would read from the
+#     middle -- reaches none of it. SUMMARY records the commit and a sha256 of the copy. --status,
+#     --stop and --analyze are readers and run from the checkout.
+# The runs' own logs are unbuffered (PYTHONUNBUFFERED=1; that changes no number), so each shows its
+# lines as they happen: run.py's first line when it starts, '=== composed' with its startup when it
+# begins training, and a '[N windows]' line every 100 windows.
 #
 # A LAUNCH INTO AN OUT THAT HOLDS A PREVIOUS FLEET MOVES THAT FLEET ASIDE, WHOLE, beside it as
 # <OUT>.<its launch stamp> (2026-09-27, build 1.5's review; the reason is at the move, below). Nothing
@@ -176,6 +217,7 @@ case "$EXP" in
           "Nothing was started."; exit 2 ;;
 esac
 case "$EXP" in retok) _o=gpu_retok_out ;; world_epoch) _o=gpu_world_epoch_out ;; *) _o=gpu_world_out ;; esac
+_OUT_GIVEN=${OUT:+x}
 OUT=${OUT:-$_o}
 WINDOWS=${WINDOWS:-20000}
 SEEDS=${SEEDS:-$([[ "$EXP" == retok ]] && echo "0 1 2" || echo "0 1 2 3 4")}
@@ -232,12 +274,32 @@ RETOK_INCUMBENT=${RETOK_INCUMBENT:-3000}   # the incumbent cadence (O14's interi
   || { echo "!! EPS='$EPS' is not a positive number of bits/byte (the eps rule's budget). Nothing was started."; exit 2; }
 [[ "$RETOK_INCUMBENT" =~ ^[1-9][0-9]*$ ]] \
   || { echo "!! RETOK_INCUMBENT='$RETOK_INCUMBENT' is not a positive cadence. Nothing was started."; exit 2; }
+# THE HEARTBEAT'S PERIOD (seconds; 0 = no heartbeat) AND PAR, CHECKED AT LAUNCH: an empty or 0 PAR
+# made run_fleet wait for a free slot for ever, without a word.
+HB_EVERY=${HB_EVERY:-30}
+[[ "$HB_EVERY" =~ ^[0-9]+$ ]] || { echo "!! HB_EVERY='$HB_EVERY' is not a number of seconds (0 = no heartbeat). Nothing was started."; exit 2; }
+[[ "$PAR" == auto || "$PAR" =~ ^[1-9][0-9]*$ ]] \
+  || { echo "!! PAR='$PAR' is not 'auto' or a positive number of runs at a time. Nothing was started."; exit 2; }
 # LM_CTX TURNS PER-TOKEN NATS INTO BITS PER BYTE, so the analysis must use the one the runs used: from
 # EXTRA, else from this environment (which the runs inherit), else the lever's default.
 CTX=$(echo " $EXTRA " | sed -n 's/.* LM_CTX=\([0-9][0-9]*\) .*/\1/p')
 CTX=${CTX:-${LM_CTX:-128}}
 
-cd "$(dirname "$0")"
+# THE PRIVATE COPY KNOWS ITSELF by GW_CODE naming the directory it runs from (the launch below sets it
+# with GW_ROOT, the checkout, just before it re-executes the copy). It works in the checkout, where OUT
+# and the corpus (DATA_DIR) are resolved as before, and reads its code -- run.py, src/, the dashboard --
+# from the copy. Anything else runs from the checkout, as it always did.
+GW_PRIVATE=0
+if [[ -n "${GW_CODE:-}" && -n "${GW_ROOT:-}" && -d "$GW_CODE" \
+      && "$(cd "$(dirname "$0")" && pwd -P)" == "$(cd "$GW_CODE" && pwd -P)" ]]; then
+  GW_PRIVATE=1
+  cd "$GW_ROOT" || { echo "!! GW_ROOT='$GW_ROOT': no such checkout"; exit 2; }
+  CODE_DIR=$(cd "$GW_CODE" && pwd -P)
+else
+  cd "$(dirname "$0")"
+  CODE_DIR=$PWD
+fi
+DASH="$CODE_DIR/tools/fleet_dash.sh"
 
 # ---------------------------------------------------------------- the arms
 arm_env() {  # the lever settings that define each arm; an arm this does not know is refused
@@ -291,7 +353,7 @@ EXP_ENV=""
 # C12's LABEL, READ OFF THE TREE AND THE FLEET'S SETTINGS AT LAUNCH (so --analyze on another day
 # reports what ran, not what the checkout holds then).
 LEVELS="on (DOM_LEVELS declared, default on)"
-grep -q "levels = Lever" src/domains/levers.py 2>/dev/null || LEVELS="pre-Levels (this tree declares no DOM_LEVELS)"
+grep -q "levels = Lever" "$CODE_DIR/src/domains/levers.py" 2>/dev/null || LEVELS="pre-Levels (this tree declares no DOM_LEVELS)"
 _dl=$(echo " $EXTRA " | sed -n 's/.* DOM_LEVELS=\([^ ]*\) .*/\1/p'); _dl=${_dl:-${DOM_LEVELS:-}}
 case "$(echo "$_dl" | tr 'A-Z' 'a-z')" in 0|off|no|none|false) LEVELS="pre-Levels (DOM_LEVELS=$_dl)" ;; esac
 # §8 1.3's COUNTERS AND run.py's --flush-bytes, READ OFF THE TREE AT LAUNCH as LEVELS is (2026-09-27,
@@ -301,10 +363,10 @@ case "$(echo "$_dl" | tr 'A-Z' 'a-z')" in 0|off|no|none|false) LEVELS="pre-Level
 # tree can say a key is missing; each name is looked for as a quoted string in src's Python.
 TREE13=""
 for _k in fab.blackout_windows tok.mint_wait_windows loop.act_seconds tok.bpt_tail; do
-  grep -rqF --include='*.py' "\"$_k\"" src 2>/dev/null && TREE13="$TREE13${TREE13:+ }$_k"
+  grep -rqF --include='*.py' "\"$_k\"" "$CODE_DIR/src" 2>/dev/null && TREE13="$TREE13${TREE13:+ }$_k"
 done
 FB_FLAG=no
-grep -q -- '--flush-bytes' run.py 2>/dev/null && FB_FLAG=yes
+grep -q -- '--flush-bytes' "$CODE_DIR/run.py" 2>/dev/null && FB_FLAG=yes
 
 # THE CHECKPOINT SETTINGS OF ONE RUN, '' AT KEEP_CKPT=0 -- so every default command line is the one
 # this script ran before the option existed. Appended AFTER the arm's settings, so they win over EXTRA.
@@ -657,8 +719,13 @@ def emit(sections):
                     + " -- in ANALYSIS.txt and the archive)")
     lines = body + tail
     text = "\n".join(["==== PASTE THIS BACK ===="] + lines + ["==== END ===="]) + "\n"
-    with open(os.path.join(OUT, "PASTE_BACK.txt"), "w") as fh:
-        fh.write(text)
+    # A FULL DISK DOES NOT SWALLOW THE BLOCK (2026-09-27): unwritable, it goes to stderr, which is the
+    # fleet's log, and the paste-back file is left unwritten.
+    try:
+        with open(os.path.join(OUT, "PASTE_BACK.txt"), "w") as fh:
+            fh.write(text)
+    except OSError as e:
+        sys.stderr.write(f"!! could not write {os.path.join(OUT, 'PASTE_BACK.txt')} ({e}); the block:\n" + text)
 
 
 def done_book():
@@ -1766,7 +1833,9 @@ print(f"{tag}: {len(rows)} kept")
 PY
   )
 }
-ROOT_DIR=$PWD
+# src/ FOR THE INDEX'S UNPICKLING: the fleet's own copy when it runs one (a launch always does, since
+# 2026-09-27), so a pull during the fleet cannot pair its checkpoints with other code.
+ROOT_DIR=$CODE_DIR
 
 # ---------------------------------------------------------------- the block and the archive
 archive_path() {  # beside OUT, named for the fleet's LAUNCH date, so --analyze on a later day repacks the same name
@@ -1778,31 +1847,287 @@ archive_path() {  # beside OUT, named for the fleet's LAUNCH date, so --analyze 
 paste_back() {  # print the owner's block (EXP=retok's analysis wrote it; the others are wrapped here)
   [[ "$EXP" == retok ]] || gw_py wrap "$OUT" "$EXP" "$(archive_path)"
   echo
-  cat "$OUT/PASTE_BACK.txt"
+  cat "$OUT/PASTE_BACK.txt" 2>/dev/null
 }
-pack() {  # everything under OUT but checkpoints, into the archive the owner keeps
-  local a p b
+pack() {  # everything under OUT but checkpoints (and the fleet's code copy), into the archive the owner keeps
+  local a p b rc
+  gw_hb_stop                # the heartbeat writes into OUT: it ends before the archive is taken
   a=$(archive_path); p=$(dirname "$OUT"); b=$(basename "$OUT")
-  if tar -czf "$a" -C "$p" --exclude="$b/ckpt" --exclude="$b/smoke/ckpt" --exclude="$b/mps" \
-         --exclude='*.pt' --exclude='*.pt.*' "$b"; then
+  # tar's exit 1 is "a file changed as it was read" (the dashboard's page, a run still ending): the
+  # archive is written, so it counts as packed.
+  tar -czf "$a" -C "$p" --warning=no-file-changed --warning=no-file-removed \
+      --exclude="$b/ckpt" --exclude="$b/smoke/ckpt" --exclude="$b/mps" --exclude="$b/code" \
+      --exclude='*.pt' --exclude='*.pt.*' --exclude='.*.tmp' "$b"
+  rc=$?
+  if [[ "$rc" -le 1 && -s "$a" ]]; then
     echo "=== packed $a ($(du -h "$a" | cut -f1)): logs, curves, SUMMARY, ANALYSIS, the block; no checkpoints. Keep it."
   else
     echo "!! could not pack $a"
   fi
 }
 fail_back() {  # reason [log...] : a stop before the analysis still ends in a block and an archive
+  GW_BLOCKED=1; GW_FAIL_REASON=$1
+  gw_hb_stop                # no heartbeat line lands inside the block
   gw_py fail "$OUT" "$EXP" "$(archive_path)" "$@"
   echo
-  cat "$OUT/PASTE_BACK.txt"
+  cat "$OUT/PASTE_BACK.txt" 2>/dev/null
   pack
+}
+
+# ---------------------------------------------------------------- one fleet per OUT: the lock, STATE, the heartbeat, the stops
+# (2026-09-27; the header's "A FLEET SAYS IT IS ALIVE, AND ONLY ONE RUNS PER OUT" says why.)
+# THE LOCK SITS BESIDE OUT, NOT IN IT: OUT is what a launch moves aside, and a lock inside it would move
+# with it. It is an flock on fd 9, which every process of the fleet inherits -- the runs, the kept-
+# checkpoint watchers, the heartbeat -- so the lock is held while ANY of them runs, even when the shell
+# itself was killed; the MPS daemon and the nvidia-smi sampler, which outlive a killed fleet, are
+# started without it (9>&-), and so are the readers the fleet calls. The file holds nothing and is
+# never replaced: a replaced file would hand the next launch a fresh, unlocked one.
+LOCKF=${OUT%/}; LOCKF="${LOCKF:-.}.lock"
+_cmdenv="EXP=$EXP "; [[ -n "$_OUT_GIVEN" ]] && _cmdenv="${_cmdenv}OUT=$OUT "
+
+gw_flock() {  # fd: an exclusive lock on it, taken without waiting (0 = taken, 1 = held by another)
+  if command -v flock > /dev/null 2>&1; then flock -n "$1"; return; fi
+  python3 -c 'import fcntl, sys; fcntl.flock(int(sys.argv[1]), fcntl.LOCK_EX | fcntl.LOCK_NB)' "$1" 2>/dev/null
+}
+gw_proc() {  # pid: "<state> <start time>" of a process; fails when it is gone
+  local s
+  read -r s 2>/dev/null < "/proc/$1/stat" || return 1
+  s=${s##*) }
+  # shellcheck disable=SC2086
+  set -- $s
+  echo "$1 ${20}"
+}
+gw_alive() {  # pid start: THAT process (same start time) still runs, and is not a zombie
+  local p
+  [[ -n "${1:-}" && -n "${2:-}" ]] || return 1
+  p=$(gw_proc "$1") || return 1
+  [[ "${p%% *}" != Z && "${p#* }" == "$2" ]]
+}
+gw_is_live() {  # the fleet in OUT runs: fleet_dash.sh's verdict is RUNNING (0) or STALLED (5)
+  local v
+  bash "$DASH" --status "$OUT" 9>&- > /dev/null 2>&1
+  v=$?
+  [[ "$v" == 0 || "$v" == 5 ]]
+}
+gw_refuse_live() {  # why [process rows]: a launch finds a live fleet in OUT
+  local frame v
+  frame=$(bash "$DASH" --status "$OUT" 9>&- 2>/dev/null)
+  v=$?
+  if [[ "$v" == 0 || "$v" == 5 ]]; then
+    echo "!! A FLEET IS ALREADY RUNNING IN $OUT: $1."
+  else
+    echo "!! THE FLEET IN $OUT IS NOT RUNNING, BUT PROCESSES IT STARTED STILL ARE ($1): runs orphaned when"
+    echo "!! its shell was killed keep writing into OUT. ${_cmdenv}bash gpu_world.sh --stop clears them."
+  fi
+  echo "!! Nothing was started and nothing was moved (a second launch into a live OUT is what moved the"
+  echo "!! 2026-09-27 retok fleet's directory out from under it)."
+  if [[ -n "${2:-}" ]]; then echo "   its processes:"; echo "$2" | head -12 | sed 's/^/     /'; fi
+  echo "$frame" | sed 's/^/   /'
+  echo "   The card can read 0% while it runs: every smoke and calibration step starts its runs on the CPU"
+  echo "   (python and torch, corpus, tokenizer, stream, model) before they use the GPU. Judge it by --status"
+  echo "   or the heartbeat, never by nvidia-smi or a quiet log, and never by launching again."
+  echo "   watch it:  bash tools/fleet_dash.sh $OUT"
+  echo "   one look:  ${_cmdenv}bash gpu_world.sh --status"
+  echo "   stop it:   ${_cmdenv}bash gpu_world.sh --stop      (it writes its block; launch again after)"
+}
+
+# STATE: key=value lines, the whole file rewritten (a tmp file, then mv) by the fleet's shell at every
+# step; a later line for a key wins. The heartbeat watcher, whose copy of ST is stale, only appends.
+declare -A ST=()
+ST_KEYS=()
+gw_state() {  # key=value ...
+  local kv k
+  for kv in "$@" "updated=$(date +%s)"; do
+    k=${kv%%=*}
+    [[ -n "${ST[$k]+x}" ]] || ST_KEYS+=("$k")
+    ST[$k]=${kv#*=}
+  done
+  { for k in "${ST_KEYS[@]}"; do printf '%s=%s\n' "$k" "${ST[$k]}"; done; } > "$OUT/.STATE.tmp" 2>/dev/null \
+    && mv -f "$OUT/.STATE.tmp" "$OUT/STATE" 2>/dev/null
+  return 0
+}
+gw_state_add() {  # key=value ...: appended to STATE as it is on disk
+  { cat "$OUT/STATE" 2>/dev/null; printf '%s\n' "$@"; } > "$OUT/.STATE.w.tmp" 2>/dev/null \
+    && mv -f "$OUT/.STATE.w.tmp" "$OUT/STATE" 2>/dev/null
+  return 0
+}
+gw_st() { sed -n "s/^$1=//p" "$OUT/STATE" 2>/dev/null | tail -1; }   # key: its value in STATE
+gw_where() {  # where the fleet is, in words, off STATE
+  local n
+  case "$(gw_st phase)" in
+    smoke) echo "the smoke" ;;
+    cal) echo "calibration $(gw_st step)" ;;
+    fleet) n=$(grep -c 'rc=' "$OUT/logs/_done.txt" 2>/dev/null)
+           echo "the fleet (${n:-0} of $(gw_st runs_total) run(s) ended)" ;;
+    analysis) echo "the analysis (the runs had ended: --analyze reads them)" ;;
+    stopping) echo "the stop" ;;
+    *) echo "the setup, before the smoke" ;;
+  esac
+}
+gw_step() {  # phase step dir runs windows: from now on STATE says the fleet is here
+  gw_state phase="$1" step="$2" step_dir="$(realpath -m -- "$3")" step_runs="$4" step_windows="$5" since="$(date +%s)"
+}
+gw_step_logs() {  # the logs of the current step's runs that did not end rc=0, at most 2 (for the block)
+  local d tag rest n=0
+  d=$(gw_st step_dir)
+  [[ -n "$d" && -f "$d/_started.txt" ]] || return 0
+  while read -r tag rest; do
+    awk -v t="$tag" '$1 == t && $2 == "rc=0" { f = 1 } END { exit !f }' "$d/_done.txt" 2>/dev/null && continue
+    [[ -f "$d/$tag.log" ]] || continue
+    echo "$d/$tag.log"; n=$(( n + 1 ))
+    (( n >= 2 )) && break
+  done < "$d/_started.txt"
+}
+gw_kids() {  # kind ... | all: this shell's descendants of those kinds, one pid a line (never the MPS daemon)
+  local rows p k c want=" $* "
+  rows=$(bash "$DASH" --scan desc "$$" 9>&- 2>/dev/null) || return 0
+  while IFS=$'\t' read -r p k c; do
+    [[ -n "$p" && "$k" != mps ]] || continue
+    if [[ "$want" == *" all "* || "$want" == *" $k "* ]]; then echo "$p"; fi
+  done <<< "$rows"
+}
+gw_hb_stop() {  # the heartbeat watcher ends (a no-op where there is none, and in the watcher itself)
+  [[ -n "${HB_PID:-}" ]] || return 0
+  kill "$HB_PID" 2>/dev/null
+  wait "$HB_PID" 2>/dev/null
+  HB_PID=""
+  return 0
+}
+gw_stop_children() {  # the heartbeat and the sampler; then this fleet's runs (TERM) and up to 30 s for each
+                      # run_job to write its _done line; then TERM and KILL whatever of this shell's is left
+  local left i
+  : > "$OUT/.stopping" 2>/dev/null         # run_job skips its keep_index: --analyze indexes what is left
+  gw_hb_stop
+  [[ -n "${SMI_PID:-}" ]] && kill "$SMI_PID" 2>/dev/null
+  left=$(gw_kids run)
+  if [[ -n "$left" ]]; then
+    echo "   stopping $(wc -w <<< "$left") run(s): pid $(echo $left)"
+    kill -TERM $left 2>/dev/null
+  fi
+  for i in $(seq 1 60); do
+    left=$(gw_kids all)
+    [[ -z "$left" ]] && break
+    sleep 0.5
+  done
+  if [[ -n "$left" ]]; then kill -TERM $left 2>/dev/null; sleep 1; left=$(gw_kids all); fi
+  [[ -n "$left" ]] && kill -KILL $left 2>/dev/null
+  rm -f "$OUT/.stopping"
+  return 0
+}
+gw_mps_quit() {  # this fleet's MPS daemon, once, after its runs are gone (quit waits for its clients)
+  [[ "${MPS_ON:-0}" == 1 && -z "${MPS_QUIT:-}" ]] || return 0
+  MPS_QUIT=1
+  echo quit | timeout 60 nvidia-cuda-mps-control > /dev/null 2>&1 \
+    || echo "!! the MPS daemon did not quit within 60 s (CUDA_MPS_PIPE_DIRECTORY=${CUDA_MPS_PIPE_DIRECTORY:-?})"
+  return 0
+}
+gw_on_signal() {  # INT | TERM | HUP: stop the runs, say why here and in the block, pack, exit 128+n
+  local sig=$1 n where
+  if [[ -n "${GW_STOPPING:-}" ]]; then echo "!! SIG$sig again: the fleet is already stopping (pid $$)"; return 0; fi
+  GW_STOPPING=SIG$sig
+  case "$sig" in INT) n=2 ;; HUP) n=1 ;; *) n=15 ;; esac
+  where=$(gw_where)
+  say ""
+  say "!! gpu_world.sh STOPPED by SIG$sig at $(date -u +%H:%M:%SZ) during $where (pid $$)"
+  gw_state phase=stopping since="$(date +%s)" reason="stopped by SIG$sig during $where"
+  gw_stop_children
+  fail_back "stopped by SIG$sig during $where" $(gw_step_logs)
+  exit $(( 128 + n ))
+}
+gw_on_exit() {  # every exit of the fleet's shell: say why when nothing did, and leave no process behind
+  local rc=$? cmd=$BASH_COMMAND where
+  # a second Ctrl-C or TERM must not cut the cleanup short (it is bounded: 30 s for the runs, 60 for MPS)
+  trap - EXIT
+  trap '' INT TERM HUP
+  if [[ -z "${GW_FINISHED:-}" && -z "${GW_BLOCKED:-}" ]]; then
+    where=$(gw_where)
+    say ""
+    say "!! gpu_world.sh stopped unexpectedly (exit $rc) during $where, at: $cmd"
+    gw_stop_children
+    fail_back "stopped unexpectedly (exit $rc) during $where, at: $cmd" $(gw_step_logs)
+  else
+    gw_stop_children
+  fi
+  gw_mps_quit
+  if [[ -n "${GW_FINISHED:-}" ]]; then
+    gw_state phase=done end=finished rc="$rc" ended="$(date +%s)" reason="its analysis and its block are written"
+  else
+    gw_state end=stopped rc="$rc" ended="$(date +%s)" reason="${GW_FAIL_REASON:-exit $rc}"
+  fi
+  exit "$rc"
+}
+gw_watch() {  # in the background: a heartbeat line every HB_EVERY s, and the shell's death noticed
+  local next=0 now txt
+  while :; do
+    gw_alive "$GW_PID" "$GW_PSTART" || { gw_watch_died; exit 0; }
+    printf -v now '%(%s)T' -1
+    if (( now >= next )); then
+      next=$(( now + HB_EVERY ))
+      txt=$(timeout 60 bash "$DASH" --line --sample "$OUT" 9>&- 2>/dev/null)
+      if [[ -n "$txt" ]]; then
+        printf '%s\n' "${txt%%$'\n'*}"
+        printf '%s\n' "${txt%%$'\n'*}" >> "$OUT/heartbeat.log"
+        printf '%s\n' "$txt" > "$OUT/.HEARTBEAT.tmp" && mv -f "$OUT/.HEARTBEAT.tmp" "$OUT/HEARTBEAT"
+      fi
+    fi
+    sleep 1 9>&-
+  done
+}
+gw_watch_died() {  # the shell is gone: if it recorded no end, say so, stop what it left, write the block
+  grep -q '^end=' "$OUT/STATE" 2>/dev/null && return 0
+  local where msg pids mp
+  where=$(gw_where)
+  msg="!! THE FLEET'S SHELL (pid $GW_PID) IS GONE AND WROTE NO BLOCK, during $where (noticed $(date -u +%H:%M:%SZ)"
+  msg="$msg by its heartbeat watcher): a signal no trap can catch killed it (kill -9, the OOM killer), or it"
+  msg="$msg crashed. The watcher stops the processes it left and writes the block."
+  echo "$msg"
+  echo "$msg" >> "$OUT/SUMMARY.txt"
+  pids=$(bash "$DASH" --scan own "$OUT" 9>&- 2>/dev/null | awk -F'\t' '$2 == "run" || $2 == "shell" || $2 == "sampler" { print $1 }')
+  if [[ -n "$pids" ]]; then
+    kill -TERM $pids 2>/dev/null
+    sleep 2
+    pids=$(bash "$DASH" --scan own "$OUT" 9>&- 2>/dev/null | awk -F'\t' '$2 == "run" || $2 == "shell" || $2 == "sampler" { print $1 }')
+    [[ -n "$pids" ]] && kill -KILL $pids 2>/dev/null
+  fi
+  mp=$(gw_st mps_pipe)
+  [[ -n "$mp" ]] && echo quit | CUDA_MPS_PIPE_DIRECTORY="$mp" timeout 60 nvidia-cuda-mps-control > /dev/null 2>&1
+  fail_back "the fleet's shell (pid $GW_PID) vanished during $where and wrote no block: killed by a signal no trap catches (kill -9, the OOM killer), or crashed"
+  gw_state_add end=died rc=137 "ended=$(date +%s)" \
+    "reason=its shell (pid $GW_PID) vanished during $where without a block (kill -9, the OOM killer, or a crash); its heartbeat watcher stopped what it left and wrote the block"
+}
+gw_fleet_start() {  # STATE, the traps and the heartbeat, before anything runs
+  local log
+  GW_PID=$$
+  GW_PSTART=$(gw_proc $$); GW_PSTART=${GW_PSTART#* }
+  log=$(readlink "/proc/$$/fd/1" 2>/dev/null); [[ -f "$log" ]] || log=""
+  gw_state pid=$$ pid_start="$GW_PSTART" host="$(uname -n)" exp="$EXP" out="$GW_FLEET_OUT" code="$CODE_DIR" \
+    commit="$COMMIT$DIRTY" launch="$LAUNCH" launch_t="$LAUNCH_T" log="$log" device="$DEVICE" \
+    hb_every="$HB_EVERY" lock="${GW_LOCKF:-}" phase=setup step= step_dir="$GW_FLEET_OUT" since="$LAUNCH_T"
+  trap 'gw_on_signal INT' INT
+  trap 'gw_on_signal TERM' TERM
+  trap 'gw_on_signal HUP' HUP
+  trap 'gw_on_exit' EXIT
+  HB_PID=""
+  if (( HB_EVERY > 0 )); then
+    gw_watch &
+    HB_PID=$!
+    gw_state hb_pid="$HB_PID"
+  fi
 }
 
 # bash gpu_world.sh --analyze : the analysis of whatever runs are on disk, printed and written to
 # ANALYSIS.txt, then the block and the archive. For a fleet that finished but never reached its own
 # analysis, or one that was stopped part-way (the missing runs simply have no curve and are left out
-# of the pairing; k0's copies an interrupted run never indexed are indexed first).
+# of the pairing; k0's copies an interrupted run never indexed are indexed first). NEVER ON A LIVE
+# FLEET (2026-09-27): it would write into it and index the checkpoints its runs are still saving.
 if [[ "${1:-}" == --analyze ]]; then
   [[ -f "$OUT/SUMMARY.txt" ]] || { echo "!! no $OUT/SUMMARY.txt: nothing to analyse here (OUT=$OUT)"; exit 1; }
+  if gw_is_live; then
+    echo "!! a fleet is running in $OUT: --analyze would write into it. Wait for it to end, or stop it"
+    echo "   (${_cmdenv}bash gpu_world.sh --stop), which writes its block. Nothing was written."
+    exit 2
+  fi
+  [[ -d "$OUT/code/src" ]] && ROOT_DIR=$(cd "$OUT/code" && pwd -P)   # the fleet's own code unpickles its copies
   if [[ -z "$_EXP_GIVEN" ]]; then     # the experiment the fleet recorded, when EXP was not given
     _e=$(sed -n 's/^=== plan: EXP=\([a-z_]*\);.*/\1/p' "$OUT/SUMMARY.txt" | head -1)
     [[ -z "$_e" ]] && compgen -G "$OUT/logs/k0.s*.log" > /dev/null && _e=retok
@@ -1822,39 +2147,52 @@ if [[ "${1:-}" == --analyze ]]; then
   exit 0
 fi
 
+# bash gpu_world.sh --status : the VERDICT FIRST -- RUNNING, STALLED, FINISHED, STOPPED (with its
+# reason), DEAD ("died without a reason": the pid is gone and STATE records no end) or NO FLEET --
+# then where it is: the stage and its time, each run of the step, windows, windows/s, the ETA, the
+# GPU, the load, the disk, the heartbeat's age and the log's last lines. tools/fleet_dash.sh reads it
+# (one reader for this, the dashboard and the heartbeat); the exit code is the verdict's: 0 RUNNING,
+# 1 FINISHED, 2 NO FLEET, 3 STOPPED, 4 DEAD, 5 STALLED. It changes nothing and is safe at any time.
 if [[ "${1:-}" == --status ]]; then
-  OUT="$OUT" python3 - <<'PY'
-import glob, os, re, datetime as dt
-out = os.environ["OUT"]
-s = open(f"{out}/SUMMARY.txt").read()
-m = re.search(r"=== (\d+) run\(s\), (\d+) at a time", s)
-if not m: raise SystemExit("the fleet has not started yet (still in the smoke or the calibration)")
-n, par = map(int, m.groups())
-win = int(re.search(r"(\d+) windows per run", s).group(1))
-hh, mm, ss = map(int, re.search(r"fleet started (\d+):(\d+):(\d+)Z", s).groups())
-now = dt.datetime.now(dt.timezone.utc)
-start = now.replace(hour=hh, minute=mm, second=ss, microsecond=0)
-if start > now: start -= dt.timedelta(days=1)
-el = (now - start).total_seconds()
-dtxt = open(f"{out}/logs/_done.txt").read() if os.path.exists(f"{out}/logs/_done.txt") else ""
-done, failed = dtxt.count("rc="), len(re.findall(r"rc=[1-9]", dtxt))
-logs = glob.glob(f"{out}/logs/*.log")
-# A FINISHED RUN COUNTS ITS SUMMARY LINE: a run shorter than the progress cadence prints no
-# "[N windows]" line at all, and read as 0 it made the rate 0 and the finish time NaN (a traceback).
-at = []
-for l in logs:
-    t = open(l).read()
-    fin = re.search(r"^=== (\d+) windows, ", t, re.M)
-    at.append(int(fin.group(1)) if fin else int((re.findall(r"^\[(\d+) windows\]", t, re.M) or [0])[-1]))
-total, got = n * win, sum(min(a, win) for a in at)
-rate = got / el if el else 0
-left = (total - got) / rate / 3600 if rate else float("nan")
-print(f"running {el/3600:.2f} h | runs {done}/{n} ended ({failed} FAILED), {len(logs)-done} in flight ({par} slots)")
-print(f"windows {got:,}/{total:,} ({100*got/total:.0f}%) | {rate:.1f} w/s total, {rate/max(1,len(logs)-done):.2f} per run")
-print(f"time left ~{left:.1f} h (finish ~{(now+dt.timedelta(hours=left)):%H:%M} UTC)" if left == left else
-      "time left: unknown (no log holds a window count yet)")
-for l in re.findall(r"=== ETA.*|=== parallelism.*|=== calibration.*", s): print(l)
-PY
+  bash "$DASH" --status "$OUT" 9>&-
+  _v=$?
+  [[ "$_v" == 2 && -z "$_EXP_GIVEN" && -z "$_OUT_GIVEN" ]] \
+    && echo "   (EXP was not given, so this read $OUT, EXP=world's; the retok fleet is EXP=retok bash gpu_world.sh --status)"
+  exit "$_v"
+fi
+
+# bash gpu_world.sh --stop : stop the running fleet the way a signal does -- SIGTERM to its shell, which
+# stops its runs, writes STOPPED by SIGTERM in its log and its block, packs its archive and quits MPS --
+# and wait for it (STOP_WAIT, 300 s). Then clear whatever still runs for OUT: a fleet from before
+# STATE, or what a killed one left (its runs, its sampler, its MPS daemon). Never the container.
+if [[ "${1:-}" == --stop ]]; then
+  _pid=$(gw_st pid); _pst=$(gw_st pid_start)
+  if gw_is_live && gw_alive "$_pid" "$_pst"; then
+    echo "=== stopping the fleet in $OUT: SIGTERM to its shell, pid $_pid (it stops its runs, writes its block, packs)"
+    kill -TERM "$_pid"
+    for _i in $(seq 1 "${STOP_WAIT:-300}"); do gw_alive "$_pid" "$_pst" || break; sleep 1; done
+    if gw_alive "$_pid" "$_pst"; then
+      echo "!! pid $_pid still runs after ${STOP_WAIT:-300} s: kill -9 $_pid, then ${_cmdenv}bash gpu_world.sh --stop again"
+      exit 1
+    fi
+    cat "$OUT/PASTE_BACK.txt" 2>/dev/null
+  fi
+  _rows=$(bash "$DASH" --scan own "$OUT" 9>&- 2>/dev/null)
+  _p=$(awk -F'\t' '$2 != "mps" && $2 != "" { print $1 }' <<< "$_rows")
+  if [[ -n "$_p" ]]; then
+    echo "=== stopping $(wc -w <<< "$_p") process(es) still running for $OUT:"
+    echo "$_rows" | sed 's/^/    /'
+    kill -TERM $_p 2>/dev/null
+    sleep 3
+    _p=$(bash "$DASH" --scan own "$OUT" 9>&- 2>/dev/null | awk -F'\t' '$2 != "mps" && $2 != "" { print $1 }')
+    [[ -n "$_p" ]] && kill -KILL $_p 2>/dev/null
+  fi
+  _mp=$(gw_st mps_pipe); [[ -n "$_mp" ]] || _mp="$(realpath -m -- "$OUT")/mps/pipe"
+  if [[ -d "$_mp" ]] && command -v nvidia-cuda-mps-control > /dev/null 2>&1; then
+    echo quit | CUDA_MPS_PIPE_DIRECTORY="$_mp" timeout 30 nvidia-cuda-mps-control > /dev/null 2>&1 \
+      && echo "=== told the MPS daemon at $_mp to quit"
+  fi
+  bash "$DASH" --status "$OUT" 9>&-
   exit 0
 fi
 
@@ -1878,6 +2216,45 @@ if [[ "$KEEP_CKPT" == 1 && "$OUT" =~ [[:space:]] ]]; then
   echo "   split on whitespace. Choose an OUT without spaces. Nothing was started."; exit 2
 fi
 
+# ---------------------------------------------------------------- the launch gate (from the checkout)
+# 1. THE LOCK. 2. A FLEET THE LOCK CANNOT SEE: a gpu_world.sh launched before the lock existed, or a
+# run.py still writing under OUT -- the scan reads /proc (their command lines, working directories and
+# environments). 3. At DEVICE=cuda, a fleet under ANOTHER OUT on this machine. 4. A previous fleet in
+# OUT, now known dead, moved aside (below), and the MPS daemon it may have left told to quit. 5. The
+# private copy, and the re-execution of it: nothing after this block runs from the checkout's script.
+# A launch that finds a live fleet refuses before it has moved or written anything but the lock file.
+if [[ "$GW_PRIVATE" != 1 ]]; then
+  _oabs=$(realpath -m -- "$OUT")
+  mkdir -p -- "$(dirname -- "$LOCKF")" 2>/dev/null     # OUT's parent, which the launch creates anyway
+  if ! { exec 9<>"$LOCKF"; } 2>/dev/null; then
+    echo "!! cannot open the lock file $LOCKF beside OUT: is its directory writable? Nothing was started."; exit 2
+  fi
+  if ! gw_flock 9; then
+    gw_refuse_live "its lock, $LOCKF, is held"
+    exit 2
+  fi
+  _rows=$(bash "$DASH" --scan own "$_oabs" 9>&- 2>/dev/null)
+  _live=$(awk -F'\t' '$2 == "run" || $2 == "shell"' <<< "$_rows")
+  if [[ -n "$_live" ]]; then
+    gw_refuse_live "processes of a fleet the lock cannot see are running for it (launched by a gpu_world.sh from before the lock, or left by a killed one)" "$_live"
+    exit 2
+  fi
+  if [[ "$DEVICE" == cuda && "${ALLOW_CONCURRENT:-0}" != 1 ]]; then
+    _other=$(bash "$DASH" --scan card "$_oabs" 9>&- 2>/dev/null)
+    if [[ -n "$_other" ]]; then
+      echo "!! ANOTHER FLEET IS RUNNING ON THIS MACHINE'S GPU, under another OUT. Nothing was started:"
+      echo "$_other" | head -6 | sed 's/^/     /'
+      echo "   Two fleets on one card measure each other: the calibration, the rates and the ETA of both would"
+      echo "   be wrong. Watch it (bash tools/fleet_dash.sh <its OUT>), wait for it, or stop it (bash gpu_world.sh"
+      echo "   --stop with its EXP and OUT). ALLOW_CONCURRENT=1 runs this one beside it anyway."
+      exit 2
+    fi
+  fi
+  # a sampler a killed fleet left in OUT writes into it for ever: it is stopped (its MPS daemon, below)
+  _stray=$(awk -F'\t' '$2 == "sampler" { print $1 }' <<< "$_rows")
+  [[ -n "$_stray" ]] && kill $_stray 2>/dev/null
+fi
+
 # A LAUNCH NEVER WRITES INTO A PREVIOUS FLEET (2026-09-27, build 1.5's review). A launch truncated
 # SUMMARY.txt and left the rest: the logs and curves of seeds or arms it does not run, which its
 # analysis then read as its own; KEPT.txt, PASTE_BACK.txt and ANALYSIS.txt; and at EXP=retok the
@@ -1889,9 +2266,11 @@ fi
 # ASIDE WHOLE, beside it, as <OUT>.<its launch stamp>: nothing is deleted, and
 # OUT=<that name> bash gpu_world.sh --analyze still reads it. The move is of OUT's own directory (a
 # symlinked OUT keeps its link and its disk); OUT is recreated empty. A checkout or its parent is
-# never moved: such an OUT is refused.
-MOVED_ASIDE=""
-if [[ -e "$OUT/SUMMARY.txt" || -e "$OUT/logs" || -e "$OUT/ckpt" ]]; then
+# never moved: such an OUT is refused. ONLY A DEAD FLEET IS MOVED (2026-09-27): the checks above
+# refuse a live one, whose runs write to OUT by name -- moved, they had lost their files, and their
+# MPS quit reached the NEW fleet's daemon (reproduced).
+MOVED_ASIDE=${GW_MOVED_ASIDE:-}
+if [[ "$GW_PRIVATE" != 1 ]] && [[ -e "$OUT/SUMMARY.txt" || -e "$OUT/logs" || -e "$OUT/ckpt" || -e "$OUT/STATE" || -e "$OUT/code" ]]; then
   _od=$(cd "$OUT" && pwd -P); _od=${_od%/}
   case "$(pwd -P)/" in
     "$_od"/*) echo "!! OUT='$OUT' holds a previous fleet, and it is this checkout or holds it, so it cannot be moved"
@@ -1905,7 +2284,39 @@ if [[ -e "$OUT/SUMMARY.txt" || -e "$OUT/logs" || -e "$OUT/ckpt" ]]; then
     echo "!! could not move the previous fleet in $OUT aside to $MOVED_ASIDE. Move or delete it, or choose another"
     echo "   OUT. Nothing was started."; exit 2
   fi
+  # ITS MPS DAEMON, IF IT LEFT ONE (a SIGKILL runs no trap): the daemon listens on the FIFO in its pipe
+  # directory, which moved with it, so the quit goes there. Nothing of that fleet runs (checked above).
+  if [[ -d "$MOVED_ASIDE/mps/pipe" ]] && command -v nvidia-cuda-mps-control > /dev/null 2>&1; then
+    echo quit | CUDA_MPS_PIPE_DIRECTORY="$MOVED_ASIDE/mps/pipe" timeout 30 nvidia-cuda-mps-control 9>&- > /dev/null 2>&1
+  fi
 fi
+
+# THE PRIVATE COPY, THEN THE RE-EXECUTION OF IT. The commit and the dirty flag are read here, before
+# the copy, and checked again after it: a checkout that changed in between (a pull during the launch)
+# is refused. fd 9, the lock, stays open across the exec, and the pid does not change.
+if [[ "$GW_PRIVATE" != 1 ]]; then
+  mkdir -p "$OUT" || { echo "!! cannot create $OUT. Nothing was started."; exit 2; }
+  COMMIT=$(git rev-parse --short HEAD 2>/dev/null)
+  DIRTY=""
+  [[ -n "$COMMIT" ]] && ! git diff --quiet HEAD -- src run.py gpu_world.sh 2>/dev/null && DIRTY=" (dirty)"
+  _code="$_oabs/code"
+  if ! { mkdir -p "$_code/tools" && cp -p gpu_world.sh run.py "$_code/" && cp -p tools/fleet_dash.sh "$_code/tools/" \
+         && tar -cf - --exclude=__pycache__ --exclude='*.pyc' src | tar -xf - -C "$_code"; } 2>/dev/null; then
+    echo "!! could not copy the code (gpu_world.sh, run.py, src/, tools/fleet_dash.sh) into $_code: is the disk full?"
+    echo "   Nothing was started."; exit 2
+  fi
+  _sum=$(cd "$_code" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)
+  _dirty2=""
+  [[ -n "$COMMIT" ]] && ! git diff --quiet HEAD -- src run.py gpu_world.sh 2>/dev/null && _dirty2=" (dirty)"
+  if [[ "$(git rev-parse --short HEAD 2>/dev/null)" != "$COMMIT" || "$_dirty2" != "$DIRTY" ]]; then
+    echo "!! the checkout changed while its code was being copied into $_code (a git pull during the launch?)."
+    echo "   Launch again. Nothing was started."; exit 2
+  fi
+  export GW_ROOT="$PWD" GW_CODE="$_code" GW_FLEET_OUT="$_oabs" GW_COMMIT="$COMMIT" GW_DIRTY="$DIRTY" \
+         GW_CODE_SUM="$_sum" GW_MOVED_ASIDE="$MOVED_ASIDE" GW_DEVICE="$DEVICE" GW_LOCKF="$(realpath -m -- "$LOCKF")"
+  exec bash "$_code/gpu_world.sh" "$@"
+fi
+{ : >&9; } 2>/dev/null || { echo "!! $0 is a fleet's private copy: launch from the checkout (bash gpu_world.sh)"; exit 2; }
 
 mkdir -p "$OUT/logs" "$OUT/curves" "$OUT/smoke" "$OUT/cal"
 S="$OUT/SUMMARY.txt"
@@ -1914,16 +2325,22 @@ say() { echo "$*" | tee -a "$S"; }
 
 # ---------------------------------------------------------------- preflight
 # ONE FLEET, ONE COMMIT: a checkout that differs from its commit where the runs read (src, run.py, this
-# script) is flagged, and the flag reaches the block.
-COMMIT=$(git rev-parse --short HEAD 2>/dev/null)
-DIRTY=""
-[[ -n "$COMMIT" ]] && ! git diff --quiet HEAD -- src run.py gpu_world.sh 2>/dev/null && DIRTY=" (dirty)"
+# script) is flagged, and the flag reaches the block. Both were read in the checkout, before the copy
+# this fleet runs from was taken (the launch gate, above).
+COMMIT=${GW_COMMIT:-}
+DIRTY=${GW_DIRTY:-}
 # THE LAUNCH STAMP: SUMMARY's first line, the name a later launch moves this fleet aside under, and
 # the .fleet stamp of its keep directories.
-LAUNCH=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+LAUNCH_T=$(date +%s)
+LAUNCH=$(date -u -d "@$LAUNCH_T" +%Y-%m-%dT%H:%M:%SZ)
 say "=== gpu_world.sh  $LAUNCH  commit $COMMIT$DIRTY"
 [[ -n "$MOVED_ASIDE" ]] && say "=== the previous fleet in $OUT was moved aside, whole, to $MOVED_ASIDE" \
   "(nothing was deleted: its checkpoints are still on this disk)"
+say "=== code: this fleet runs its own copy, $CODE_DIR (gpu_world.sh, run.py, src/, tools/fleet_dash.sh;" \
+  "sha256 ${GW_CODE_SUM:-?}), taken from commit $COMMIT$DIRTY at launch: a git pull during the fleet reaches none of it"
+gw_fleet_start
+say "=== pid $$; watch it: bash tools/fleet_dash.sh $OUT | one look: ${_cmdenv}bash gpu_world.sh --status |" \
+  "stop it: ${_cmdenv}bash gpu_world.sh --stop"
 NCPU=$(nproc)
 # nproc READS THE CPU AFFINITY MASK, AND IN A CONTAINER THAT IS USUALLY THE HOST'S CORES. The cgroup
 # QUOTA is what this container may actually use. The first version of this script sized its
@@ -1981,9 +2398,11 @@ if [[ "$DEVICE" == cuda && "$MPS" != 0 ]] && command -v nvidia-cuda-mps-control 
   _ob=$OUT; [[ "$OUT" == /* ]] || _ob="$PWD/$OUT"
   export CUDA_MPS_PIPE_DIRECTORY="$_ob/mps/pipe" CUDA_MPS_LOG_DIRECTORY="$_ob/mps/log"
   mkdir -p "$CUDA_MPS_PIPE_DIRECTORY" "$CUDA_MPS_LOG_DIRECTORY"
-  if nvidia-cuda-mps-control -d 2>/dev/null; then
+  # THE DAEMON OUTLIVES A KILLED FLEET, SO IT NEVER HOLDS THE LOCK (9>&-). Every exit quits it, after the
+  # runs are gone (gw_on_exit); a daemon a SIGKILLed fleet left is quit by the next launch.
+  if nvidia-cuda-mps-control -d 9>&- 2>/dev/null; then
     MPS_ON=1; say "=== CUDA MPS started (kernels from different runs execute concurrently)"
-    trap 'echo quit | nvidia-cuda-mps-control >/dev/null 2>&1' EXIT
+    gw_state mps_pipe="$CUDA_MPS_PIPE_DIRECTORY"
   else
     unset CUDA_MPS_PIPE_DIRECTORY CUDA_MPS_LOG_DIRECTORY
     say "=== CUDA MPS could not start (permissions or GPU mode); runs will time-slice instead"
@@ -2021,15 +2440,27 @@ run_job() {  # name seed windows gpu arm-env...
     keep_watch "$ck" "$kd" "$tag" "$me" &
     w=$!
   fi
-  env "${vis[@]}" OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 RUN_DEVICE="$DEVICE" RUN_SEED="$seed" \
+  # THE RUN IS THE FLEET'S OWN COPY OF run.py ($CODE_DIR), UNBUFFERED, AND ITS PID GOES ON THE BOOK
+  # (2026-09-27). PYTHONUNBUFFERED=1 puts each line in the log when it is printed (the '[N windows]'
+  # progress line was the only flushed one, so a log stayed empty for its first 100 windows); it
+  # changes no number. <step>/_started.txt, "tag pid=P t0=T cap=C target=W", is what the heartbeat,
+  # the dashboard and a stop read: which runs started, which are alive, and how many windows each is
+  # after (at the whole-epoch shapes the cap is out of reach and a run reads about WINDOWS).
+  local tw=$win rp
+  [[ "$EXP" != world && "$win" -gt "$WINDOWS" ]] && tw=$WINDOWS
+  env "${vis[@]}" PYTHONUNBUFFERED=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 RUN_DEVICE="$DEVICE" RUN_SEED="$seed" \
       DATA_STREAM_BYTES="$BYTES" $EXTRA $EXP_ENV "$@" \
-      python3 run.py --max-windows "$win" --loss-curve "${CURVE_DIR:-$OUT/curves}/$tag.json" "${fb[@]}" \
-      > "$log" 2>&1
+      python3 "$CODE_DIR/run.py" --max-windows "$win" --loss-curve "${CURVE_DIR:-$OUT/curves}/$tag.json" "${fb[@]}" \
+      > "$log" 2>&1 &
+  rp=$!
+  echo "$tag pid=$rp t0=$t0 cap=$win target=$tw" >> "${JOB_DIR:-$OUT/logs}/_started.txt"
+  wait "$rp"
   local rc=$?
   if [[ -n "$w" ]]; then
     : > "$kd/.$tag.stop"
     wait "$w"
-    keep_index "$kd" "$tag" "$LAUNCH" > "$kd/$tag.index.log" 2>&1
+    # a stop skips the index (seconds of torch per run): --analyze indexes the copies left unindexed
+    [[ -e "$OUT/.stopping" ]] || keep_index "$kd" "$tag" "$LAUNCH" > "$kd/$tag.index.log" 2>&1
   fi
   echo "$tag rc=$rc secs=$(( $(date +%s) - t0 ))" >> "${JOB_DIR:-$OUT/logs}/_done.txt"
   return $rc
@@ -2047,6 +2478,7 @@ run_fleet() {  # runs JOBS with $1 slots, round-robin over GPUs
   local slots="$1" i=0 p
   local -a pids=()
   : > "${JOB_DIR:-$OUT/logs}/_done.txt"
+  : > "${JOB_DIR:-$OUT/logs}/_started.txt"
   for line in "${JOBS[@]}"; do
     # shellcheck disable=SC2086
     set -- $line
@@ -2079,6 +2511,15 @@ for a in $BASE_ARMS; do add_job "$a 0 $SMOKE_WINDOWS $(arm_env $a) $(ckpt_env $a
 if [[ -n "$ARCH_ALSO" ]]; then
   for a in fb_off fb_on; do add_job "${a}@$ARCH_ALSO 0 $SMOKE_WINDOWS LM_ARCH=$ARCH_ALSO $(arm_env $a) $(ckpt_env "${a}@$ARCH_ALSO" 0 "$OUT/smoke/ckpt" smoke)"; done
 fi
+# EACH STEP SAYS WHEN ITS RUNS START, AND THAT THEY START ON THE CPU (2026-09-27): a fresh run.py
+# imports torch and builds its corpus, tokenizer, stream and model before it touches the GPU, so the
+# card reads idle for that long at the start of every smoke and calibration step, and the step's
+# own line prints only when it ends. The smoke measures the startup on this machine (below).
+HB_NOTE=""; (( HB_EVERY > 0 )) && HB_NOTE="; a heartbeat line every $HB_EVERY s until then"
+gw_step smoke smoke "$OUT/smoke" "${#JOBS[@]}" "$SMOKE_WINDOWS"
+say "    ${#JOBS[@]} run(s) start $(date -u +%H:%M:%SZ). Each builds on the CPU first -- python and torch, corpus," \
+  "tokenizer, stream, model: ~14 s on the 4-core CPU box, and this smoke measures it here -- and only then" \
+  "uses the GPU, so nvidia-smi reads idle until they train. The step's result prints when it ends$HB_NOTE."
 JOB_DIR="$OUT/smoke" CURVE_DIR="$OUT/smoke" run_fleet "${#JOBS[@]}"
 if grep -q "rc=[1-9]" "$OUT/smoke/_done.txt"; then
   say "!! a smoke arm FAILED -- stopping before the fleet:"
@@ -2127,6 +2568,25 @@ if echo "$SIZING" | grep -q "bad=[1-9]"; then
 fi
 PEAK_GIB=$(echo "$SIZING" | sed -n 's/.*peak_gib=\([0-9.]*\).*/\1/p')
 SMOKE_WPS=$(echo "$SIZING" | sed -n 's/.*wps=\([0-9.]*\).*/\1/p')
+# THE STARTUP, MEASURED: run.py's '=== composed' line says how long the run took from its first line
+# to its first window (imports and compose). Every calibration and fleet step's line quotes it.
+STARTUP=$(python3 - "$OUT/smoke" <<'PY'
+import glob, os, re, statistics, sys
+xs = []
+for log in glob.glob(os.path.join(sys.argv[1], "*.log")):
+    m = re.search(r"^=== composed: [^\n]*?startup took ([\d.]+) s", open(log, errors="replace").read(), re.M)
+    if m:
+        xs.append(float(m.group(1)))
+print(f"{statistics.median(xs):.1f} {min(xs):.1f} {max(xs):.1f} {len(xs)}" if xs else "")
+PY
+)
+STARTUP_S=""
+if [[ -n "$STARTUP" ]]; then
+  read -r STARTUP_S _smin _smax _sn <<< "$STARTUP"
+  say "  startup: each smoke run built on the CPU for ${STARTUP_S} s (median of $_sn; ${_smin}-${_smax} s) before its" \
+      "first window: the GPU idles that long at the start of every calibration step"
+  gw_state startup_s="$STARTUP_S"
+fi
 # THE KEPT-CHECKPOINT TRIPWIRE: the smoke's k0 saved at SMOKE_WINDOWS/2, so the watcher and the index
 # ran on this card in the first minute, and at least one copy must be kept and coherent. The smoke's
 # checkpoints then size the fleet's disk and are deleted.
@@ -2178,7 +2638,14 @@ if [[ "$PAR" == auto ]]; then
     [[ "$k" -gt "$CEIL" ]] && break
     d="$OUT/cal/k$k"; mkdir -p "$d"
     JOBS=(); for j in $(seq 1 "$k"); do add_job "cal $(( 1000 + j )) $CAL_WINDOWS"; done
+    gw_step cal "k=$k" "$d" "$k" "$CAL_WINDOWS"
+    say "    k=$k: $k run(s) x $CAL_WINDOWS windows start $(date -u +%H:%M:%SZ): ~${STARTUP_S:-14} s on the CPU first" \
+        "(the GPU reads idle), then the training; the step's line prints when it ends"
     JOB_DIR="$d" CURVE_DIR="$d" run_fleet "$k"
+    # A RUN THAT WROTE NO _done LINE COUNTS AS FAILED (2026-09-27): the count was the _done lines minus the
+    # runs with a summary line, which a killed run_job turned negative -- read as "no failure" -- and a
+    # missing _done.txt stopped the reader, whose empty answer then killed the script at `set -- $line`
+    # (set -u) without a block. With every _done line written, as on every fleet so far, it is unchanged.
     line=$(python3 - "$d" "$k" <<'PY'
 import glob, os, re, sys
 d, k = sys.argv[1], int(sys.argv[2])
@@ -2187,10 +2654,19 @@ for log in glob.glob(os.path.join(d, "*.log")):
     m = re.search(r"=== (\d+) windows[^\n]*? in ([\d.]+)s", open(log).read())
     if m and float(m.group(2)) > 0:
         rate += int(m.group(1)) / float(m.group(2)); n += 1
-fails = open(os.path.join(d, "_done.txt")).read().count("rc=") - n
+try:
+    done = open(os.path.join(d, "_done.txt")).read().count("rc=")
+except OSError:
+    done = 0
+fails = max(done, k) - n
 print(f"{k} {rate:.3f} {fails}")
 PY
 )
+    if [[ ! "$line" =~ ^[0-9]+\ [0-9.]+\ -?[0-9]+$ ]]; then
+      say "!! calibration k=$k could not be read (its reader answered '${line:-nothing}') -- stopping before the fleet"
+      fail_back "calibration k=$k could not be read (its runs' logs are in $d)" $(ls "$d"/*.log 2>/dev/null | head -2)
+      exit 1
+    fi
     echo "$line" >> "$OUT/cal/table.txt"
     set -- $line
     say "    k=$1  aggregate $2 windows/s  ($(python3 -c "print(f'{$2/$1:.2f}')") per run)  failed $3"
@@ -2283,17 +2759,23 @@ PY
 
 # ---------------------------------------------------------------- 4. the fleet, with a sampler
 say "---- 2. fleet started $(date -u +%H:%M:%SZ)"
+gw_step fleet "" "$OUT/logs" "${#JOBS[@]}" "$WINDOWS"
+gw_state par="$PAR" runs_total="${#JOBS[@]}" windows="$WINDOWS"
+say "    ${#JOBS[@]} run(s), $PAR at a time; each spends ~${STARTUP_S:-14} s on the CPU before it trains. The fleet's" \
+    "own line prints when its last run ends$HB_NOTE; bash tools/fleet_dash.sh shows every run."
 SMI_PID=""
 if [[ "$DEVICE" == cuda ]]; then
+  # THE SAMPLER NEVER HOLDS THE LOCK (9>&-): it runs until it is killed, and a SIGKILLed fleet cannot.
   nvidia-smi --query-gpu=index,utilization.gpu,memory.used,memory.total \
-             --format=csv,noheader,nounits -l 2 > "$OUT/smi.csv" 2>/dev/null &
+             --format=csv,noheader,nounits -l 2 > "$OUT/smi.csv" 2>/dev/null 9>&- &
   SMI_PID=$!
+  gw_state smi_pid="$SMI_PID"
 fi
 T0=$(date +%s)
 run_fleet "$PAR"
 T1=$(date +%s)
 [[ -n "$SMI_PID" ]] && kill "$SMI_PID" 2>/dev/null
-[[ "$MPS_ON" == 1 ]] && { echo quit | nvidia-cuda-mps-control >/dev/null 2>&1; trap - EXIT; }
+gw_mps_quit
 say "---- fleet finished in $(( (T1 - T0) / 60 )) min ($(( T1 - T0 )) s)"
 if grep -q "rc=[1-9]" "$OUT/logs/_done.txt"; then
   say "!! FAILED runs (their logs are in $OUT/logs):"
@@ -2301,8 +2783,12 @@ if grep -q "rc=[1-9]" "$OUT/logs/_done.txt"; then
 fi
 
 # ---------------------------------------------------------------- 5. analysis, the block, the archive
+# THE HEARTBEAT ENDS HERE: nothing runs any more, and no heartbeat line may land inside the block.
+gw_step analysis "" "$OUT" 0 0
+gw_hb_stop
 analyze "$OUT" "$DEVICE" "$MPS_ON" "$PAR" "$NCPU" | tee "$OUT/ANALYSIS.txt" >> "$S"
 say "=== wrote $S"
 cat "$S" | sed -n '/^=== RUNS/,$p'
 paste_back
 pack
+GW_FINISHED=1

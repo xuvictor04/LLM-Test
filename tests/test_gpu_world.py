@@ -91,6 +91,33 @@ is pinned here, on a fleet whose every number is chosen.
       the part before at 0% and sound nothing (the split's review: every notification was charged
       there, and both alarmed at 100%), a stamp no act line places is charged a cooldown before, and
       only a log with no act window falls back to every notification x cooldown.
+  F18 ONE FLEET PER OUT (2026-09-27: a second paste of the launch line started a second fleet, whose launch
+      moved the first one's OUT from under it): a launch into a live OUT is refused -- exit 2, nothing
+      moved, the live fleet named with where it is and how to watch and stop it -- and the live fleet ends
+      rc 0 in its own block, its pid the one STATE names; a run.py of a fleet from before the lock, writing
+      under OUT, is found in /proc and refused the same way, and once it is gone the dead fleet is moved aside.
+  F19 THE HEARTBEAT: a line every HB_EVERY seconds through the smoke, a calibration step and the fleet,
+      naming the stage and the runs starting on the CPU and training; each step's line when its runs start,
+      saying they build on the CPU first, and the startup the smoke measured (run.py's '=== composed'
+      line); HEARTBEAT and heartbeat.log; every run unbuffered and running the fleet's copy of run.py.
+  F20 A STOP WRITES ITS BLOCK: TERM, HUP and INT in a calibration step exit 128+n with 'STOPPED by SIG<x>
+      during calibration k=1' in the log and the block, the runs stopped, nothing left, the archive packed;
+      under nohup a HUP is ignored and the fleet runs on; at DEVICE=cuda (nvidia-smi and MPS stood in) the
+      stop quits MPS, and the daemon never held the lock.
+  F21 --status's VERDICT AND EXIT CODE: RUNNING 0, FINISHED 1, STOPPED 3 with its reason, NO FLEET 2; DEAD 4
+      after SIGKILL of the shell (its heartbeat watcher says so, stops the runs, writes the block) and of the
+      whole fleet (no end recorded); a reused pid is not RUNNING; a fleet from before STATE reads off its
+      block; STALLED 5 when nothing moves for --stall-min.
+  F22 PULL SAFETY: in a scratch git checkout, gpu_world.sh rewritten in place and run.py and src/ replaced
+      mid-fleet change nothing -- rc 0, every run on $OUT/code/run.py, the commit and the copy's sha256 in
+      SUMMARY (the launch before the copy died on a syntax error with no block) -- and --status and
+      --analyze from the checkout read the fleet as ever.
+  F23 THE DASHBOARD (tools/fleet_dash.sh): live frames with the verdict, the stage, each run starting on CPU
+      then training with its windows; FINISHED on the finished fleet; --line; --html writes dashboard.html
+      and nothing else into OUT; --serve serves that page and only it.
+  F24 THE LAUNCHER (tools/gpu_launch.sh): its checks FAIL clearly with their fixes (EXP unset; no GPU at
+      DEVICE=cuda) and --go then launches nothing; --go at DEVICE=cpu from a shell that exits at once leaves
+      a fleet in its own session that runs to its end and its block; a second --go FAILs on it.
 """
 import glob
 import json
@@ -707,24 +734,45 @@ try:
     # A python3 on PATH that hands `python3 run.py ...` to a stand-in and everything else to this
     # interpreter. The stand-in records each run's CKPT_ settings and argv, and prints what the
     # smoke's tripwires read (the WORLD arms' forecast counters) and the analysis reads.
+    # SINCE 2026-09-27 EVERY RUN IS `python3 $OUT/code/run.py` (the fleet's private copy), so the stand-in
+    # answers any */run.py, records which one it was asked for, and is itself a file named run.py (the
+    # fleet recognises its runs by that name, to stop them). STUB_STARTUP, STUB_WSLEEP and STUB_PROG make
+    # it slow -- seconds before its banner, seconds per window, a progress line every N windows; STUB_MAXW
+    # caps its windows (50) -- for the
+    # checks of a live fleet (F18-F24); unset, it answers as before. With STUB_CUDA the torch probe says yes.
     binp = os.path.join(TMP, "bin")
-    stub = os.path.join(TMP, "fake_run.py")
+    stub = os.path.join(TMP, "stub", "run.py")
     write(os.path.join(binp, "python3"),
-          f'#!/bin/bash\nif [[ "${{1:-}}" == run.py ]]; then shift; exec "{sys.executable}" "{stub}" "$@"; fi\n'
+          f'#!/bin/bash\nif [[ "${{1:-}}" == run.py || "${{1:-}}" == */run.py ]]; then export STUB_RUNPY="$1"; shift; '
+          f'exec "{sys.executable}" "{stub}" "$@"; fi\n'
+          f'if [[ "${{1:-}}" == -c && "${{2:-}}" == *torch.cuda.is_available* && -n "${{STUB_CUDA:-}}" ]]; then exit 0; fi\n'
           f'exec "{sys.executable}" "$@"\n')
     os.chmod(os.path.join(binp, "python3"), 0o755)
-    write(stub, r'''import json, os, sys
+    write(stub, r'''import json, os, sys, time
+t0 = time.time()
+print(f"=== run.py pid {os.getpid()} started {time.strftime('%H:%M:%SZ', time.gmtime(t0))}: the stand-in", flush=True)
 a = sys.argv[1:]
 w = int(a[a.index("--max-windows") + 1]); curve = a[a.index("--loss-curve") + 1]
 tag = os.path.basename(curve)[:-5]
-with open(os.environ["STUB_BOOK"], "a") as fh:
-    fh.write(json.dumps({"tag": tag, "argv": a, "ckpt": {k: v for k, v in os.environ.items() if k.startswith("CKPT_")},
-                         "retok": os.environ.get("TOK_RETOK_EVERY")}) + "\n")
-n = min(w, 50)
+if os.environ.get("STUB_BOOK"):
+    with open(os.environ["STUB_BOOK"], "a") as fh:
+        fh.write(json.dumps({"tag": tag, "argv": a, "ckpt": {k: v for k, v in os.environ.items() if k.startswith("CKPT_")},
+                             "retok": os.environ.get("TOK_RETOK_EVERY"), "runpy": os.environ.get("STUB_RUNPY", ""),
+                             "unbuffered": os.environ.get("PYTHONUNBUFFERED", "")}) + "\n")
+time.sleep(float(os.environ.get("STUB_STARTUP", "0")))
+print(f"=== device={os.environ.get('RUN_DEVICE', 'cpu')} amp=off")
+print(f"=== composed: stage=assembled, 0 refusal(s), 0 warning(s); startup took {time.time() - t0:.1f} s (imports and "
+      f"compose), training starts now")
+n = min(w, int(os.environ.get("STUB_MAXW", "50")))
+ws, every = float(os.environ.get("STUB_WSLEEP", "0")), int(os.environ.get("STUB_PROG", "100"))
+for i in range(1, n + 1):
+    if ws:
+        time.sleep(ws)
+    if i > 1 and i % every == 1:
+        print(f"[{i} windows] loss=2.0000 opt_steps={i} n_live=2049 vocab=600 uncalled=0", flush=True)
 json.dump([2.0] * n, open(curve, "w"))
 if "--flush-bytes" in a:
     json.dump([189] * n, open(a[a.index("--flush-bytes") + 1], "w"))
-print("=== device=cpu amp=off")
 print(f"=== {n} windows, {n} flushes, {n} optimizer steps, 1 epoch(s) in 1.0s ({n} w/s)")
 if n == w:
     print(f"WARNING: loop: stopped at max_windows={w} window(s) trained by THIS process")
@@ -1368,7 +1416,521 @@ esac
               "(upper bound by the act windows x cooldown)" in a17c and len(_al) == 2
           and f"  k1000 before -% (<= {100 * 800 / 1001:.1f}%) / after -%" in b17c,
           str(sp17c) + str(_al) + p17c.stderr[-300:])
+
+    # ---- F18-F24: a fleet that says it is alive, and only one per OUT (2026-09-27) --------------------
+    # Live fleets of the stand-in above, slowed down (STUB_STARTUP seconds before its banner, STUB_WSLEEP a
+    # window), each in the background with its output in a log, the way the owner launches one. Every wait
+    # is on the fleet's own STATE or logs, never on a fixed sleep alone.
+    import signal
+    import socket
+    import time
+    import urllib.error
+    import urllib.request
+    DASH = os.path.join(ROOT, "tools", "fleet_dash.sh")
+    LAUNCHER = os.path.join(ROOT, "tools", "gpu_launch.sh")
+    SLOW = dict(STUB_STARTUP="3", STUB_WSLEEP="0.1", STUB_PROG="5", STUB_MAXW="10")
+    BASE = dict(EXP="retok", DEVICE="cpu", WINDOWS=20, SEEDS="0", SMOKE_WINDOWS=10, KEEP_CKPT=0)
+
+    def st_of(out):
+        d = {}
+        try:
+            for ln in open(os.path.join(out, "STATE")):
+                k, eq, val = ln.rstrip("\n").partition("=")
+                if eq:
+                    d[k] = val
+        except OSError:
+            pass
+        return d
+
+    def wait_for(pred, timeout=120.0):
+        t_ = time.time()
+        while time.time() - t_ < timeout:
+            if pred():
+                return True
+            time.sleep(0.2)
+        return False
+
+    def own(out):
+        """[(pid, kind)] of the live processes fleet_dash.sh counts as the fleet's own (a transient `sleep`
+        aside: the heartbeat's last one-second sleep outlives it by under a second, and holds no lock)."""
+        r = subprocess.run(["bash", DASH, "--scan", "own", out], capture_output=True, text=True, timeout=60)
+        return [tuple(ln.split("\t")[:2]) for ln in r.stdout.splitlines()
+                if ln.strip() and ln.split("\t")[1] != "transient"]
+
+    def dfl():
+        # A child that can trap INT, TERM and HUP whatever this process ignores (a test run under nohup,
+        # or in the background of a script, would otherwise hand it a signal ignored at entry).
+        for s_ in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            signal.signal(s_, signal.SIG_DFL)
+
+    def fleet(out, log, argv=("bash", SCRIPT), cwd=ROOT, **env):
+        """A launch in the background, its output in `log` (the fleet log STATE names)."""
+        fh = open(log, "w")
+        e = dict(BASE, PATH=env10["PATH"], OUT=out)
+        e.update(env)
+        return subprocess.Popen(list(argv), cwd=cwd, env=clean_env(**e), stdout=fh, stderr=subprocess.STDOUT,
+                                preexec_fn=dfl), fh
+
+    def done(p_, fh, timeout=300):
+        try:
+            rc_ = p_.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            p_.kill()
+            rc_ = None
+        fh.close()
+        return rc_
+
+    def training(logpath):
+        return lambda: "=== composed:" in (open(logpath).read() if os.path.exists(logpath) else "")
+
+    def status(out, *extra):
+        r = subprocess.run(["bash", SCRIPT, "--status", *extra], cwd=ROOT, capture_output=True, text=True,
+                           timeout=120, env=clean_env(OUT=out, EXP="retok"))
+        return r.returncode, r.stdout
+
+    # ---- F18: one fleet per OUT -----------------------------------------------------------------------
+    o18 = os.path.join(TMP, "f18", "gpu_retok_out")
+    pA, fA = fleet(o18, os.path.join(TMP, "f18a.log"), PAR=5, HB_EVERY=1, **SLOW)
+    up = wait_for(lambda: st_of(o18).get("phase") == "smoke")
+    first18 = open(os.path.join(o18, "SUMMARY.txt")).readline() if up else ""
+    p18 = gw(OUT=o18, PAR=1, PATH=env10["PATH"], **BASE)
+    check("F18 a second launch into a live OUT is refused (exit 2) and moves nothing -- the live fleet's SUMMARY is "
+          "untouched and no <OUT>.<stamp> appears -- and it says which fleet runs, where it is, why the card may read "
+          "idle, and how to watch and stop it",
+          up and p18.returncode == 2 and "A FLEET IS ALREADY RUNNING IN" in p18.stdout and "its lock" in p18.stdout
+          and "#####  RUNNING  #####" in p18.stdout and "stage      smoke" in p18.stdout
+          and "bash tools/fleet_dash.sh" in p18.stdout and "gpu_world.sh --stop" in p18.stdout
+          and "on the CPU" in p18.stdout and not glob.glob(o18 + ".20*")
+          and open(os.path.join(o18, "SUMMARY.txt")).readline() == first18,
+          f"rc {p18.returncode}; {p18.stdout[:400]!r}")
+    rcA = done(pA, fA)
+    lA = open(os.path.join(TMP, "f18a.log")).read()
+    check("F18 ... and the live fleet runs on to its own end: rc 0, its block, STATE end=finished, and STATE's pid is "
+          "the launched one (the re-execution of its private copy keeps the pid, and the lock with it)",
+          rcA == 0 and block_of(lA) is not None and st_of(o18).get("end") == "finished"
+          and st_of(o18).get("pid") == str(pA.pid), f"rc {rcA}; {st_of(o18)}")
+    # A FLEET THE LOCK CANNOT SEE: a run.py writing under OUT for a gpu_world.sh from before the lock (no
+    # GW_FLEET_OUT in its environment), found by its command line.
+    o18b = os.path.join(TMP, "f18b", "gpu_retok_out")
+    summary(o18b, seeds="0")
+    os.makedirs(os.path.join(o18b, "logs"), exist_ok=True)
+    stray = subprocess.Popen([os.path.join(binp, "python3"), "run.py", "--max-windows", "50", "--loss-curve",
+                              os.path.join(o18b, "logs", "k0.s0.json")], cwd=TMP, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, env=clean_env(PATH=env10["PATH"], STUB_WSLEEP="2"))
+    seen = wait_for(lambda: ("run" in [k for _, k in own(o18b)]), 30)
+    p18b = gw(OUT=o18b, PAR=1, PATH=env10["PATH"], **BASE)
+    stray.kill()
+    stray.wait()
+    p18c = gw(OUT=o18b, PAR=1, PATH=env10["PATH"], **BASE)
+    aside18 = os.path.realpath(o18b) + ".2026-10-01T120000Z"
+    check("F18 a fleet the lock cannot see -- a run.py writing under OUT, launched by a gpu_world.sh from before the "
+          "lock -- is found in /proc and refused the same way, nothing moved; gone, its dead fleet is moved aside as "
+          "before and the launch runs",
+          seen and p18b.returncode == 2 and "a fleet the lock cannot see" in p18b.stdout and str(stray.pid) in p18b.stdout
+          and p18c.returncode == 0 and os.path.isfile(os.path.join(aside18, "SUMMARY.txt"))
+          and f"moved aside, whole, to {aside18}" in open(os.path.join(o18b, "SUMMARY.txt")).read(),
+          f"seen {seen}; rc {p18b.returncode}/{p18c.returncode}; {p18b.stdout[:300]!r}")
+
+    # ---- F19: the heartbeat and the step lines -----------------------------------------------------------
+    # PAR auto with LADDER 1: a smoke, one calibration step, the fleet. OMP_NUM_THREADS=1 makes nproc 1, so
+    # the ceiling is 1 and the ladder stops at k=1.
+    o19 = os.path.join(TMP, "f19", "gpu_retok_out")
+    log19, book19 = os.path.join(TMP, "f19.log"), os.path.join(TMP, "f19_book.jsonl")
+    p19, f19 = fleet(o19, log19, HB_EVERY=1, LADDER="1", CAL_WINDOWS=20, STUB_BOOK=book19, STUB_STARTUP="2",
+                     STUB_WSLEEP="0.25", STUB_PROG="5", STUB_MAXW="12")
+    frames19, st19 = {}, {}
+
+    def grab(tag, pred):
+        if wait_for(pred, 120):
+            frames19[tag] = subprocess.run(["bash", DASH, "--once", o19], capture_output=True, text=True,
+                                           timeout=60).stdout
+            st19[tag] = status(o19)
+
+    smoke_started = os.path.join(o19, "smoke", "_started.txt")
+    grab("smoke-cpu", lambda: os.path.exists(smoke_started) and len(open(smoke_started).read().splitlines()) == 4)
+    grab("smoke-train", training(os.path.join(o19, "smoke", "k0.s0.log")))
+    grab("cal", lambda: st_of(o19).get("step") == "k=1" and training(os.path.join(o19, "cal", "k1", "cal.s1001.log"))())
+    grab("fleet", lambda: st_of(o19).get("phase") == "fleet" and training(os.path.join(o19, "logs", "k0.s0.log"))())
+    rc19 = done(p19, f19)
+    L19 = open(log19).read()
+    hb19 = re.findall(r"^\[hb (\d\d):(\d\d):(\d\d)Z\] (\w+)[^|]*\| (\S+(?: k=\d+)?) since", L19, re.M)
+    gaps = [((int(b[0]) * 3600 + int(b[1]) * 60 + int(b[2])) - (int(a[0]) * 3600 + int(a[1]) * 60 + int(a[2]))) % 86400
+            for a, b in zip(hb19, hb19[1:])]
+    phases19 = {x[4] for x in hb19}
+    check("F19 the heartbeat: a line every HB_EVERY seconds in the fleet log -- through the smoke, the calibration step "
+          "and the fleet, each naming its stage and RUNNING -- never more than a few seconds apart",
+          rc19 == 0 and {"smoke", "cal k=1", "fleet"} <= phases19 and all(x[3] == "RUNNING" for x in hb19)
+          and gaps and max(gaps) <= 4, f"rc {rc19}; phases {sorted(phases19)}; max gap {max(gaps or [0])}")
+    S19 = open(os.path.join(o19, "SUMMARY.txt")).read()
+    check("F19 each step says when its runs START, and that they build on the CPU before the GPU, in the log and in "
+          "SUMMARY; the smoke measures that startup (run.py's '=== composed ... startup took') and the later steps "
+          "quote it",
+          all(x in S19 and x in L19 for x in ("4 run(s) start ", "Each builds on the CPU first",
+                                               "k=1: 1 run(s) x 20 windows start ", "on the CPU first (the GPU reads idle)",
+                                               "each spends ~2."))
+          and re.search(r"^  startup: each smoke run built on the CPU for 2\.\d s \(median of 4;", S19, re.M) is not None
+          and st_of(o19).get("startup_s", "").startswith("2."),
+          str([ln for ln in S19.splitlines() if "CPU" in ln]))
+    hbfile = open(os.path.join(o19, "HEARTBEAT")).read().splitlines() if os.path.exists(os.path.join(o19, "HEARTBEAT")) else []
+    recs19 = [json.loads(ln) for ln in open(book19)] if os.path.exists(book19) else []
+    check("F19 a heartbeat names the runs starting on the CPU and those training, with their windows; HEARTBEAT holds "
+          "the last line and its JSON sample, heartbeat.log the history; every run was unbuffered "
+          "(PYTHONUNBUFFERED=1) and ran the fleet's own copy, $OUT/code/run.py",
+          re.search(r"\| 4 run\(s\): 4 on CPU, 0 training", L19) is not None
+          and re.search(r"\| 4 run\(s\): 0 on CPU, 4 training \(w (<101|\d+-\d+)/10\)", L19) is not None
+          and len(hbfile) == 2 and hbfile[0].startswith("[hb ") and json.loads(hbfile[1]).get("hist")
+          and os.path.getsize(os.path.join(o19, "heartbeat.log")) > 0
+          and len(recs19) >= 10 and all(r["unbuffered"] == "1" for r in recs19)
+          and {r["runpy"] for r in recs19} == {os.path.join(os.path.realpath(o19), "code", "run.py")},
+          f"{len(recs19)} runs; {sorted({r['runpy'] for r in recs19})}")
+
+    # ---- F20: a stop writes its block ------------------------------------------------------------------
+    for sig, name, want in ((signal.SIGTERM, "TERM", 143), (signal.SIGHUP, "HUP", 129), (signal.SIGINT, "INT", 130)):
+        o20 = os.path.join(TMP, f"f20{name}", "gpu_retok_out")
+        log20 = os.path.join(TMP, f"f20{name}.log")
+        p20, f20 = fleet(o20, log20, HB_EVERY=1, LADDER="1", CAL_WINDOWS=40, STUB_STARTUP="0.5", STUB_WSLEEP="0.3",
+                         STUB_PROG="5", STUB_MAXW="12")
+        ready = wait_for(lambda: st_of(o20).get("step") == "k=1"
+                         and training(os.path.join(o20, "cal", "k1", "cal.s1001.log"))())
+        os.kill(p20.pid, sig)
+        rc20 = done(p20, f20)
+        L20 = open(log20).read()
+        b20 = "\n".join(block_of(L20) or [])
+        gone = wait_for(lambda: not own(o20), 10)
+        done20 = open(os.path.join(o20, "cal", "k1", "_done.txt")).read() if os.path.exists(
+            os.path.join(o20, "cal", "k1", "_done.txt")) else ""
+        check(f"F20 SIG{name} during a calibration step stops the fleet with a reason: exit {want}, 'STOPPED by "
+              f"SIG{name} ... during calibration k=1' in its log and its block, STATE end=stopped, its run stopped "
+              "(its _done line rc=143) and nothing of it left running, and the archive packed",
+              ready and rc20 == want and re.search(rf"^!! gpu_world\.sh STOPPED by SIG{name} at \d\d:\d\d:\d\dZ during "
+                                                   rf"calibration k=1 \(pid {p20.pid}\)$", L20, re.M) is not None
+              and f"STOPPED BEFORE THE ANALYSIS: stopped by SIG{name} during calibration k=1" in b20
+              and st_of(o20).get("end") == "stopped" and st_of(o20).get("rc") == str(want)
+              and "cal.s1001 rc=143" in done20 and gone
+              and glob.glob(os.path.join(os.path.dirname(o20), "gpu_retok_*.tgz")),
+              f"ready {ready}; rc {rc20}; gone {gone}; {done20!r}; {L20[-300:]!r}")
+    # UNDER nohup A HANG-UP IS IGNORED -- bash cannot trap a signal ignored at entry -- and the fleet runs on.
+    o20n = os.path.join(TMP, "f20nohup", "gpu_retok_out")
+    p20n, f20n = fleet(o20n, os.path.join(TMP, "f20nohup.log"), argv=("nohup", "bash", SCRIPT), PAR=5, HB_EVERY=1,
+                       STUB_STARTUP="1", STUB_WSLEEP="0.2", STUB_MAXW="12")
+    up20 = wait_for(lambda: st_of(o20n).get("phase") == "smoke")
+    os.kill(p20n.pid, signal.SIGHUP)
+    time.sleep(1.5)
+    alive20 = p20n.poll() is None
+    rc20n = done(p20n, f20n)
+    check("F20 under nohup a hang-up is ignored, as before (a closed terminal stops nothing): the fleet runs on to rc 0 "
+          "and its analysis",
+          up20 and alive20 and rc20n == 0 and st_of(o20n).get("end") == "finished"
+          and "STOPPED by" not in open(os.path.join(TMP, "f20nohup.log")).read(), f"alive {alive20}; rc {rc20n}")
+    # AT DEVICE=cuda, WITH MPS: nvidia-smi and nvidia-cuda-mps-control stood in (the daemon forks away,
+    # serves a FIFO in CUDA_MPS_PIPE_DIRECTORY, and books its open fds and its quit).
+    cbin = os.path.join(TMP, "cbin")
+    write(os.path.join(cbin, "nvidia-smi"), r'''#!/bin/bash
+q=""; for a in "$@"; do case "$a" in --query-gpu=*) q=${a#--query-gpu=} ;; esac; done
+case "$q" in
+  index) echo 0 ;;
+  memory.total) echo 143771 ;;
+  index,name,memory.total,memory.used) echo "index, name, memory.total [MiB], memory.used [MiB]"; echo "0, NVIDIA H200, 143771 MiB, 1 MiB" ;;
+  index,utilization.gpu,memory.used,memory.total) while :; do echo "0, 37, 2048, 143771"; sleep 2; done ;;
+  utilization.gpu,memory.used,memory.total) echo "37, 2048, 143771" ;;
+  *) echo "NVIDIA-SMI stand-in" ;;
+esac
+''')
+    write(os.path.join(cbin, "fake_mps.py"), r'''import os, sys, time
+book = os.environ.get("MPS_BOOK", "/dev/null")
+def log(m):
+    with open(book, "a") as fh:
+        fh.write(m + "\n")
+d = os.environ.get("CUDA_MPS_PIPE_DIRECTORY", "/tmp/nvidia-mps")
+ctl = os.path.join(d, "control")
+if sys.argv[1:] == ["-d"]:
+    os.makedirs(d, exist_ok=True)
+    if os.fork() == 0:
+        os.setsid()
+        if os.fork() == 0:
+            n = os.open(os.devnull, os.O_RDWR)
+            for i in (0, 1, 2):
+                os.dup2(n, i)
+            if os.path.exists(ctl):
+                os.unlink(ctl)
+            os.mkfifo(ctl)
+            log(f"daemon {os.getpid()} fds {sorted(int(x) for x in os.listdir('/proc/self/fd'))}")
+            while True:
+                with open(ctl) as fh:
+                    for line in fh:
+                        if line.strip() == "quit":
+                            log(f"daemon {os.getpid()} quits")
+                            os.unlink(ctl)
+                            os._exit(0)
+        os._exit(0)
+    for _ in range(300):
+        if os.path.exists(ctl):
+            break
+        time.sleep(0.01)
+    sys.exit(0)
+try:
+    fd = os.open(ctl, os.O_WRONLY | os.O_NONBLOCK)
+except OSError:
+    print("Cannot find MPS control daemon process")
+    sys.exit(1)
+os.write(fd, sys.stdin.read().encode())
+os.close(fd)
+for _ in range(100):
+    if not os.path.exists(ctl):
+        break
+    time.sleep(0.05)
+''')
+    write(os.path.join(cbin, "nvidia-cuda-mps-control"),
+          f'#!/bin/bash\nexec -a nvidia-cuda-mps-control "{sys.executable}" "{os.path.join(cbin, "fake_mps.py")}" "$@"\n')
+    for f_ in ("nvidia-smi", "nvidia-cuda-mps-control"):
+        os.chmod(os.path.join(cbin, f_), 0o755)
+    CPATH = binp + os.pathsep + cbin + os.pathsep + os.environ.get("PATH", "")
+    o20c = os.path.join(TMP, "f20cuda", "gpu_retok_out")
+    mbook = os.path.join(TMP, "f20cuda_mps.book")
+    p20c, f20c = fleet(o20c, os.path.join(TMP, "f20cuda.log"), PATH=CPATH, DEVICE="cuda", STUB_CUDA=1, MPS_BOOK=mbook,
+                       HB_EVERY=1, LADDER="1", CAL_WINDOWS=40, STUB_STARTUP="0.5", STUB_WSLEEP="0.3", STUB_PROG="5",
+                       STUB_MAXW="12")
+    ready = wait_for(lambda: st_of(o20c).get("step") == "k=1"
+                     and training(os.path.join(o20c, "cal", "k1", "cal.s1001.log"))())
+    os.kill(p20c.pid, signal.SIGTERM)
+    rc20c = done(p20c, f20c)
+    mb = open(mbook).read() if os.path.exists(mbook) else ""
+    fds = [int(x) for x in re.findall(r"fds \[([\d, ]+)\]", mb)[0].split(",")] if "fds [" in mb else [9]
+    check("F20 at DEVICE=cuda the stop still quits MPS, after its runs are gone; the MPS daemon never held the fleet's "
+          "lock (fd 9), so a killed fleet's daemon cannot keep the next launch out",
+          ready and rc20c == 143 and "CUDA MPS started" in open(os.path.join(o20c, "SUMMARY.txt")).read()
+          and mb.count("quits") == 1 and 9 not in fds and st_of(o20c).get("mps_pipe", "").endswith("/mps/pipe")
+          and "STOPPED by SIGTERM" in open(os.path.join(TMP, "f20cuda.log")).read(),
+          f"ready {ready}; rc {rc20c}; {mb!r}")
+
+    # ---- F21: --status says RUNNING, STALLED, FINISHED, STOPPED, DEAD or NO FLEET, by its exit code -----------
+    s_run = st19.get("fleet", (None, ""))
+    s_fin = status(o19)
+    s_stop = status(os.path.join(TMP, "f20TERM", "gpu_retok_out"))
+    s_none = status(os.path.join(TMP, "f21", "nothing_here"))
+    check("F21 --status reads RUNNING (0) off a live fleet with its stage and each run's state, FINISHED (1) off a "
+          "finished one, STOPPED (3) with its reason, and NO FLEET (2) where there is none",
+          s_run[0] == 0 and "#####  RUNNING  #####" in s_run[1] and "stage      fleet:" in s_run[1]
+          and " training " in s_run[1]
+          and s_fin[0] == 1 and "#####  FINISHED  #####" in s_fin[1]
+          and s_stop[0] == 3 and "#####  STOPPED  #####" in s_stop[1]
+          and "stopped by SIGTERM during calibration k=1" in s_stop[1]
+          and s_none[0] == 2 and "#####  NO FLEET  #####" in s_none[1],
+          f"{s_run[0]} {s_fin[0]} {s_stop[0]} {s_none[0]}")
+    # SIGKILL OF THE SHELL ALONE: its heartbeat watcher sees it vanish, says so, stops its runs, writes the block.
+    o21 = os.path.join(TMP, "f21k", "gpu_retok_out")
+    log21 = os.path.join(TMP, "f21k.log")
+    p21, f21 = fleet(o21, log21, HB_EVERY=1, LADDER="1", CAL_WINDOWS=40, STUB_STARTUP="0.5", STUB_WSLEEP="0.3",
+                     STUB_PROG="5", STUB_MAXW="12")
+    ready = wait_for(lambda: st_of(o21).get("step") == "k=1" and training(os.path.join(o21, "cal", "k1", "cal.s1001.log"))())
+    os.kill(p21.pid, signal.SIGKILL)
+    done(p21, f21)
+    ended = wait_for(lambda: st_of(o21).get("end") == "died", 30)
+    gone = wait_for(lambda: not own(o21), 15)
+    k21 = status(o21)
+    L21 = open(log21).read()
+    check("F21 SIGKILL of the fleet's shell: its heartbeat watcher says so in the log ('THE FLEET'S SHELL (pid N) IS "
+          "GONE AND WROTE NO BLOCK, during calibration k=1'), stops what it left, writes the block, and --status "
+          "reads DEAD (4), died without a reason of its own",
+          ready and ended and gone and k21[0] == 4 and "#####  DEAD  #####" in k21[1]
+          and f"THE FLEET'S SHELL (pid {p21.pid}) IS GONE AND WROTE NO BLOCK, during calibration k=1" in L21
+          and "vanished during calibration k=1" in "\n".join(block_of(L21) or []),
+          f"ready {ready} ended {ended} gone {gone} rc {k21[0]}")
+    # SIGKILL OF EVERYTHING (a container stop): nothing is written, and the pid is gone with no end recorded.
+    o21b = os.path.join(TMP, "f21all", "gpu_retok_out")
+    p21b, f21b = fleet(o21b, os.path.join(TMP, "f21all.log"), HB_EVERY=1, PAR=1, STUB_STARTUP="0.5",
+                       STUB_WSLEEP="0.3", STUB_PROG="5", STUB_MAXW="12")
+    ready = wait_for(lambda: st_of(o21b).get("phase") == "smoke" and training(os.path.join(o21b, "smoke", "k0.s0.log"))())
+    for _round in range(3):                  # the shell first (the lowest pid), then whatever it had started
+        for pid_, _k in own(o21b):
+            try:
+                os.kill(int(pid_), signal.SIGKILL)
+            except OSError:
+                pass
+        time.sleep(0.3)
+    done(p21b, f21b)
+    k21b = status(o21b)
+    check("F21 SIGKILL of the whole fleet (a container stop): no end in STATE and the pid gone -- --status reads DEAD "
+          "(4): 'killed without a trap'",
+          ready and k21b[0] == 4 and "killed without a trap" in k21b[1] and "end" not in st_of(o21b),
+          f"ready {ready} rc {k21b[0]}")
+    # A STATE NAMING A LIVE PROCESS THAT IS NOT THE FLEET (this test, at another start time): not RUNNING. A
+    # fleet from before STATE is read off its block. A live fleet whose runs print nothing reads STALLED.
+    o21c = os.path.join(TMP, "f21c", "gpu_retok_out")
+    summary(o21c, seeds="0")
+    write(os.path.join(o21c, "STATE"), f"pid={os.getpid()}\npid_start=1\nphase=fleet\nstep_dir={o21c}/logs\n")
+    k21c = status(o21c)
+    o21d = os.path.join(TMP, "f21d", "gpu_retok_out")
+    summary(o21d, seeds="0")
+    write(os.path.join(o21d, "PASTE_BACK.txt"), "==== PASTE THIS BACK ====\nSTOPPED BEFORE THE ANALYSIS: a smoke arm "
+                                                 "failed\n==== END ====\n")
+    k21d = status(o21d)
+    o21e = os.path.join(TMP, "f21e", "gpu_retok_out")
+    p21e, f21e = fleet(o21e, os.path.join(TMP, "f21e.log"), PAR=1, HB_EVERY=0, STUB_STARTUP="30")
+    quiet = wait_for(lambda: os.path.exists(os.path.join(o21e, "smoke", "_started.txt"))
+                     and len(open(os.path.join(o21e, "smoke", "_started.txt")).read().splitlines()) == 4, 60)
+    time.sleep(5)
+    k21e = subprocess.run(["bash", DASH, "--status", "--stall-min", "0.05", o21e], capture_output=True, text=True,
+                          timeout=60)
+    os.kill(p21e.pid, signal.SIGTERM)
+    done(p21e, f21e)
+    check("F21 a STATE whose pid runs with another start time (a reused pid) is not RUNNING but DEAD; a fleet from "
+          "before STATE reads STOPPED off its block; a live fleet with no new output for --stall-min reads STALLED (5)",
+          k21c[0] == 4 and k21d[0] == 3 and "a smoke arm failed" in k21d[1]
+          and quiet and k21e.returncode == 5 and "#####  STALLED  #####" in k21e.stdout,
+          f"{k21c[0]} {k21d[0]} {k21e.returncode}")
+
+    # ---- F22: pull safety -------------------------------------------------------------------------------
+    # A SCRATCH CHECKOUT (a git repository of this tree's gpu_world.sh, run.py, src/ and the dashboard). Mid-
+    # fleet its gpu_world.sh is rewritten IN PLACE -- an editor, cp or scp; a running bash reads its script
+    # from its offset, so the old launch died on a syntax error with no block -- and a "pull" replaces run.py
+    # and a file under src/. The fleet runs its private copy and ends as if nothing happened.
+    r22 = os.path.join(TMP, "f22", "repo")
+    os.makedirs(os.path.join(r22, "tools"))
+    for f_ in ("gpu_world.sh", "run.py"):
+        shutil.copy2(os.path.join(ROOT, f_), r22)
+    shutil.copy2(DASH, os.path.join(r22, "tools"))
+    shutil.copytree(os.path.join(ROOT, "src"), os.path.join(r22, "src"), ignore=shutil.ignore_patterns("__pycache__"))
+    for cmd in (["git", "init", "-q"], ["git", "add", "-A"],
+                ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "scratch"]):
+        subprocess.run(cmd, cwd=r22, check=True, capture_output=True)
+    head22 = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=r22, capture_output=True, text=True).stdout.strip()
+    o22 = os.path.join(TMP, "f22", "gpu_retok_out")
+    log22, book22 = os.path.join(TMP, "f22.log"), os.path.join(TMP, "f22_book.jsonl")
+    p22, f22 = fleet(o22, log22, argv=("bash", os.path.join(r22, "gpu_world.sh")), cwd=r22, PAR=1, HB_EVERY=1,
+                     STUB_BOOK=book22, STUB_STARTUP="0.5", STUB_WSLEEP="0.1", STUB_PROG="5", STUB_MAXW="10")
+    mid = wait_for(lambda: st_of(o22).get("phase") == "fleet")
+    g22 = open(os.path.join(r22, "gpu_world.sh")).read()
+    with open(os.path.join(r22, "gpu_world.sh"), "w") as fh:
+        fh.write("echo INJECTED-FROM-THE-CHECKOUT; exit 99\n" + g22.replace("fleet started", "FLEET MUTANT"))
+    write(os.path.join(r22, "run.py"), "raise SystemExit('the pulled run.py ran')\n")
+    with open(os.path.join(r22, "src", "spine", "loop.py"), "a") as fh:
+        fh.write("\nraise SystemExit('the pulled src ran')\n")
+    rc22 = done(p22, f22)
+    L22 = open(log22).read()
+    recs22 = [json.loads(ln) for ln in open(book22)] if os.path.exists(book22) else []
+    S22 = open(os.path.join(o22, "SUMMARY.txt")).read() if os.path.exists(os.path.join(o22, "SUMMARY.txt")) else ""
+    check("F22 a git pull or an in-place rewrite of the checkout during a fleet reaches none of it: the fleet runs its "
+          "private copy to rc 0 and its block, no rewritten line runs, every run (after the rewrite too) ran "
+          "$OUT/code/run.py, and SUMMARY records the commit and the copy's sha256",
+          mid and rc22 == 0 and block_of(L22) is not None and "INJECTED" not in L22 and "FLEET MUTANT" not in L22
+          and "syntax error" not in L22 and len(recs22) == 9
+          and {r["runpy"] for r in recs22} == {os.path.join(os.path.realpath(o22), "code", "run.py")}
+          and re.search(rf"^=== code: this fleet runs its own copy, \S+/code \(gpu_world\.sh, run\.py, src/, "
+                        rf"tools/fleet_dash\.sh; sha256 [0-9a-f]{{16}}\), taken from commit {head22} at launch", S22, re.M)
+          is not None and S22.startswith(f"=== gpu_world.sh  ") and f"commit {head22}\n" in S22.splitlines(True)[0],
+          f"mid {mid}; rc {rc22}; {len(recs22)} runs; {S22[:120]!r}")
+    a22 = gw("--analyze", EXP="retok", OUT=o22)
+    check("F22 ... and --status and --analyze, readers run from the checkout, read that fleet as ever",
+          status(o22)[0] == 1 and a22.returncode == 0 and block_of(a22.stdout) is not None, a22.stdout[-300:])
+
+    # ---- F23: the dashboard ---------------------------------------------------------------------------
+    fs = frames19
+    check("F23 the dashboard, live: the big verdict line, the stage and its time, each run of the step -- starting on "
+          "CPU before its banner, then training with its windows -- runs alive/done/failed, and the fleet log's last lines",
+          all(f"#####  RUNNING  #####" in fs.get(k, "") for k in ("smoke-cpu", "smoke-train", "cal", "fleet"))
+          and "stage      smoke: every arm, seed 0, 4 run(s) x 10 windows; since" in fs.get("smoke-cpu", "")
+          and re.search(r"^ k0\.s0 +starting on CPU \(\d+ s\) +-/10 ", fs.get("smoke-cpu", ""), re.M) is not None
+          and "every run of this step is still building on the CPU" in fs.get("smoke-cpu", "")
+          and re.search(r"^ k0\.s0 +training +(<101|\d+)/10 ", fs.get("smoke-train", ""), re.M) is not None
+          and "stage      calibration k=1: 1 run(s) x 20 windows" in fs.get("cal", "")
+          and "stage      fleet: 5 run(s), 1 at a time, 20 windows each" in fs.get("fleet", "")
+          and "queued, of 5" in fs.get("fleet", "") and "last lines of " in fs.get("fleet", "")
+          and " log        f19.log: last line " in fs.get("fleet", ""),
+          str({k: v[:200] for k, v in fs.items()}))
+    fin23 = subprocess.run(["bash", DASH, "--once", o19], capture_output=True, text=True, timeout=60).stdout
+    ln23 = subprocess.run(["bash", DASH, "--line", o19], capture_output=True, text=True, timeout=60).stdout
+    before = sorted(os.listdir(o19))
+    hp = subprocess.Popen(["bash", DASH, "--html", "--every", "1", o19], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    wrote = wait_for(lambda: os.path.exists(os.path.join(o19, "dashboard.html")), 30)
+    time.sleep(1.5)
+    hp.terminate()
+    hp.wait()
+    after = sorted(os.listdir(o19))
+    page = open(os.path.join(o19, "dashboard.html")).read() if wrote else ""
+    check("F23 on a finished fleet it reads FINISHED and says what to paste back; --line is one heartbeat line; --html "
+          "writes $OUT/dashboard.html, which reloads itself, and nothing else into the fleet",
+          "#####  FINISHED  #####" in fin23 and "paste back: cat " in fin23
+          and len(ln23.splitlines()) == 1 and ln23.startswith("[hb ") and " FINISHED " in ln23
+          and wrote and after == sorted(before + ["dashboard.html"]) and "http-equiv='refresh'" in page
+          and ">FINISHED<" in page, f"{sorted(set(after) - set(before))}")
+    sk = socket.socket()
+    sk.bind(("127.0.0.1", 0))
+    port = sk.getsockname()[1]
+    sk.close()
+    sp = subprocess.Popen(["bash", DASH, "--serve", str(port), "--every", "1", o19], stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL)
+
+    def fetch(path):
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=5) as r_:
+                return r_.status, r_.read().decode()
+        except urllib.error.HTTPError as e:
+            return e.code, ""
+        except OSError:
+            return None, ""
+
+    served = wait_for(lambda: fetch("/")[0] == 200 and "FINISHED" in fetch("/")[1], 30)
+    code_other = fetch("/SUMMARY.txt")[0]
+    sp.terminate()
+    sp.wait()
+    check("F23 --serve PORT serves that page, and only it, on 0.0.0.0 (a fleet file asked for is a 404)",
+          served and code_other == 404, f"served {served}; /SUMMARY.txt -> {code_other}")
+
+    # ---- F24: the launcher ------------------------------------------------------------------------------
+    o24 = os.path.join(TMP, "f24", "gpu_retok_out")
+    log24 = os.path.join(TMP, "f24", "retok_fleet.log")
+    e24 = dict(PATH=env10["PATH"], DEVICE="cpu", WINDOWS=20, SEEDS="0", SMOKE_WINDOWS=10, KEEP_CKPT=0, PAR=1,
+               HB_EVERY=1, OUT=o24, LOG=log24, FETCH=0, WAIT_S=3, STUB_STARTUP="0.5", STUB_WSLEEP="0.15", STUB_PROG="5",
+               STUB_MAXW="16")
+    n24 = subprocess.run(["bash", LAUNCHER, "--go"], cwd=TMP, capture_output=True, text=True, timeout=300,
+                         env=clean_env(**{k: v for k, v in e24.items()}))
+    g24 = subprocess.run(["bash", LAUNCHER], cwd=TMP, capture_output=True, text=True, timeout=300,
+                         env=clean_env(**dict(e24, EXP="retok", DEVICE="cuda")))
+    import shutil as _sh
+    check("F24 the launcher's checks FAIL clearly, each with its fix, and --go launches nothing: EXP unset; and on a box "
+          "without a GPU, DEVICE=cuda fails on torch's CUDA and on nvidia-smi",
+          n24.returncode == 1 and "FAIL EXP is not set" in n24.stdout and "!! NOT LAUNCHED" in n24.stdout
+          and not os.path.exists(o24)
+          and (_sh.which("nvidia-smi") is not None
+               or (g24.returncode == 1 and "FAIL nvidia-smi not found" in g24.stdout and "fix: " in g24.stdout)),
+          n24.stdout[-400:] + g24.stdout[-400:])
+    # --go FROM A SHELL THAT EXITS AT ONCE: the fleet runs on in its own session to its end.
+    sh24 = subprocess.run(["bash", "-c", f'bash "{LAUNCHER}" --go; echo "LAUNCHER-RC=$?"'], cwd=TMP,
+                          capture_output=True, text=True, timeout=300, env=clean_env(**dict(e24, EXP="retok")))
+    pid24 = int(st_of(o24).get("pid", "0") or 0)
+    alive24 = pid24 > 0 and os.path.exists(f"/proc/{pid24}")
+    sid_ok = alive24 and os.getsid(pid24) == pid24 and os.getsid(pid24) != os.getsid(0)
+    again = subprocess.run(["bash", LAUNCHER, "--go"], cwd=TMP, capture_output=True, text=True, timeout=300,
+                           env=clean_env(**dict(e24, EXP="retok")))
+    fin24 = wait_for(lambda: st_of(o24).get("end") == "finished", 120)
+    L24 = open(log24).read() if os.path.exists(log24) else ""
+    check("F24 --go (DEVICE=cpu) launches detached and says RUNNING with the pid STATE names; the invoking shell exits "
+          "and the fleet runs on in its own session (setsid) to its end, its block in the appended log",
+          "LAUNCHER-RC=0" in sh24.stdout and f"=== RUNNING: pid {pid24} " in sh24.stdout and alive24 and sid_ok
+          and "bash tools/fleet_dash.sh" in sh24.stdout and "PASTE_BACK.txt" in sh24.stdout
+          and fin24 and block_of(L24) is not None and "tools/gpu_launch.sh --go (EXP=retok" in L24,
+          f"pid {pid24} alive {alive24} sid {sid_ok} fin {fin24}; {sh24.stdout[-500:]!r}")
+    check("F24 ... and a second --go while it runs FAILs on the running fleet, with the commands to watch and stop it, "
+          "and launches nothing",
+          again.returncode == 1 and f"FAIL a fleet is RUNNING in {o24}" in again.stdout and "!! NOT LAUNCHED" in again.stdout
+          and "gpu_world.sh --stop" in again.stdout, again.stdout[-600:])
 finally:
+    # NOTHING THESE CHECKS STARTED OUTLIVES THEM: a process carrying a GW_FLEET_OUT under TMP (a fleet, its
+    # runs, its heartbeat) or naming TMP on its command line (a stand-in run, a dashboard) is killed.
+    for _d in os.listdir("/proc"):
+        if not _d.isdigit() or int(_d) == os.getpid():
+            continue
+        try:
+            _env = open(f"/proc/{_d}/environ", "rb").read().split(b"\0")
+            _cmd = open(f"/proc/{_d}/cmdline", "rb").read()
+        except OSError:
+            continue
+        if any(x.startswith(b"GW_FLEET_OUT=" + TMP.encode()) for x in _env) or TMP.encode() in _cmd:
+            try:
+                os.kill(int(_d), 9)
+            except OSError:
+                pass
     shutil.rmtree(TMP, ignore_errors=True)
 
 print(f"\n=== {len(FAILS)} failing ===")

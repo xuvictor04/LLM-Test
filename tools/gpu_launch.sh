@@ -1,0 +1,306 @@
+#!/bin/bash
+# ==================================================================================================
+# THE OWNER'S ONE COMMAND: CHECK THE BOX, THEN LAUNCH A GPU FLEET THAT OUTLIVES THE TERMINAL (2026-09-27)
+# ==================================================================================================
+# The retok fleet of 2026-09-27 was launched twice by hand -- the second paste started a second fleet
+# on the same card and moved the first one's OUT from under it -- and then stopped by shutting the
+# container down, because nothing said it was alive. This is the launch that replaces the pasted
+# `nohup ... &` line:
+#
+#     EXP=retok bash tools/gpu_launch.sh          # the checks: PASS / WARN / FAIL, each FAIL with its fix
+#     EXP=retok bash tools/gpu_launch.sh --go     # the checks, then the launch, confirmed alive
+#
+# EXP IS REQUIRED here (gpu_world.sh's default, world, is the 2026-09-24 experiment, already decided).
+# Every other knob -- WINDOWS, SEEDS, EXTRA, PAR, MPS, OUT, KEEP_CKPT, RETOK_ARMS, DEVICE, ... -- is
+# read from this environment for the checks and reaches gpu_world.sh unchanged:
+#     EXP=retok SEEDS="0 1" WINDOWS=5000 bash tools/gpu_launch.sh --go
+#
+# THE CHECKS, fast, in order: EXP; python3 >= 3.10; torch imports, sees CUDA, and names the card; the
+# torch version against requirements.txt's floor (torch>=2.11, which is load-bearing on aarch64, where
+# PyPI's wheels up to 2.10 are CPU-only; on x86_64 a CUDA build below it is a WARN -- torch
+# 2.8.0+cu128 passed the 2026-09-27 smoke, its tripwires and five calibration steps on the H200);
+# nvidia-smi and whether something already uses the card; the MPS binary (a WARN: without it runs
+# time-slice) and an MPS daemon already running; OMP_NUM_THREADS (GNU nproc reports it instead of the
+# cores, and the fleet sizes its parallelism by nproc); the free disk against the kept checkpoints'
+# estimate (EXP=retok keeps k0's saves: about 2 x CKPT_MB, 125 MB measured, per file); the branch
+# and whether it is at origin's head, and a dirty tree; and a fleet already RUNNING in OUT -- a FAIL,
+# with the commands to watch or stop it -- or, at DEVICE=cuda, under another OUT on this machine.
+# DEVICE=cpu skips the GPU checks (a CPU fleet: an operation check only).
+#
+# --go LAUNCHES DETACHED: `setsid nohup bash gpu_world.sh >> LOG 2>&1 < /dev/null &` -- its own session,
+# so no terminal close or logout reaches it, HUP ignored, no stdin, and the log APPENDED to, never
+# truncated (LOG, default <EXP>_fleet.log in the checkout). It then watches for WAIT_S seconds (20):
+# a fleet that exits in that time is reported with its log's tail; one that runs is confirmed from
+# its $OUT/STATE (the same pid) and the commands to watch, look, stop and paste back are printed.
+# It refuses to launch while any check FAILs, and it never deletes anything. FETCH=0 skips the `git
+# fetch` behind the origin check (30 s at most without a network).
+set -u
+cd "$(dirname "$0")/.." || exit 2
+ROOT=$PWD
+GO=0
+for a in "$@"; do
+  case "$a" in
+    --go) GO=1 ;;
+    -h|--help) sed -n '2,/^set -u/p' "$0" | sed '$d'; exit 0 ;;
+    *) echo "!! unknown argument '$a' (use --go, or nothing for the checks alone)"; exit 2 ;;
+  esac
+done
+
+NP=0; NW=0; NF=0
+if [[ -t 1 ]]; then C_P=$'\033[32m'; C_W=$'\033[33m'; C_F=$'\033[31m'; C_0=$'\033[0m'; else C_P=""; C_W=""; C_F=""; C_0=""; fi
+pass() { NP=$(( NP + 1 )); printf '  %sPASS%s %s\n' "$C_P" "$C_0" "$1"; }
+warn() { NW=$(( NW + 1 )); printf '  %sWARN%s %s\n' "$C_W" "$C_0" "$1"; [[ -n "${2:-}" ]] && printf '       fix: %s\n' "$2"; return 0; }
+fail() { NF=$(( NF + 1 )); printf '  %sFAIL%s %s\n' "$C_F" "$C_0" "$1"; [[ -n "${2:-}" ]] && printf '       fix: %s\n' "$2"; return 0; }
+
+EXP_SET=${EXP:-}
+DEVICE=${DEVICE:-cuda}
+case "$EXP_SET" in retok) _o=gpu_retok_out ;; world_epoch) _o=gpu_world_epoch_out ;; *) _o=gpu_world_out ;; esac
+OUT=${OUT:-$_o}
+LOG=${LOG:-${EXP_SET:-fleet}_fleet.log}
+CMDENV="EXP=${EXP_SET:-<exp>} "; [[ "$OUT" != "$_o" ]] && CMDENV="${CMDENV}OUT=$OUT "
+
+echo "=== gpu_launch.sh $(date -u +%Y-%m-%dT%H:%M:%SZ) in $ROOT"
+echo "    EXP=${EXP_SET:-(unset)} WINDOWS=${WINDOWS:-(default)} SEEDS='${SEEDS:-(default)}' EXTRA='${EXTRA:-}'" \
+     "PAR=${PAR:-auto} MPS=${MPS:-auto} OUT=$OUT DEVICE=$DEVICE LOG=$LOG"
+
+# ------------------------------------------------------------------------------------------ the experiment
+case "$EXP_SET" in
+  retok|world) pass "EXP=$EXP_SET" ;;
+  world_epoch) if [[ "${GO_WORLD_EPOCH:-0}" == 1 ]]; then pass "EXP=world_epoch (GO_WORLD_EPOCH=1)"
+               else fail "EXP=world_epoch is sized, not run, until SR0 (gpu_world.sh refuses it)" "EXP=retok"; fi ;;
+  "") fail "EXP is not set: say which fleet (gpu_world.sh's default, world, is the decided 2026-09-24 experiment)" \
+           "EXP=retok bash tools/gpu_launch.sh$([[ $GO == 1 ]] && echo ' --go')" ;;
+  *) fail "EXP='$EXP_SET' is not an experiment gpu_world.sh runs (world, retok, world_epoch)" "EXP=retok" ;;
+esac
+
+# ------------------------------------------------------------------------------------------ python and torch
+if ! command -v python3 > /dev/null 2>&1; then
+  fail "python3 not found" "install python3 (3.10 or newer)"
+else
+  PYV=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)
+  if python3 -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 10) else 1)' 2>/dev/null; then
+    pass "python3 $PYV"
+  else
+    fail "python3 ${PYV:-?} is older than 3.10" "install python 3.10+ and put it first on PATH"
+  fi
+fi
+FLOOR=$(sed -n 's/^torch>=\([0-9][0-9.]*\).*/\1/p' requirements.txt 2>/dev/null | head -1)
+TORCH=$(timeout 180 python3 - 2>&1 <<'PY'
+import platform, sys
+try:
+    import torch
+except Exception as e:                                  # noqa: BLE001 -- said, not raised
+    print(f"NOIMPORT|{type(e).__name__}: {e}".replace("\n", " ")[:300])
+    sys.exit(0)
+ok = torch.cuda.is_available()
+name = torch.cuda.get_device_name(0) if ok else ""
+n = torch.cuda.device_count() if ok else 0
+print(f"OK|{torch.__version__}|{torch.version.cuda}|{int(ok)}|{n}|{name}|{platform.machine()}")
+PY
+)
+TORCH=$(grep -E '^(OK|NOIMPORT)\|' <<< "$TORCH" | tail -1)
+if [[ "$TORCH" == NOIMPORT* || -z "$TORCH" ]]; then
+  fail "torch does not import: ${TORCH#NOIMPORT|}" "pip install torch --index-url https://download.pytorch.org/whl/cu128"
+else
+  IFS='|' read -r _ TV TCU TOK TN TNAME TARCH <<< "$TORCH"
+  if [[ "$DEVICE" == cpu ]]; then
+    pass "torch $TV (DEVICE=cpu: CUDA not required, an operation check only)"
+  elif [[ "$TOK" == 1 ]]; then
+    pass "torch $TV, CUDA $TCU, $TN GPU(s): $TNAME"
+  else
+    fail "torch $TV (CUDA ${TCU:-none}) sees no CUDA device: every run would raise at its first .to()" \
+         "a CUDA build of torch (pip install torch --index-url https://download.pytorch.org/whl/cu128) and a visible GPU"
+  fi
+  if [[ -n "$FLOOR" ]]; then
+    if python3 -c "import sys, re
+v = [int(x) for x in re.findall(r'\d+', '$TV'.split('+')[0])[:2]]
+f = [int(x) for x in '$FLOOR'.split('.')[:2]]
+sys.exit(0 if v >= f else 1)"; then
+      pass "torch $TV meets requirements.txt (torch>=$FLOOR)"
+    elif [[ "$TARCH" == aarch64 && "$TOK" != 1 ]]; then
+      fail "torch $TV is below requirements.txt's torch>=$FLOOR on aarch64, where PyPI's wheels up to 2.10 are CPU-only" \
+           "pip install 'torch>=$FLOOR', or a CUDA 12 build: pip install torch --index-url https://download.pytorch.org/whl/cu128"
+    else
+      warn "torch $TV is below requirements.txt's torch>=$FLOOR; the floor guards aarch64's CPU-only wheels, and on $TARCH a CUDA build below it ran the 2026-09-27 smoke, tripwires and calibration" \
+           "none needed on x86_64 with CUDA; pip install 'torch>=$FLOOR' to match the file"
+    fi
+  fi
+fi
+
+# ------------------------------------------------------------------------------------------ the card
+if [[ "$DEVICE" == cpu ]]; then
+  pass "GPU checks skipped (DEVICE=cpu)"
+else
+  if ! command -v nvidia-smi > /dev/null 2>&1; then
+    fail "nvidia-smi not found: DEVICE=cuda needs an NVIDIA driver and a GPU" "run on the GPU box (or DEVICE=cpu for an operation check)"
+  else
+    SMI=$(timeout 20 nvidia-smi --query-gpu=index,name,memory.total,memory.used,utilization.gpu --format=csv,noheader,nounits 2>&1)
+    if [[ $? -ne 0 || -z "$SMI" ]]; then
+      fail "nvidia-smi did not list a GPU: ${SMI:0:200}" "check the driver (nvidia-smi) and the container's GPU access"
+    else
+      pass "nvidia-smi: $(awk -F', *' '{printf "%s%s (%s MiB)", (NR>1?"; ":""), $2, $3}' <<< "$SMI")"
+      BUSY=$(awk -F', *' '$4 > 1024 || $5 > 5 {printf "GPU %s: %s%% busy, %s MiB used; ", $1, $5, $4}' <<< "$SMI")
+      [[ -n "$BUSY" ]] && warn "something already uses the card: ${BUSY%; }" \
+        "look before launching: nvidia-smi, and bash tools/fleet_dash.sh (a fleet already running?)"
+    fi
+  fi
+  if [[ "${MPS:-auto}" == 0 ]]; then
+    pass "MPS=0: runs time-slice the card (no MPS)"
+  elif command -v nvidia-cuda-mps-control > /dev/null 2>&1; then
+    pass "nvidia-cuda-mps-control present (runs share the card concurrently)"
+  else
+    warn "nvidia-cuda-mps-control not installed: the runs will time-slice the card instead of sharing it" \
+         "none needed (the fleet runs without it; MPS=0 silences this)"
+  fi
+  MPSD=$(python3 -c '
+import os
+for d in sorted(os.listdir("/proc")):
+    try:
+        a = open(f"/proc/{d}/cmdline", "rb").read().split(b"\0")
+    except OSError:
+        continue
+    if d.isdigit() and os.path.basename(a[0].decode(errors="replace")) == "nvidia-cuda-mps-control" and b"-d" in a[1:]:
+        print(d)' 2>/dev/null)
+  [[ -n "$MPSD" ]] && warn "an MPS control daemon already runs (pid $(echo $MPSD)): a running fleet's, or one a killed fleet left" \
+    "if no fleet runs (bash tools/fleet_dash.sh), gpu_world.sh quits the one it left in OUT; any other: echo quit | CUDA_MPS_PIPE_DIRECTORY=<its pipe dir> nvidia-cuda-mps-control"
+fi
+if [[ -n "${OMP_NUM_THREADS:-}${OMP_THREAD_LIMIT:-}" ]]; then
+  warn "OMP_NUM_THREADS/OMP_THREAD_LIMIT is set (${OMP_NUM_THREADS:-}${OMP_THREAD_LIMIT:+ / $OMP_THREAD_LIMIT}): GNU nproc reports it instead of the cores, and the fleet sizes its parallelism by nproc (it sets one thread per run itself)" \
+       "unset OMP_NUM_THREADS OMP_THREAD_LIMIT"
+else
+  pass "OMP_NUM_THREADS unset (nproc reports $(nproc) core(s); the cgroup quota, if lower, sizes the fleet)"
+fi
+
+# ------------------------------------------------------------------------------------------ the disk
+_p=$OUT; while [[ ! -d "$_p" ]]; do _p=$(dirname "$_p"); done
+FREE_B=$(( $(df -Pk "$_p" | awk 'NR == 2 {print $4}') * 1024 ))
+KC=${KEEP_CKPT:-$([[ "$EXP_SET" == retok ]] && echo 1 || echo 0)}
+W=${WINDOWS:-20000}
+SD=${SEEDS:-$([[ "$EXP_SET" == retok ]] && echo "0 1 2" || echo "0 1 2 3 4")}
+NS=$(wc -w <<< "$SD")
+CKPT_MB=${CKPT_MB:-125}
+if [[ "$KC" == 1 && "$W" =~ ^[0-9]+$ ]]; then
+  if [[ "$EXP_SET" == retok ]]; then
+    ARMS=${RETOK_ARMS:-"3000 1000"}
+    g=0; for c in $ARMS; do a=$g; b=$c; while (( b )); do t=$(( a % b )); a=$b; b=$t; done; g=$a; done
+    KE=${KEEP_EVERY:-$g}; [[ "$KE" =~ ^[1-9][0-9]*$ ]] || KE=1000
+    PER=$(( (11 * W + 10 * KE - 1) / (10 * KE) + 2 + 2 + $(wc -w <<< "$ARMS") + $([[ -n "${COOLDOWN_ARM:-}" ]] && echo 1 || echo 0) ))
+    FILES=$(( NS * PER + 2 ))
+  else
+    FILES=$(( NS * 4 + 1 ))
+  fi
+  NEED_B=$(( FILES * CKPT_MB * 2 * 1000000 ))
+  G() { awk -v b="$1" 'BEGIN { printf "%.1f", b / 1e9 }'; }
+  if (( FREE_B < NEED_B )); then
+    fail "disk: $(G $FREE_B) GB free at $_p, and the kept checkpoints may need $(G $NEED_B) GB ($FILES files x 2 x $CKPT_MB MB at $NS seed(s))" \
+         "free space there, fewer SEEDS, or KEEP_CKPT=0 (which leaves the spike test without its control)"
+  elif (( FREE_B < 2 * NEED_B )); then
+    warn "disk: $(G $FREE_B) GB free, $(G $NEED_B) GB needed at $NS seed(s): FILL will add few extra seeds (it stops at 0.9 of the free disk)" \
+         "free space for more seeds, or accept fewer"
+  else
+    pass "disk: $(G $FREE_B) GB free at $_p; the kept checkpoints may need $(G $NEED_B) GB at $NS seed(s)"
+  fi
+else
+  (( FREE_B > 2000000000 )) && pass "disk: $(( FREE_B / 1000000000 )) GB free at $_p (no kept checkpoints)" \
+    || warn "disk: only $(( FREE_B / 1000000 )) MB free at $_p" "free a few GB for the logs and the archive"
+fi
+
+# ------------------------------------------------------------------------------------------ the checkout
+BR=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+if [[ -z "$BR" ]]; then
+  warn "not a git checkout: the fleet's commit will read '?'" ""
+else
+  [[ "$BR" == rm-predict-DC ]] && pass "branch $BR" || warn "branch $BR, not rm-predict-DC" "git checkout rm-predict-DC && git pull --ff-only"
+  if [[ "${FETCH:-1}" == 0 ]]; then
+    warn "origin not checked (FETCH=0)" "git fetch origin $BR; git status"
+  elif timeout 30 git fetch -q origin "$BR" > /dev/null 2>&1; then
+    L=$(git rev-parse HEAD); R=$(git rev-parse "origin/$BR" 2>/dev/null)
+    if [[ "$L" == "$R" ]]; then pass "at origin/$BR's head ($(git rev-parse --short HEAD))"
+    elif git merge-base --is-ancestor HEAD "origin/$BR" 2>/dev/null; then
+      warn "behind origin/$BR by $(git rev-list --count HEAD.."origin/$BR") commit(s): the fleet would run older code" "git pull --ff-only"
+    elif git merge-base --is-ancestor "origin/$BR" HEAD 2>/dev/null; then
+      warn "ahead of origin/$BR by $(git rev-list --count "origin/$BR"..HEAD) local commit(s) that are not on origin" "none needed if you meant it"
+    else
+      warn "diverged from origin/$BR" "git status; then git pull --ff-only once it can"
+    fi
+  else
+    warn "could not reach origin (git fetch failed): cannot say whether this is the newest code" "check the network; git pull --ff-only"
+  fi
+  if git diff --quiet HEAD -- src run.py gpu_world.sh tools 2>/dev/null; then pass "no local edits under src/, run.py, gpu_world.sh, tools/"
+  else warn "local edits under src/, run.py, gpu_world.sh or tools/: the block will say DIRTY" "git stash, or git checkout -- <files>"; fi
+fi
+
+# ------------------------------------------------------------------------------------------ a fleet already running
+ST=$(bash gpu_world.sh --status 2>/dev/null)
+STV=$?
+case "$STV" in
+  0|5) fail "a fleet is RUNNING in $OUT ($(grep -m1 -o '#####  [A-Z ]*  #####' <<< "$ST" | tr -d '#' | xargs)): launching again would be refused" \
+            "watch it: bash tools/fleet_dash.sh $OUT | look: ${CMDENV}bash gpu_world.sh --status | stop it: ${CMDENV}bash gpu_world.sh --stop" ;;
+  2) pass "no fleet in $OUT yet" ;;
+  *) V=$(grep -m1 -o '#####  [A-Z ]*  #####' <<< "$ST" | tr -d '#' | xargs)
+     pass "$OUT holds a ${V:-previous} fleet, not running: the launch moves it aside whole, as $OUT.<its launch stamp> (nothing is deleted)" ;;
+esac
+if [[ "$DEVICE" != cpu && "${ALLOW_CONCURRENT:-0}" != 1 ]]; then
+  OTHER=$(bash tools/fleet_dash.sh --scan card "$OUT" 2>/dev/null)
+  [[ -n "$OTHER" ]] && fail "another fleet runs on this machine's GPU: $(cut -f3 <<< "$OTHER" | head -2 | tr '\n' ' ')" \
+    "wait for it or stop it (bash gpu_world.sh --stop with its EXP/OUT); ALLOW_CONCURRENT=1 runs both anyway"
+fi
+command -v setsid > /dev/null 2>&1 || warn "setsid not found: the fleet stays in this terminal's session (nohup still ignores the hang-up)" "apt-get install util-linux"
+
+echo "=== $NP PASS, $NW WARN, $NF FAIL"
+if [[ "$GO" != 1 ]]; then
+  (( NF == 0 )) && echo "    ready: ${CMDENV}bash tools/gpu_launch.sh --go" || echo "    fix the FAILs, then run this again"
+  exit $(( NF > 0 ))
+fi
+if (( NF > 0 )); then
+  echo "!! NOT LAUNCHED: fix the FAIL(s) above first."
+  exit 1
+fi
+
+# ------------------------------------------------------------------------------------------ --go
+mkdir -p -- "$(dirname -- "$LOG")" 2>/dev/null
+printf '\n==== %s: tools/gpu_launch.sh --go (EXP=%s OUT=%s), %d PASS %d WARN ====\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$EXP_SET" "$OUT" "$NP" "$NW" >> "$LOG" || { echo "!! cannot write $LOG"; exit 1; }
+if command -v setsid > /dev/null 2>&1; then
+  setsid nohup bash gpu_world.sh >> "$LOG" 2>&1 < /dev/null &
+else
+  nohup bash gpu_world.sh >> "$LOG" 2>&1 < /dev/null &
+fi
+PID=$!
+T0=$(date +%s)
+echo "=== launched: pid $PID at $(date -u +%H:%M:%SZ), detached (its own session, hang-up ignored, no stdin); log $LOG (appended)"
+WAIT_S=${WAIT_S:-20}
+# ALIVE IS THE PID A FRESH $OUT/STATE NAMES (written after this launch, with that pid's start time),
+# else the pid started here: setsid execs in place, so the two are one pid, but only STATE is proof.
+st_pid() { local lt; lt=$(sed -n 's/^launch_t=//p' "$OUT/STATE" 2>/dev/null | tail -1)
+           [[ -n "$lt" && "$lt" -ge $(( T0 - 2 )) ]] && sed -n 's/^pid=//p' "$OUT/STATE" | tail -1; }
+st_alive() { local p s; p=$(st_pid); [[ -n "$p" ]] || return 1
+             s=$(sed -n 's/^pid_start=//p' "$OUT/STATE" | tail -1)
+             [[ "$(sed 's/.*) //' "/proc/$p/stat" 2>/dev/null | cut -d' ' -f20)" == "$s" ]]; }
+for _i in $(seq 1 "$WAIT_S"); do
+  sleep 1
+  if ! kill -0 "$PID" 2>/dev/null && ! st_alive; then
+    echo "!! THE FLEET EXITED within $(( $(date +%s) - T0 )) s. The end of $LOG:"
+    tail -n 30 "$LOG" | sed 's/^/    /'
+    exit 1
+  fi
+done
+if ! st_alive; then
+  echo "!! pid $PID runs, but no fresh $OUT/STATE names a live fleet after $WAIT_S s. The end of $LOG:"
+  tail -n 15 "$LOG" | sed 's/^/    /'
+  exit 1
+fi
+PID=$(st_pid)
+echo "=== RUNNING: pid $PID for $(( $(date +%s) - T0 )) s, confirmed by $OUT/STATE; phase $(sed -n 's/^phase=//p' "$OUT/STATE" | tail -1)"
+cat <<EOF
+    watch it (a second terminal):  bash tools/fleet_dash.sh $OUT
+    one look, any time:            ${CMDENV}bash gpu_world.sh --status
+    the log:                       tail -n 20 $LOG
+    stop it (it writes its block): ${CMDENV}bash gpu_world.sh --stop
+    when it has ended, paste back: cat $OUT/PASTE_BACK.txt
+    For its first minutes the card reads 0% for a stretch of every step: each smoke and calibration
+    run builds on the CPU (python and torch, corpus, tokenizer, stream, model) before it uses the GPU.
+    The log prints a heartbeat line every ${HB_EVERY:-30} s. Judge it by the dashboard or --status, never by
+    nvidia-smi or a quiet terminal, and do not launch it again or git pull while it runs.
+EOF
+exit 0

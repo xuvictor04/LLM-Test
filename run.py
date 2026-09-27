@@ -50,6 +50,19 @@ run minted can appear in this run's own training data.
 import argparse
 import os
 import sys
+import time
+
+# THE RUN'S START, TAKEN BEFORE THE HEAVY IMPORTS (2026-09-27). A run spends its first ~14 s on the CPU
+# -- torch's import, then compose(): the corpus, the tokenizer, the stream, the model, SIG's warm-up
+# -- before its first window, and printed nothing the whole time: gpu_world.sh's fleets looked dead
+# for exactly those seconds of every step. The line below says the process started, and the
+# '=== composed' line says how long the startup took. Neither contains 'device=' (the smoke's tripwire
+# reads that off the banner, and an early echo of it would hide a silent fallback) nor matches the
+# '=== N windows ... in Xs' summary line the fleet's readers parse. Both change no computation.
+_T_START = time.time()
+if __name__ == "__main__":
+    print(f"=== run.py pid {os.getpid()} started {time.strftime('%H:%M:%SZ', time.gmtime(_T_START))}: "
+          f"importing torch and composing (corpus, tokenizer, stream, model) before the first window", flush=True)
 
 # THE REPOSITORY ROOT MUST NOT BE ON sys.path BEFORE src/, AND THIS IS NOT DEFENSIVENESS.
 # Python puts a script's own directory FIRST, and this repository's root still carries the frozen
@@ -157,7 +170,8 @@ def main(argv=None):
     # the count printed here is 0 on every run that reaches this line; it stays because a reader
     # comparing logs looks for it.
     print(f"=== composed: stage={sysm.stage}, {len(sysm.refusals)} refusal(s), "
-          f"{len(sysm.warnings)} warning(s)")
+          f"{len(sysm.warnings)} warning(s); startup took {time.time() - _T_START:.1f} s "
+          f"(imports and compose), training starts {time.strftime('%H:%M:%SZ', time.gmtime())}")
     for w in sysm.warnings:
         print(f"WARNING: {w}")
 
