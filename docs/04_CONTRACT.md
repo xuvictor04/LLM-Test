@@ -4512,7 +4512,8 @@ the acts do, so an unsplit C13 alarm would blame the acts for the capacity ceili
 `fab.blackout_windows` is now reported before and after the first progress line with n_live ≥
 `FAB_SLOTS` (read off the growth gate's text, else EXTRA, else 4096; a pool that never fills is all
 before), each part as a share of its own windows, with n_live at the end per arm, and C13's alarm reads
-the part before only. The counter is cumulative and no log carries a per-window series, so the split is
+the part before only (without the counter, an upper bound built from the acts before the fill: the
+split's review, below). The counter is cumulative and no log carries a per-window series, so the split is
 an estimate built from the act windows: each act blacks out up to `FAB_COOLDOWN` windows from its window
 (a later act restarting it, as `grow_check`'s latest stamp does), those windows are counted either side
 of the fill, and the counter is split in that proportion; the analysis says so. **Driven:**
@@ -4563,6 +4564,44 @@ packed `.tgz`, took 2100 off the gate text. Every run reached the ceiling by win
 of the run still to go, and its one pass (before the line at window 201) dropped n_live by 432-452. That is 1 below the
 counters' exact 433-453 in every run, one spawn between the pass and the line: the bound held, and was
 nearly tight.
+**2026-09-27 (the split's review; §8 1.5): WITHOUT THE COUNTER, C13 READS A BOUND BUILT FROM THE ACTS
+BEFORE THE FILL, AND A FLUSH'S PHASE HAS A KNOWN ANSWER THAT ONLY ITS BYTES GIVE.** Two findings on
+1bd51c5. (1) When a log carries no `fab.blackout_windows` (a tree before §8 1.3), C13's alarm reads an
+upper bound on the part before the fill, and that bound was every `fab.shift_notifications` × cooldown
+over the windows before the fill, so the acts after the fill were charged to the part before. On a
+synthetic fleet of 2000 windows whose pool was full at window 101 and whose every act came later (k3000
+at 1501; k1000 at 1001, 1501 and 1901; cooldown 400) both arms read 100.0% before and alarmed. The
+whole-run bound the split replaced read 20.0% for k3000, with no alarm. **Ruling.** The bound is built
+from the acts before the fill: the windows their cooldowns cover ([act, act + cooldown), merged and
+clipped at the run's end, the cover the estimate uses) that fall before the fill, over the windows before
+it. A stamp no act line places (`fab.shift_notifications` above the act lines, as an epoch roll's
+would be) is charged a whole cooldown before the fill. Only a log with no act window falls back to every
+notification × cooldown. The split row prints the bound where the part is missing ("no counter: at most
+X% by the act windows x cooldown"), the block prints "<= X%", and the alarm names the bound. The fleet
+above now reads 0.0% for both, with no alarm. (2) No test placed a flush by its bytes. Every synthetic
+run had equal flushes, and there index quarters place flushes as bytes do, so a placement that ignored
+the bytes passed. A real act arm's flushes grow after its act. **Driven:** `tests/test_gpu_world.py`
+F15 adds an act arm whose flushes grow after its act (15 of 63,000 bytes, then 30 of 94,500). It reads
+its known phases, 2.0100, 2.1200, 2.2400 and 2.6000 bits/byte, +0.0100, +0.0200, +0.0400 and +0.3000
+against k0, and FAILs by phase 4. F17 adds the review's fleet (0.0%, no alarm) and a second one: acts
+before the fill bounded by their cover (800 of 1001 windows, 79.9%), a stamp no act line places (400 of
+1001, 40.0%), and the fallback with no act window (3 × 100 of 1001, 30.0%). Run against mutants in a
+scratch copy: index quarters in place of the byte placement fail only the new F15 check (its p2 reads
+−0.0020); placing by a flush's end fails it, F4's by-phase check and F15's one-harmful-phase fleet; 1bd51c5's script fails both new F17 checks (100.0%,
+two alarms). **On CPU (operation only),** `EXP=retok DEVICE=cpu WINDOWS=300 SEEDS='0 1' PAR=4 FILL=0
+KEEP_CKPT=0 EXTRA='TOK_GROW_EVERY=30 FAB_SLOTS=2180' RETOK_ARMS='40 20' RETOK_INCUMBENT=40`: 9 runs
+rc=0, "stays 40" (both cadences UNRESOLVED at n = 2). The pool filled at window 201 in every run.
+k40 acted at 121, 161, 201, 241 and 281 and k20 at 121, 161, 181, 221, 241 and 281, and
+`fab.shift_notifications` equalled the act lines in all four act runs. The no-op acts (`loop.acts_noop`
+2 and 8) printed no line and stamped nothing. With the counter both arms read 39.8% before and 100% after,
+and the alarm sounded on the 39.8%. With `fab.blackout_windows` removed from copies of the logs and from
+the tree record, the bound read 39.8% for both arms (80 of 201 windows, [121, 201)), equal to the
+estimate, and the alarm sounded on it, labelled an upper bound; 1bd51c5's script read 100.0% there. At
+`WINDOWS=200 FAB_SLOTS=2100` (9 runs rc=0) the pool was full at window 101, before every act (k40 at
+121 and 161; k20 at 101, 121, 161 and 181). With the counter both arms read 0.0% before, with no alarm.
+Without it the bound read 0.0% and nothing sounded, where 1bd51c5's script read 100.0% and alarmed both.
+The act arms' flushes grow after their first act: k40.s0's mean flush was 189.0 bytes over windows
+1-120 and 193.5 after, k0.s0's 189.0 and 189.4.
 
 **THE QUESTION AS IT STOOD.**
 

@@ -127,7 +127,12 @@
 # EXTRA, else 4096; never filled, it is all before), n_live at the end is printed per arm, and C13's
 # alarm reads only the part before. The counter is cumulative and the log has no per-window series, so
 # the split is an ESTIMATE built from the act windows and FAB_COOLDOWN (each act blacks out up to a
-# cooldown from its window, a later act restarting it), and says so. The verdict is labelled
+# cooldown from its window, a later act restarting it), and says so. A LOG WITHOUT THE COUNTER is read
+# against an UPPER BOUND on the part before, built from the acts before the fill: the windows their
+# cooldowns cover before it, over the windows before it, with a stamp no act line places charged a
+# whole cooldown there, and every notification x cooldown only where no act window is known (the
+# split's review, 2026-09-27: every notification was charged there, so acts after the fill read as
+# blackout before it and a pool full at window 101 alarmed on acts at 1001-1901). The verdict is labelled
 # B-provisional (note retok fleet (3)), and
 # pre-Levels when this tree lacks DOM_LEVELS or the fleet turns it off (C12). IF THIS FLEET RUNS AFTER
 # SR0, 04-Q5's pin rule applies: its margin pairs with pre-SR0 runs, so SR0's build adds
@@ -1253,15 +1258,8 @@ def retok(ctx_arg, archive, eps, inc_cadence):
         m_ = re.fullmatch(r"k\d+_cd(\d+)", arm) or re.search(r"(?:^| )FAB_COOLDOWN=(\d+)", EXTRA)
         return int(m_.group(1)) if m_ else 400
 
-    def split(arm, v):
-        """(before, after, how) in windows of fab.blackout_windows either side of the fill."""
-        bw_ = blackout(v)
-        if bw_ is None:
-            return None, None, None
-        if bw_ == 0:
-            return 0.0, (None if v["fill"] is None else 0.0), "zero"
-        if v["fill"] is None:
-            return bw_, None, "never full"
+    def cover(arm, v):
+        """The windows the acts can black out: [act, act + cooldown) each, merged, clipped at the run's end."""
         cdn, end = cooldown_of(arm, v), v["win"] or max(v["at"] or [0])
         ivs = []
         for a_ in sorted(v["at"]):
@@ -1272,6 +1270,18 @@ def retok(ctx_arg, archive, eps, inc_cadence):
                 ivs[-1][1] = max(ivs[-1][1], hi)
             else:
                 ivs.append([lo, hi])
+        return ivs
+
+    def split(arm, v):
+        """(before, after, how) in windows of fab.blackout_windows either side of the fill."""
+        bw_ = blackout(v)
+        if bw_ is None:
+            return None, None, None
+        if bw_ == 0:
+            return 0.0, (None if v["fill"] is None else 0.0), "zero"
+        if v["fill"] is None:
+            return bw_, None, "never full"
+        ivs = cover(arm, v)
         tot = sum(hi - lo for lo, hi in ivs)
         if tot <= 0:
             # A COUNT WITH NO ACT WINDOW TO PLACE IT is left whole before the fill: the alarm reads more.
@@ -1288,7 +1298,30 @@ def retok(ctx_arg, archive, eps, inc_cadence):
         pre, post = min(f_, v["win"]), v["win"] - min(f_, v["win"])
         return (b_ / pre if pre else 0.0), (a_ / post if a_ is not None and post else None), how
 
+    # WITHOUT THE COUNTER THE ALARM READS AN UPPER BOUND ON THE BEFORE-PART, BUILT FROM THE ACTS BEFORE
+    # THE FILL (2026-09-27, the split's review). It was fab.shift_notifications x cooldown over the
+    # windows before the fill, which charged the acts AFTER the fill to the before-part: a fleet whose
+    # pool was full at window 101 and whose every act came later read 100% before, and alarmed where the
+    # whole-run bound it replaced did not. The bound is now the windows of the acts' cover (above) that
+    # fall before the fill, as a share of the windows before it. A stamp no act line places (an epoch
+    # roll; fab.shift_notifications above the act lines) is charged a whole cooldown before the fill, and
+    # only a run with no act window at all falls back to every notification x cooldown.
+    def before_bound(arm, v):
+        """(share, how): an UPPER BOUND on the before-part's share of the windows before the fill."""
+        n_ = fnum(v["r"].get("fab.shift_notifications"))
+        if not v["win"]:
+            return None, None
+        pre = v["fill"] if v["fill"] is not None and v["fill"] < v["win"] else v["win"]
+        if v["at"]:
+            b_ = sum(max(0, min(hi, pre) - lo) for lo, hi in cover(arm, v))
+            b_ += max(0, (n_ or 0) - len(v["at"])) * cooldown_of(arm, v)
+            return min(1.0, b_ / pre), "acts"
+        if n_ is None or not v["cooldown"]:
+            return None, None
+        return min(1.0, n_ * v["cooldown"] / pre), "notifications"
+
     sec_rows, sec_short, phase_rows, alarms, split_short, unsplit, any_est = [], [], [], [], [], [], False
+    any_bb = False
     for arm in ORDER:
         rs = per_arm(arm)
         acts = cm(arm, "loop.acts")
@@ -1299,11 +1332,9 @@ def retok(ctx_arg, archive, eps, inc_cadence):
         # the whole run (a short run's cooldowns overlap and overrun its end).
         ub = mean([min(1.0, fnum(v["r"].get("fab.shift_notifications")) * v["cooldown"] / v["win"]) for _, v in rs
                    if fnum(v["r"].get("fab.shift_notifications")) is not None and v["cooldown"] and v["win"]])
-        # ... AND OF THE BEFORE-PART: at most the notifications' cooldowns, and at most every window before
-        # the fill, as a share of those windows.
-        ubb = mean([min(1.0, fnum(v["r"].get("fab.shift_notifications")) * v["cooldown"]
-                        / (v["fill"] if v["fill"] is not None and v["fill"] < v["win"] else v["win"])) for _, v in rs
-                    if fnum(v["r"].get("fab.shift_notifications")) is not None and v["cooldown"] and v["win"]])
+        # ... AND OF THE BEFORE-PART (before_bound): the acts before the fill, not every notification.
+        bb = [before_bound(arm, v) for _, v in rs]
+        ubb, ubb_how = mean([b[0] for b in bb]), {b[1] for b in bb if b[1]}
         pt = [parts(arm, v) for _, v in rs]
         bwb, bwa = mean([p[0] for p in pt]), mean([p[1] for p in pt])
         est = any(p[2] == "estimated" for p in pt)
@@ -1315,11 +1346,18 @@ def retok(ctx_arg, archive, eps, inc_cadence):
         full = (f"full (n_live >= FAB_SLOTS {'/'.join(map(str, sls))}) in {len(fills)}/{len(rs)} run(s)"
                 + (f" from window {fills[0]}" + (f"-{fills[-1]}" if fills[-1] != fills[0] else "") if fills else ""))
         nltxt = (f"{mean(nlv):.0f} [{min(nlv):.0f}-{max(nlv):.0f}]" if nlv else "-")
+        # WITHOUT THE COUNTER the row gives the before-part's upper bound, which the alarm then reads.
+        bb_src = ("the act windows" if ubb_how == {"acts"} else "fab.shift_notifications" if ubb_how == {"notifications"}
+                  else "the act windows, else fab.shift_notifications")
+        bb_on = bwb is None and ubb is not None
+        any_bb = any_bb or bb_on
         split_row = (
-            f"  {'':<12} blackout {fmt(bwb and 100 * bwb, '.1f')}% of the windows before the pool fills, "
+            f"  {'':<12} blackout {fmt(bwb and 100 * bwb, '.1f')}% of the windows before the pool fills"
+            + (f" (no counter: at most {100 * ubb:.1f}% by {bb_src} x cooldown)" if bb_on else "") + ", "
             f"{fmt(bwa and 100 * bwa, '.1f')}% of those after" + (" (estimated from the act windows)" if est else "")
             + f"; pool {full}; n_live at the end {nltxt}")
-        split_short.append(f"  {arm} before {fmt(bwb and 100 * bwb, '.1f')}% / after {fmt(bwa and 100 * bwa, '.1f')}%"
+        split_short.append(f"  {arm} before {fmt(bwb and 100 * bwb, '.1f')}%" + (f" (<= {100 * ubb:.1f}%)" if bb_on else "")
+                           + f" / after {fmt(bwa and 100 * bwa, '.1f')}%"
                            + (" (est.)" if est else "") + f"; {full.replace('(n_live >= FAB_SLOTS', '(slots')}"
                            f"; n_live end {nltxt}")
         waited, wwin = cm(arm, "tok.mint_waited"), cm(arm, "tok.mint_wait_windows")
@@ -1368,7 +1406,7 @@ def retok(ctx_arg, archive, eps, inc_cadence):
                           f"re-run with COOLDOWN_ARM=100 (adds {fastest}_cd100, FAB_COOLDOWN=100 at the fastest "
                           f"cadence)")
                 alarms.append(f"  BLACKOUT ALARM (C13): {arm} blacks out {100 * s_:.1f}% of its windows before the "
-                              f"pool fills" + (" (upper bound)" if bwb is None else "")
+                              f"pool fills" + (f" (upper bound by {bb_src} x cooldown)" if bwb is None else "")
                               + f", above 20%: {follow}")
     print()
     print("=== SECONDARIES (per arm, mean over seeds; beside the rule, never in it -- register note secondaries) ===")
@@ -1530,7 +1568,9 @@ def retok(ctx_arg, archive, eps, inc_cadence):
     sec_tail = unsplit_note + absent_lines + alarms
     bo_short = ([f"BLACKOUT SPLIT where n_live first reaches FAB_SLOTS (each part over its own windows; C13 reads the "
                  f"part before" + ("; ESTIMATED from the act windows x FAB_COOLDOWN, the counter being cumulative"
-                                   if any_est else "") + "):"] + split_short)
+                                   if any_est else "")
+                 + ("; no counter: <= is an upper bound, the act windows before the fill x FAB_COOLDOWN, or every "
+                    "notification's where no act window is known" if any_bb else "") + "):"] + split_short)
     ph_short = [f"  bits/byte by phase ({nph} equal byte ranges), {arm}: {vals}" for arm, vals, _ in phase_rows]
     emit([
         ("head", head("retok", labels) + failures(runs, done), 0),

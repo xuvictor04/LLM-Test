@@ -74,13 +74,20 @@ is pinned here, on a fleet whose every number is chosen.
       cadence PASSes, a harmful one FAILs, a noisy one and one at n < 2 are UNRESOLVED; the Bonferroni
       split over phases and Holm across the cadences (the stronger evidence at alpha/2, the other at
       alpha, none after the first that does not FAIL); the block carries each arm's per-phase means and
-      bounds, its verdict, eps and n.
+      bounds, its verdict, eps and n. Each flush is placed by its run's cumulative bytes: an act arm
+      whose flushes grow after its act reads each phase at its known value, where index quarters
+      would mix neighbouring phases (the split's review: every fleet had equal flushes, so a
+      placement ignoring the bytes passed).
   F16 O14's CHOICE: 1000 replaces 3000 when it is significantly better or when 3000 FAILs; 3000 stays
       on UNRESOLVED readings and when 1000 FAILs; every cadence FAILing is ESCALATE; no act is
       UNDECIDED; the whole truth table, and 0 is never an answer.
   F17 THE BLACKOUT SPLIT where n_live first reaches FAB_SLOTS (O14): an estimate from the act windows and
       the cooldown, each part over its own windows, FAB_SLOTS off the gate text, a pool that never fills
-      read as all before, n_live at the end per arm; C13's alarm reads the before-part only.
+      read as all before, n_live at the end per arm; C13's alarm reads the before-part only. Without
+      the counter it reads an upper bound built from the acts before the fill: acts all after it bound
+      the part before at 0% and sound nothing (the split's review: every notification was charged
+      there, and both alarmed at 100%), a stamp no act line places is charged a cooldown before, and
+      only a log with no act window falls back to every notification x cooldown.
 """
 import glob
 import json
@@ -1094,6 +1101,41 @@ esac
           re.search(r"^  k3000 n=1 a=[\d.]+: p1 \+0\.0010 \[-\] .* -> UNRESOLVED", a15c, re.M)
           and re.search(r"^  k1000 n=1 .* -> UNRESOLVED", a15c, re.M)
           and "=== DECISION: TOK_RETOK_EVERY stays 3000" in a15c, str([l for l in a15c.splitlines() if "->" in l]))
+    # EACH FLUSH IS PLACED BY ITS RUN'S CUMULATIVE BYTES, NOT BY ITS INDEX (the split's review). Every fleet
+    # above has equal flushes, where index quarters place them alike, so a placement that ignored the
+    # bytes passed. A retok raises the bytes per token, so an act arm's flushes grow after its act: k1000
+    # reads phase 1 in 15 flushes of 63,000 bytes and, after its act, phases 2-4 in 30 flushes of 94,500.
+    # By their bytes they fall 15/10/10/10; index quarters (i x 4 // 45) would place 12/11/11/11 and mix
+    # phases 1-2, 2-3 and 3-4 (phase 2 would read 0.2 x phase 1 + 0.8 x phase 2: a difference of -0.0020
+    # where it is +0.0200). k1000 - k0 is +0.01, +0.02, +0.04 and +0.30 by phase, plus a per-seed jitter
+    # of mean 0 (K0's offsets also average 0), so its phases read 2.01, 2.12, 2.24 and 2.60 bits/byte.
+    o15d = os.path.join(TMP, "f15d", "gpu_retok_out")
+    summary(o15d, seeds="0 1 2")
+    FB_ACT = [63000] * 15 + [94500] * 30
+    PH_ACT = [0] * 15 + [1] * 10 + [2] * 10 + [3] * 10
+    D15, J15 = [0.01, 0.02, 0.04, 0.30], [0.001, -0.002, 0.001]
+    for s in (0, 1, 2):
+        base = [2.0 + 0.1 * k + K0[s] for k in range(4)]
+        run_ph(o15d, "k0", s, base)
+        run_ph(o15d, "k0_nuis", s, [b + 0.001 * (s + 1) for b in base])
+        run_ph(o15d, "k3000", s, [b + HARMLESS[s] for b in base], acts=3, at=(3001,))
+        v15 = [base[k] + D15[k] + J15[s] for k in range(4)]
+        run(o15d, "k1000", s, None, n=len(FB_ACT), win=20000, nbytes=sum(FB_ACT), fbytes=FB_ACT, acts=1, at=(5001,),
+            losses=[v15[k] * LN2 * nb / CTX for k, nb in zip(PH_ACT, FB_ACT)],
+            lines=["       gate:data.phase_entered                      ('fired', '4 vs 4')"])
+    p15d = gw("--analyze", EXP="retok", OUT=o15d)
+    a15d, b15d = ana(o15d)
+    ALL["f15d"] = a15d + b15d
+    check("F15 each flush is placed by its run's cumulative bytes: k1000's flushes grow after its act (15 of 63,000 "
+          "bytes, then 30 of 94,500), and its phases read their known values, 2.0100 2.1200 2.2400 2.6000 bits/byte, "
+          "+0.0100 +0.0200 +0.0400 +0.3000 against k0, FAILing by phase 4 (index quarters read p2 -0.0020)",
+          p15d.returncode == 0 and sum(FB_ACT) == 3780000
+          and re.search(r"^  k1000\s+bits/byte by phase: 2\.0100 2\.1200 2\.2400 2\.6000  \(3 seed\(s\)\)$", a15d, re.M)
+          and re.search(r"^  k1000 n=3 a=[\d.]+: p1 \+0\.0100 \[\S+\] p2 \+0\.0200 \[\S+\] p3 \+0\.0400 \[\S+\] "
+                        r"p4 \+0\.3000 \[\+0\.2\d+,\+0\.3\d+\] -> FAIL$", a15d, re.M)
+          and re.search(r"^  k1000 n=3 a=[\d.]+: p1 \+0\.0100 .* p2 \+0\.0200 .* -> FAIL$", b15d, re.M)
+          and "=== DECISION: TOK_RETOK_EVERY stays 3000" in a15d,
+          str([l for l in a15d.splitlines() if "-> " in l or "by phase:" in l]) + p15d.stderr[-300:])
 
     # ---- F16: O14's choice ------------------------------------------------------------------------------
     CASES = {
@@ -1226,6 +1268,71 @@ esac
               "run(s) from window 1001; n_live end 4096 [4096-4096]" in b17
           and "  k0 before 0.0% / after 0.0%; full (slots 4096) in 1/1 run(s) from window 1001; n_live end 4096" in b17,
           str([l for l in b17.splitlines() if "before" in l]))
+    # WITHOUT THE COUNTER THE ALARM READS AN UPPER BOUND BUILT FROM THE ACTS BEFORE THE FILL (the split's
+    # review). The tree record lists no §8 1.3 counter, so no log carries fab.blackout_windows. The bound
+    # was fab.shift_notifications x cooldown over the windows before the fill, which charged the acts
+    # after the fill to the part before: on this fleet, the pool full at window 101 and every act later
+    # (k3000 at 1501; k1000 at 1001, 1501 and 1901), it read 100.0% for both and sounded both alarms,
+    # where the whole-run bound before the split (20.0% for k3000) sounded none for k3000.
+    o17b = os.path.join(TMP, "f17b", "gpu_retok_out")
+    summary(o17b, seeds="0", windows=2000, stream=378000)
+    for a, at in (("k0", ()), ("k0_nuis", ()), ("k3000", (1501,)), ("k1000", (1001, 1501, 1901))):
+        run(o17b, a, 0, 1.0, n=20, win=2000, nbytes=378000, acts=(len(at) if at else None), at=at,
+            counters=(dict(OLD13, **{"fab.shift_notifications": len(at)}) if at else {"fab.shift_notifications": 0}),
+            lines=prog(101, 4096))
+    p17b = gw("--analyze", EXP="retok", OUT=o17b)
+    a17b, b17b = ana(o17b)
+    sp17b = {a: re.search(rf"^  {a} +acts [^\n]*\n[^\n]*\n +(blackout [^\n]*)$", a17b, re.M) for a in ("k3000", "k1000")}
+    sp17b = {a: (m.group(1) if m else "") for a, m in sp17b.items()}
+    check("F17 without the counter, an arm whose every act follows the fill is bounded at 0.0% before it and sounds "
+          "no alarm (the pool full at 101; k3000's act at 1501, k1000's at 1001-1901): the bound counts the acts "
+          "before the fill, not every notification (it read 100.0% and alarmed both)",
+          p17b.returncode == 0 and "BLACKOUT ALARM" not in a17b + b17b
+          and all(sp17b[a].startswith("blackout -% of the windows before the pool fills (no counter: at most 0.0% by "
+                                      "the act windows x cooldown), -% of those after; pool full (n_live >= FAB_SLOTS "
+                                      "4096) in 1/1 run(s) from window 101") for a in sp17b)
+          and "fab.shift_notifications x cooldown 400 / windows = 20.0%" in a17b
+          and "  k3000 before -% (<= 0.0%) / after -%; full (slots 4096) in 1/1 run(s) from window 101" in b17b
+          and "no counter: <= is an upper bound, the act windows before the fill x FAB_COOLDOWN" in b17b,
+          str(sp17b) + str([l for l in a17b.splitlines() if "ALARM" in l]) + p17b.stderr[-300:])
+    # ... AND THE BOUND WHERE ACTS COME BEFORE THE FILL (at 1001 here). k1000's acts at 101 and 601 cover
+    # [101,501) and [601,1001): 800 of the 1001 windows before the fill, 79.9% (every notification's
+    # 4 x 400 read 100%). k3000's one act, at 1501, is after it, but a second stamp no act line places is
+    # charged a whole cooldown before: 400 of 1001, 40.0%. k1000_cd100 prints no act line, so its bound
+    # falls back to every notification: 3 x 100 of 1001, 30.0%.
+    o17c = os.path.join(TMP, "f17c", "gpu_retok_out")
+    summary(o17c, seeds="0", windows=2000, stream=378000)
+    for a in ("k0", "k0_nuis"):
+        run(o17c, a, 0, 1.0, n=20, win=2000, nbytes=378000, counters={"fab.shift_notifications": 0},
+            lines=prog(1001, 4096))
+    run(o17c, "k1000", 0, 1.0, n=20, win=2000, nbytes=378000, acts=4, at=(101, 601, 1201, 1801),
+        counters=dict(OLD13, **{"fab.shift_notifications": 4}), lines=prog(1001, 4096))
+    run(o17c, "k3000", 0, 1.0, n=20, win=2000, nbytes=378000, acts=1, at=(1501,),
+        counters=dict(OLD13, **{"fab.shift_notifications": 2}), lines=prog(1001, 4096))
+    run(o17c, "k1000_cd100", 0, 1.0, n=20, win=2000, nbytes=378000, acts=3, cooldown=100,
+        counters=dict(OLD13, **{"fab.shift_notifications": 3}), lines=prog(1001, 4096))
+    p17c = gw("--analyze", EXP="retok", OUT=o17c)
+    a17c, b17c = ana(o17c)
+    sp17c = {a: re.search(rf"^  {a} +acts [^\n]*\n[^\n]*\n +(blackout [^\n]*)$", a17c, re.M)
+             for a in ("k1000", "k3000", "k1000_cd100")}
+    sp17c = {a: (m.group(1) if m else "") for a, m in sp17c.items()}
+    _al = [l for l in a17c.splitlines() if "ALARM" in l]
+    check("F17 without the counter the bound is the act windows before the fill x cooldown (k1000: 800 of 1001, "
+          "79.9%), a stamp no act line places is charged a cooldown before (k3000: 400 of 1001, 40.0%), and with no "
+          "act window every notification x cooldown (k1000_cd100: 3 x 100 of 1001, 30.0%); the alarm reads the bound",
+          p17c.returncode == 0
+          and sp17c["k1000"].startswith(f"blackout -% of the windows before the pool fills (no counter: at most "
+                                        f"{100 * 800 / 1001:.1f}% by the act windows x cooldown)")
+          and sp17c["k3000"].startswith(f"blackout -% of the windows before the pool fills (no counter: at most "
+                                        f"{100 * 400 / 1001:.1f}% by the act windows x cooldown)")
+          and sp17c["k1000_cd100"].startswith(f"blackout -% of the windows before the pool fills (no counter: at most "
+                                              f"{100 * 300 / 1001:.1f}% by fab.shift_notifications x cooldown)")
+          and f"BLACKOUT ALARM (C13): k1000 blacks out {100 * 800 / 1001:.1f}% of its windows before the pool fills "
+              "(upper bound by the act windows x cooldown), above 20%: the cooldown arm k1000_cd100 is in this fleet" in a17c
+          and f"BLACKOUT ALARM (C13): k3000 blacks out {100 * 400 / 1001:.1f}% of its windows before the pool fills "
+              "(upper bound by the act windows x cooldown)" in a17c and len(_al) == 2
+          and f"  k1000 before -% (<= {100 * 800 / 1001:.1f}%) / after -%" in b17c,
+          str(sp17c) + str(_al) + p17c.stderr[-300:])
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
 
