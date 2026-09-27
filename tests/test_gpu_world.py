@@ -35,7 +35,11 @@ is pinned here, on a fleet whose every number is chosen.
       SUMMARY.txt without the record says it cannot tell the two apart (build 1.5's review). The act
       arms' rates carry the act's own share of loop time and qualify their distance from a saving k0.
   F5  THE ARCHIVE: <name minus _out>_<launch date>.tgz beside OUT, with SUMMARY, the block, logs and
-      curves, no member under ckpt/ and none ending .pt or .pt.*; tools/read_fleet_archive.sh reads it.
+      curves, no member under ckpt/ and none ending .pt or .pt.*; tools/read_fleet_archive.sh reads it,
+      and its pool rows (O20, NEW-20) read a synthetic fleet to the known answer: the fill window, the
+      windows from it to the end and their share, the lines at FAB_SLOTS (off the gate text, and off
+      SUMMARY.txt's EXTRA), the drops near it as a lower bound per pass beside merged + culled, and
+      the pooled line without the *_rerun replicate.
   F6  AN ACT ARM WITH NO ACT AT ANY SEED is NO ACT FIRED and never ships, and an incumbent that did not
       act is not read, so it stays; with no k0_nuis, M is not formed and still decides nothing, the
       DECISION reads, and the block is written.
@@ -482,6 +486,42 @@ try:
                          env=clean_env(), capture_output=True, text=True, timeout=120)
     check("F5 tools/read_fleet_archive.sh reads it", rfa.returncode == 0 and "==== PASTE THIS BACK ====" in rfa.stdout
           and "(9 run logs)" in rfa.stdout, rfa.stderr[-300:])
+    # THE POOL AT ITS CEILING (O20, NEW-20). k0 fills FAB_SLOTS 3000 (the growth gate's text) at the line of
+    # window 1001 and dips 10 at 1201 and 25 at 1701: 999 of 2000 windows to the end, 8 of the 10 lines there
+    # at it, 45 merged + culled in 3 passes. k1000 takes 3000 from SUMMARY.txt's EXTRA, peaks at 2950 and drops
+    # 30 from within 2% of it, with passes every 50 windows. k0_rerun, k0's twin, is left out of the pool.
+    o5p = os.path.join(TMP, "f5p", "gpu_retok_out")
+    summary(o5p, seeds="0", windows=2000, extra="FAB_SLOTS=3000")
+
+    def pl(pairs):
+        return [f"[{w} windows] loss=2.0000 opt_steps={w} n_live={n} vocab=600 uncalled=0" for w, n in pairs]
+    fill_k0 = [(w, 2049 + w // 100 * 100 if w < 1001 else {1201: 2990, 1701: 2975}.get(w, 3000))
+               for w in range(101, 2000, 100)]
+    gate3000 = ("       gate:fab.growth                              ('armed-but-zero', \"'0 asked, 0 grown, "
+                "n_live=3000' vs 'soft cap headroom + new_frac=0.04 of 3000 (FAB_N0=2048, FAB_SLOTS=3000)'\")")
+    for a in ("k0", "k0_rerun"):
+        run(o5p, a, 0, 1.0, n=20, win=2000, lines=pl(fill_k0) + [gate3000],
+            counters={"fab.merged": 30, "fab.cull_fail": 12, "fab.cull_util": 3, "fab.manage_passes": 3,
+                      "fab.manage_every_windows": 500})
+    run(o5p, "k1000", 0, 1.0, n=20, win=2000,
+        lines=pl([(w, 2049 + w // 100 * 50) for w in range(101, 1700, 100)] + [(1701, 2950), (1801, 2920), (1901, 2950)]),
+        counters={"fab.merged": 5, "fab.cull_fail": 2, "fab.manage_passes": 3, "fab.manage_every_windows": 50})
+    r5p = subprocess.run(["bash", os.path.join(ROOT, "tools", "read_fleet_archive.sh"), o5p], cwd=TMP,
+                         env=clean_env(), capture_output=True, text=True, timeout=120)
+    rows5 = [l.strip() for l in r5p.stdout.splitlines() if l.strip().startswith("ceiling ")]
+    check("F5 the reader's pool row: the fill, the windows from it to the end and their share, the lines at the "
+          "ceiling, the drops near it as a lower bound per pass, and merged + culled over the passes",
+          r5p.returncode == 0 and rows5 == [
+              "ceiling 3000 from w1001: 999 of 2000 w to the end (50.0%), at it on 8/10 lines; freed/pass >= med 17.5, "
+              "max 25 (2 drops); merged+culled 45 in 3 passes (15.0/pass, whole run)"] * 2 + [
+              "ceiling 3000 never reached (max n_live 2950 at w1701); freed/pass >= med 30, max 30 (1 drop); "
+              "merged+culled 7 in 3 passes (2.3/pass, whole run)"], str(rows5) + r5p.stderr[-300:])
+    check("F5 ... the pooled line leaves the *_rerun twin out and says a drop can span passes when they are closer "
+          "than the lines, and the header calls the drops a LOWER BOUND",
+          "-- pool, 2 runs (*_rerun left out): 1/2 reach the ceiling; fill to end 50.0-50.0% of the run (median 50.0%); "
+          "at it on 80.0-80.0% of the lines from the fill on; freed/pass >= med 25 (10-30, 3 drops); passes every "
+          "50/500 w, lines every 100 w (a drop can span passes)" in r5p.stdout and "a LOWER BOUND" in r5p.stdout,
+          str([l for l in r5p.stdout.splitlines() if l.startswith("-- pool")]))
 
     # ---- F6: today's refusals stand ---------------------------------------------------------------
     o6 = os.path.join(TMP, "f6", "gpu_retok_out")

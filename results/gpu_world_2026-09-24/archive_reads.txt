@@ -10,47 +10,71 @@ archive read: gpu_world_2026-09-24.tgz (gpu_world_out/)  (21 run logs)
    Gate data.exposure_skew: armed, did not fire (3.0 vs 3.0)
    Gate data.splice_window: FIRED (6.495 vs 8.0)
 -- data protocol across all logs: ['generated']
--- per run: final counters; n_live at windows 0/2k/5k/10k/15k/20k (from progress lines)
+-- per run: n_live at windows 0/2k/5k/10k/15k/20k (from progress lines); final counters; the pool at its ceiling
+   3rd row (O20, NEW-20): windows from the first progress line at FAB_SLOTS to the end, and the lines there at it (the rest read a pass's dip);
+   freed/pass >= the n_live drops between progress lines from within 2% of FAB_SLOTS: a LOWER BOUND from the sampling, the logs hold no per-pass count
   fb_off.s0          n_live 101:2049 1901:2749 4901:2813 9901:4096 14901:4096 19901:4096
                      cull_fail=265 cull_util=63 experts_past_grace_ever=533 gn.p50=1.445 gn.p99=9.187 gn.samples=20000 merged=401 n_live=4096 p.n_cull_candidates=112 p.n_culled=6 p.n_merged=1385 rescued=0
+                     ceiling 4096 from w8901: 11099 of 20000 w to the end (55.5%), at it on 89/111 lines; freed/pass >= med 25, max 50 (22 drops); merged+culled 729 in 39 passes (18.7/pass, whole run)
   fb_off.s1          n_live 101:2049 1901:2473 4901:3521 9901:4096 14901:4096 19901:4096
                      cull_fail=261 cull_util=86 experts_past_grace_ever=565 gn.p50=1.463 gn.p99=12.51 gn.samples=20000 merged=399 n_live=4096 p.n_cull_candidates=130 p.n_culled=7 p.n_merged=1356 rescued=0
+                     ceiling 4096 from w6201: 13799 of 20000 w to the end (69.0%), at it on 111/138 lines; freed/pass >= med 25, max 46 (27 drops); merged+culled 746 in 39 passes (19.1/pass, whole run)
   fb_off.s2          n_live 101:2049 1901:2421 4901:3327 9901:3486 14901:4096 19901:4096
                      cull_fail=230 cull_util=96 experts_past_grace_ever=609 gn.p50=1.578 gn.p99=12.79 gn.samples=20000 merged=379 n_live=4096 p.n_cull_candidates=133 p.n_culled=5 p.n_merged=1527 rescued=0
+                     ceiling 4096 from w12201: 7799 of 20000 w to the end (39.0%), at it on 63/78 lines; freed/pass >= med 26, max 36 (15 drops); merged+culled 705 in 39 passes (18.1/pass, whole run)
   fb_off.s3          n_live 101:2049 1901:2456 4901:3787 9901:4096 14901:4096 19901:4096
                      cull_fail=226 cull_util=90 experts_past_grace_ever=521 gn.p50=1.387 gn.p99=12.77 gn.samples=20000 merged=526 n_live=4096 p.n_cull_candidates=125 p.n_culled=4 p.n_merged=1255 rescued=0
+                     ceiling 4096 from w5801: 14199 of 20000 w to the end (71.0%), at it on 114/142 lines; freed/pass >= med 28, max 42 (28 drops); merged+culled 842 in 39 passes (21.6/pass, whole run)
   fb_off.s4          n_live 101:2049 1901:2585 4901:2685 9901:4096 14901:4096 19901:4096
                      cull_fail=385 cull_util=77 experts_past_grace_ever=695 gn.p50=1.338 gn.p99=10.7 gn.samples=20000 merged=535 n_live=4096 p.n_cull_candidates=113 p.n_culled=8 p.n_merged=1179 rescued=0
+                     ceiling 4096 from w8701: 11299 of 20000 w to the end (56.5%), at it on 91/113 lines; freed/pass >= med 35, max 51 (22 drops); merged+culled 997 in 39 passes (25.6/pass, whole run)
   fb_off_rerun.s0    n_live 101:2049 1901:2749 4901:2813 9901:4096 14901:4096 19901:4096
                      cull_fail=265 cull_util=63 experts_past_grace_ever=533 gn.p50=1.445 gn.p99=9.187 gn.samples=20000 merged=401 n_live=4096 p.n_cull_candidates=112 p.n_culled=6 p.n_merged=1385 rescued=0
+                     ceiling 4096 from w8901: 11099 of 20000 w to the end (55.5%), at it on 89/111 lines; freed/pass >= med 25, max 50 (22 drops); merged+culled 729 in 39 passes (18.7/pass, whole run)
   fb_on.s0           n_live 101:2049 1901:2570 4901:3534 9901:4096 14901:4096 19901:4096
                      cull_fail=257 cull_util=69 experts_past_grace_ever=502 gn.p50=1.406 gn.p99=8.58 gn.samples=20000 merged=501 n_live=4096 p.n_cull_candidates=114 p.n_culled=7 p.n_merged=1366 rescued=0
+                     ceiling 4096 from w6101: 13899 of 20000 w to the end (69.5%), at it on 112/139 lines; freed/pass >= med 27, max 45 (27 drops); merged+culled 827 in 39 passes (21.2/pass, whole run)
   fb_on.s1           n_live 101:2049 1901:2579 4901:3989 9901:4096 14901:4096 19901:4096
                      cull_fail=289 cull_util=75 experts_past_grace_ever=564 gn.p50=1.563 gn.p99=12.6 gn.samples=20000 merged=489 n_live=4096 p.n_cull_candidates=131 p.n_culled=6 p.n_merged=1345 rescued=0
+                     ceiling 4096 from w5801: 14199 of 20000 w to the end (71.0%), at it on 109/142 lines; freed/pass >= med 26.5, max 51 (28 drops); merged+culled 853 in 39 passes (21.9/pass, whole run)
   fb_on.s2           n_live 101:2049 1901:2571 4901:4096 9901:4096 14901:4096 19901:4096
                      cull_fail=215 cull_util=88 experts_past_grace_ever=488 gn.p50=1.502 gn.p99=11.62 gn.samples=20000 merged=447 n_live=4096 p.n_cull_candidates=133 p.n_culled=6 p.n_merged=1532 rescued=0
+                     ceiling 4096 from w4301: 15699 of 20000 w to the end (78.5%), at it on 125/157 lines; freed/pass >= med 22, max 43 (31 drops); merged+culled 750 in 39 passes (19.2/pass, whole run)
   fb_on.s3           n_live 101:2049 1901:2715 4901:4063 9901:4096 14901:4096 19901:4096
                      cull_fail=239 cull_util=99 experts_past_grace_ever=514 gn.p50=1.594 gn.p99=18.73 gn.samples=20000 merged=395 n_live=4096 p.n_cull_candidates=127 p.n_culled=7 p.n_merged=1307 rescued=0
+                     ceiling 4096 from w5101: 14899 of 20000 w to the end (74.5%), at it on 111/149 lines; freed/pass >= med 23, max 39 (29 drops); merged+culled 733 in 39 passes (18.8/pass, whole run)
   fb_on.s4           n_live 101:2049 1901:2780 4901:3563 9901:4096 14901:4096 19901:4096
                      cull_fail=304 cull_util=67 experts_past_grace_ever=514 gn.p50=1.347 gn.p99=11.62 gn.samples=20000 merged=509 n_live=4096 p.n_cull_candidates=106 p.n_culled=8 p.n_merged=1187 rescued=0
+                     ceiling 4096 from w6401: 13599 of 20000 w to the end (68.0%), at it on 109/136 lines; freed/pass >= med 30, max 41 (27 drops); merged+culled 880 in 39 passes (22.6/pass, whole run)
   skip.s0            n_live 101:2049 1901:2473 4901:2889 9901:4096 14901:4096 19901:4096
                      cull_fail=287 cull_util=70 experts_past_grace_ever=563 gn.p50=1.398 gn.p99=10.1 gn.samples=20000 merged=465 n_live=4096 p.n_cull_candidates=106 p.n_culled=7 p.n_merged=1331 rescued=0
+                     ceiling 4096 from w9601: 10399 of 20000 w to the end (52.0%), at it on 84/104 lines; freed/pass >= med 27, max 51 (20 drops); merged+culled 822 in 39 passes (21.1/pass, whole run)
   skip.s1            n_live 101:2049 1901:2259 4901:2590 9901:2241 14901:2418 19901:3886
                      cull_fail=810 cull_util=31 experts_past_grace_ever=1002 gn.p50=1.887 gn.p99=25 gn.samples=20000 merged=358 n_live=3927 p.n_cull_candidates=125 p.n_culled=7 p.n_merged=1323 rescued=0
+                     ceiling 4096 never reached (max n_live 3886 at w19901); freed/pass: no drop near it; merged+culled 1199 in 39 passes (30.7/pass, whole run)
   skip.s2            n_live 101:2049 1901:2481 4901:4096 9901:4096 14901:4096 19901:4096
                      cull_fail=263 cull_util=90 experts_past_grace_ever=539 gn.p50=1.635 gn.p99=13.61 gn.samples=20000 merged=410 n_live=4096 p.n_cull_candidates=128 p.n_culled=5 p.n_merged=1532 rescued=0
+                     ceiling 4096 from w4901: 15099 of 20000 w to the end (75.5%), at it on 119/151 lines; freed/pass >= med 23, max 40 (30 drops); merged+culled 763 in 39 passes (19.6/pass, whole run)
   skip.s3            n_live 101:2049 1901:2257 4901:2239 9901:2463 14901:4096 19901:4096
                      cull_fail=463 cull_util=39 experts_past_grace_ever=772 gn.p50=1.744 gn.p99=19.25 gn.samples=20000 merged=468 n_live=4096 p.n_cull_candidates=123 p.n_culled=5 p.n_merged=1274 rescued=0
+                     ceiling 4096 from w13201: 6799 of 20000 w to the end (34.0%), at it on 55/68 lines; freed/pass >= med 33, max 47 (13 drops); merged+culled 970 in 39 passes (24.9/pass, whole run)
   skip.s4            n_live 101:2049 1901:2671 4901:3936 9901:4096 14901:4096 19901:4096
                      cull_fail=459 cull_util=58 experts_past_grace_ever=585 gn.p50=1.545 gn.p99=11.71 gn.samples=20000 merged=648 n_live=4096 p.n_cull_candidates=115 p.n_culled=10 p.n_merged=1211 rescued=0
+                     ceiling 4096 from w5201: 14799 of 20000 w to the end (74.0%), at it on 116/148 lines; freed/pass >= med 38, max 61 (29 drops); merged+culled 1165 in 39 passes (29.9/pass, whole run)
   world_off.s0       n_live 101:2049 1901:2522 4901:3775 9901:4096 14901:4096 19901:4096
                      cull_fail=233 cull_util=70 experts_past_grace_ever=481 gn.p50=1.477 gn.p99=11.26 gn.samples=20000 merged=547 n_live=4096 p.n_cull_candidates=112 p.n_culled=6 p.n_merged=1385 rescued=0
+                     ceiling 4096 from w6301: 13699 of 20000 w to the end (68.5%), at it on 109/137 lines; freed/pass >= med 28, max 44 (27 drops); merged+culled 850 in 39 passes (21.8/pass, whole run)
   world_off.s1       n_live 101:2049 1901:2745 4901:3160 9901:4096 14901:4096 19901:4096
                      cull_fail=281 cull_util=92 experts_past_grace_ever=606 gn.p50=1.51 gn.p99=13.99 gn.samples=20000 merged=393 n_live=4096 p.n_cull_candidates=124 p.n_culled=6 p.n_merged=1372 rescued=0
+                     ceiling 4096 from w9101: 10899 of 20000 w to the end (54.5%), at it on 88/109 lines; freed/pass >= med 27, max 46 (21 drops); merged+culled 766 in 39 passes (19.6/pass, whole run)
   world_off.s2       n_live 101:2049 1901:2400 4901:2890 9901:3376 14901:4096 19901:4096
                      cull_fail=203 cull_util=90 experts_past_grace_ever=558 gn.p50=1.556 gn.p99=12.78 gn.samples=20000 merged=336 n_live=4096 p.n_cull_candidates=133 p.n_culled=6 p.n_merged=1532 rescued=0
+                     ceiling 4096 from w12301: 7699 of 20000 w to the end (38.5%), at it on 62/77 lines; freed/pass >= med 22, max 32 (15 drops); merged+culled 629 in 39 passes (16.1/pass, whole run)
   world_off.s3       n_live 101:2049 1901:2527 4901:3658 9901:4096 14901:4096 19901:4096
                      cull_fail=255 cull_util=91 experts_past_grace_ever=517 gn.p50=1.483 gn.p99=12.59 gn.samples=20000 merged=511 n_live=4096 p.n_cull_candidates=126 p.n_culled=7 p.n_merged=1238 rescued=0
+                     ceiling 4096 from w6601: 13399 of 20000 w to the end (67.0%), at it on 108/134 lines; freed/pass >= med 29.5, max 46 (26 drops); merged+culled 857 in 39 passes (22.0/pass, whole run)
   world_off.s4       n_live 101:2049 1901:2558 4901:2764 9901:4096 14901:4096 19901:4096
                      cull_fail=309 cull_util=76 experts_past_grace_ever=577 gn.p50=1.409 gn.p99=11.14 gn.samples=20000 merged=505 n_live=4096 p.n_cull_candidates=114 p.n_culled=8 p.n_merged=1238 rescued=0
+                     ceiling 4096 from w8401: 11599 of 20000 w to the end (58.0%), at it on 93/116 lines; freed/pass >= med 31, max 48 (23 drops); merged+culled 890 in 39 passes (22.8/pass, whole run)
+-- pool, 20 runs (*_rerun left out): 19/20 reach the ceiling; fill to end 34.0-78.5% of the run (median 68.0%); at it on 74.5-80.9% of the lines from the fill on; freed/pass >= med 27 (6-61, 460 drops); passes every 500 w, lines every 100 w
 ==== END ====

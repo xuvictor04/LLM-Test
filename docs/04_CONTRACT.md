@@ -4535,6 +4535,34 @@ At `WINDOWS=300 FAB_SLOTS=2180 KEEP_CKPT=0` the pool filled at window 201, betwe
 161 and those at 201-281. k40.s0's 174 blacked-out windows (from the act at 121 to its 295th window,
 the estimate's total, equal to the counter in all four act runs) split into 80 before, 39.8% of the 201
 windows before the fill, and 94 after, 100% of those after. The alarm sounded on the 39.8%.
+**2026-09-27 (Proposal 05 O20, NEW-20; §8 1.5's owed archive reads): A FLEET'S ARCHIVE NOW SAYS HOW
+LONG THE POOL SAT AT ITS CEILING AND HOW MANY SLOTS A MANAGE PASS FREED THERE.** Under each run's
+counters, `tools/read_fleet_archive.sh` prints one more row. It gives `FAB_SLOTS` (the growth gate's
+text, else any `FAB_SLOTS=` in the log, else SUMMARY.txt's EXTRA, else 4096, labelled "assumed") and
+the first progress window with n_live ≥ `FAB_SLOTS`. It gives the windows from there to the run's end
+(its `=== N windows` line) and their share of the run, and how many of the progress lines from there
+on read `FAB_SLOTS`. Slots freed per manage pass are the drops in n_live between consecutive progress
+lines whose earlier line is within 2% of `FAB_SLOTS` (median, max and count). Beside them is the whole
+run's `fab.merged` + `fab.cull_fail` + `fab.cull_util` over `fab.manage_passes`, each of which frees
+one slot. One pooled line follows the rows; arms named `*_rerun` are replicates and are left out of it.
+The pooled line notes when passes come closer together than the lines, since a drop can then span
+several passes. No log holds a per-pass count, and spawns refill slots between lines 100 windows
+apart, so the freed figure is a LOWER BOUND from the sampling, and the block says so. A line one window
+after a pass reads that pass's dip, so the line count is a sample, not the time spent at the ceiling. On
+the 2026-09-24 archive (`results/gpu_world_2026-09-24/archive_reads.txt`, ARCHIVE_READS.md item 2),
+with the replicate left out: the stretch from the fill to the end is 34.0-78.5% of each filling run
+(median 68.0%), and 74.5-80.9% of the progress lines in it read 4096. A pass frees a median of at least
+27 slots (6-61, 460 passes), as `results/decisions_2026-09-26/revise/o16_dc/churn.out` read it, beside 629-1,199 merges and FAB
+culls per run over its 39 passes. **Driven:** `tests/test_gpu_world.py` F5, on a synthetic fleet: the
+fill, the share and the lines at the ceiling, with `FAB_SLOTS` read off the gate text and off EXTRA;
+the drops near the ceiling, merged + culled, and the pooled line without the replicate, with its note.
+**On CPU (operation only),** `EXP=retok DEVICE=cpu WINDOWS=400 SEEDS=0 PAR=4 FILL=0
+EXTRA='TOK_GROW_EVERY=30 FAB_SLOTS=2100 FAB_MANAGE_EVERY=200 FAB_GRACE=1' RETOK_ARMS='40 20'
+RETOK_INCUMBENT=40` ran 5 runs, all rc=0, and k40 and k20 acted 7 and 9 times. The reader, run on the
+packed `.tgz`, took 2100 off the gate text. Every run reached the ceiling by window 101, with 74.0-74.8%
+of the run still to go, and its one pass (before the line at window 201) dropped n_live by 432-452. That is 1 below the
+counters' exact 433-453 in every run, one spawn between the pass and the line: the bound held, and was
+nearly tight.
 
 **THE QUESTION AS IT STOOD.**
 

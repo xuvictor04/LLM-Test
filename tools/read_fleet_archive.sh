@@ -10,6 +10,19 @@
 #   DECISIONS-Q-CAP-2    the n_live trajectory: does the population settle from FAB_N0=2048, and where
 #   CONTRACT-Q-FAB-5     fab.experts_past_grace_ever and the cull / merge / rescue counts
 #   CONTRACT-Q-OPT-3     opt.grad_norm p50 / p99 at the end, per arm
+# and two more for O20 / NEW-20 (2026-09-27, Proposal 05 §8 1.5), one row per run and one pooled line:
+#   AT THE CEILING       FAB_SLOTS (off the growth gate's text, else any FAB_SLOTS= in the log, else
+#                        SUMMARY.txt's EXTRA, else the lever's 4096), the first progress window with
+#                        n_live >= FAB_SLOTS, the windows from there to the run's end ('=== N windows')
+#                        as a share of the run, and how many progress lines from there on read n_live
+#                        at FAB_SLOTS. The lines are 100 windows apart and one lands a window after each
+#                        manage pass and reads its dip, so the count is a sample, not the time at it.
+#   SLOTS FREED PER PASS the drops in n_live between consecutive progress lines whose earlier line is
+#                        within 2% of FAB_SLOTS (median, max, count): a LOWER BOUND, because spawns
+#                        refill between the lines and the logs carry no per-pass count; beside it the
+#                        whole run's fab.merged + fab.cull_fail + fab.cull_util (each frees one slot)
+#                        over fab.manage_passes. The pooled line leaves out arms named *_rerun
+#                        (replicates of another run).
 # It READS ONLY. It writes one file, PASTE_BACK_archive.txt, next to where it is run, and prints the
 # same block; copy the block from "==== PASTE THIS BACK ====" to "==== END ====" into the chat.
 #
@@ -30,7 +43,7 @@ if [[ -f "$SRC" ]]; then
   [[ -d "$SRC/logs" ]] || { echo "no logs/ directory inside the archive"; exit 1; }
 fi
 python3 - "$SRC" <<'PY' | tee PASTE_BACK_archive.txt
-import glob, os, re, sys
+import glob, os, re, statistics, sys
 src = sys.argv[1]
 logs = sorted(glob.glob(os.path.join(src, "logs", "*.log")))
 logs = [l for l in logs if not os.path.basename(l).startswith("_")]
@@ -57,7 +70,50 @@ for l in logs:
     mm = re.search(r"^=== data plan: protocol=(\w+)", open(l, errors="replace").read(), re.M)
     srcs.add(mm.group(1) if mm else "?")
 print(f"-- data protocol across all logs: {sorted(srcs)}")
-print("-- per run: final counters; n_live at windows 0/2k/5k/10k/15k/20k (from progress lines)")
+# O20 / NEW-20: THE POOL AT ITS CEILING, off the progress lines (the header says what each figure is).
+sm = os.path.join(src, "SUMMARY.txt")
+sm = re.search(r"^=== \d+ windows per run, .*?EXTRA='(.*)'$", open(sm, errors="replace").read(), re.M) if os.path.exists(sm) else None
+EXTRA = sm.group(1) if sm else ""
+def pool(t, c, prog):
+    sl = (re.search(r"^\s+gate:fab\.growth\s[^\n]*?FAB_SLOTS=(\d+)", t, re.M) or re.search(r"FAB_SLOTS=(\d+)", t)
+          or re.search(r"(?:^| )FAB_SLOTS=(\d+)", EXTRA))
+    slots = int(sl.group(1)) if sl else 4096
+    e = re.search(r"^=== (\d+) windows, ", t, re.M)
+    end = int(e.group(1)) if e else (prog[-1][0] if prog else 0)
+    fill = next((w for w, n in prog if n >= slots), None)
+    after = [n for w, n in prog if fill is not None and w >= fill]
+    near = slots - max(1, round(0.02 * slots))
+    drops = [n0 - n1 for (w0, n0), (w1, n1) in zip(prog, prog[1:]) if n0 >= near and n1 < n0]
+    ks = [k for k in ("fab.merged", "fab.cull_fail", "fab.cull_util") if k in c]
+    freed = sum(int(float(c[k])) for k in ks) if ks else None
+    mp = re.search(r"^\s+fab\.manage_passes\s+(\d+)\s*$", t, re.M)
+    me = re.search(r"^\s+fab\.manage_every_windows\s+(\d+)\s*$", t, re.M)
+    return dict(slots=slots, lab=f"{slots}" + ("" if sl else " (assumed)"), end=end, fill=fill,
+                at=sum(n >= slots for n in after), after=len(after), drops=drops, freed=freed,
+                passes=int(mp.group(1)) if mp else None, every=int(me.group(1)) if me else None,
+                gap=prog[1][0] - prog[0][0] if len(prog) > 1 else None,
+                top=max(prog, key=lambda q: q[1]) if prog else None)
+def share(p):
+    return 100 * (p["end"] - p["fill"]) / max(1, p["end"])
+def pool_row(p):
+    head = (f"ceiling {p['lab']} from w{p['fill']}: {p['end'] - p['fill']} of {p['end']} w to the end ({share(p):.1f}%), "
+            f"at it on {p['at']}/{p['after']} lines" if p["fill"] is not None else
+            f"ceiling {p['lab']} never reached (max n_live {p['top'][1]} at w{p['top'][0]})" if p["top"] else
+            f"ceiling {p['lab']}: no progress lines")
+    d = p["drops"]
+    fr = (f"freed/pass >= med {statistics.median(d):g}, max {max(d)} ({len(d)} drop{'s' * (len(d) != 1)})" if d else
+          "freed/pass: no drop near it")
+    mc = ("merged+culled " + (f"{p['freed']} in {p['passes']} pass{'es' * (p['passes'] != 1)} ({p['freed'] / max(1, p['passes']):.1f}/pass, "
+                               "whole run)"
+                              if p["freed"] is not None and p["passes"] is not None else
+                              f"{p['freed']}, passes absent" if p["freed"] is not None else "absent"))
+    return f"{head}; {fr}; {mc}"
+POOL = {}
+print("-- per run: n_live at windows 0/2k/5k/10k/15k/20k (from progress lines); final counters; the pool at its ceiling")
+print("   3rd row (O20, NEW-20): windows from the first progress line at FAB_SLOTS to the end, and the lines there at it (the rest "
+      "read a pass's dip);")
+print("   freed/pass >= the n_live drops between progress lines from within 2% of FAB_SLOTS: a LOWER BOUND from the sampling, the "
+      "logs hold no per-pass count")
 for l in logs:
     t = open(l, errors="replace").read()
     c = counters(t)
@@ -77,6 +133,19 @@ for l in logs:
              for k, v in c.items()}
     print(f"  {os.path.basename(l)[:-4]:<18} n_live {' '.join(marks) or '(no progress lines)'}")
     print(f"  {'':<18} " + " ".join(f"{k}={v}" for k, v in sorted(short.items())))
+    POOL[os.path.basename(l)[:-4]] = p = pool(t, c, prog)
+    print(f"  {'':<18} " + pool_row(p))
+P = {k: v for k, v in POOL.items() if not k.split(".")[0].endswith("_rerun")}
+F = [p for p in P.values() if p["fill"] is not None]
+D = [d for p in P.values() for d in p["drops"]]
+ev = sorted({p["every"] for p in P.values() if p["every"]}); gp = sorted({p["gap"] for p in P.values() if p["gap"]})
+S = [share(p) for p in F]; A = [100 * p["at"] / p["after"] for p in F]
+print(f"-- pool, {len(P)} runs (*_rerun left out): {len(F)}/{len(P)} reach the ceiling"
+      + (f"; fill to end {min(S):.1f}-{max(S):.1f}% of the run (median {statistics.median(S):.1f}%); at it on "
+         f"{min(A):.1f}-{max(A):.1f}% of the lines from the fill on" if F else "")
+      + (f"; freed/pass >= med {statistics.median(D):g} ({min(D)}-{max(D)}, {len(D)} drops)" if D else "; no drop near it")
+      + f"; passes every {'/'.join(map(str, ev)) or '?'} w, lines every {'/'.join(map(str, gp)) or '?'} w"
+      + (" (a drop can span passes)" if ev and gp and min(ev) < max(gp) else ""))
 print("==== END ====")
 PY
 [[ -n "$TMP" ]] && rm -rf "$TMP"

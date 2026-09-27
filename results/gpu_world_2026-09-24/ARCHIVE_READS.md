@@ -27,7 +27,13 @@ The card was one NVIDIA H200 (143,771 MiB), 20 CPU cores by cgroup quota, 12 run
    2,508-16,933 `fab.spawn_declined` per run are novelty tests that said no while a slot was still
    free, not spawns refused by a full pool; `fabric/api.py` credits a decline only when the test
    ran.)* No run's population comes near the cull's settling point
-   of 1,844 that Q-CAP-2 asked about.
+   of 1,844 that Q-CAP-2 asked about. *(Added 2026-09-27, the reader's pool rows for O20 and NEW-20,
+   with the replicate `fb_off_rerun.s0` left out:)* from the first progress line at 4,096 to the end
+   is 34.0-78.5% of each filling run (median 68.0%), and 74.5-80.9% of the progress lines in that
+   stretch read 4,096, the rest a manage pass's dip. The drops in `n_live` between consecutive
+   progress lines at the ceiling put the slots a manage pass frees at a median of 27 (6-61, 460
+   passes), a lower bound from the 100-window sampling (no log holds the per-pass count), beside
+   629-1,199 slots freed by merges and FAB culls per run over its 39 passes.
 3. **Grace and culls (CONTRACT-Q-FAB-5): reachable, as ruled.** `fab.experts_past_grace_ever`
    481-1,002; `fab.merged` 336-648; FAB's cull verdicts `cull_fail` 203-810 and `cull_util` 31-99;
    DOM partitions culled (`part.n_culled`) 4-10. `fab.rescued` is 0 in every run.
