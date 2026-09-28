@@ -296,6 +296,7 @@ is numerically identical, so a units defect is invisible. The full generated ref
 | `docs/02_OPERATIONS.md` | operators | the owner's machine, this container and the working agreement, from the chat record to 2026-08-29; the roles in force now are `notes/OWNER_BRIEF.md`'s "How we work" |
 | `docs/proposals/` | future work | 01 modalities, 02 router recursion, 03 audio and video, 03b the live codec, 04 self-regulation (designs); 05, the register above |
 | `notes/AGENT_STATE.md` | the agent, after a reset | where things stand, the owner's rulings in his words, and the working rules |
+| `results/README.md` | anyone checking a claim | the evidence folders, one per workflow or GPU fleet, and the documents each one backs |
 | `.rework/PLAN.md` | orientation | the phase plan P1–P9 and its rules |
 | `.rework/ISSUES.md` | anyone fixing anything | every defect the survey found, in four parts, each id qualified by its part (`P1-C11`, `P2-C3`, `P3-H22`) |
 | `.rework/CENSUS.md` + `census.json` | anyone adding a lever | every old knob and where it went; a new lever needs a row here |
@@ -334,7 +335,7 @@ notes/               OWNER_BRIEF.md (the owner's page), AGENT_STATE.md (the agen
                      the rest is the 2026-08 notes corpus about the old tree (00_INDEX.md first) and
                      CURRENT_DEFAULTS.md, the old tree's generated defaults
 data/                the tracked corpus, DATA_DIR's default: train/ (eng py num c), continual/, ood/
-results/             dated evidence, one folder per workflow or GPU fleet
+results/             dated evidence, one folder per workflow or GPU fleet; README.md indexes them
 .rework/             the rework's ledgers (DECISIONS, CENSUS.md + census.json, ISSUES, PLAN), the oracle/
                      tests/test_derive.py replays, and the records they were built from; README.md
                      indexes them
