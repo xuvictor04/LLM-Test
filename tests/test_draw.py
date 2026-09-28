@@ -44,9 +44,14 @@ GPU pair's to say.
       DATA_REHEARSE_PARENT=1 draws eng at 0.27 of every phase from its first byte; at 0, under
       'planned', or on a fresh run it draws none, and data.rehearse_parent says which; an area the
       parent declared and never drew is not rehearsed. End to end: a parent over eng, resumed at its
-      epoch boundary by that child, with the R report's DATA(plan.gates) and DATA(plan.counters) rows.
+      epoch boundary by that child, with the R report's DATA(plan.gates) and DATA(plan.counters) rows
+      -- the fired Gate's row carrying its arithmetic alone, as spine/gate.py::three_state renders
+      the fired arm (its reason is run.py's startup line's).
   D6  CONTINUATION: a continuing mid-epoch resume under 'replay' continues exactly, and so does a
-      rehearsing child's, whose plan is read off the lineage's record.
+      rehearsing child's, whose plan is read off the lineage's record -- its Plan.parent_faded still
+      (0,), the set its parent leg had, and not the () the Plan docstring claimed for a continuing
+      resume until Q-DATA-10's review -- and so does that child's checkpoint with its
+      drawn_assumed key stripped, as the builds before the review wrote it.
   D7  A DRAW CHANGE ACROSS A CONTINUING RESUME IS REFUSED BY THE STREAM DIGEST (Q-DATA-9): 'planned' to
       'replay', 'replay' to 'planned' and a DATA_REPLAY_SHARE change, each at the `segment` stage,
       naming the draw levers; DATA_REHEARSE_PARENT flipped under 'planned' redraws the same stream and
@@ -54,6 +59,26 @@ GPU pair's to say.
   D8  THE REST OF THE SURFACE: the gauges' permille rule, a Plan whose targets do not fill a phase is
       refused rather than hung on, and a recorded parent area this run does not declare stays
       refused, naming the replay reservoir that is not built (NEW-06).
+  D9  THE REVIEW OF Q-DATA-10 (2026-09-28), each on the tree before it driven wrong:
+      (a) WHAT A REHEARSED SYNTHETIC BODY IS. At DATA_SYNTH_HOLDOUT=0 a child listing its parent's eng
+      at another position (py,eng over eng,py) is admitted by the restore and REFUSED at data_plan
+      when rehearsal would draw it, naming both positions and DATA_REHEARSE_PARENT=0; at 0 or under
+      'planned' the same child plans as before; at another RUN_SEED, which no record carries, it is
+      admitted with other text and the Gate's reason says RUN_SEED is not checked; five positions
+      apart the alphabet is the same and so is the text (the shorter body a prefix of the longer);
+      on the real source a reorder rehearses the parent's own text and the reason carries no
+      synthetic sentence.
+      (b) WHAT THE RECORD CAN VOUCH FOR. A record without the drawn list (an eng,py,num parent that
+      drew eng alone) rehearses eng and num and the reason names both as held by ASSUMPTION, where
+      the recorded list rehearses eng alone and names none; a rehearsing child's draws confirm what
+      it drew; the assumption is CARRIED -- the child of the old record at the parent's schedule
+      records py and num as still assumed, and its own child names num and not eng -- and a record
+      carrying the list without the new key reads [] (and, end to end in D6, resumes exactly).
+      (c) WHAT FIRED MEANS AT A SHARE THAT COMES TO NO BYTE. At DATA_REPLAY_SHARE=0.0 every faded
+      area of every faded phase prints its gauge at 0 / 0, and Gate data.replay reads armed-but-zero
+      (0 of 4) naming the phases, with data.replay.fixed_phases 0; where only some phases come to no
+      byte it fires on the others and names the rest; the draw is still exact.
+      (d) THE PROSE: data_plan's docstring declares the five Gates it builds, by name.
 
 WHAT THIS FILE CANNOT SEE: whether rehearsal at 0.27 protects a faded area's held-out bits/byte. That
 is §8 5.3's GPU pair and E1's (6.4), read through the retention probe.
@@ -496,9 +521,11 @@ def d5_d6_end_to_end():
     check("D5 end to end: a parent over eng, resumed at its epoch boundary by the pure-add child at "
           "'replay' and DATA_REHEARSE_PARENT=1 -- the child's epoch-1 stream holds eng at 0.27 of every "
           "phase from its first byte, the R report's DATA(plan.gates) reads data.rehearse_parent and "
-          "data.replay fired and DATA(plan.counters) data.rehearse_parent.areas 1, and the loss is finite",
+          "data.replay fired, the first as ('fired', '1 vs 1') with no reason (three_state keeps none "
+          "on the fired arm, as spine/loop.py's comment now says), and DATA(plan.counters) "
+          "data.rehearse_parent.areas 1, and the loss is finite",
           kid.plan.parent_faded == (0,) and fracs == [0.27] * 4 and kid.stream.labels[0] == "eng"
-          and (pg.get("gate:data.rehearse_parent") or ("",))[0] == "fired"
+          and pg.get("gate:data.rehearse_parent") == ("fired", "1 vs 1")
           and (pg.get("gate:data.replay") or ("",))[0] == "fired"
           and pc.get("data.rehearse_parent.areas") == 1 and pc.get("data.parent_faded") == ["eng"]
           and rk.loss_curve and all(x == x for x in rk.loss_curve),
@@ -515,13 +542,33 @@ def d5_d6_end_to_end():
     rc = loop.run(kc, progress=False)
     check("D6 the rehearsing child saved mid-epoch at window 50 and continued by a second process "
           "continues exactly: its plan is read off the lineage's record (drawn eng and py; eng still "
-          "faded from window 0), its redrawn stream passes the digest, and its losses are the "
-          "uninterrupted child's",
+          "faded from window 0, Plan.parent_faded (0,) -- the set its parent leg had, not the () the "
+          "Plan docstring claimed for a continuing resume), its redrawn stream passes the digest, and "
+          "its losses are the uninterrupted child's",
           kc.resume_pos is not None and kc.plan.shares == kid.plan.shares
+          and kc.plan.parent_faded == kid.plan.parent_faded == (0,)
+          and kc.plan.replay_faded == ((0,),) * 4
           and list(kc.areas.drawn) == ["eng", "py"]
           and rp.loss_curve == rk.loss_curve[:50] and rc.loss_curve == rk.loss_curve[50:],
-          f"resume_pos {kc.resume_pos}; drawn {list(kc.areas.drawn)}; losses "
+          f"resume_pos {kc.resume_pos}; parent_faded {kc.plan.parent_faded}; drawn "
+          f"{list(kc.areas.drawn)}; losses "
           f"{rp.loss_curve == rk.loss_curve[:50]} / {rc.loss_curve == rk.loss_curve[50:]}")
+    # R12: THE NEW STATE KEY DEFAULTS WHEN ABSENT (2026-09-28, Q-DATA-10's review). The same checkpoint
+    # with `drawn_assumed` stripped from DATA's record, as c872121 and d9900c6 wrote it, resumes and
+    # continues exactly, reading no assumption.
+    blob = torch.load(f"{TMP}/kp/ckpt.pt", map_location="cpu", weights_only=False)
+    had = blob["payload"]["DATA"].pop("drawn_assumed", "absent")
+    torch.save(blob, f"{TMP}/kp/ckpt.pt")
+    ks = build(**dict(kid_env, CKPT_RESUME=f"{TMP}/kp", CKPT_DIR=f"{TMP}/ks"))
+    rs = loop.run(ks, progress=False)
+    check("D6 the rehearsing child's checkpoint with DATA's drawn_assumed key stripped (it held [], "
+          "every area the lineage drew having been drawn) resumes, reads data.drawn_assumed [] and an "
+          "empty Areas.drawn_assumed, plans the same split and continues exactly",
+          had == [] and ks.resume_pos is not None and list(ks.areas.drawn_assumed) == []
+          and ks.areas.counters.get("data.drawn_assumed") == [] and ks.plan.shares == kid.plan.shares
+          and rs.loss_curve == rk.loss_curve[50:],
+          f"stripped {had!r}; resume_pos {ks.resume_pos}; assumed {list(ks.areas.drawn_assumed)}; "
+          f"losses {rs.loss_curve == rk.loss_curve[50:]}")
 
 
 def d6_d7_continuation():
@@ -600,6 +647,164 @@ def d8_surface():
               and "not built" in str(e), str(e)[:160])
 
 
+# ==================================================================================================
+# D9 -- the review of Q-DATA-10
+# ==================================================================================================
+
+def leg(state=None, seed=0, **env):
+    """(areas, plan, stream, record) for one run through DATA's five entry points, as the root calls
+    them: open_areas, restore_stream_state on `state` where one is given, data_plan, draw_stream and
+    stream_state -- so a record written here is what the next leg's restore reads."""
+    d = cfg(**env)
+    rng.reset_issued()
+    areas = data_api.open_areas(d, seed=seed)
+    if state is not None:
+        data_api.restore_stream_state(d, areas, state)
+    plan = data_api.data_plan(d, areas, epochs=1, win_tokens=128, bytes_per_token=1.2)
+    st = data_api.draw_stream(d, areas, plan, epoch=0, seed=seed)
+    return areas, plan, st, data_api.stream_state(d, areas)
+
+
+def d9a_synthetic_body():
+    small = {"DATA_STREAM_BYTES": "20000"}
+    pa, _pp, _ps, rec = leg(**dict(TWO, DATA_PHASE_SCHED="eng|eng|eng|eng", **small))
+    kid = dict(small, DATA_PHASE_SCHED="py|py|py|py", DATA_DRAW="replay", DATA_REHEARSE_PARENT=1)
+    # THE PARENT'S eng AT ANOTHER POSITION: the restore admits it at DATA_SYNTH_HOLDOUT=0, and the
+    # plan refuses the rehearsal by name.
+    d = cfg(**dict(kid, DATA_AREAS="py,eng", DATA_N_PROCESSES="2"))
+    rng.reset_issued()
+    ka = data_api.open_areas(d, seed=0)
+    data_api.restore_stream_state(d, ka, rec)
+    try:
+        data_api.data_plan(d, ka, epochs=1, win_tokens=128, bytes_per_token=1.2)
+        check("D9 a moved synthetic parent area is refused when rehearsed", False, "planned")
+    except data_api.CorpusError as e:
+        msg = str(e)
+        check("D9 at DATA_SYNTH_HOLDOUT=0 a child listing its parent's eng at another position (py,eng "
+              "over eng,py) is admitted by the restore -- its eng body is other text -- and REFUSED at "
+              "data_plan when DATA_REHEARSE_PARENT=1 under 'replay' would rehearse it, naming the area, "
+              "both positions and area lists, DATA_REHEARSE_PARENT=0 and RUN_SEED",
+              ka.bodies["eng"][:64] != pa.bodies["eng"][:64] and list(ka.drawn) == ["eng"]
+              and "'eng' at position 1 of this run's areas, where the checkpoint had it at 0" in msg
+              and "py, eng" in msg and "eng, py" in msg and "DATA_REHEARSE_PARENT=0" in msg
+              and "RUN_SEED" in msg, msg[:220])
+    for tag, over in (("DATA_REHEARSE_PARENT=0", {"DATA_REHEARSE_PARENT": 0}),
+                      ("'planned'", {"DATA_DRAW": "planned"})):
+        a, p, st, _r = leg(rec, **dict(kid, DATA_AREAS="py,eng", DATA_N_PROCESSES="2", **over))
+        check(f"D9 the same moved child at {tag} plans and draws as before the review: no refusal, eng "
+              f"faded from window 0 (FAB's reading) and not one byte of it drawn",
+              p.parent_faded == (1,) and st.per_area_drawn["eng"] == 0)
+    a, p, st, _r = leg(rec, seed=1, **dict(TWO, **kid))
+    g = gate(p, "data.rehearse_parent")
+    check("D9 at another RUN_SEED, which no record carries, the child is admitted and rehearses other "
+          "text under the parent's eng (the known limit), and data.rehearse_parent's fired reason says "
+          "the body is the parent's only at the parent's RUN_SEED, which is not checked",
+          a.bodies["eng"][:64] != pa.bodies["eng"][:64] and g is not None and g.fired
+          and "RUN_SEED, which no record carries, so it is not checked" in g.reason
+          and "DATA_SOURCE=synthetic" in g.reason, g.line()[:240] if g else "no gate")
+    a, p, st, _r = leg(rec, **dict(kid, DATA_AREAS="py,num,c,rust,go,eng", DATA_N_PROCESSES="6"))
+    check("D9 five positions apart the alphabet is the same, and so is the text: eng at position 5 over "
+          "a parent's 0 is rehearsed, and its 10,000-byte body is the first 10,000 bytes of the "
+          "parent's 20,000 (a generated body at another length is a prefix or a continuation of the "
+          "same sequence)",
+          p.parent_faded == (5,) and st.per_area_drawn["eng"] > 0 and len(a.bodies["eng"]) == 10000
+          and pa.bodies["eng"].startswith(a.bodies["eng"]), f"{p.parent_faded}")
+    real = {"DATA_SOURCE": "real", "DATA_STREAM_BYTES": "20000"}
+    ra, _p, _s, rrec = leg(**dict(TWO, DATA_PHASE_SCHED="eng|eng|eng|eng", **real))
+    a, p, st, _r = leg(rrec, **dict(kid, DATA_AREAS="py,eng", DATA_N_PROCESSES="2", **real))
+    g = gate(p, "data.rehearse_parent")
+    check("D9 on the real source a reordered child rehearses its parent's own text -- an area's text "
+          "is its directory -- with no refusal and no synthetic sentence in the Gate's reason",
+          p.parent_faded == (1,) and a.bodies["eng"] == ra.bodies["eng"]
+          and st.per_area_drawn["eng"] == 5400 and g is not None and g.fired
+          and "DATA_SOURCE=synthetic" not in g.reason, g.line()[:200] if g else "no gate")
+
+
+def d9b_what_the_record_vouches_for():
+    three = {"DATA_AREAS": "eng,py,num", "DATA_N_PROCESSES": "3", "DATA_STREAM_BYTES": "20000"}
+    _a, _p, _s, rec = leg(**dict(three, DATA_PHASE_SCHED="eng|eng|eng|eng"))
+    old = {k: v for k, v in rec.items() if k not in ("drawn", "drawn_assumed")}
+    kid = dict(three, DATA_PHASE_SCHED="py|py|py|py", DATA_DRAW="replay", DATA_REHEARSE_PARENT=1)
+    a0, p0, s0, r0 = leg(old, **kid)
+    a1, p1, s1, _r1 = leg(rec, **kid)
+    g0, g1 = gate(p0, "data.rehearse_parent"), gate(p1, "data.rehearse_parent")
+    check("D9 a record without the drawn list (an eng,py,num parent that drew eng alone, stripped as "
+          "every checkpoint older than c872121 is) rehearses eng and num, 2,700 bytes each, and "
+          "data.rehearse_parent's reason names both as held drawn only by ASSUMPTION; the recorded list "
+          "rehearses eng alone, 5,400 bytes, and names no assumption",
+          rec["drawn"] == ["eng"] and rec["drawn_assumed"] == []
+          and a0.counters.get("data.drawn_assumed") == ["eng", "py", "num"]
+          and p0.parent_faded == (0, 2) and s0.per_area_drawn["eng"] == 2700
+          and s0.per_area_drawn["num"] == 2700 and g0 is not None and g0.fired
+          and "eng, num are held drawn only by ASSUMPTION" in g0.reason
+          and p1.parent_faded == (0,) and s1.per_area_drawn["eng"] == 5400
+          and s1.per_area_drawn["num"] == 0 and g1 is not None and "ASSUMPTION" not in g1.reason,
+          f"{g0.line()[:200] if g0 else None} | {g1.line()[:120] if g1 else None}")
+    check("D9 a draw confirms an assumption: the rehearsing child of the old record drew eng, py and "
+          "num, and its record carries no area as still assumed",
+          r0["drawn_assumed"] == [] and sorted(r0["drawn"]) == ["eng", "num", "py"], str(r0["drawn_assumed"]))
+    # THE ASSUMPTION IS CARRIED, NOT LAUNDERED: the old record's child at the parent's own schedule
+    # draws eng alone and saves; before the review its record read drawn ['eng', 'py', 'num'] as
+    # fact, and the next child rehearsed num as "drawn by the lineage" with data.drawn_assumed [].
+    _a2, _p2, _s2, rec2 = leg(old, **dict(three, DATA_PHASE_SCHED="eng|eng|eng|eng"))
+    a3, p3, s3, _r3 = leg(rec2, **kid)
+    g3 = gate(p3, "data.rehearse_parent")
+    check("D9 the assumption is carried down the lineage: the old record's child at eng|eng|eng|eng "
+          "records drawn ['eng', 'py', 'num'] with py and num still assumed, and ITS rehearsing child "
+          "reads data.drawn_assumed ['py', 'num'] and names num -- not eng, which a draw confirmed -- as "
+          "held drawn only by assumption",
+          rec2["drawn"] == ["eng", "py", "num"] and rec2["drawn_assumed"] == ["py", "num"]
+          and a3.counters.get("data.drawn_assumed") == ["py", "num"] and p3.parent_faded == (0, 2)
+          and g3 is not None and "num is held drawn only by ASSUMPTION" in g3.reason
+          and "eng is held" not in g3.reason and "eng, num are held" not in g3.reason,
+          g3.line()[:240] if g3 else "no gate")
+    stripped = {k: v for k, v in rec2.items() if k != "drawn_assumed"}
+    a4, _p4, _s4, _r4 = leg(stripped, **dict(three, DATA_PHASE_SCHED="eng|eng|eng|eng"))
+    check("D9 a record carrying the drawn list and not the drawn_assumed key (c872121 and d9900c6 wrote "
+          "that) carries no assumption: data.drawn_assumed [] and Areas.drawn_assumed empty",
+          a4.counters.get("data.drawn_assumed") == [] and list(a4.drawn_assumed) == []
+          and list(a4.drawn) == ["eng", "py", "num"])
+
+
+def d9c_a_share_of_no_byte():
+    a, p, st, _r = leg(DATA_DRAW="replay", DATA_REPLAY_SHARE="0.0")
+    g = gate(p, "data.replay")
+    zero = {f"data.share.p{k}.{n}.{w}": st.counters.get(f"data.share.p{k}.{n}.{w}")
+            for k, n in ((1, "eng"), (2, "eng"), (3, "eng"), (3, "py")) for w in ("planned", "realised")}
+    check("D9 at DATA_REPLAY_SHARE=0.0 every faded area of every faded phase prints its share gauges at "
+          "0 / 0 (they were ABSENT), Gate data.replay reads armed-but-zero (0 vs 4) with a reason naming "
+          "the three faded phases that come to no byte, data.replay.fixed_phases and .bytes read 0, and "
+          "the draw is still exact",
+          set(zero.values()) == {0} and g is not None and g.reachable and not g.fired
+          and (g.value, g.threshold) == (0, 4) and "comes to no byte in every one of them" in g.reason
+          and "phase 3: eng, py 0 of 30000 bytes" in g.reason
+          and p.counters.get("data.replay.fixed_phases") == 0
+          and p.counters.get("data.replay.bytes") == 0 and realised(a, p, st) == targets(a, p),
+          f"{zero}; {g.line()[:200] if g else None}")
+    a, p, st, _r = leg(DATA_DRAW="replay", DATA_REPLAY_SHARE="0.2", DATA_STREAM_BYTES="10")
+    g = gate(p, "data.replay")
+    check("D9 where only some faded phases come to no byte (0.2 of phases of 3, 3 and 2 bytes: 1, 1 and "
+          "0) the Gate fires on the two that rehearse, FIRED (2 vs 4), names the third, and the draw is "
+          "exact with the third phase's faded gauges at 0",
+          g is not None and g.fired and (g.value, g.threshold) == (2, 4)
+          and "1 of those 3 phase(s) give their faded areas no byte" in g.reason
+          and p.counters.get("data.replay.fixed_phases") == 2 and p.counters.get("data.replay.bytes") == 2
+          and st.counters.get("data.share.p3.eng.planned") == 0
+          and st.counters.get("data.share.p3.py.realised") == 0 and realised(a, p, st) == targets(a, p),
+          g.line()[:240] if g else "no gate")
+
+
+def d9d_the_prose():
+    _a, p, _s = draw(DATA_DRAW="replay")
+    doc = data_api.data_plan.__doc__ or ""
+    built = [g.name for g in p.gates]
+    check("D9 data_plan's docstring declares the five Gates it builds, each by name, and no longer "
+          "counts three",
+          len(built) == 5 and all(n in doc for n in built) and "FIVE DECLARED GATES" in doc
+          and "TWO OF THE FIVE GATES' BOUNDS" in doc and "THREE DECLARED GATES" not in doc
+          and "TWO OF THE THREE" not in doc, str(built))
+
+
 def main():
     try:
         d1_the_old_laws()
@@ -610,6 +815,10 @@ def main():
         d5_d6_end_to_end()
         d6_d7_continuation()
         d8_surface()
+        d9a_synthetic_body()
+        d9b_what_the_record_vouches_for()
+        d9c_a_share_of_no_byte()
+        d9d_the_prose()
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     print(f"=== {len(FAILS)} failure(s)" + (": " + "; ".join(FAILS) if FAILS else ""))

@@ -507,7 +507,11 @@ is** (2026-09-28, Q-FAB-18's review): every area the lineage's streams have draw
 the order first drawn — filled in place from the record by `restore_stream_state`, extended by
 `draw_stream`, recorded by `stream_state`. A record written before it carries none, and every area
 it declares is then assumed drawn and named in `data.drawn_assumed` ([] where the record carried
-its list; ABSENT on a fresh run).
+its list; ABSENT on a fresh run). **So is `Areas.drawn_assumed`** (2026-09-28, Q-DATA-10's
+review): the part of that list held only by the assumption and not drawn since — `draw_stream`
+removes each area it draws, `stream_state` records the rest, a later resume reads it back and
+`data.drawn_assumed` names it — so a descendant of such a record does not read the assumption as a
+draw ([] wherever no record of the lineage predates the list, and on a record without the key).
 **Counters:** `data.area_open`, `corpus_cap_trip`, `holdout_block`, `val_cap_trip`, `area_refused`,
 `stream_draw`, `segment`, `contig_wrap`, `resample`, `phase_entered`, `phase_resolved`,
 `state_written/restored/refused` (with `state_written_here`, the process twin of the lineage
@@ -554,10 +558,16 @@ truncated to that area's remaining target — so every phase's realised bytes ar
 choice takes no rng draw and iterates no set, and a phase with no faded area is laid by the planned
 law verbatim. `rehearse_parent` has no effect under `'planned'` or `'uniform'` and none on a fresh
 run; a recorded parent area this run does not declare stays refused, the message naming the unbuilt
-replay reservoir (NEW-06). **SR0's share gauges**, under every law, are `Stream.counters`
-`data.share.p<k>.<area>.planned` and `.realised`, in permille of the phase. None of it is
-checkpointed: a resume recomputes the plan from the same schedule and the record's drawn areas, and
-the stream digest (Q-DATA-9) refuses a continuing resume whose draw changed.
+replay reservoir (NEW-06). On `source="synthetic"` a rehearsed area whose position in `areas` moved
+is refused by name at `data_plan` (its text is its position's alphabet), and `RUN_SEED`, the text's
+other input, is recorded nowhere and so not checked; an area the lineage holds drawn only by
+assumption (a record older than the drawn list) is rehearsed and named in the Gate's reason
+(Q-DATA-10's review). **SR0's share gauges**, under every law, are `Stream.counters`
+`data.share.p<k>.<area>.planned` and `.realised`, in permille of the phase, for every area the
+phase makes live or its `Plan.shares` entry names (a faded area 'replay' gives 0 bytes reads 0,
+since the review). None of it is checkpointed: a resume recomputes the plan from the same schedule
+and the record's drawn areas, and the stream digest (Q-DATA-9) refuses a continuing resume whose
+draw changed.
 
 **The synthetic source's held-out law is a lever (2026-09-27, Q-DATA-9).** At `synth_holdout=True`
 `open_areas` runs the real sources' carve on each generated body **verbatim** — size, per-area child
@@ -7371,37 +7381,45 @@ exposure Gates were exact no longer; the fix it asked for is built here.
 * **Rehearsing the parent.** The set is `Plan.parent_faded`, which Q-FAB-18's review reads off
   `Areas.drawn`: an area this run declares, that the lineage's streams drew, and that no phase of
   this schedule makes live. A declared area is not a drawn one, so an area a parent declared and
-  never trained is not rehearsed. Under 'planned' and 'uniform' the flag moves nothing (04-Q4), and
-  on a fresh run there is no record to read. The parent area's body is this run's, as every declared
-  area's is (its corpus on disk, or its generated text on the synthetic source); **a recorded parent
-  area this run does not declare stays refused** at `restore_stream_state`, and the refusal now
-  names the route that would carry one without its corpus, NEW-06's replay reservoir in the
-  checkpoint (register §8 4.5), as not built. A continuing child recomputes the same plan from the
-  record's drawn list and its parent's schedule.
+  never trained is not rehearsed — where the record can say which it drew (the review below: a
+  record older than the list cannot, and its declared areas are rehearsed on the assumption, named).
+  Under 'planned' and 'uniform' the flag moves nothing (04-Q4), and on a fresh run there is no
+  record to read. The parent area's body is this run's, as every declared area's is (its corpus on
+  disk, or its generated text on the synthetic source — the parent's only at the parent's position
+  and `RUN_SEED`, the review below); **a recorded parent area this run does not declare stays
+  refused** at `restore_stream_state`, and the refusal now names the route that would carry one
+  without its corpus, NEW-06's replay reservoir in the checkpoint (register §8 4.5), as not built. A
+  continuing child recomputes the same plan from the record's drawn list and its parent's schedule.
 * **SR0's share gauges**, under every law, in `Stream.counters` beside `data.segment`:
   `data.share.p<k>.<area>.planned` (the phase's `Plan.shares` target) and `.realised` (the bytes the
   draw laid there), in permille of the phase's span, rounded half up in integers
-  (`data/api.py::_permille`), for every area the phase makes live, gives a target or drew from. A phase
-  of no bytes prints none. Under 'planned' and 'replay' the pair is equal by construction; under
-  'uniform' their difference is the draw's error bar, per phase. They are readings about the bytes, so
-  the resample-off replay carries them over with `data.segment`.
-* **What fired.** `data.replay.fixed_phases` (the phases the replay law lays: a faded area and a
-  nonzero span) and `data.replay.bytes` (the bytes per epoch it gives faded areas) are PRESENT at
-  `DATA_DRAW=replay`, 0 on a schedule with no faded phase, and ABSENT under 'planned' and 'uniform'.
+  (`data/api.py::_permille`), for every area the phase makes live or its `Plan.shares` entry names,
+  and every area it drew from ("gives a target" until the review below, which left a faded area
+  given 0 bytes ABSENT; it reads 0 now). A phase of no bytes prints none. Under 'planned' and
+  'replay' the pair is equal by construction; under 'uniform' their difference is the draw's error
+  bar, per phase. They are readings about the bytes, so the resample-off replay carries them over
+  with `data.segment`.
+* **What fired.** `data.replay.fixed_phases` (the phases that give a faded area at least one byte,
+  since the review below; "a faded area and a nonzero span" before it) and `data.replay.bytes` (the
+  bytes per epoch it gives faded areas) are PRESENT at `DATA_DRAW=replay`, 0 where no phase gives a
+  faded area a byte (a schedule with no faded phase, or a share that comes to none), and ABSENT
+  under 'planned' and 'uniform'.
   `data.replay.newest_boosted` (the faded phases whose newest-arrived live area took the boost beside
   another live area) is ABSENT unless 'replay' runs at `DATA_REPLAY_NEWEST` > 0, the arm on which the
   boost is armed, and 0 there when no faded phase had another live area. `data.rehearse_parent.areas`
   is PRESENT only on a resume at 'replay' with `DATA_REHEARSE_PARENT=1`. All four are `Plan.counters`
   — the plan's decisions; the gauges say what the draw laid. **Two Gates** join the Plan's three:
-  `data.replay` (UNREACHABLE naming `DATA_DRAW` under 'planned' and 'uniform'; its value the phases the
-  law lays against the phase count, armed-but-zero on a schedule with no faded phase) and
+  `data.replay` (UNREACHABLE naming `DATA_DRAW` under 'planned' and 'uniform'; its value the phases
+  that give a faded area a byte against the phase count, armed-but-zero on a schedule with no faded
+  phase and, since the review, where every faded phase's share comes to no byte) and
   `data.rehearse_parent` (UNREACHABLE at `DATA_REHEARSE_PARENT=0`, under a law with no rehearsal share,
   and on a fresh run, each with its own sentence; its value the areas rehearsed from window 0 against
   the lineage's drawn areas this run declares, armed-but-zero where the child schedules every one).
   **The Plan's gates get an R row, `DATA(plan.gates)`**, rendered through `spine/gate.py::three_state`
   as the Areas and Stream gates beside it are: run.py's startup print gives a reason only for a gate
   that fired, so the new Gates' UNREACHABLE sentences — and `data.exposure_skew`'s at one area — reached
-  no reader.
+  no reader. The row gives a reason on the two arms `three_state` gives one, unreachable and
+  armed-but-zero; a fired Gate's reason is the startup line's, so the two print each reason once.
 * **Across a continuing resume** the stream digest (Q-DATA-9) is the check: a draw change redraws
   other bytes and is refused at the `segment` stage, and the refusal now prints `DATA_REPLAY_SHARE`,
   `DATA_REPLAY_NEWEST` and `DATA_REHEARSE_PARENT` with the other draw-shaping levers.
@@ -7455,6 +7473,80 @@ D6, continuing resumes under 'replay', of a fresh run and of a rehearsing child,
 change across a continuing resume refused by the digest; D8, the permille rule, a Plan that cannot
 fill a phase refused, and the vanished-area refusal naming NEW-06. Whether rehearsal at 0.27
 protects a faded area is §8 5.3's GPU pair and E1's.
+
+**AMENDED 2026-09-28 — THE REVIEW OF THIS RULING.** Five findings, each driven on the tree before it
+(CPU, operation only). The three that moved a byte or a reading are repaired and held by
+`tests/test_draw.py` D9, whose checks of each repair fail when run on d9900c6's `src/` (those of the
+cases the review leaves alone, and of the new key's default, pass on both); the prose is corrected
+where it stood:
+* **A synthetic parent area is rehearsed from the parent's text, or not at all.** On
+  `DATA_SOURCE=synthetic` an area's text is the alphabet its position in `DATA_AREAS` picks, drawn by
+  `RUN_SEED`, and at `DATA_SYNTH_HOLDOUT=0` — the shipped value until 04-Q5's flip — no held-out block
+  rides on it, so `restore_stream_state` checks neither: its moved-alphabet check sits on the carving
+  arm, and the block digest it compares on every arm is of a block that is empty there. Driven: a
+  parent at `eng,py`, seed 0, drew eng alone; a child at `py,eng` scheduling `py|py|py|py` under
+  'replay' at `DATA_REHEARSE_PARENT=1` was admitted with an eng of another alphabet (b'uAuBuyxC…'
+  against the parent's b'flfmfjin…'), `Plan.parent_faded` (1,), and `data.rehearse_parent` FIRED
+  (1 vs 1), "drawn by the lineage" — and a child at the parent's order and `RUN_SEED` 1 likewise,
+  with other text. **Ruled:** at `DATA_REHEARSE_PARENT=1` under 'replay', `data_plan` refuses by
+  name, on the synthetic source, a rehearsed area whose position moved (`_alphabet_moved` against
+  `Areas.parent_names`; five positions apart is the same alphabet and the same text), naming both
+  positions and both area lists, `DATA_REHEARSE_PARENT=0` and `RUN_SEED`; it reads `source` for that,
+  and its `LEVERS READ` says so. **`RUN_SEED` is recorded nowhere** — not in DATA's record, and not in
+  the geometry manifest, where a new field would refuse every checkpoint written before it
+  (`ckpt/api.py::check_geometry` refuses a missing field) — so a reseeded child is admitted and
+  rehearses other text under the parent's name; on the synthetic source the fired Gate's reason says
+  the body is the parent's only at the parent's `RUN_SEED`, which is not checked. A body at another
+  generated length (`DATA_STREAM_BYTES`, `DATA_N_PROCESSES`, `DATA_SEG_MAX`) is a prefix or a
+  continuation of the same sequence, and is admitted. At `DATA_SYNTH_HOLDOUT=1` the restore refused a
+  moved position already; on the real source an area's text is its directory, and a reorder rehearses
+  the parent's own. At `DATA_REHEARSE_PARENT=0`, and under 'planned', the moved child plans and draws
+  as before.
+* **A record older than the drawn list is rehearsed on its assumption, which is named and carried.**
+  `restore_stream_state` holds every area such a record declares as drawn (`data.drawn_assumed`,
+  Q-FAB-18's review), which moved only FAB's faded reading; under 'replay' at `DATA_REHEARSE_PARENT=1`
+  it moves bytes. Driven: an `eng,py,num` parent that drew eng alone, its list stripped, gave a
+  `py|py|py|py` child eng and num 2,700 bytes each where the recorded list gives eng 5,400, and the
+  Gate called both "drawn by the lineage". And it outlived the resume: the old record's child wrote
+  the assumed areas into its own `drawn` as draws, and that child's child read `data.drawn_assumed` []
+  and rehearsed num, which nothing in the lineage had drawn. **Ruled, and not refused** — every
+  checkpoint older than c872121 lacks the list, and a parent that drew every area it declared (the
+  generated schedule's) is the common case, which a refusal would bar from rehearsal: such an area is
+  rehearsed, and `data.rehearse_parent`'s fired reason names the rehearsed areas held drawn only by
+  assumption. **`Areas.drawn_assumed`** is the part of `Areas.drawn` held on the assumption and not
+  drawn since: `restore_stream_state` fills it (all of a record's areas where it has no list, the
+  record's carried `drawn_assumed` where it has one), `draw_stream` removes each area it draws,
+  `stream_state` records the rest, and `data.drawn_assumed` names it at every resume that holds one.
+  A record carrying `drawn` without the new key — c872121 and d9900c6, on this branch, wrote them —
+  reads []: nothing in it can recover an assumption it did not keep. No number a run trains on moves:
+  FAB's sets read `Areas.drawn`, unchanged, and `data_plan` reads the new list only for the reason.
+* **A share that comes to no byte rehearses nothing, and reads so.** At `DATA_REPLAY_SHARE=0.0`, in
+  the lever's domain, the faded phases gave their faded areas 0 bytes, yet `data.replay` read FIRED
+  (3 vs 4) and `data.replay.fixed_phases` 3 beside `data.replay.bytes` 0, and the faded areas printed
+  no share gauge — ABSENT, for a law armed there. **Ruled:** a phase counts in
+  `data.replay.fixed_phases`, and `data.replay` fires, where it gives a faded area at least one byte;
+  armed-but-zero's reason says whether the schedule has no faded phase or its faded phases' share
+  comes to no byte, and a fired reason names the faded phases that gave none. Such a phase is still
+  laid by deficit over its live areas (the plan's rule for a phase with a faded area), its faded areas'
+  pairs in `Plan.shares` reading 0. The gauges print for every area a phase makes live or its
+  `Plan.shares` entry names, and every area it drew from, so a faded area given 0 bytes reads 0 / 0;
+  under 'planned' and 'uniform' the entry names exactly the live areas, and no gauge moves there.
+* **Stale counts.** `data_plan`'s docstring said "TWO OF THE THREE GATES' BOUNDS" and "THREE DECLARED
+  GATES" over a three-gate list; it says five, and lists `data.replay` and `data.rehearse_parent` with
+  their arithmetic (D9 holds every Gate it builds to a name in it). `spine/loop.py`'s comment on the
+  `DATA(plan.gates)` row said every Plan gate reads there "with its arithmetic and reason";
+  `three_state` keeps a reason on the unreachable and armed-but-zero arms only, and a fired Gate's
+  reason is run.py's startup line's, which the comment and the bullet above now say (D5 holds the
+  fired row to its arithmetic).
+* **The `Plan` docstring** said `parent_faded` is () "on a continuing resume, whose schedule is its
+  parent's". A continuing resume recomputes the set its parent leg had — the same schedule over the
+  record's drawn list — and for a pure-add or rehearsing child that is not empty: (0,) for eng under
+  `py|py|py|py` over `eng,py`, which is what keeps the continuation exact. The docstring says so, and
+  D6 holds it.
+
+**What the default changes:** nothing a run trains on and no integer it prints. The gauges, the
+counts and the Gates move only under 'replay', the refusal only at `DATA_REHEARSE_PARENT=1` under
+'replay', and the new record key is a list; B1, B3, B3r, B5, B6 and B6r reproduce their fixtures.
 
 ## 6. What `tests/test_contract.py` checks
 

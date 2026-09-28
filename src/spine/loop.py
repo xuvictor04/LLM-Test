@@ -2390,7 +2390,12 @@ def _report(sysm, elapsed_s, ctx):
     # gate's reason only when it FIRED -- so the UNREACHABLE sentence of data.replay (naming
     # DATA_DRAW) and of data.rehearse_parent (the lever off, no effect under 'planned', a fresh run)
     # reached no reader, nor did data.exposure_skew's at one area. Here every Plan gate reads in
-    # G4's three states with its arithmetic and reason, as the Areas and Stream gates beside it do.
+    # G4's three states with its arithmetic, as the Areas and Stream gates beside it do, and with its
+    # reason on the two arms spine/gate.py::three_state gives one: unreachable and armed-but-zero. A
+    # FIRED gate's reason is the startup line's, which run.py prints under it (this said every gate
+    # read here "with its arithmetic and reason" until Q-DATA-10's review; three_state keeps none on
+    # the fired arm -- a data.rehearse_parent that rehearses an assumed area says so there).
+    # Between them the two print every reason once.
     out["DATA(plan.gates)"] = (
         {f"gate:{k}": v for k, v in _gate.three_state(sysm.plan.gates).items()}
         if getattr(sysm.plan, "gates", ()) else "no Plan gates: the plan carries none")

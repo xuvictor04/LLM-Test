@@ -357,8 +357,10 @@ ASSEMBLY_ORDER = (
                                               "record of key None, size 0 against a block now: "
                                               "Q-DATA-9, which the root warns of), and it yields "
                                               "nothing a later row takes: the record's area names "
-                                              "land on Areas.parent_names, and the areas its "
-                                              "lineage drew on Areas.drawn, in place"),
+                                              "land on Areas.parent_names, the areas its "
+                                              "lineage drew on Areas.drawn, and the part of that "
+                                              "list a record older than it could only assume on "
+                                              "Areas.drawn_assumed (Q-DATA-10's review), in place"),
     ("vocab",     "TOK",   "build_vocabulary","(area_heads=Areas.bodies, seed=RUN.seed, soft_cap=CAP's "
                                               "`vocab_start` lever, readable off the frozen Config "
                                               "at any point -- NOT CAP's "

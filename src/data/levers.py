@@ -694,7 +694,10 @@ class DATALevers(LeverSet):
     # secondary reads 0.15 / 0.27 / 0.40 if 'replay' ever becomes a default (04-6-UNMEASURED (h)).
     # DOMAIN (0.0, 1.0): a share of a phase's bytes. 1.0 gives a faded phase wholly to its faded
     # areas; `replay_share` + `replay_newest` above 1 is refused at data_plan by name, because no
-    # phase can give away more bytes than it has.
+    # phase can give away more bytes than it has. At 0.0 -- or a share that comes to no byte in a
+    # phase -- the faded phase gives its faded areas nothing and is still laid by deficit over its
+    # live areas: Gate data.replay counts only the phases that give a faded area a byte, and reads
+    # armed-but-zero with the reason naming the rest (Q-DATA-10's review; it read FIRED there).
 
     replay_newest = Lever(0.0, "Share of each faded phase's bytes the 'replay' draw gives the "
                                "newest-arrived live area, the other live areas splitting what is "
@@ -722,13 +725,19 @@ class DATALevers(LeverSet):
     # can protect what the parent learned (04-Q4). The set is Plan.parent_faded, which Q-FAB-18
     # reads off Areas.drawn: an area this run declares, that the lineage's streams drew, and that no
     # phase of this schedule makes live. A DECLARED AREA IS NOT A DRAWN ONE, so an area a parent
-    # declared and never trained is not rehearsed. BUILT OFF, AND OFF IN EVERY TRAINING AND
+    # declared and never trained is not rehearsed -- WHERE THE RECORD CAN SAY (Q-DATA-10's review):
+    # a record older than the drawn list cannot, every area it declares is held drawn by assumption
+    # (Areas.drawn_assumed, carried down the lineage until a draw confirms it), and such an area is
+    # rehearsed with data.rehearse_parent's reason naming it. BUILT OFF, AND OFF IN EVERY TRAINING AND
     # MEASUREMENT RUN (O9: D2 stands, pure-add is the unprotected measurement arm); the unbuilt
     # continue preset carries True with 'replay' 0.27, provisional until §8 5.3. The area's body is
     # this run's, as every declared area's is (its corpus on disk, or its generated text on the
     # synthetic source); a recorded parent area this run does not declare is refused at
     # restore_stream_state, because the replay reservoir that would carry it in the checkpoint
-    # (NEW-06, register §8 4.5) is not built.
+    # (NEW-06, register §8 4.5) is not built. ON THE SYNTHETIC SOURCE THE GENERATED TEXT IS THE
+    # PARENT'S ONLY AT THE PARENT'S POSITION IN DATA_AREAS AND AT ITS RUN_SEED (Q-DATA-10's review):
+    # a rehearsed area whose position moved is refused at data_plan, and RUN_SEED, which no record
+    # carries, is the operator's to keep.
     # A BOOL, WITH THE BOOL BRANCH'S KNOWN HAZARD (see `resample`): DATA_REHEARSE_PARENT=flase reads as
     # on.
 

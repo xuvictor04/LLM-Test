@@ -19,7 +19,7 @@ implementation agents share; nothing else about the layout is load-bearing.
 RECORD TYPES RETURNED (P4 defines them; they are DATA's objects and other packages receive
 them as arguments, which is not an import and O10 does not refuse it):
   Areas   names, bodies, holdout, holdout_bytes, bytes_present, bytes_taken, cursors, rng_holdout,
-          counters, gates, parent_names, drawn
+          counters, gates, parent_names, drawn, drawn_assumed
   Plan    protocol, schedule, phase_bounds, per_area_draw, exposure, gates, counters, faded,
           parent_faded, shares, replay_faded
   Stream  bytes, labels, splice_starts, area_changes, phase_bounds, area_names, per_area_drawn,
@@ -87,6 +87,18 @@ class Areas:
     stream_state records it. A declared area is not a trained one -- a run over "eng,py" that
     schedules eng alone never draws py -- and Plan.parent_faded is read off this list, not
     parent_names. Empty on a fresh run until its first draw.
+
+    `drawn_assumed` IS THE PART OF `drawn` HELD ON AN ASSUMPTION AND NOT SEEN DRAWN SINCE
+    (2026-09-28, Q-DATA-10's review): every area a record written before `drawn` existed declared,
+    which restore_stream_state assumes drawn (Q-FAB-18's review), less every area a stream of this
+    lineage has since drawn a byte from -- draw_stream removes each area it draws. stream_state
+    records it beside `drawn` and restore_stream_state reads it back, so a descendant of such a
+    record does not read the assumption as a draw. Until this field the first resume of an old
+    record wrote every area it declared into its own `drawn`, and the next resume read them all as
+    drawn -- `data.drawn_assumed` [], and data.rehearse_parent's reason "drawn by the lineage" for
+    an area nothing in the lineage ever drew. Nothing reads it to move a byte: FAB's faded sets read
+    `drawn`, and data_plan reads this only to name the assumption in data.rehearse_parent's reason.
+    Empty on a fresh run, and wherever no record of the lineage predates `drawn`.
     """
     names: tuple
     bodies: dict
@@ -100,6 +112,7 @@ class Areas:
     gates: tuple = ()
     parent_names: list = dataclasses.field(default_factory=list)
     drawn: list = dataclasses.field(default_factory=list)
+    drawn_assumed: list = dataclasses.field(default_factory=list)
 
 
 def _holdout_key(label):
@@ -905,11 +918,17 @@ class Plan:
     Plan order. `parent_faded` is every area this run declares that the resumed lineage's streams
     DREW from (Areas.drawn, as the record carried it) and that is live in NO phase of this run's
     schedule: the areas a child inherits the training of and never trains, faded from its first
-    window -- () on a fresh run, whenever the child schedules every area the lineage drew, and on a
-    continuing resume, whose schedule is its parent's. An area the parent declared and never drew
-    is not in it (Q-FAB-18's review: it was read off Areas.parent_names, every DECLARED area, so a
-    run over "eng,py" that scheduled eng alone handed its continuing child's passes py as faded
-    where the uninterrupted run handed them nothing). Both are known at startup because the
+    window -- () on a fresh run and wherever the schedule makes live every area the lineage drew.
+    A CONTINUING RESUME RECOMPUTES THE SET ITS PARENT LEG HAD, not an empty one (2026-09-28,
+    Q-DATA-10's review; this line said "() ... on a continuing resume, whose schedule is its
+    parent's" until then): the same schedule over the record's drawn list, which holds what the
+    parent leg read at its own restore plus its own draws, and every draw of that schedule is of an
+    area some phase makes live. So a pure-add or rehearsing child's parent areas stay faded from
+    window 0 across its continuation -- (0,) for eng under "py|py|py|py" over "eng,py" -- which is
+    what keeps the continuation exact. An area the parent declared and never drew is not in it
+    (Q-FAB-18's review: it was read off Areas.parent_names, every DECLARED area, so a run over
+    "eng,py" that scheduled eng alone handed its continuing child's passes py as faded where the
+    uninterrupted run handed them nothing). Both are known at startup because the
     schedule is, and both are READINGS OF THE SCHEDULE WITHIN ONE EPOCH: an area only a previous
     epoch's later phases trained is not in phase 0's set when the schedule restarts, and a parent
     area the child schedules later is not faded before its phase -- Q-FAB-18 records both as what
@@ -924,9 +943,11 @@ class Plan:
     over the phases, and draw_stream prints it beside what each phase drew (the share gauges).
     `replay_faded` is, per phase, the areas the 'replay' law gives DATA_REPLAY_SHARE to: `faded[k]`,
     plus `parent_faded` at DATA_REHEARSE_PARENT=1 -- () in every phase under 'planned' and 'uniform',
-    and a phase whose tuple is empty is laid by the planned law. Both are known at startup, move no
-    byte by themselves and are not checkpointed: a resume recomputes them from the same schedule and
-    record.
+    and a phase whose tuple is empty is laid by the planned law. A phase whose tuple is not empty is
+    laid by the replay law's deficit even where the share comes to no byte for its faded areas
+    (2026-09-28, Q-DATA-10's review): their pairs in `shares` then read 0, and the phase REHEARSES
+    nothing, which data.replay does not count. Both are known at startup, move no byte by
+    themselves and are not checkpointed: a resume recomputes them from the same schedule and record.
     """
     protocol: str
     schedule: tuple
@@ -1049,7 +1070,7 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
     seen 2.1x and the original is 28% sampled, and "adding py cost eng X bits/byte" is then
     confounded with "py was memorised and eng was skimmed" (ISSUES P3-H22).
 
-    TWO OF THE THREE GATES' BOUNDS ARE REFUSED AT nan AND AT +inf, BEFORE THE SCHEDULE IS PARSED.
+    TWO OF THE FIVE GATES' BOUNDS ARE REFUSED AT nan AND AT +inf, BEFORE THE SCHEDULE IS PARSED.
     At either value `max(vals) > bound` and `skew > bound` are False for every possible exposure, so
     the gate CANNOT fire while spine/gate.py::Gate's default reachable=True renders it as the middle
     state -- measured, "Gate data.exposure_max: armed, did not fire (0.75 vs nan)". That is the
@@ -1058,8 +1079,9 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
     closes two values per lever and claims nothing beyond them -- a finite bound no exposure can
     reach (1e26) passes it and is exactly as uncrossable. See the block itself.
 
-    THREE DECLARED GATES, each printing its own arithmetic so "did not fire" is distinguishable
-    from "could not fire":
+    FIVE DECLARED GATES (three until 2026-09-28, when Q-DATA-10 added the last two; this line and
+    the one above said three until that ruling's review), each printing its own arithmetic so "did
+    not fire" is distinguishable from "could not fire":
       data.exposure_max     max(exposure) > dat.exposure_max. COMPUTED AT ONE AREA TOO: both reads
                             sat inside `if DATA_MODE == "real" and NP > 1`, so the check was
                             unavailable on exactly the single-area goal-A configuration where
@@ -1069,6 +1091,13 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
       data.splice_window    mean_segment_bytes / (win_tokens * bytes_per_token) < 8. The one place
                             the byte/token boundary is crossed, and it is crossed with the MEASURED
                             bytes/token handed in, never with an estimate (ISSUES P1-H16).
+      data.replay           the phases in which the 'replay' law gives its faded areas at least one
+                            byte, against the phase count; fired above 0. UNREACHABLE, naming
+                            DATA_DRAW, under 'planned' and 'uniform'.
+      data.rehearse_parent  the areas rehearsed from window 0 (Plan.parent_faded under 'replay' at
+                            DATA_REHEARSE_PARENT=1), against the areas the lineage drew that this
+                            run declares; fired above 0. UNREACHABLE at DATA_REHEARSE_PARENT=0,
+                            under 'planned' and 'uniform', and on a fresh run.
 
     THE FADED SETS (2026-09-28, register §8 3.1, NEW-10 and C37; docs/04_CONTRACT.md Q-FAB-18).
     Plan.faded[k] is every area live in a phase before k and not live in phase k; Plan.parent_faded
@@ -1099,6 +1128,19 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
     remainder: the boost has no other live area to take bytes from. dat.rehearse_parent has NO
     EFFECT under 'planned' or 'uniform' (04-Q4), and Plan.parent_faded is the same reading either
     way: FAB's count reads it whatever the law.
+    WHAT A REHEARSED PARENT AREA'S BODY IS (2026-09-28, Q-DATA-10's review). This run's, as every
+    declared area's is -- and on DATA_SOURCE=synthetic that is the parent's text only where this run
+    generates it: the alphabet the area's POSITION in DATA_AREAS picks, drawn by RUN_SEED. At
+    DATA_SYNTH_HOLDOUT=0 no held-out block rides on the text, so restore_stream_state admits a moved
+    position, and driven, a child at "py,eng" over a parent at "eng,py" rehearsed alphabet 1's text
+    under the parent's eng, the Gate calling it drawn by the lineage. So at DATA_REHEARSE_PARENT=1
+    under 'replay' a synthetic parent area whose position moved is REFUSED here by name. RUN_SEED
+    no record carries, so it is not checked: a rehearsing child resumes at its parent's, and the
+    Gate's reason says so. And an area the lineage holds as drawn only by ASSUMPTION
+    (Areas.drawn_assumed: a record older than the drawn list could not say which declared areas it
+    drew) is rehearsed as the assumption says, as FAB's faded count reads it, and the Gate's reason
+    names it: a parent that declared an area and never trained it has it rehearsed here, and only
+    this name says so.
 
     RECEIVES: epochs <- RUN.epochs; win_tokens <- LM.ctx; bytes_per_token <- TOK, measured by
     derive.bytes_per_token after build_vocabulary. All three are arguments: bytes_per_token cannot
@@ -1108,7 +1150,9 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
     LEVERS READ: phase_sched, phases, phase_live, stream_bytes, seg_min, seg_max, exposure_max,
                  exposure_skew, draw, replay_share, replay_newest (both only under 'replay'),
                  rehearse_parent (under every law, for its Gate's reason; it moves bytes only under
-                 'replay')
+                 'replay'), source (only under 'replay' at rehearse_parent, since Q-DATA-10's
+                 review: a synthetic parent area's text is its position's, and a moved one is
+                 refused)
     WIRES READ: none
     DID IT FIRE: data.phase_resolved, data.protocol_named (the recognised protocol, printed by
                  name -- one of the four, never blank), data.phase_name_resolved (entries given as
@@ -1125,19 +1169,25 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
                  `reason` and not on its name, so a report can be grepped across every arm (ISSUES
                  P1-H58, ruled),
                  Gate data.splice_window,
-                 data.replay.fixed_phases (the phases the 'replay' law lays: a faded area and a
-                 nonzero span), data.replay.bytes (the bytes per epoch it gives faded areas) --
-                 both ABSENT unless DATA_DRAW=replay, and 0 there when no phase has a faded area --
-                 and data.replay.newest_boosted (the faded phases whose newest-arrived live area took
-                 DATA_REPLAY_NEWEST beside another live area; ABSENT unless DATA_DRAW=replay with
-                 DATA_REPLAY_NEWEST above 0, where the boost is armed), Gate data.replay
-                 (UNREACHABLE naming DATA_DRAW under 'planned' and 'uniform'; its value the fixed
-                 phases, against the phase count), data.rehearse_parent.areas (the parent areas the
-                 draw rehearses from window 0; ABSENT unless DATA_DRAW=replay at
+                 data.replay.fixed_phases (the phases in which the 'replay' law gives its faded
+                 areas at least one byte; it read every phase with a faded area and bytes until
+                 Q-DATA-10's review, so DATA_REPLAY_SHARE=0.0 counted three phases that rehearsed
+                 nothing), data.replay.bytes (the bytes per epoch it gives faded areas) --
+                 both ABSENT unless DATA_DRAW=replay, and 0 there when no phase gives a faded area a
+                 byte -- and data.replay.newest_boosted (the faded phases whose newest-arrived live
+                 area took DATA_REPLAY_NEWEST beside another live area; ABSENT unless
+                 DATA_DRAW=replay with DATA_REPLAY_NEWEST above 0, where the boost is armed), Gate
+                 data.replay (UNREACHABLE naming DATA_DRAW under 'planned' and 'uniform'; its value
+                 the fixed phases, against the phase count, and armed-but-zero both on a schedule
+                 with no faded phase and where every faded phase's share comes to no byte -- the
+                 reason says which), data.rehearse_parent.areas (the parent areas the draw
+                 rehearses from window 0; ABSENT unless DATA_DRAW=replay at
                  DATA_REHEARSE_PARENT=1 on a resume, the one configuration that arms it), Gate
                  data.rehearse_parent (UNREACHABLE at DATA_REHEARSE_PARENT=0, under 'planned' or
                  'uniform' where it has no effect, and on a fresh run, which has no parent record;
-                 its value the rehearsed areas, against the lineage's drawn areas this run declares)
+                 its value the rehearsed areas, against the lineage's drawn areas this run declares;
+                 its reason names any it holds drawn only by assumption, and on the synthetic
+                 source that RUN_SEED must be the parent's)
                  -- all six added 2026-09-28 (Q-DATA-10), and both Gates printed at R in the
                  root's DATA(plan.gates) row
     """
@@ -1389,6 +1439,35 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
         # PARENT AREAS ARE FADED FROM WINDOW 0 at DATA_REHEARSE_PARENT=1 (04-Q4, O9). They are live in
         # no phase, so no phase's own faded set holds them and the two never overlap.
         from_parent = parent_faded if rehearse else ()
+        # A SYNTHETIC PARENT AREA IS REHEARSED FROM THE PARENT'S TEXT OR NOT AT ALL (2026-09-28,
+        # Q-DATA-10's review). Its text is the alphabet its POSITION in DATA_AREAS picks
+        # (_synthetic_areas), and at DATA_SYNTH_HOLDOUT=0 no held-out block rides on that text, so
+        # restore_stream_state admits a moved position: driven, a child at "py,eng" over a parent at
+        # "eng,py" drew alphabet 1 under the parent's eng, and data.rehearse_parent read FIRED,
+        # "drawn by the lineage". The rehearsal would give DATA_REPLAY_SHARE of every phase to text
+        # the parent never trained on, so it is refused by name here, where the rehearsal is decided;
+        # at DATA_SYNTH_HOLDOUT=1 restore_stream_state has refused the move already. RUN_SEED is the
+        # text's other input and no record carries it, so it cannot be checked: the Gate's reason
+        # below says so.
+        if from_parent and str(dat.source) == "synthetic":
+            was = [str(n) for n in (getattr(areas, "parent_names", None) or ())]
+            moved = [(names[i], _alphabet_moved(names[i], was, names))
+                     for i in from_parent if names[i] in was]
+            moved = [(n, at) for n, at in moved if at is not None]
+            if moved:
+                raise CorpusError(
+                    f"DATA: DATA_REHEARSE_PARENT=1 under DATA_DRAW=replay would rehearse "
+                    + "; ".join(f"{n!r} at position {at[1]} of this run's areas, where the checkpoint "
+                                f"had it at {at[0]}" for n, at in moved)
+                    + f" (this run's: {', '.join(names)}; the checkpoint's: {', '.join(was)}). On "
+                    f"DATA_SOURCE=synthetic an area's text is the alphabet its position picks "
+                    f"(_ALPHABETS[position % {len(_ALPHABETS)}], data/api.py::_synthetic_areas), so "
+                    f"this body is other text, and the rehearsal would give DATA_REPLAY_SHARE of "
+                    f"every phase to text the parent never trained on, under the parent area's name. "
+                    f"Keep the parent's areas at their positions in DATA_AREAS and add new ones after "
+                    f"them (Q-DATA-9), or resume at DATA_REHEARSE_PARENT=0, which rehearses nothing. "
+                    f"The text's other input is RUN_SEED, which no record carries: resume at the "
+                    f"parent's.")
         replay_faded = tuple(tuple(sorted(set(f) | set(from_parent))) for f in faded)
         # WHO ARRIVED LAST: each area's first live phase, read off this run's schedule. Ties go to the
         # last area in Plan order -- an add-an-area run appends its new area (Q-DATA-9) -- and
@@ -1408,9 +1487,16 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
             boost = newest_share > 0 and len(live) > 1
             cuts[k] = _replay_cut(span, replay_faded[k], live, newest if boost else None, share,
                                   newest_share)
-            faded_bytes += sum(cuts[k][i] for i in replay_faded[k])
-            if span > 0:
+            gave = sum(cuts[k][i] for i in replay_faded[k])
+            faded_bytes += gave
+            # A PHASE IS COUNTED WHERE IT GIVES A FADED AREA A BYTE (2026-09-28, Q-DATA-10's review).
+            # It was counted wherever it had a faded area and bytes, so DATA_REPLAY_SHARE=0.0 read
+            # data.replay.fixed_phases 3 and Gate data.replay FIRED (3 vs 4) beside data.replay.bytes
+            # 0: armed, and rehearsing nothing. Such a phase is still laid by deficit over its live
+            # areas, and the Gate's reason names it.
+            if gave > 0:
                 n_fixed += 1
+            if span > 0:
                 n_boosted += 1 if boost else 0
     # (area index, bytes) pairs in Plan order, per phase: the record's form, which a reader walks in
     # one order whatever order the cut was built in.
@@ -1516,9 +1602,13 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
                       round(windows_per_segment, 3), 8.0, reason=splice_caveat))
 
     # THE 'replay' LAW'S OWN GATE (2026-09-28, Q-DATA-10). UNREACHABLE under the two laws that lay
-    # no fixed rehearsal share, naming the lever; under 'replay' its value is the phases the law
-    # lays against the phase count, and armed-but-zero is the schedule with no faded phase, which
-    # 'replay' lays as 'planned' throughout.
+    # no fixed rehearsal share, naming the lever; under 'replay' its value is the phases that give
+    # their faded areas a byte, against the phase count. ARMED-BUT-ZERO HAS TWO CAUSES AND THE
+    # REASON SAYS WHICH (Q-DATA-10's review): a schedule with no faded phase, which 'replay' lays as
+    # 'planned' throughout, and faded phases whose share comes to no byte -- DATA_REPLAY_SHARE=0.0,
+    # or a share too small for the phase -- which rehearse nothing and are still laid by deficit
+    # over their live areas. The second read FIRED (3 vs 4) at 0.0 until the review, with
+    # data.replay.bytes 0 beside it.
     if law != "replay":
         gates.append(Gate(
             "data.replay", False, None, n_phases, reachable=False,
@@ -1527,20 +1617,33 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
                    f"phase with a faded area a fixed DATA_REPLAY_SHARE of its bytes for its faded "
                    f"areas (Proposal 04 section 1 item 2, built OFF)"))
     else:
+        with_faded = [k for k in range(n_phases) if replay_faded[k]]
+        given = {k: sum(cuts[k][i] for i in replay_faded[k]) for k in with_faded}
         laid = "; ".join(
-            f"phase {k}: {', '.join(names[i] for i in replay_faded[k])} "
-            f"{sum(cuts[k][i] for i in replay_faded[k])} of {bounds[k][1] - bounds[k][0]} bytes"
-            for k in range(n_phases) if replay_faded[k])
+            f"phase {k}: {', '.join(names[i] for i in replay_faded[k])} {given[k]} of "
+            f"{bounds[k][1] - bounds[k][0]} bytes" for k in with_faded)
         boosted = (f", DATA_REPLAY_NEWEST={float(dat.replay_newest)} to its newest-arrived live area "
                    f"in {n_boosted} of them" if float(dat.replay_newest) > 0 else "")
-        gates.append(Gate(
-            "data.replay", n_fixed > 0, n_fixed, n_phases,
-            reason=(f"DATA_REPLAY_SHARE={float(dat.replay_share)} of each phase with a faded area goes "
-                    f"to its faded areas{boosted}, laid by deficit and truncated to each area's "
-                    f"target -- {laid}" if n_fixed else
-                    "no phase of this schedule has a faded area (every area live in an earlier "
-                    "phase is live again, and no parent area is rehearsed), so every phase is laid "
-                    "by the planned law, byte for byte as DATA_DRAW=planned lays it")))
+        n_none = sum(1 for k in with_faded if given[k] == 0)
+        if n_fixed:
+            reason = (f"DATA_REPLAY_SHARE={float(dat.replay_share)} of each phase with a faded area "
+                      f"goes to its faded areas{boosted}, laid by deficit and truncated to each "
+                      f"area's target -- {laid}"
+                      + (f"; {n_none} of those {len(with_faded)} phase(s) give their faded areas no "
+                         f"byte (a 0 above: the share comes to none there), so they rehearse nothing "
+                         f"and are not counted, and one with bytes is still laid by deficit over its "
+                         f"live areas" if n_none else ""))
+        elif with_faded:
+            reason = (f"DATA_REPLAY_SHARE={float(dat.replay_share)} of each phase with a faded area "
+                      f"comes to no byte in every one of them{boosted} -- {laid} -- so the law is "
+                      f"armed and rehearses nothing: each of those phases that has bytes is still "
+                      f"laid by deficit over its live areas, and every other phase by the planned "
+                      f"law")
+        else:
+            reason = ("no phase of this schedule has a faded area (every area live in an earlier "
+                      "phase is live again, and no parent area is rehearsed), so every phase is laid "
+                      "by the planned law, byte for byte as DATA_DRAW=planned lays it")
+        gates.append(Gate("data.replay", n_fixed > 0, n_fixed, n_phases, reason=reason))
 
     # THE PARENT'S AREAS (2026-09-28, register 04-Q4 and O9; Q-DATA-10). Three arms cannot rehearse
     # one, each its own sentence: the lever off (every training and measurement run), a law with no
@@ -1569,12 +1672,38 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
                    "parent area to rehearse; a run resumed from a checkpoint (CKPT_RESUME) reads "
                    "the areas its lineage drew off the record"))
     else:
+        # TWO THINGS THE FIRED ARM MUST SAY, BOTH FROM Q-DATA-10's REVIEW. (1) Which rehearsed areas
+        # the lineage holds as drawn only by ASSUMPTION (Areas.drawn_assumed): a record older than the
+        # drawn list cannot say which declared areas its lineage drew, every one is taken as drawn,
+        # and one a parent declared and never trained is rehearsed here as if it had been -- driven,
+        # an eng,py,num record with its list stripped gave eng and num 2,700 bytes each where the
+        # recorded list ['eng'] gives eng 5,400, and the reason called both "drawn by the lineage".
+        # (2) On the synthetic source, that the body is the parent's only at the parent's RUN_SEED,
+        # which no record carries (a moved position is refused above).
+        assumed_in = set(getattr(areas, "drawn_assumed", None) or ())
+        assumed = [names[i] for i in parent_faded if names[i] in assumed_in]
+        caveat_rp = ""
+        if assumed:
+            caveat_rp += (
+                f". {', '.join(assumed)} {'is' if len(assumed) == 1 else 'are'} held drawn only by "
+                f"ASSUMPTION (Areas.drawn_assumed; data.drawn_assumed at the restore): a record of "
+                f"this lineage predates the list of the areas its streams drew, so every area it "
+                f"declared is taken as drawn, and one it declared and never trained is rehearsed "
+                f"here as if it had been")
+        if str(dat.source) == "synthetic":
+            caveat_rp += (
+                ". On DATA_SOURCE=synthetic the rehearsed body is this run's generated text, which "
+                "is the parent's only at the parent's positions in DATA_AREAS -- checked against the "
+                "record, a moved one refused -- and at the parent's RUN_SEED, which no record "
+                "carries, so it is not checked: a rehearsing child resumes at its parent's")
         gates.append(Gate(
             "data.rehearse_parent", len(parent_faded) > 0, len(parent_faded), len(lineage),
             reason=(f"DATA_DRAW=replay at DATA_REHEARSE_PARENT=1: "
-                    f"{', '.join(names[i] for i in parent_faded)} -- drawn by the lineage and live in "
+                    f"{', '.join(names[i] for i in parent_faded)} -- "
+                    f"{'held drawn' if assumed else 'drawn'} by the lineage and live in "
                     f"no phase of this schedule -- faded from window 0, sharing "
-                    f"DATA_REPLAY_SHARE={float(dat.replay_share)} of every phase" if parent_faded else
+                    f"DATA_REPLAY_SHARE={float(dat.replay_share)} of every phase{caveat_rp}"
+                    if parent_faded else
                     f"every area the lineage drew that this run declares "
                     f"({', '.join(names[i] for i in lineage) or 'none'}) is live in some phase of "
                     f"this schedule, so none is faded from window 0")))
@@ -1716,7 +1845,9 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
 
     EVERY AREA A DRAW TAKES A BYTE FROM IS APPENDED TO Areas.drawn, in place, where the list does not
     hold it yet (2026-09-28, Q-FAB-18's review): the lineage's record of what it drew, which
-    stream_state carries and a child's Plan.parent_faded is read off.
+    stream_state carries and a child's Plan.parent_faded is read off. And it leaves
+    Areas.drawn_assumed, the part of the list an older record held only by assumption (2026-09-28,
+    Q-DATA-10's review): a draw is what confirms one.
 
     RETURNS: Stream.
 
@@ -1736,11 +1867,13 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
                  data.share.p<k>.<area>.planned and .realised (READINGS in `counters`, under every
                  law, 2026-09-28, Q-DATA-10: SR0's per-phase share gauges, the area's bytes in phase
                  k as Plan.shares planned them and as these bytes hold them, in permille of the
-                 phase's span, rounded half up, for every area the phase makes live, gives a target
-                 or drew from; a phase of no bytes has no share to read and prints none. Equal under
-                 "planned" and "replay" by construction, and under "uniform" the difference is the
-                 draw's error bar, per phase. A reading about the bytes, so the resample-off
-                 replay below carries them over with data.segment),
+                 phase's span, rounded half up, for every area the phase makes live or its
+                 Plan.shares entry names -- a faded area 'replay' gives 0 bytes reads 0, since
+                 Q-DATA-10's review -- and every area it drew from; a phase of no bytes has no
+                 share to read and prints none. Equal under "planned" and "replay" by
+                 construction, and under "uniform" the difference is the draw's error bar, per
+                 phase. A reading about the bytes, so the resample-off replay below carries them
+                 over with data.segment),
                  Gate data.contig_wrap (unreachable at seg_contig=False, with the gate arithmetic:
                  a random-offset seek is bounded by the body it reads and there is no cursor to
                  wrap, so 0 there is not a count),
@@ -2005,12 +2138,17 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
             got[idx] = got.get(idx, 0) + len(chunk)
             if mode == "planned":
                 budget[idx] -= len(chunk)
-        # THE PHASE'S GAUGES, in Plan order, for every area the phase makes live, gives a target or
-        # drew from. Permille of the span, rounded half up in integers; a phase of no bytes has no
-        # share to read and prints none, which is not a 0.
+        # THE PHASE'S GAUGES, in Plan order, for every area the phase makes live or its Plan.shares
+        # entry names, and every area it drew from. Permille of the span, rounded half up in
+        # integers; a phase of no bytes has no share to read and prints none, which is not a 0.
+        # NAMED, NOT HANDED BYTES (2026-09-28, Q-DATA-10's review): this read "a target above 0", so
+        # a faded area the 'replay' law names with a target of 0 -- DATA_REPLAY_SHARE=0.0, or a
+        # share that comes to no byte in the phase -- printed no gauge, and ABSENT reads as a law
+        # that cannot reach the area where it is armed and gave it nothing. It reads 0 now. Under
+        # 'planned' and 'uniform' the entry names exactly the live areas, so nothing there moved.
         if span > 0:
             for i, name in enumerate(names):
-                if i in live or target.get(i, 0) or got.get(i, 0):
+                if i in live or i in target or got.get(i, 0):
                     gauges[f"data.share.p{k}.{name}.planned"] = _permille(target.get(i, 0), span)
                     gauges[f"data.share.p{k}.{name}.realised"] = _permille(got.get(i, 0), span)
 
@@ -2022,6 +2160,12 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
     for label in names:
         if per_area[label] > 0 and label not in areas.drawn:
             areas.drawn.append(label)
+    # AND AN ASSUMPTION A DRAW CONFIRMS IS AN ASSUMPTION NO LONGER (2026-09-28, Q-DATA-10's review):
+    # an area this draw took a byte from leaves Areas.drawn_assumed, the part of the list a record
+    # older than it could not vouch for. Whatever is left is recorded by stream_state as still
+    # assumed, so a descendant names it rather than reading it as drawn.
+    if areas.drawn_assumed:
+        areas.drawn_assumed[:] = [n for n in areas.drawn_assumed if per_area.get(n, 0) == 0]
 
     # ---- THE DID IT FIRE SURFACE THIS FUNCTION DECLARES ------------------------------------------
     # Built here, at the end, from tallies taken at the decision points above -- so a name whose
@@ -2203,7 +2347,8 @@ def stream_state(dat: Config, areas):
     """The mutable state that must survive into a checkpoint: the per-area read cursors, the epoch
     index of the last draw, the holdout block offsets and sizes (and, since 2026-09-27, a digest of
     each block's bytes: Q-DATA-9's review), the areas the lineage has drawn from (Areas.drawn, since
-    2026-09-28: Q-FAB-18's review), and the counter vector.
+    2026-09-28: Q-FAB-18's review) and the part of that list held only by assumption
+    (Areas.drawn_assumed, since Q-DATA-10's review), and the counter vector.
 
     The cursors are LOAD-BEARING: without them a resume re-reads the head of every area under
     seg_contig and silently trains a second time on material the parent already used. The counter
@@ -2258,6 +2403,12 @@ def stream_state(dat: Config, areas):
         # Plan.parent_faded off this, and not off the `holdout` keys above, which are every area the
         # parent DECLARED -- drawn or not.
         "drawn": [str(n) for n in areas.drawn],
+        # AND THE PART OF IT HELD ONLY BY ASSUMPTION (2026-09-28, Q-DATA-10's review):
+        # Areas.drawn_assumed, the areas a record older than `drawn` declared and no stream of this
+        # lineage has drawn since. Without it the assumption was written into `drawn` above as a
+        # draw, and a descendant rehearsed an area nothing ever drew while calling it "drawn by the
+        # lineage". [] wherever no record of the lineage predates the list.
+        "drawn_assumed": [str(n) for n in areas.drawn_assumed],
         # THE COUNTER VECTOR, because a DID-IT-FIRE count that resets on resume counts the wrong
         # thing -- it counts "since the last checkpoint" while being read as "this run".
         "counters": dict(areas.counters),
@@ -2352,7 +2503,12 @@ def restore_stream_state(dat: Config, areas, state):
     the lineage's streams drew from, which Plan.parent_faded is read off. A record written before
     stream_state carried it has none, and then every area it declares is ASSUMED drawn and named
     in data.drawn_assumed -- over-counting only a declared area no phase ever drew, which a record
-    cannot tell apart.
+    cannot tell apart. THE ASSUMPTION IS CARRIED DOWN THE LINEAGE (2026-09-28, Q-DATA-10's review):
+    it fills `Areas.drawn_assumed`, draw_stream removes each area a draw confirms, stream_state
+    records what is left, and a later resume reads that back into both -- so a descendant's
+    data.drawn_assumed names what its own record still cannot vouch for, where it read [] and the
+    assumption as a draw. Under 'replay' at DATA_REHEARSE_PARENT=1 the assumption moves bytes (an
+    assumed area is rehearsed), and data.rehearse_parent's reason names it.
 
     THE COUNTERS THE RECORD DOES NOT OVERWRITE are this resume's own statements and this run's own
     readings: the restore and refusal tallies, data.area_added and its names, the process twin
@@ -2383,8 +2539,9 @@ def restore_stream_state(dat: Config, areas, state):
                  admit, and a real one is never admitted -- Q-DATA-9's review, where they read 0 on
                  every resume), data.drawn_assumed (a READING, 2026-09-28, Q-FAB-18's review: the
                  areas this resume ASSUMED the lineage drew because the record carries no list of
-                 them -- every area it declares -- and [] on a resume whose record carries one;
-                 ABSENT on a fresh run)
+                 them -- every area it declares -- or, since Q-DATA-10's review, the part of its
+                 list the record carries as still assumed; [] on a resume whose lineage's records
+                 all carried the list; ABSENT on a fresh run)
     """
     dat = dat.owned_by("DATA")
     if not state:
@@ -2409,12 +2566,22 @@ def restore_stream_state(dat: Config, areas, state):
     # and then every area it declared is ASSUMED drawn -- the reading the faded sets took of every
     # record until this date -- and data.drawn_assumed names them; [] where the record carried its
     # list. This run's draws are appended by draw_stream.
+    # AND THE ASSUMPTION IS CARRIED, NOT LAUNDERED (2026-09-28, Q-DATA-10's review): the part of the
+    # list a record holds only by assumption comes back as Areas.drawn_assumed -- all of it on a
+    # record older than the list, the record's own carried part on one since -- and
+    # data.drawn_assumed names it. Until the review a record older than the list was assumed here
+    # and then written into the next record's `drawn` as a draw: driven, the child of an eng,py,num
+    # record whose parent drew eng alone saved drawn ['eng', 'py', 'num'], and its own child read
+    # data.drawn_assumed [] and rehearsed num as "drawn by the lineage". A record carrying `drawn`
+    # without this key (the two builds on this branch before the review) carries no assumption.
     if state.get("drawn") is not None:
         areas.drawn[:] = [str(n) for n in state["drawn"]]
-        areas.counters["data.drawn_assumed"] = []
+        areas.drawn_assumed[:] = [str(n) for n in (state.get("drawn_assumed") or ())
+                                  if str(n) in areas.drawn]
     else:
         areas.drawn[:] = list(recorded)
-        areas.counters["data.drawn_assumed"] = list(recorded)
+        areas.drawn_assumed[:] = list(recorded)
+    areas.counters["data.drawn_assumed"] = list(areas.drawn_assumed)
     # THE ONE ARM THE ADMISSION CAN FIRE ON: the synthetic source at DATA_SYNTH_HOLDOUT=1. At 0 every
     # live synthetic block has size 0, so there is nothing to admit, and a real block is never
     # admitted (a change of source, below).
