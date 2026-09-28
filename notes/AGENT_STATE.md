@@ -1,13 +1,13 @@
 # Agent state — read this first after a session reset
 
-Updated 2026-09-26 (the decision register, Proposal 05) on `rm-predict-DC` (the only branch pushed to; no PRs unless asked).
+Updated 2026-09-28 (the 2026-09-27 retok fleet read: `TOK_RETOK_EVERY` ships 1000) on `rm-predict-DC` (the only branch pushed to; no PRs unless asked).
 
 ## Where things stand
 - **WORLD_FEEDBACK ships False** (d97779d) on the 20k-window GPU fleet: the forecast was within
   noise (docs/04_CONTRACT.md Q-WORLD-10, results/gpu_world_2026-09-24/ANALYSIS.txt). WORLD stays enabled.
 - **GPU slowdown repaired** (4feb65f): FAB.manage's scalar merge scan was n^2/2 device syncs from
   window 501 on. The fix is bit-identical (fabric-internals I10 plus a byte-identical 300-window
-  merge-firing run). The post-fix GPU rate is **not yet measured**: the owner's next fleet measures it.
+  merge-firing run). Post-fix GPU rate (the retok fleet): 35.8-39.2 windows/s per arm, 239 at PAR 12.
 - **Audio/video design committed** (ac94811): docs/proposals/03_AUDIO_VIDEO.md. §0 is binding;
   §16 lists the owner's rulings, each with the recommendation that gets built if unruled. Evidence:
   results/multimodal_design_2026-09-25/.
@@ -126,7 +126,8 @@ Updated 2026-09-26 (the decision register, Proposal 05) on `rm-predict-DC` (the 
 - Brought to the owner, in notes/OWNER_BRIEF.md and the chat: major issues that threaten A or B,
   potential expansions, and GPU tests as copy-paste blocks. Results come back as each script's
   "PASTE THIS BACK" block (the GPU box has a checkout but no push token).
-- Explicit owner rulings stand (D2, D8, D16, Q-RUN-8's 3000, WORLD kept for A, the CPU rule); a GPU
+- Explicit owner rulings stand (D2, D8, D16, Q-RUN-8's stream rebuilding, WORLD kept for A, the CPU
+  rule; the rebuilding cadence is the manager's, O14); a GPU
   result that contradicts one is a major issue for the owner. A bad result is a reason to try the next
   arm, not to drop the path.
 
@@ -141,8 +142,9 @@ Updated 2026-09-26 (the decision register, Proposal 05) on `rm-predict-DC` (the 
   drafts and checks are in results/decisions_2026-09-26/rulings/. The owner channel is
   notes/OWNER_BRIEF.md (goals check, major issues, expansions, GPU queue, rulings that touch owner
   rulings). One statistical rule governs every GPU comparison against eps (O2); each test's seeds and
-  caps are pre-registered when that test is built. TOK_RETOK_EVERY 3000 is the manager's interim
-  value (the owner approved stream rebuilding, not a cadence).
+  caps are pre-registered when that test is built. TOK_RETOK_EVERY is the manager's value (the owner
+  approved stream rebuilding, not a cadence): the interim 3000 until the retok fleet, 1000 since
+  (2026-09-27, provisional until E2's held-out re-read).
 
 ## Next
 - 2026-09-27: Stage 1 (§8 1.1-1.6) built, reviewed and fixed; full suite green at 253bfa1; 1.5's owed
@@ -175,6 +177,17 @@ Updated 2026-09-26 (the decision register, Proposal 05) on `rm-predict-DC` (the 
   on the idle box, so the texts blame a shared CPU, not the count of runs. The owner stopped the
   container because the GPU showed no sign of work: nothing runs, and the relaunch block (test 2)
   stands, its commands now by absolute path.
+- 2026-09-27/28, THE RETOK FLEET READ (§8 2.1 done; the owner's H200 at 319f313, 13 of 13 rc=0;
+  results/gpu_retok_2026-09-27/RESULTS.md, verified by two analysts and its verify/): **1000 ships**
+  (k1000 PASS per phase, k3000 UNRESOLVED, whole-run 1000 - 3000 upper bound -0.0035), B-provisional
+  until E2. TOK_RETOK_EVERY, RETOK_INCUMBENT and PIN_RETOK are 1000; F1-F17 read at
+  RETOK_INCUMBENT=3000. O14's choice is pinned to the whole run, as 1bd51c5 built it (every phase
+  would have kept 3000; the register says so). C13's alarm tripped (k1000 37.9%): the cooldown arm is
+  read against k1000 with bounds (F25), and the cooldown fleet is brief test 3 (5 seeds, its cap; the
+  exact command ran on CPU, 21 runs rc=0). The arm prices FAB_COOLDOWN whole: it also spaces growth
+  firings, so isolating the blackout needs a k0 cooldown control (not built).
+  Named risk for E2: per area, num in phase 4 is +0.10 at 1000. Owed: the spike test's offline
+  analysis, the continuation (§8 6.1), an ETA priced by waves and a FILL that fills the last wave.
 0. Proposal 05 §8 orders everything: Stage 0 (owner rulings O1-O20; the fleet-archive reads; the
    k0_nuis pair; phase-traversal resizing), then Stage 1's small builds (vocab `.prev` rotation, DOM
    Levels, counters, OPT_LR_CONTINUE 'as_logged', gpu_world.sh kept checkpoints) before the owner's
@@ -185,7 +198,7 @@ Updated 2026-09-26 (the decision register, Proposal 05) on `rm-predict-DC` (the 
 2. S1 per 03 Appendix A as amended by §0. **Step 0 is the baseline fixture (R7), before any tree edit.**
    Then derive ids/frames, Areas.media, the aud/tones generator plus DATA.recover, and media_batch.
    Sync the K12/K13 counts.
-3. On GPU (the owner): a fleet throughput re-baseline after 4feb65f.
+3. DONE 2026-09-27: the fleet throughput re-baseline after 4feb65f rode in the retok fleet.
 
 ## Known low items, not yet fixed
 - Fixed in Proposal 05 §8 1.6 (2026-09-27), kept here so the old symptoms are recognisable:
@@ -202,7 +215,9 @@ Updated 2026-09-26 (the decision register, Proposal 05) on `rm-predict-DC` (the 
 - gpu_world.sh calibrates on 150 windows at EXP=world, before the first manage pass at window 501, so
   its ETA can still miss per-pass costs; `--status` gives the live ETA. EXP=retok and EXP=world_epoch
   calibrate on 600 since §8 1.5 (2026-09-27), and the retok fleet's paste-back block prints its ETA
-  against wall: past 1.5x, raise EXP=world's default to >= 520 (LOW-GPU-WORLD-ETA).
+  against wall: past 1.5x, raise EXP=world's default to >= 520 (LOW-GPU-WORLD-ETA). That fleet missed
+  by 1.95x at CAL_WINDOWS 600, so the advice does not fit it: 13 runs at PAR 12 left k0_rerun running
+  alone from +590 s to +986 s. Owed: an ETA priced by waves, and a FILL that fills a partial last wave.
 - Next hunt classes: lever isolation, efficacy vs labels, long-horizon mechanisms, SIGUSR1 saves.
 
 ## Working rules this repo has taught
