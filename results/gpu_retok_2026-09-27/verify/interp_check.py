@@ -53,12 +53,13 @@ for name, at in (("num", 945000), ("c", 2835000)):
         print(f"  {name} {a:6} {np.mean(d):+.3f}  {' '.join(f'{x:+.3f}' for x in d)}")
 
 print("ACT SPIKES: peak (10 KB bins, mean over seeds of arm - k0) within 200 KB after each act's byte offset")
+spans = {}
 for a in ("k3000", "k1000"):
-    peaks = []
+    peaks, means = [], []
     c, fb, t = R[(a, 0)]
     acts = [int(w) for w in re.findall(r"mid-epoch act at window (\d+):", t)]
     for w in acts:
-        pk = []
+        pk, mn = [], []
         for s in range(3):
             c_, fb_, _ = R[(a, s)]
             at = int(np.cumsum(fb_)[min(w - 1, len(fb_) - 1)])
@@ -66,9 +67,19 @@ for a in ("k3000", "k1000"):
             if len(e) < 2:
                 continue
             pk.append(binned(a, s, e) - binned("k0", s, e))
+            mn.append(binned(a, s, [e[0], e[-1]])[0] - binned("k0", s, [e[0], e[-1]])[0])
         n = min(len(p) for p in pk)
         peaks.append(float(np.max(np.mean([p[:n] for p in pk], axis=0))))
+        means.append(float(np.mean(mn)))
     print(f"  {a}: acts at {acts} (seed 0); peaks {' '.join(f'{x:+.2f}' for x in peaks)}")
+    spans[a] = (peaks, means)
+# DO THE SPIKES GROW WITH THE ACT'S LATENESS? (2026-09-28, the review of this record: RESULTS.md said they
+# did.) The peaks above do not; the mean over the same 200 KB after each act does, most at the last acts.
+for a, (peaks, means) in spans.items():
+    h = len(peaks) // 2
+    print(f"  {a}: 200 KB means {' '.join(f'{x:+.3f}' for x in means)}; peaks first {h} {np.mean(peaks[:h]):+.3f} "
+          f"last {h} {np.mean(peaks[-h:]):+.3f}; 200 KB means first {h} {np.mean(means[:h]):+.3f} last {h} "
+          f"{np.mean(means[-h:]):+.3f}")
 
 print("N_LIVE at the end, per run (the last progress line / fab.n_live)")
 for a in A:
@@ -145,3 +156,10 @@ print(f"  the ETA: {est:.0f} s ({eta.group(1)} windows at {eta.group(2)} windows
 hb_eta = re.search(r"ETA ~(\d+)m(\d+)s \(2 waves\)", hb)
 he = int(hb_eta.group(1)) * 60 + int(hb_eta.group(2))
 print(f"  the heartbeat's first fleet ETA: {he} s (2 waves), {he / wall - 1:+.1%} of the wall")
+# THE HEARTBEAT'S ETA IS TIME LEFT, AT THE HEARTBEAT (2026-09-28, the review of this record: the line above
+# set it against the whole wall). tools/fleet_dash.sh's step_eta returns the seconds left, and that line was
+# written "fleet since ... (N s)" into the fleet: it put the end at N + ETA.
+hb_at = re.search(r"fleet since [^(]*\((?:(\d+)m)?(\d+)\s?s\)[^\n]*ETA ~\d+m\d+s \(2 waves\)", hb)
+el = int(hb_at.group(1) or 0) * 60 + int(hb_at.group(2))
+print(f"  ... written {el} s into the fleet, as time left: the end at +{el + he} s against +{wall} s, "
+      f"{(el + he) / wall - 1:+.1%}; {he} s left against {wall - el} s, {he / (wall - el) - 1:+.1%}")

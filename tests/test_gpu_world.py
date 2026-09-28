@@ -52,7 +52,10 @@ is pinned here, on a fleet whose every number is chosen.
       is coherent when its merge count equals its vocabulary's entries, INCOHERENT otherwise; the run's
       final save is dropped; the act windows it covers are counted off the act arms' logs; the resume
       line carries the run's seed, device and stream. A keep directory stamped by another launch is
-      refused, with nothing indexed and nothing dropped, and the block says so.
+      refused, with nothing indexed and nothing dropped, and the block says so. With no ckpt/ (an
+      unpacked archive), KEPT.txt is kept and read, and whether the fleet kept any is SUMMARY's to say:
+      ON with no KEPT.txt is "none here", never "KEEP_CKPT off" (the review of 88d3fae: --analyze of an
+      archive deleted its KEPT.txt, said "off", and repacked the archive without it).
   F8  THE WHOLE-EPOCH FLAGS: under EXP=world_epoch a run that read its epoch is not "RAN OUT OF
       STREAM" and one that hit the cap is "STOPPED AT THE WINDOW CAP"; EXP=world flags as it did.
   F9  THE REFUSALS: EXP=world_epoch without GO_WORLD_EPOCH=1 exits 2 having written nothing and prints
@@ -84,8 +87,11 @@ is pinned here, on a fleet whose every number is chosen.
       would mix neighbouring phases (the split's review: every fleet had equal flushes, so a
       placement ignoring the bytes passed).
   F16 O14's CHOICE: 1000 replaces 3000 when it is significantly better or when 3000 FAILs; 3000 stays
-      on UNRESOLVED readings and when 1000 FAILs; every cadence FAILing is ESCALATE; no act is
-      UNDECIDED; the whole truth table, and 0 is never an answer.
+      on UNRESOLVED readings and when 1000 FAILs; every cadence of a two-cadence fleet FAILing is
+      ESCALATE; no act is UNDECIDED; the whole truth table, and 0 is never an answer. A fleet of one
+      cadence never escalates (the review of 88d3fae; O14 escalates only when both cadences and every
+      remedy arm FAIL): the incumbent's FAIL does not ship and names O14's other cadence and the remedy
+      arms as next, and a lone challenger's FAIL leaves the incumbent standing.
   F17 THE BLACKOUT SPLIT where n_live first reaches FAB_SLOTS (O14): an estimate from the act windows and
       the cooldown, each part over its own windows, FAB_SLOTS off the gate text, a pool that never fills
       read as all before, n_live at the end per arm; C13's alarm reads the before-part only. Without
@@ -137,12 +143,22 @@ is pinned here, on a fleet whose every number is chosen.
       DEVICE=cuda) and --go then launches nothing; --go at DEVICE=cpu from a shell that exits at once leaves
       a fleet in its own session that runs to its end and its block, and prints commands by absolute path;
       a second --go FAILs on it; an exported OMP_NUM_THREADS is said, not a WARN; an ended fleet whose run
-      still runs is a FAIL whose fix is --stop.
+      still runs is a FAIL whose fix is --stop. Without --go a clean check's "ready:" line carries every
+      knob set -- run with env in the launcher's place it gives each one back -- and its KNOBS name every
+      knob gpu_world.sh reads (the review of 88d3fae: it carried EXP alone, and after the cooldown fleet's
+      knobs its paste would have launched the default retok fleet).
   F25 THE COOLDOWN FLEET AT THE SHIPPED CADENCE (C13's alarm, after the 2026-09-27 DECISION): RETOK_ARMS=1000
       with COOLDOWN_ARM=100 is read at the default incumbent, 1000 -- it stays while k1000 does not FAIL,
-      and every cadence FAILing is ESCALATE with the act ON at 1000 -- and k1000_cd100 is read against
-      k1000, paired: per phase by the eps rule and over the whole run by its one-sided 95% upper bound
-      (below 0: the longer cooldown costs), beside the rule and never shipped, in ANALYSIS and in the block.
+      and when k1000, the only cadence, FAILs it does not ship and 3000 and the remedy arms run next, never
+      ESCALATE (the review of 88d3fae: O14 escalates only when both cadences and every remedy arm FAIL)
+      -- and k1000_cd100 is read against k1000, paired: per phase by the eps rule and over the whole run
+      by its one-sided 95% upper bound (below 0: the longer cooldown costs), beside the rule and never
+      shipped, in ANALYSIS and in the block.
+  F26 THE 2026-09-27 ARCHIVE, RE-READ ON A COPY (the review of 88d3fae): --analyze at RETOK_INCUMBENT=3000
+      reproduces the archive's ANALYSIS.txt but the eps rule header's wording and the KEPT section's disk
+      and resume lines, which need the checkpoints and give way to one line naming KEPT.txt as the
+      source; KEPT.txt stays as it was and the repacked archive holds it; at the default incumbent the
+      same runs read "stays 1000"; and the committed archive is never touched.
 """
 import glob
 import json
@@ -714,6 +730,51 @@ try:
           "(2026-10-01T12:00:00Z): nothing indexed and nothing dropped" in ilog, ilog[-300:])
     check("F7 ... and the block carries the refusal",
           "INDEX REFUSED: !! k0.s0: " in open(os.path.join(o7b, "PASTE_BACK.txt")).read())
+    # WITH NO ckpt/, KEPT.txt IS THE FLEET'S RECORD (the review of 88d3fae): an archive packs KEPT.txt and no
+    # checkpoint, and --analyze of an unpacked one deleted KEPT.txt, said "KEEP_CKPT off" beside SUMMARY's ON,
+    # and repacked the archive without it. o7c is o7 analysed, its ckpt/ then gone, as in an unpacked archive.
+    o7c = os.path.join(TMP, "f7c", "gpu_retok_out")
+    shutil.copytree(o7, o7c)
+    shutil.rmtree(os.path.join(o7c, "ckpt"))
+    kept7c = open(os.path.join(o7c, "KEPT.txt")).read()
+    p7c = gw("--analyze", EXP="retok", **INC0927, OUT=o7c)
+    a7c = open(os.path.join(o7c, "ANALYSIS.txt")).read()
+    b7c = open(os.path.join(o7c, "PASTE_BACK.txt")).read()
+    tgz7c = os.path.join(os.path.dirname(o7c), "gpu_retok_2026-10-01.tgz")
+    names7c = tarfile.open(tgz7c).getnames() if os.path.exists(tgz7c) else []
+    check("F7 with no ckpt/ (an unpacked archive) --analyze keeps KEPT.txt as it was and reads its rows -- the same "
+          "coverage row, one line naming KEPT.txt in place of the disk and resume lines -- and the archive it packs "
+          "holds KEPT.txt",
+          p7c.returncode == 0 and os.path.exists(os.path.join(o7c, "KEPT.txt"))
+          and open(os.path.join(o7c, "KEPT.txt")).read() == kept7c
+          and "k0.s0: 2 kept, w1001-w2001, INCOHERENT at w2001; act windows covered: k1000 1/2" in a7c
+          and "  read from KEPT.txt, as the fleet's own analysis wrote it: this directory holds no ckpt/ (an archive "
+              "packs none), so no disk figure and no resume line" in a7c
+          and "resume one:" not in a7c + b7c and "  disk: " not in a7c
+          and "KEPT: 2 copies of 1 k0 run(s), 1 INCOHERENT, act windows covered k1000 1/2; read from KEPT.txt (no "
+              "ckpt/ here)" in b7c
+          and "gpu_retok_out/KEPT.txt" in names7c,
+          str([l for l in (a7c + b7c).splitlines() if "KEPT" in l or "kept" in l]) + p7c.stderr[-300:])
+    # WHETHER THE FLEET KEPT ANY IS SUMMARY'S TO SAY: with neither ckpt/ nor KEPT.txt, ON reads "none here" and
+    # only OFF reads "KEEP_CKPT off"; and a ckpt/ that holds no index still removes a KEPT.txt it does not hold.
+    o7d = os.path.join(TMP, "f7d", "gpu_retok_out")
+    retok_fleet(o7d, seeds=(0,))
+    gw("--analyze", EXP="retok", **INC0927, OUT=o7d)
+    o7e = os.path.join(TMP, "f7e", "gpu_retok_out")
+    retok_fleet(o7e, seeds=(0,), kept="OFF")
+    gw("--analyze", EXP="retok", **INC0927, OUT=o7e)
+    o7f = os.path.join(TMP, "f7f", "gpu_retok_out")
+    retok_fleet(o7f, seeds=(0,))
+    os.makedirs(os.path.join(o7f, "ckpt"))
+    write(os.path.join(o7f, "KEPT.txt"), "k0.s0.w1001 step=1001 reason=periodic merges=3 entries=3 coherent\n")
+    gw("--analyze", EXP="retok", **INC0927, OUT=o7f)
+    b7d, b7e = (open(os.path.join(o_, "PASTE_BACK.txt")).read() for o_ in (o7d, o7e))
+    check("F7 with neither ckpt/ nor KEPT.txt the block reads SUMMARY's record: kept checkpoints ON is 'none here', "
+          "OFF is 'KEEP_CKPT off'; and a ckpt/ holding no index still removes a KEPT.txt it does not hold",
+          "KEPT: none here (SUMMARY: kept checkpoints ON; no ckpt/, no KEPT.txt)" in b7d and "KEEP_CKPT off" not in b7d
+          and "KEPT: none (KEEP_CKPT off)" in b7e
+          and not os.path.exists(os.path.join(o7f, "KEPT.txt")),
+          str([l for l in (b7d + b7e).splitlines() if "KEPT" in l]))
 
     # ---- F8: the whole-epoch flags --------------------------------------------------------------
     for exp in ("world_epoch", "world"):
@@ -1318,6 +1379,23 @@ esac
     check("F16 O14's truth table on choose(): ESCALATE iff both FAIL; 1000 replaces 3000 iff 1000 does not FAIL "
           "and (3000 FAILs or 1000 is significantly better); otherwise 3000 stays; 0 is never an answer",
           table_ok and choose([], {}, {}, "k3000")[0] == "undecided", str(bad_rows))
+    # A FLEET OF ONE CADENCE NEVER ESCALATES (the review of 88d3fae): O14 escalates only when both of its
+    # cadences and every remedy arm FAIL, and a cadence that FAILs does not ship (note retok fleet (3)). The
+    # incumbent alone FAILing withdraws it and names O14's other cadence; a lone challenger FAILing leaves the
+    # incumbent, which that fleet does not read, where it stands; a lone incumbent that does not FAIL stays.
+    one16 = {v: choose(["k1000"], {"k1000": {"verdict": v}}, {}, "k1000") for v in ("PASS", "FAIL", "UNRESOLVED")}
+    one16_3 = choose(["k3000"], {"k3000": {"verdict": "FAIL"}}, {}, "k3000")
+    lone16 = choose(["k3000"], {"k3000": {"verdict": "FAIL"}}, {}, "k1000")
+    check("F16 a fleet of one cadence never escalates: the incumbent's FAIL does not ship and names O14's other "
+          "cadence and the remedy arms as next (3000 after 1000, 1000 after 3000); a lone challenger's FAIL leaves the "
+          "incumbent standing; a lone incumbent that PASSes or is UNRESOLVED stays",
+          one16["FAIL"][:2] == ("withdraw", "k1000") and "; 3000 and the remedy arms run next" in one16["FAIL"][2]
+          and "no ESCALATE" in one16["FAIL"][2]
+          and one16_3[:2] == ("withdraw", "k3000") and "; 1000 and the remedy arms run next" in one16_3[2]
+          and lone16[:2] == ("stays", "k1000") and "the fleet has no k1000 arm" in lone16[2]
+          and "k3000 FAILs" in lone16[2]
+          and one16["PASS"][:2] == ("stays", "k1000") and one16["UNRESOLVED"][:2] == ("stays", "k1000"),
+          str((one16, one16_3, lone16)))
     never0 = {k: re.findall(r"(?:ships|stays) (\d+)", v) for k, v in ALL.items()}
     check("F16 across every fleet above no DECISION ships or keeps 0",
           all("0" not in v for v in never0.values()) and not any("ships 0" in v for v in ALL.values()), str(never0))
@@ -1532,12 +1610,20 @@ esac
     cd_fleet(o25c, [0.30, 0.31, 0.29, 0.30, 0.31], CD_SAME)
     a25c, b25c = ana(o25c)
     ALL["f25c"] = a25c + b25c
-    check("F25 when the shipped 1000 FAILs against k0 -- the only cadence -- the DECISION is ESCALATE, the act ON "
-          "at 1000 until the owner answers (never 0), and the cooldown arm is still read beside it",
-          "=== DECISION: ESCALATE: every cadence FAILs against k0 by the ε rule; the act stays ON at 1000 until the "
-          "owner answers; the remedy arms run next (register O14) (ε 0.05 bits/byte, n 5 seed(s)) ===" in a25c
+    # O14 ESCALATES ONLY WHEN BOTH CADENCES AND EVERY REMEDY ARM FAIL (the review of 88d3fae: this fleet read the
+    # FAIL of its one cadence as ESCALATE, the act ON at 1000 until the owner answered, though 3000 never FAILed).
+    check("F25 when the shipped 1000 FAILs against k0 -- the only cadence -- it does not ship, and 3000 and the remedy "
+          "arms run next (note retok fleet (3)): never ESCALATE, never 0, in ANALYSIS and in the block; and the "
+          "cooldown arm is still read beside it",
+          "=== DECISION: TOK_RETOK_EVERY 1000 does not ship (0 is never shipped by the rule): k1000 FAILs against k0 "
+          "by the ε rule, and it is this fleet's only cadence; 3000 and the remedy arms run next (register O14, note "
+          "retok fleet (3)); no ESCALATE, which needs both cadences and every remedy arm to FAIL (ε 0.05 bits/byte, "
+          "n 5 seed(s)) ===" in a25c
+          and re.search(r"^DECISION: TOK_RETOK_EVERY 1000 does not ship .* \(ε 0\.05 bits/byte, n 5 seed\(s\)\)  "
+                        r"\[B-provisional\]$", b25c, re.M) is not None
+          and "DECISION: ESCALATE" not in a25c + b25c
           and cd_line(a25c) is not None and cd_line(a25c)[2] == "PASS",
-          str([l for l in a25c.splitlines() if "DECISION" in l or "-> " in l]))
+          str([l for l in (a25c + b25c).splitlines() if "DECISION" in l or "-> " in l]))
     # THE LAUNCH BUILDS WHAT THE COMMAND NAMES, with run.py stood in (F10's stand-in, which books each run's
     # TOK_RETOK_EVERY, FAB_COOLDOWN and CKPT_ settings): 5 seeds x 4 arms plus k0_rerun, k1000_cd100 at
     # TOK_RETOK_EVERY=1000 and FAB_COOLDOWN=100, no checkpoint setting at KEEP_CKPT=0, and a block.
@@ -1561,6 +1647,70 @@ esac
           and "=== plan: EXP=retok; arms k0 k1000 k0_nuis k1000_cd100, plus k0_rerun at seed 0" in p25d.stdout
           and 0 < len(block_of(p25d.stdout) or []) <= 80,
           f"rc {p25d.returncode}; {sorted(set(fleet25) ^ want25)}; {p25d.stderr[-400:]}")
+
+    # ---- F26: the 2026-09-27 archive, re-read on a copy (the review of 88d3fae) ------------------------------
+    # --analyze rewrites ANALYSIS.txt and the block and repacks <name>_<launch date>.tgz beside OUT, so the re-read
+    # the contract and RESULTS.md document runs on a copy unpacked in a scratch directory, never beside the
+    # committed archive. At RETOK_INCUMBENT=3000 it reproduces the fleet's ANALYSIS.txt but two things: the eps
+    # rule header's wording, and the KEPT section's disk and resume lines, which need the checkpoints the archive
+    # does not hold and give way to one line naming KEPT.txt; the block likewise, and its archive line names
+    # this OUT. At the default incumbent the same runs read "stays 1000".
+    import hashlib
+    ARCHIVE_0927 = os.path.join(ROOT, "results", "gpu_retok_2026-09-27", "gpu_retok_2026-09-27.tgz")
+    if not os.path.exists(ARCHIVE_0927):
+        print("SKIP F26 -- needs results/gpu_retok_2026-09-27/'s archive")
+    else:
+        sha26 = hashlib.sha256(open(ARCHIVE_0927, "rb").read()).hexdigest()
+        r26 = {}
+        for side, env26 in (("inc3000", INC0927), ("default", {})):
+            d26 = os.path.join(TMP, "f26_" + side)
+            os.makedirs(d26)
+            shutil.copy(ARCHIVE_0927, d26)
+            with tarfile.open(os.path.join(d26, os.path.basename(ARCHIVE_0927))) as tf:
+                tf.extractall(d26)
+            o26 = os.path.join(d26, "gpu_retok_out")
+            was = {f: open(os.path.join(o26, f)).read() for f in ("ANALYSIS.txt", "PASTE_BACK.txt", "KEPT.txt")}
+            p26 = gw("--analyze", EXP="retok", **env26, OUT=o26)
+            now = {f: (open(os.path.join(o26, f)).read() if os.path.exists(os.path.join(o26, f)) else None)
+                   for f in was}
+            tgz26 = os.path.join(d26, os.path.basename(ARCHIVE_0927))
+            r26[side] = (p26, was, now, o26, tarfile.open(tgz26).getnames() if os.path.exists(tgz26) else [])
+        p26, was, now, o26, names26 = r26["inc3000"]
+        from_kept = ("  read from KEPT.txt, as the fleet's own analysis wrote it: this directory holds no ckpt/ (an "
+                     "archive packs none), so no disk figure and no resume line")
+        want_a26 = []
+        for l in was["ANALYSIS.txt"].splitlines():
+            if l.startswith("  resume one: "):
+                continue
+            want_a26.append(from_kept if l.startswith("  disk: ") else
+                            l.replace("incumbent 3000 (the interim default);", "incumbent 3000 (RETOK_INCUMBENT);"))
+        want_b26 = []
+        for l in was["PASTE_BACK.txt"].splitlines():
+            if l.startswith("  resume one: "):
+                continue
+            want_b26.append(l.replace("; ckpt/ 9.93 GB", "; read from KEPT.txt (no ckpt/ here)")
+                            .replace("beside gpu_retok_out (", f"beside {o26} ("))
+        diff26 = [(a_, b_) for a_, b_ in zip(want_a26, (now["ANALYSIS.txt"] or "").splitlines()) if a_ != b_][:3]
+        check("F26 --analyze of a copy of the 2026-09-27 archive at RETOK_INCUMBENT=3000 reproduces its ANALYSIS.txt "
+              "but the eps rule header's wording and the KEPT section's disk and resume lines (one line names "
+              "KEPT.txt in their place), and its block but the KEPT line's tail, the resume line and the archive "
+              "line's OUT; the DECISION is the fleet's, 1000 replacing 3000",
+              p26.returncode == 0 and (now["ANALYSIS.txt"] or "").splitlines() == want_a26
+              and (now["PASTE_BACK.txt"] or "").splitlines() == want_b26
+              and "DECISION: TOK_RETOK_EVERY ships 1000, replacing the incumbent 3000: k1000 PASS against k0, and the "
+                  "whole-run 1000 - 3000 upper bound -0.0035 is below 0" in (now["PASTE_BACK.txt"] or ""),
+              f"{diff26}; {p26.stderr[-300:]}")
+        check("F26 ... its KEPT.txt stays as the fleet wrote it (57 coherent copies) and the archive it repacks holds "
+              "it; the committed archive is untouched",
+              now["KEPT.txt"] == was["KEPT.txt"] and was["KEPT.txt"].count(" coherent") == 57
+              and "gpu_retok_out/KEPT.txt" in names26
+              and hashlib.sha256(open(ARCHIVE_0927, "rb").read()).hexdigest() == sha26,
+              str(names26[:3]))
+        a26d = r26["default"][2]["ANALYSIS.txt"] or ""
+        check("F26 ... and at the default incumbent the same runs read 'stays 1000'",
+              "=== DECISION: TOK_RETOK_EVERY stays 1000 (the incumbent; 0 is never shipped by the rule): k1000 PASS "
+              "against k0; k3000 UNRESOLVED, the whole-run 3000 - 1000 upper bound +0.0188 is not below 0" in a26d,
+              str([l for l in a26d.splitlines() if "DECISION" in l]))
 
     # ---- F18-F24: a fleet that says it is alive, and only one per OUT (2026-09-27) --------------------
     # Live fleets of the stand-in above, slowed down (STUB_STARTUP seconds before its banner, STUB_WSLEEP a
@@ -2357,6 +2507,37 @@ for _ in range(100):
           and f"fix: EXP=retok OUT={o21i} bash {SCRIPT} --stop" in or24.stdout and "!! NOT LAUNCHED" in or24.stdout
           and not glob.glob(o21i + ".20*"),
           or24.stdout[-700:])
+    # THE READY LINE CARRIES EVERY KNOB SET (the review of 88d3fae): without --go, a clean check with the cooldown
+    # fleet's knobs printed "ready: EXP=retok bash .../gpu_launch.sh --go", whose paste would have launched the
+    # default retok fleet (k0, k3000, k1000, k0_nuis at seeds 0-2, kept checkpoints). The printed line is run
+    # here with `env` in the launcher's place: every knob comes back as it was set, and nothing else.
+    o24r = os.path.join(TMP, "f24r", "gpu_retok_out")
+    k24 = dict(EXP="retok", RETOK_ARMS="1000", COOLDOWN_ARM="100", SEEDS="0 1 2 3 4", KEEP_CKPT="0", DEVICE="cpu",
+               FETCH="0", OUT=o24r, WINDOWS="20", PAR="12", EXTRA="LM_CTX=128 FAB_SLOTS='4096'", TOK_GROW_EVERY="200")
+    rd24 = subprocess.run(["bash", LAUNCHER], cwd=TMP, capture_output=True, text=True, timeout=300,
+                          env=clean_env(PATH=env10["PATH"], **k24))
+    rl24 = next((ln[len("    ready: "):] for ln in rd24.stdout.splitlines() if ln.startswith("    ready: ")), "")
+    go24 = f" bash {LAUNCHER} --go"
+    back24 = {}
+    if rl24.endswith(go24):
+        ev24 = subprocess.run(["bash", "-c", rl24[:-len(go24)] + " env"], capture_output=True, text=True, timeout=60,
+                              env={"PATH": os.environ.get("PATH", "")})
+        back24 = dict(ln.split("=", 1) for ln in ev24.stdout.splitlines() if "=" in ln)
+    extra24 = set(back24) - set(k24) - {"PATH", "PWD", "OLDPWD", "SHLVL", "_"}
+    check("F24 without --go a clean check ends in a ready line that carries every knob set, quoted: run with env in "
+          "the launcher's place it gives each one back -- the cooldown fleet's RETOK_ARMS, COOLDOWN_ARM, SEEDS and "
+          "KEEP_CKPT, EXTRA with its quotes, and a lever a run inherits -- and nothing it was not given",
+          rd24.returncode == 0 and rl24.endswith(go24) and all(back24.get(k) == v for k, v in k24.items())
+          and not extra24,
+          f"{rl24!r}; {sorted(extra24)}; {rd24.stdout[-400:]!r}")
+    lt24 = open(LAUNCHER).read()
+    kn24 = re.search(r'^KNOBS="([^"]*)"', lt24, re.M)
+    knobs24 = set(kn24.group(1).split()) if kn24 else set()
+    read24 = {k for k in re.findall(r"^\s*([A-Z][A-Z0-9_]*)=\$\{\1:-", open(SCRIPT).read() + lt24, re.M)
+              if k not in ("CTX", "CKPT_BYTES") and not k.startswith("GW_")}
+    check("F24 ... and the launcher's KNOBS name every knob gpu_world.sh and the launcher read with a default "
+          "(CTX and CKPT_BYTES are the script's own, assigned before they are read)",
+          len(read24) > 20 and read24 <= knobs24, str(sorted(read24 - knobs24)))
 finally:
     # NOTHING THESE CHECKS STARTED OUTLIVES THEM: a process carrying a GW_FLEET_OUT under TMP (a fleet, its
     # runs, its heartbeat) or naming TMP on its command line (a stand-in run, a dashboard) is killed.

@@ -2,3 +2,11 @@ windows 15300, probes 95.6, mean tail 1.89 MB, 0.96 s per act, wall 403 s at 38 
   DATA_FOCUS_ACT_EVERY  3: 31 focus + 5 retok + 3 phase = 39 acts, 37 s splice, 9.3% of wall
   DATA_FOCUS_ACT_EVERY  6: 15 focus + 5 retok + 3 phase = 23 acts, 22 s splice, 5.5% of wall
   DATA_FOCUS_ACT_EVERY 25: 3 focus + 5 retok + 3 phase = 11 acts, 11 s splice, 2.6% of wall
+k1000, 16 retok acts, the windows above (15300): probes 95.6, wall 403 s at 38 w/s
+  DATA_FOCUS_ACT_EVERY  3: 31 focus + 16 retok + 3 phase = 50 acts, 48 s splice, 11.9% of wall; at the fleet's 0.70-0.74 s per act 8.7-9.2%
+  DATA_FOCUS_ACT_EVERY  6: 15 focus + 16 retok + 3 phase = 34 acts, 33 s splice, 8.1% of wall; at the fleet's 0.70-0.74 s per act 5.9-6.3%
+  DATA_FOCUS_ACT_EVERY 25: 3 focus + 16 retok + 3 phase = 22 acts, 21 s splice, 5.2% of wall; at the fleet's 0.70-0.74 s per act 3.8-4.0%
+k1000, 16 retok acts, k1000's mean windows in the fleet (16093): probes 100.6, wall 424 s at 38 w/s
+  DATA_FOCUS_ACT_EVERY  3: 33 focus + 16 retok + 3 phase = 52 acts, 50 s splice, 11.8% of wall; at the fleet's 0.70-0.74 s per act 8.6-9.1%
+  DATA_FOCUS_ACT_EVERY  6: 16 focus + 16 retok + 3 phase = 35 acts, 34 s splice, 7.9% of wall; at the fleet's 0.70-0.74 s per act 5.8-6.1%
+  DATA_FOCUS_ACT_EVERY 25: 4 focus + 16 retok + 3 phase = 23 acts, 22 s splice, 5.2% of wall; at the fleet's 0.70-0.74 s per act 3.8-4.0%

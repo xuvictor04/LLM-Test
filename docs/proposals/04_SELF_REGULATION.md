@@ -538,7 +538,7 @@ The d3 controller, revised by R-1, R-4 and R-7.
   - OPT's re-warm is inert: `OPT_LR_SHIFT_WARM` is 0.
   - FAB growth blacks out for `FAB_COOLDOWN` (400) windows per stamp.
   - At about 21 focus acts plus about 6 retok acts in a 20,000-window run, the upper bound is
-    27 × 400 = 10,800 blackout windows, 54% of the run.
+    27 × 400 = 10,800 blackout windows, 54% of the run (at 1000, the default since 2026-09-27, about 19 retok acts: 40 × 400 = 16,000, 80%).
   - New counter `fab.blackout_windows`, reported by E2. If E2 reads above 20%, the recommendation
     is to stamp redraw-only acts for OPT but not for FAB growth (§8 Q9).
 - *Not measured.* The toy has no FAB.
@@ -1033,7 +1033,7 @@ critic's text.
   - Per-phase byte shares are reported beside every per-area gap, so exposure effects are visible.
 - **The probe reads the tree's own acts (R-7).**
   - Guard: rebase at every act that moved the view (`data.focus.rebased`).
-  - Residual: the rebase drops one interval per retok act, about 6 per run. The step size is
+  - Residual: the rebase drops one interval per retok act, about 6 per run (about 19 at 1000, the default since 2026-09-27). The step size is
     measured at SR2.
 - **The probe perturbs training (R-8).**
   - Guard: the SR0 bit-identity test (probe ON against OFF). The default flips to off if it fails.

@@ -16,3 +16,25 @@ for ae in (3, 6, 25):
     acts = focus + 5 + 3
     s = acts * per_act
     print(f"  DATA_FOCUS_ACT_EVERY {ae:2d}: {focus} focus + 5 retok + 3 phase = {acts} acts, {s:.0f} s splice, {100*s/wall:.1f}% of wall")
+
+# RE-RUN AT THE SHIPPED CADENCE (2026-09-28, the review of the retok fleet read). TOK_RETOK_EVERY ships 1000
+# since the 2026-09-27 retok fleet (register O14) and E2 pins the shipped cadence (S0b-ship), so E2's retok
+# acts are k1000's, not k3000's 5. In that fleet k1000 acted 16, 15 and 16 times (seeds 0-2) over 16,186,
+# 15,957 and 16,136 windows of the same 3.78 MB epoch (results/gpu_retok_2026-09-27/ANALYSIS.txt), so 16
+# retok acts, at the windows above and at the fleet's own. Each act is priced as above (0.96 s, this
+# container's CPU) and at the act time the fleet measured on the GPU box's CPU, loop.act_seconds over
+# loop.acts in each k1000 log (the MEM re-cut, loop.act_remap_seconds, is not in it).
+RETOK = 16
+W_K1000 = round((16186 + 15957 + 16136) / 3)
+ACT_S_FLEET = (11.172267 / 16, 10.679583 / 15, 11.857102 / 16)
+for label, w_ in (("the windows above", W), ("k1000's mean windows in the fleet", W_K1000)):
+    probes_, wall_ = w_ / EVERY, w_ / RATE
+    print(f"k1000, {RETOK} retok acts, {label} ({w_}): probes {probes_:.1f}, wall {wall_:.0f} s at {RATE:.0f} w/s")
+    for ae in (3, 6, 25):
+        focus = int(probes_ // ae)
+        acts = focus + RETOK + 3
+        s = acts * per_act
+        lo, hi = acts * min(ACT_S_FLEET) / wall_, acts * max(ACT_S_FLEET) / wall_
+        print(f"  DATA_FOCUS_ACT_EVERY {ae:2d}: {focus} focus + {RETOK} retok + 3 phase = {acts} acts, {s:.0f} s splice, "
+              f"{100*s/wall_:.1f}% of wall; at the fleet's {min(ACT_S_FLEET):.2f}-{max(ACT_S_FLEET):.2f} s per act "
+              f"{100*lo:.1f}-{100*hi:.1f}%")

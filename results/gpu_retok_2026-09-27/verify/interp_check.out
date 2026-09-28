@@ -13,6 +13,8 @@ AREA ENTRIES: first 10 KB after num's (945,000) and c's (2,835,000) nominal entr
 ACT SPIKES: peak (10 KB bins, mean over seeds of arm - k0) within 200 KB after each act's byte offset
   k3000: acts at [3001, 6001, 9001, 12001, 15001] (seed 0); peaks +1.09 +0.42 +0.93 +0.68 +0.62
   k1000: acts at [1001, 2001, 3001, 4001, 5001, 6001, 7001, 8001, 9001, 10001, 11001, 12001, 13001, 14001, 15001, 16001] (seed 0); peaks +0.15 +0.30 +0.27 +0.24 +0.12 +0.22 +0.29 +0.26 +0.24 +0.25 +0.20 +0.08 +0.26 +0.15 +0.24 +0.32
+  k3000: 200 KB means +0.098 +0.035 +0.103 +0.088 +0.216; peaks first 2 +0.757 last 2 +0.649; 200 KB means first 2 +0.066 last 2 +0.152
+  k1000: 200 KB means -0.064 -0.004 +0.001 -0.023 -0.008 +0.005 +0.019 +0.013 +0.031 +0.035 +0.035 -0.124 +0.030 +0.059 +0.114 +0.236; peaks first 8 +0.230 last 8 +0.218; 200 KB means first 8 -0.008 last 8 +0.052
 N_LIVE at the end, per run (the last progress line / fab.n_live)
   k0       [3949, 3413, 3853]
   k3000    [3643, 3002, 3733]
@@ -54,3 +56,4 @@ THE ETA MISS: each run's start (logs/_started.txt t0) and wall (logs/_done.txt s
   k0_rerun.s0 started at +433 s and took 553 s, alone from +590 s, ending at +986 s; fleet wall 986 s
   the ETA: 505 s (260,000 windows at 514.6 windows/s), wall/ETA 1.95; priced by waves: 2 x (20,000 / 42.88 + 12.6 s) = 958 s (-2.8% of the wall)
   the heartbeat's first fleet ETA: 1040 s (2 waves), +5.5% of the wall
+  ... written 20 s into the fleet, as time left: the end at +1060 s against +986 s, +7.5%; 1040 s left against 966 s, +7.7%

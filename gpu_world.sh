@@ -155,11 +155,18 @@
 # the interim 3000 before it. A challenger replaces it only if the challenger does not FAIL and (the
 # incumbent FAILs, or the one-sided 95% upper bound of the whole-run paired challenger - incumbent is
 # below 0); otherwise the incumbent stays, UNRESOLVED readings included. 0 is never shipped by the rule:
-# if every cadence FAILs, the DECISION is ESCALATE (the act stays ON at the incumbent until the owner
-# answers; the remedy arms run next). M = max over seeds |k0 - k0_nuis| and the per-arm means are
-# printed beside the rule and decide nothing. RETOK_INCUMBENT is read when the analysis runs, like EPS:
-# --analyze of the 2026-09-27 archive reads its DECISION again at RETOK_INCUMBENT=3000, and an operation
-# check at a shorter shape (a CPU fleet whose cadences are 40 and 20) names its own.
+# if every cadence of a fleet of two or more FAILs, the DECISION is ESCALATE (the act stays ON at the
+# incumbent until the owner answers; the remedy arms run next). A FLEET OF ONE CADENCE NEVER ESCALATES
+# (2026-09-28, review of 88d3fae): O14 escalates only when both of its cadences and every remedy arm
+# FAIL, and a re-read of the shipped cadence alone (RETOK_ARMS=1000) cannot show the other one FAILing.
+# The incumbent's FAIL there reads "<c> FAILs ...: it does not ship; <O14's other cadence> and the
+# remedy arms run next" (register O14, note retok fleet (3): the shipped cadence stops firing), and a
+# lone challenger that FAILs leaves the incumbent, unread, as it stands. M = max over seeds
+# |k0 - k0_nuis| and the per-arm means are printed beside the rule and decide nothing. RETOK_INCUMBENT
+# is read when the analysis runs, like EPS: --analyze of the 2026-09-27 archive reads its DECISION again
+# at RETOK_INCUMBENT=3000 -- on a copy unpacked in a scratch directory, never beside the committed
+# archive, since --analyze rewrites ANALYSIS.txt and the block and repacks <name>_<date>.tgz beside OUT
+# -- and an operation check at a shorter shape (a CPU fleet whose cadences are 40 and 20) names its own.
 # RETOK_ARMS names the act cadences (arm k<c> each; default "3000 1000", the 2026-09-27 fleet's arms in
 # its order), and COOLDOWN_ARM=<v> adds k<fastest>_cd<v> at FAB_COOLDOWN=<v>, beside the rule and never a
 # ship candidate: C13's reading of whether FAB's cooldown costs. It is read against its own cadence's
@@ -370,6 +377,11 @@ if [[ "$EXP" != world ]]; then
   ARCH_ALSO=""; LONG=0
 fi
 # THE PINS EVERY RUN OF THE EXPERIMENT CARRIES, after EXTRA and before the arm's own settings.
+# EXP=world PINS NONE (2026-09-28, review of 88d3fae), so its command lines stay the ones it ran before:
+# its four arms set only WORLD_ levers, and its runs act at the tree's TOK_RETOK_EVERY -- 1000 since the
+# 2026-09-27 retok fleet, about 19 acts in a 20,000-window run where 3000 gave about 6. A re-run of it
+# that decides anything names the cadence in EXTRA, where SUMMARY and the block record it (S0b-ship:
+# every dependent experiment pins and labels TOK_RETOK_EVERY). EXP=retok's arms set it themselves.
 EXP_ENV=""
 [[ "$EXP" == world_epoch ]] && EXP_ENV="TOK_RETOK_EVERY=$PIN_RETOK DATA_DRAW=planned"
 # C12's LABEL, READ OFF THE TREE AND THE FLEET'S SETTINGS AT LAUNCH (so --analyze on another day
@@ -921,19 +933,39 @@ def better_than(diffs, alpha=0.05):
     return out
 
 
+# THE TWO CADENCES O14 NAMES: the interim 3000 and the arm 1000, which the 2026-09-27 fleet shipped. O14
+# escalates only when both of them (and every remedy arm) FAIL against k0, so a fleet that holds one
+# cadence names the other as what runs next when its own FAILs.
+O14_CADENCES = ("k3000", "k1000")
+
+
 def choose(cadences, verdicts, better, inc):
     """O14's choice. cadences: every cadence arm of the fleet (k<c>); verdicts: eps_rule's reading of the
     ones that acted; better: better_than's reading of the acted challengers against the incumbent arm
     `inc` (k1000 since the 2026-09-27 fleet's DECISION, k3000 before it). Returns (kind, arm, why), kind
-    one of 'undecided' (no cadence acted), 'escalate' (every
-    cadence FAILs), 'replace' (arm replaces the incumbent) or 'stays' (the incumbent stays). A challenger
+    one of 'undecided' (no cadence acted), 'escalate' (every cadence of a fleet of two or more FAILs),
+    'withdraw' (the incumbent, the fleet's only cadence, FAILs: it does not ship, and `why` names what
+    runs next), 'replace' (arm replaces the incumbent) or 'stays' (the incumbent stays). A challenger
     replaces the incumbent only if it does not FAIL and (the incumbent FAILs, or it is significantly
     better); among several that qualify, the lowest upper bound against the incumbent. 0 is never an
-    answer: it is the control, and the rule never ships it."""
+    answer: it is the control, and the rule never ships it.
+    A FLEET OF ONE CADENCE NEVER ESCALATES (2026-09-28, review of 88d3fae). O14 escalates when both of its
+    cadences and every remedy arm FAIL against k0, and a cadence that FAILs does not ship: the other
+    cadence or O14's remedy arms run next (register O14, note retok fleet (3)). At 88d3fae the cooldown
+    fleet's re-read of the shipped 1000 alone (RETOK_ARMS=1000) would have taken its FAIL for ESCALATE, the
+    act ON at 1000 until the owner answered, though 3000 never FAILed. A lone challenger that FAILs does
+    not ship either, and the incumbent, which that fleet does not read, stays."""
     if not verdicts:
         return "undecided", None, "no cadence acted in these runs"
     if cadences and all(verdicts.get(a, {}).get("verdict") == "FAIL" for a in cadences):
-        return "escalate", None, "every cadence FAILs against k0 by the ε rule"
+        if len(cadences) > 1:
+            return "escalate", None, "every cadence FAILs against k0 by the ε rule"
+        if cadences[0] == inc:
+            nxt = [c[1:] for c in O14_CADENCES if c != inc]
+            return "withdraw", inc, (f"{inc} FAILs against k0 by the ε rule, and it is this fleet's only cadence; "
+                                     f"{', '.join(nxt)} and the remedy arms run next (register O14, note retok "
+                                     f"fleet (3)); no ESCALATE, which needs both cadences and every remedy arm "
+                                     f"to FAIL")
     iv = verdicts.get(inc, {}).get("verdict")
     chal = sorted(a for a in verdicts if a != inc)
     bt = {c: better.get(c) or (0, None, None, False, None) for c in chal}
@@ -1230,6 +1262,10 @@ def retok(ctx_arg, archive, eps, inc_cadence):
     elif kind == "escalate":
         decision = (f"ESCALATE: every cadence FAILs against k0 by the ε rule; the act stays ON at {INC[1:]} until "
                     f"the owner answers; the remedy arms run next (register O14)" + tail_)
+    elif kind == "withdraw":
+        # THE SHIPPED CADENCE FAILs IN A FLEET THAT HOLDS NO OTHER (2026-09-28, review of 88d3fae): it stops
+        # firing and O14's other cadence and remedy arms run next (note retok fleet (3)); never ESCALATE here.
+        decision = f"TOK_RETOK_EVERY {INC[1:]} does not ship (0 is never shipped by the rule): {why}" + tail_
     elif kind == "replace":
         decision = f"TOK_RETOK_EVERY ships {pick[1:]}, replacing the incumbent {INC[1:]}: {why}" + tail_
     else:
@@ -1561,23 +1597,43 @@ def retok(ctx_arg, archive, eps, inc_cadence):
 
     # ---------------------------------------------------------------- kept checkpoints
     kd = os.path.join(OUT, "ckpt", "keep")
+    have_ckpt = os.path.isdir(os.path.join(OUT, "ckpt"))
     kfiles = sorted(glob.glob(os.path.join(kd, "*.kept.txt")))
     rows = []
     for f in kfiles:
         rows += [l for l in rd(f).splitlines() if l.strip()]
+    # AN ARCHIVE HOLDS NO CHECKPOINTS, SO KEPT.txt IS ITS ONLY RECORD OF THEM (2026-09-28, review of 88d3fae).
+    # --analyze of an unpacked archive found no ckpt/, deleted the KEPT.txt the fleet's own analysis had
+    # written, reported "none (KEEP_CKPT off)" beside SUMMARY's "kept checkpoints: ON", and repacked the
+    # archive without it. KEPT.txt is rewritten from ckpt/keep, and removed when a ckpt/ here holds no
+    # index; with no ckpt/ at all it is kept, and its rows are read as the fleet's record.
+    kept_from = ""
     if kfiles:
         with open(os.path.join(OUT, "KEPT.txt"), "w") as fh:
             fh.write("\n".join(rows) + "\n")
     elif os.path.exists(os.path.join(OUT, "KEPT.txt")):
-        os.remove(os.path.join(OUT, "KEPT.txt"))          # never one this ckpt/keep does not hold
+        if have_ckpt:
+            os.remove(os.path.join(OUT, "KEPT.txt"))      # never one this ckpt/keep does not hold
+        else:
+            rows = [l for l in rd(os.path.join(OUT, "KEPT.txt")).splitlines() if l.strip()]
+            kept_from = "KEPT.txt"
     # AN INDEX THAT REFUSED says so in its log's "!!" line (keep_index: a keep directory stamped by
     # another launch), and the block carries it: those saves were left unindexed, never dropped.
     refused = [l.strip() for f in sorted(glob.glob(os.path.join(kd, "*.index.log")))
                for l in rd(f).splitlines() if l.startswith("!!")]
     kept_rows, kept_short = [], []
-    if not os.path.isdir(os.path.join(OUT, "ckpt")):
-        kept_rows.append("  none: no ckpt/ directory (KEEP_CKPT was off)")
-        kept_short.append("KEPT: none (KEEP_CKPT off)")
+    if not have_ckpt and not kept_from:
+        # WHETHER THE FLEET KEPT ANY IS SUMMARY'S TO SAY, not the directory's.
+        if KEPT_ON == "ON":
+            kept_rows.append("  none here: SUMMARY.txt records kept checkpoints ON, but this directory holds no "
+                             "ckpt/ and no KEPT.txt (the fleet's archive packs KEPT.txt, never a checkpoint)")
+            kept_short.append("KEPT: none here (SUMMARY: kept checkpoints ON; no ckpt/, no KEPT.txt)")
+        elif KEPT_ON == "OFF":
+            kept_rows.append("  none: no ckpt/ directory (KEEP_CKPT was off)")
+            kept_short.append("KEPT: none (KEEP_CKPT off)")
+        else:
+            kept_rows.append("  none: no ckpt/ directory, and SUMMARY.txt predates the kept-checkpoint record")
+            kept_short.append("KEPT: none (no ckpt/; SUMMARY.txt does not say)")
     else:
         ks = {}
         for l in rows:
@@ -1615,9 +1671,15 @@ def retok(ctx_arg, archive, eps, inc_cadence):
                     seen.add((st.st_dev, st.st_ino)); du += st.st_size
         nk = sum(len(v) for v in ks.values())
         ninc = sum(1 for v in ks.values() for _, ok in v if not ok)
-        kept_rows.append(f"  disk: {du / 1e9:.2f} GB under {os.path.join(OUT, 'ckpt')} (hard links counted once)")
+        if kept_from:
+            # THE COPIES ARE NOT HERE: no disk to count and no copy to resume from, and the rows say whose.
+            kept_rows.append(f"  read from {kept_from}, as the fleet's own analysis wrote it: this directory holds no "
+                             f"ckpt/ (an archive packs none), so no disk figure and no resume line")
+        else:
+            kept_rows.append(f"  disk: {du / 1e9:.2f} GB under {os.path.join(OUT, 'ckpt')} (hard links counted once)")
         kept_rows += [f"  INDEX REFUSED: {l}" for l in refused]
-        first = next(((s, st) for s in sorted(ks) for st, ok in sorted(ks[s]) if ok), None)
+        first = (None if kept_from else
+                 next(((s, st) for s in sorted(ks) for st, ok in sorted(ks[s]) if ok), None))
         # THE RESUME LINE CARRIES THE RUN'S OWN SEED, DEVICE AND STREAM (2026-09-27, build 1.5's review):
         # run_job sets RUN_SEED, RUN_DEVICE and DATA_STREAM_BYTES on every run and EXTRA carries none of
         # them, so the line without them was refused -- on CPU at 200 windows the segmentation rebuilt
@@ -1631,7 +1693,8 @@ def retok(ctx_arg, archive, eps, inc_cadence):
         kept_short.append(f"KEPT: {nk} copies of {len(ks)} k0 run(s)"
                           + (", all coherent" if nk and not ninc else f", {ninc} INCOHERENT" if ninc else "")
                           + (", act windows covered " + ", ".join(f"{a} {h}/{n}" for a, (h, n) in cov_tot.items())
-                             if cov_tot else "") + f"; ckpt/ {du / 1e9:.2f} GB")
+                             if cov_tot else "")
+                          + (f"; read from {kept_from} (no ckpt/ here)" if kept_from else f"; ckpt/ {du / 1e9:.2f} GB"))
         kept_short += short_bad[:4] + ([f"  ... {len(short_bad) - 4} more k0 run(s): KEPT.txt"] if len(short_bad) > 4 else [])
         kept_short += [f"  INDEX REFUSED: {l}" for l in refused[:2]] + (
             [f"  ... {len(refused) - 2} more refused index(es): ckpt/keep/*.index.log"] if len(refused) > 2 else [])

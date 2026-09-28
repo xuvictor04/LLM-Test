@@ -4503,7 +4503,8 @@ read when the analysis runs, so `--analyze` can read a fleet against another ε.
 whole-run paired 1000 − 3000 is below 0); otherwise 3000 stays, UNRESOLVED readings included, and an
 incumbent that never acted is not read, so it stays. 0 is never shipped by the rule: when every cadence
 FAILs the DECISION is ESCALATE (the act stays ON at 3000 until the owner answers; the remedy arms run
-next, register O14). M and the per-arm means are printed as "reported, decides nothing (O14)", and the
+next, register O14), in a fleet of two or more cadences; a fleet of one never escalates (2026-09-28,
+below). M and the per-arm means are printed as "reported, decides nothing (O14)", and the
 run-to-run line stays. The block carries each cadence's per-phase means and bounds, its verdict, ε, n,
 and the choice with its reason. `RETOK_INCUMBENT` (default 3000; 1000 since the fleet's DECISION, the last
 note below) names the incumbent for operation checks
@@ -4648,15 +4649,22 @@ upper bounds +0.0072 and +0.0414); read on the phase worst against k0, or on eac
 1000 ships as it does here. Read per area, which the fleet did not pre-register, num in phase 4 is +0.103
 at 1000 (UNRESOLVED at 3 seeds, Bonferroni over the 8 area×phase cells), the risk E2's re-read is for.
 **The default moves:** `TOK.retok_every` is 1000 (`src/tok/levers.py`; its help says it is provisional
-until E2's held-out re-read), and `gpu_world.sh`'s `RETOK_INCUMBENT` and `PIN_RETOK` are 1000. Every fleet
-arm sets `TOK_RETOK_EVERY` itself, so no arm's run changes, and the 80-window baseline fixture reproduces
-(`tests/test_baseline.py`; no act can fire before window 1001). `RETOK_INCUMBENT` is read when the
+until E2's held-out re-read), and `gpu_world.sh`'s `RETOK_INCUMBENT` and `PIN_RETOK` are 1000. Every
+`EXP=retok` arm sets `TOK_RETOK_EVERY` itself, so none of its runs changes, and the 80-window baseline
+fixture reproduces (`tests/test_baseline.py`; no act can fire before window 1001). *(Corrected
+2026-09-28, the next note: this said every fleet arm, and no arm's run changes. `EXP=world_epoch` pins
+`PIN_RETOK`, so its runs change by design, 3000 → 1000; `EXP=world`'s four arms set only `WORLD_` levers
+and it pins nothing, so its runs now act at the shipped 1000.)* `RETOK_INCUMBENT` is read when the
 analysis runs, so `--analyze` of the 2026-09-27 archive reproduces its ANALYSIS.txt at
-`RETOK_INCUMBENT=3000` (every line from RUNS to KEPT but the ε rule header's wording, and the block but
-its KEPT lines, the archive holding no checkpoints; checked on a copy) and reads "stays 1000" at the
-default, and `tests/test_gpu_world.py` names `RETOK_INCUMBENT=3000` on F1-F17's fleets, which are shaped
-like that fleet. **C13's cooldown arm is now read, not only reported.** The fleet's alarm (k1000 blacks
-out 37.9% of its windows before the pool fills) orders it, and a mean beside the rule decided nothing:
+`RETOK_INCUMBENT=3000` and reads "stays 1000" at the default, and `tests/test_gpu_world.py` names
+`RETOK_INCUMBENT=3000` on F1-F17's fleets, which are shaped like that fleet. *(Corrected 2026-09-28,
+the next note: the re-read runs on a copy unpacked in a scratch directory, never beside the committed
+archive, because `--analyze` rewrites ANALYSIS.txt and the block and repacks the `.tgz` beside OUT; and
+at this commit it deleted the archive's KEPT.txt and read "KEEP_CKPT off". It now reproduces every line
+but the ε rule header's wording and the KEPT section's disk and resume lines, and the block but the KEPT
+line's tail and the resume line, as F26 holds.)* **C13's cooldown arm is now read, not only reported.**
+The fleet's alarm (k1000 blacks out 37.9% of its windows before the pool fills) orders it, and a mean
+beside the rule decided nothing:
 `k<c>_cd<v> − k<c>` is paired over the seeds and read per phase by the ε rule and over the whole run by
 the one-sided 95% upper bound (below 0: the shorter cooldown is significantly better). It sits beside the
 rule, in no Holm with the cadences, never a ship candidate, and is not read when its cadence never acted.
@@ -4666,18 +4674,23 @@ per k1000 run, beside the 35-46 its blackout suppressed, and 18-62 per k0 run), 
 needs a k0 cooldown control, which is not built. `FAB_COOLDOWN` stays 400 whatever it reads (C13, the CAP
 runaway precedent); a cooldown arm significantly better that does not FAIL is recorded as a measured cost
 of the cooldown. **Driven:** `tests/test_gpu_world.py` F25, the next fleet's shape at the default
-incumbent: 1000 stays while it does not FAIL and is ESCALATE, the act ON at 1000, when it does; the
-cooldown arm's known bounds at 5 seeds, PASS and not below 0, then below 0; and a stand-in launch of
-`EXP=retok RETOK_ARMS=1000 COOLDOWN_ARM=100 SEEDS="0 1 2 3 4" KEEP_CKPT=0` that runs the 21 runs it names,
+incumbent: 1000 stays while it does not FAIL, and when it FAILs it does not ship, 3000 and the remedy
+arms next, never ESCALATE *(corrected 2026-09-28, the next note: F25 held ESCALATE, the act ON at 1000,
+which O14 does not rule)*; the cooldown arm's known bounds at 5 seeds, PASS and not below 0, then below
+0; and a stand-in launch of `EXP=retok RETOK_ARMS=1000 COOLDOWN_ARM=100 SEEDS="0 1 2 3 4" KEEP_CKPT=0`
+that runs the 21 runs it names,
 k1000_cd100 at `TOK_RETOK_EVERY=1000 FAB_COOLDOWN=100`, with no `CKPT_` setting. F9 holds the pin at 1000.
 **The next fleet, pre-registered here** (`notes/OWNER_BRIEF.md` test 3): `EXP=retok RETOK_ARMS=1000
 COOLDOWN_ARM=100 SEEDS="0 1 2 3 4" KEEP_CKPT=0 bash tools/gpu_launch.sh --go`, k0, k1000, k0_nuis and
 k1000_cd100 at seeds 0-4 and k0_rerun, 21 runs. Five seeds are also its cap (O2: an UNRESOLVED reading is
 then reported as unresolved), and at PAR 12 they take the same two waves as three would. It reads k1000
-against k0 by the rule above at the default incumbent (1000 stays unless it FAILs, which reads ESCALATE
-with the remedy arms next, O14) and k1000_cd100 against k1000 as above. No arm reads the lever's default,
-so seeds 0-2 of k0, k1000 and k0_nuis repeat the 2026-09-27 runs, and on the same card and torch they
-should read its bits/byte to the last digit. **On CPU (operation only),** from a scratch clone of this
+against k0 by the rule above at the default incumbent (1000 stays unless it FAILs; a FAIL does not ship,
+and 3000 and O14's remedy arms run next, note retok fleet (3); never ESCALATE, which O14 keeps for both
+cadences and every remedy arm FAILing, and 3000 was UNRESOLVED, never FAILed) and k1000_cd100 against
+k1000 as above. *(Corrected 2026-09-28, the next note: this pre-registration read a FAIL of 1000 as
+ESCALATE with the act ON at 1000, against O14.)* No arm reads the lever's default, so seeds 0-2 of k0,
+k1000 and k0_nuis repeat the 2026-09-27 runs, and on the same card and torch they should read its
+bits/byte to the last digit. **On CPU (operation only),** from a scratch clone of this
 tree, the launcher with the command's knobs and `DEVICE=cpu FETCH=0` read 9 PASS, 2 WARN (no fetch; the
 clone's uncommitted edits), 0 FAIL, and `--go` at `WINDOWS=1050`, where the 1000 cadence acts once (window
 1001), calibrated PAR 2 and ran the 21 runs, all rc=0: every k1000 and k1000_cd100 run acted at window
@@ -4686,6 +4699,70 @@ read k1000 PASS against k0 at n = 5, "stays 1000", and the cooldown row PASS wit
 −0.0098, upper bound +0.0101, not below 0. At seeds 1-4 k1000_cd100 left k1000 at windows 505-783, before
 the act: a growth birth the new_frac budget declined over 400 windows and granted over 100, the confound
 above.
+
+**2026-09-28 (the retok fleet read's review; register O14, O20, NEW-20, LOW-GPU-WORLD-ETA, §8 2.1): A
+FLEET OF ONE CADENCE NEVER ESCALATES, `--analyze` KEEPS AN ARCHIVE'S KEPT.txt, AND THE LAUNCHER'S READY
+LINE CARRIES EVERY KNOB.** Eight findings on 88d3fae and 510c3a5, each checked against the files. (1)
+**The next fleet's FAIL branch contradicted O14.** `choose()` read every cadence FAILing as ESCALATE, and
+in the cooldown fleet (`RETOK_ARMS=1000`) k1000 is every cadence, so its FAIL would have read "ESCALATE
+... the act stays ON at 1000 until the owner answers", which F25 pinned. O14 says a cadence that FAILs
+does not ship and escalates only when both cadences and every remedy arm FAIL; note retok fleet (3) says
+the shipped cadence then stops firing and the other cadence or the remedy arms run; and 3000 was
+UNRESOLVED, never FAILed. **Ruling.** A fleet of one cadence never escalates. When its one cadence is the
+incumbent and FAILs, the DECISION is "TOK_RETOK_EVERY 1000 does not ship (0 is never shipped by the rule):
+k1000 FAILs against k0 by the ε rule, and it is this fleet's only cadence; 3000 and the remedy arms run
+next (register O14, note retok fleet (3)); no ESCALATE, which needs both cadences and every remedy arm to
+FAIL" (the other cadence is O14's other one, 1000 after 3000); a lone challenger that FAILs does not ship
+and the incumbent, which that fleet does not read, stays; a fleet of two or more reads ESCALATE as before.
+(2) The register's present tense still took 3000 as the shipped cadence in several places, and in two of
+them the numbers change at 1000; the register, 03b and 04 now state them at 1000 (C40, note S0b-ship's
+hazards, 03b-16.33 and C27, 04-Q9 and note secondaries with `verify/numbers3/e2_splice.py` re-run at 16
+retok acts, the preset's `CKPT_EVERY` and `EVAL_RETENTION_EVERY` at 333, 03b's per-act probe cost at
++106%). (3) **"Every fleet arm sets `TOK_RETOK_EVERY` itself" was false for `EXP=world`**,
+`gpu_world.sh`'s default experiment: its fb_off, fb_on, skip and world_off arms set only `WORLD_` levers
+and it pins nothing, so an `EXP=world` fleet now acts every 1000 windows, about 19 acts per 20,000-window
+run where 3000 gave about 6, unpinned; `EXP=world_epoch` moves 3000 → 1000 by design (`PIN_RETOK`). The
+sentence above is corrected in place. `EXP=world` stays unpinned, so its command lines stay the ones it
+ran before (as the kept-checkpoint note of 2026-09-27 above keeps them), and a re-run of it that decides
+anything names the cadence in `EXTRA`, where SUMMARY and the block record it (S0b-ship: every dependent
+experiment pins and labels `TOK_RETOK_EVERY`). (4) The owner brief said the whole expert pool pauses for
+400 windows after each rebuild and each growth step; the pause is FAB's growth asks alone (about 1% of
+births: k0 grew 24 of about 2,355 per run), and spawning continues through it (k1000.s0's `n_live` rose
+from 2,479 at window 1001 to 2,653 at 1401, inside its first act's blackout). The brief is corrected. (5)
+The register's O20 and NEW-20 now carry the pool re-read, counted like for like with the replicate: 2 of
+13 runs reached `FAB_SLOTS` (k0.s0 and k0_rerun.s0, window 13,401), against 20 of 21 on 2026-09-24, and
+every run ended with 122-1,627 slots free, §8 6.1's parents among them; LOW-GPU-WORLD-ETA records that the
+1.95× miss was scheduling and that the owed wave-priced ETA replaces the raise. (6) RESULTS.md's heartbeat
+ETA was compared with the whole wall: it was time left at +20 s, so it put the end at +1,060 s against
++986 s, 7.5% late; and its act spikes do not grow with lateness (k3000's first peak is its largest, +1.09;
+k1000's first eight average +0.23 and its last eight +0.22), though their 200 KB mean does. Both are
+corrected, with `verify/interp_check.py`, and the spike paragraph is labelled descriptive until note retok
+fleet (4)'s matched control runs. (7) **`--analyze` of an unpacked archive rewrote it.** An archive packs
+KEPT.txt and no checkpoint, so its re-read found no `ckpt/`, deleted KEPT.txt, printed "KEPT: none
+(KEEP_CKPT off)" beside SUMMARY's "kept checkpoints: ON", and repacked `<name>_<launch date>.tgz` beside
+OUT without it: unpacked inside `results/gpu_retok_2026-09-27/`, over the committed archive. **Ruling.**
+With no `ckpt/`, KEPT.txt is the fleet's record: it is kept and read (the same per-run rows, and one line
+in place of the disk and resume lines, which need the checkpoints), and the archive it packs holds it;
+with neither, SUMMARY's record decides between "none here" (ON) and "KEEP_CKPT off" (OFF); a `ckpt/` that
+holds no index still removes a KEPT.txt it does not hold. `--analyze` still rewrites ANALYSIS.txt and the
+block and repacks beside OUT, as a stopped fleet's re-read needs, so a committed archive is re-read on a
+copy unpacked in a scratch directory, never beside it (`gpu_world.sh`'s header and RESULTS.md say so). (8)
+**The launcher's ready line dropped the knobs.** Without `--go`, a clean check printed "ready: EXP=retok
+bash .../gpu_launch.sh --go" whatever else was set (since cd70ed1), so after the brief's cooldown-fleet
+knobs its paste would have launched the default retok fleet: k0, k3000, k1000 and k0_nuis at seeds 0-2,
+with kept checkpoints. It now carries every knob set, quoted: each one `gpu_world.sh` or the launcher
+reads, and every lever a run would inherit (a name under a package prefix `src/*/levers.py` declares).
+**Driven:** `tests/test_gpu_world.py` F16 (a one-cadence fleet: the incumbent's FAIL withdraws it and
+names the other cadence, 3000 after 1000 and 1000 after 3000; a lone challenger's FAIL leaves the
+incumbent; a lone PASS or UNRESOLVED stays), F25 (the cooldown fleet's FAIL reads "does not ship ... 3000
+and the remedy arms run next", no ESCALATE, in ANALYSIS and the block), F7 (no `ckpt/`: KEPT.txt kept,
+read and packed; ON with neither is "none here"; OFF is "KEEP_CKPT off"; a `ckpt/` with no index removes a
+stale KEPT.txt), F24 (the ready line, run with `env` in the launcher's place, gives back every knob set,
+`EXTRA` with its quotes and an inherited lever among them, and nothing else; its knob list covers every
+knob either script reads with a default) and F26 (the 2026-09-27 archive, re-read on a copy at
+`RETOK_INCUMBENT=3000`: its ANALYSIS.txt but the ε rule header's wording and the KEPT disk and resume
+lines, its block but the KEPT line's tail, the resume line and the archive line's OUT, its KEPT.txt kept
+and repacked, "stays 1000" at the default, and the committed archive untouched).
 
 **THE QUESTION AS IT STOOD.**
 

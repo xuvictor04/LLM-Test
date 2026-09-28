@@ -56,7 +56,12 @@ Everything matched:
 - **Reproducible.** `gpu_world.sh --analyze` at this commit, run on a copy with
   `RETOK_INCUMBENT=3000`, reproduces ANALYSIS.txt from RUNS to KEPT and the block. Only the ε-rule
   header's wording differs, and the block's KEPT lines, because the archive holds no checkpoints. At
-  the new default incumbent the same runs read "stays 1000".
+  the new default incumbent the same runs read "stays 1000". *(Corrected 2026-09-28: the copy must be
+  unpacked in a scratch directory, never beside this archive, because `--analyze` rewrites
+  ANALYSIS.txt and the block and repacks the `.tgz` beside OUT. At 88d3fae it also deleted the copy's
+  KEPT.txt, printed "KEPT: none (KEEP_CKPT off)" and repacked without it. It now keeps KEPT.txt and
+  reads its rows, so only the header's wording and the KEPT section's disk and resume lines differ;
+  `tests/test_gpu_world.py` F26 holds that on a copy.)*
 - **Placement.** Placing each flush by its last byte, or pro rata, moves no phase mean by more than
   0.0007.
 - Not checkable here: the 9.93 GB of checkpoint disk.
@@ -86,16 +91,24 @@ Everything matched:
      (+0.043, upper bound +0.046).
    - The p4 mean hides num behind c's arrival gain (c: −0.062 at 1000, −0.134 at 3000).
 5. **The block's LOW-GPU-WORLD-ETA line gives the wrong advice.** It says to raise `CAL_WINDOWS` to at
-   least 520, but this fleet calibrated on 600. The miss was scheduling (below).
+   least 520, but this fleet calibrated on 600. The miss was scheduling (below). The register's
+   LOW-GPU-WORLD-ETA row records it: the raise is not taken, and the owed ETA priced by waves replaces
+   it.
 6. **`CHECKPOINTS.md`'s resume line lacked `RUN_DEVICE=cuda` and `OMP_NUM_THREADS=1`.** It would have
    continued a CUDA parent on the CPU. It is corrected.
 
 ## Interpretation
 
 - **Phase pattern: an act's cost depends on when it lands.**
-  - Each act is followed by a transient spike that grows with the act's size and lateness. In 10 KB
-    bins over the next 200 KB, k3000's acts (bytes/token +4 to +11%) peak at +0.4 to +1.1 bits/byte
-    against k0, and k1000's (+1 to +4%) at +0.1 to +0.3.
+  - *Descriptive, not a test, until note retok fleet (4)'s maturity-matched k0 control runs (the
+    spike test's offline analysis, still owed).* Each act is followed by a transient spike whose size
+    follows the act's. In 10 KB bins over the next 200 KB, k3000's acts (bytes/token +4 to +11%) peak
+    at +0.4 to +1.1 bits/byte against k0, and k1000's (+1 to +4%) at +0.1 to +0.3. The peaks do not
+    grow with lateness: k3000's first is its largest (+1.09), and k1000's first eight average +0.23
+    and its last eight +0.22. The mean over the same 200 KB does grow: k3000 +0.10, +0.04, +0.10,
+    +0.09 and +0.22 by act, and k1000 −0.008 over its first eight acts and +0.052 over its last eight
+    (+0.06, +0.11 and +0.24 at its last three). *(Corrected 2026-09-28: this said the spike grows with
+    lateness, which its peaks do not show.)*
   - Coarser tokens pay while the model is naive. Right after k1000's first act (window 1001, the end of
     LR warmup) it reads −0.066 over 0.19-0.38 MB at every seed, and p1 holds its first four acts. k3000's
     p1 harm is its first act's spike alone (+0.203 over 0.567-0.661 MB).
@@ -120,10 +133,13 @@ Everything matched:
   - `FAB_COOLDOWN` also spaces growth firings: that refused 8-26 regression asks per k1000 run and
     18-62 per k0 run. So the cooldown fleet prices the whole 400-window cooldown, not the blackout
     alone; one analyst predicts a difference within ±0.01 bits/byte.
-- **Pool.** `FAB_SLOTS` 4096 was reached in 1 of 12 runs (k0.s0, from window 13,401), and end `n_live`
-  ranged 2,469-3,974. The 2026-09-24 fleet filled in 20 of 21 runs, on a stationary phase-1 stream at
-  87f810a. Shape and commit (DOM Levels on, the merge scan rewritten) are confounded. `n_live` is also
-  chaotic: at seed 1, k0_nuis's one-step `SIG_WARMUP` change moved it by 944.
+- **Pool.** `FAB_SLOTS` 4096 was reached in 2 of 13 runs (k0.s0 and its replicate k0_rerun, from window
+  13,401), and end `n_live` ranged 2,469-3,974, so every run ended with 122-1,627 slots free. The
+  2026-09-24 fleet filled in 20 of 21 runs, on a stationary phase-1 stream at 87f810a; both counts
+  include the fleet's replicate (1 of 12 and 19 of 20 without it). *(Corrected 2026-09-28: this said 1
+  of 12 against 20 of 21, counting the replicate for one fleet only.)* Shape and commit (DOM Levels
+  on, the merge scan rewritten) are confounded. `n_live` is also chaotic: at seed 1, k0_nuis's
+  one-step `SIG_WARMUP` change moved it by 944.
 - **Nuisance and fragility.** M = 0.018 is 2.5 times k1000's whole-run effect. k0_nuis is worse at
   every seed and reaches +0.052 in one phase (seed 1, p4). It decides nothing, but at n = 3 the choice
   (p = 0.026) and the PASS (p = 0.030) are fragile, which argues for 5 or more seeds.
@@ -138,7 +154,9 @@ Everything matched:
 - **ETA miss (1.95x).** 13 runs shared 12 slots. k0_rerun started at +433 s, when k1000.s0 finished, and
   took 553 s, alone from +590 s, so the wall was 986 s against an ETA of 505 s.
   - An ETA priced by waves would have been within 3%: 2 × (20,000 / 42.88 + 12.6 s) = 958 s.
-  - The heartbeat's "~17m20s (2 waves)" was within 6%.
+  - The heartbeat's "~17m20s (2 waves)", written 20 s into the fleet, was time left: it put the end at
+    +1,060 s against +986 s, 7.5% late. *(Corrected 2026-09-28: this set 1,040 s against the whole
+    986 s and said within 6%.)*
   - FILL adds seeds only when jobs < PAR, so after the first wave ended (590 s) 11 of 12 slots sat
     idle for 6.6 minutes.
 
@@ -146,14 +164,21 @@ Everything matched:
 
 - **The default.** `TOK_RETOK_EVERY` is 1000 (`src/tok/levers.py`, `docs/05_DEFAULTS.md`), provisional
   until E2's held-out re-read. `gpu_world.sh`'s `RETOK_INCUMBENT` and `PIN_RETOK` are 1000.
-  - Every fleet arm sets its cadence itself, and the 80-window baseline fixture reproduces.
-  - Re-reading this archive's block needs `RETOK_INCUMBENT=3000`.
+  - Every `EXP=retok` arm sets its cadence itself, so none of its runs changes, and the 80-window
+    baseline fixture reproduces. `EXP=world_epoch` pins `PIN_RETOK`, so its runs move 3000 → 1000 by
+    design. `EXP=world`'s four arms set only `WORLD_` levers and it pins nothing, so its runs now act
+    every 1000 windows, about 19 acts per 20,000-window run where 3000 gave about 6. *(Corrected
+    2026-09-28: this said every fleet arm.)*
+  - Re-reading this archive's block needs `RETOK_INCUMBENT=3000`, on a copy unpacked in a scratch
+    directory, never beside this archive (Verification, Reproducible).
   - The register (O14, S0b-ship, §8 2.1) and the contract (Q-RUN-8) record the result.
 - **The next test is C13's cooldown fleet at the shipped cadence** (`notes/OWNER_BRIEF.md` test 3):
   `EXP=retok RETOK_ARMS="1000" COOLDOWN_ARM=100 SEEDS="0 1 2 3 4" KEEP_CKPT=0`, 21 runs in about 20-25
   minutes. `gpu_world.sh` now reads k1000_cd100 against k1000 with bounds (F25), and the fleet re-reads
-  1000 against k0 at 5 seeds. On CPU (operation only) the command ran all 21 runs rc=0 and printed both
-  readings (`docs/04_CONTRACT.md` Q-RUN-8).
+  1000 against k0 at 5 seeds. If 1000 FAILs there, it does not ship, and 3000 and the remedy arms run
+  next: the fleet holds one cadence, and O14 escalates only when both cadences and every remedy arm
+  FAIL (read so since 2026-09-28; at 88d3fae the script would have read ESCALATE). On CPU (operation
+  only) the command ran all 21 runs rc=0 and printed both readings (`docs/04_CONTRACT.md` Q-RUN-8).
 - **E2 carries a named risk.** At 1000, num in p4 reads +0.10, so E2's worst-area re-read may FAIL
   there. A later retok fleet should pre-register a per-area reading, which needs a CPU build: per-flush
   area bytes in the analysis.

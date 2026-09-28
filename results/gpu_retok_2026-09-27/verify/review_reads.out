@@ -1,0 +1,39 @@
+PHASES: windows per phase (first byte), probe readings per phase at 1000 + the phase start, shortest / 5
+  k0.s0: 19853 windows, phases [4964, 5017, 5015, 4857], readings [5, 6, 6, 6], shortest / 5 = 971
+  k0.s1: 19344 windows, phases [4999, 4803, 4806, 4736], readings [5, 6, 6, 6], shortest / 5 = 947
+  k0.s2: 19629 windows, phases [4924, 4947, 4946, 4812], readings [5, 6, 6, 6], shortest / 5 = 962
+  k3000.s0: 16786 windows, phases [4662, 4400, 3709, 4015], readings [5, 6, 4, 5], shortest / 5 = 742
+  k3000.s1: 16566 windows, phases [4682, 4217, 3612, 4055], readings [5, 5, 5, 5], shortest / 5 = 722
+  k3000.s2: 16689 windows, phases [4651, 4308, 3673, 4057], readings [5, 5, 5, 5], shortest / 5 = 735
+  k1000.s0: 16186 windows, phases [4439, 4202, 3603, 3942], readings [5, 5, 5, 5], shortest / 5 = 721
+  k1000.s1: 15957 windows, phases [4448, 4032, 3504, 3973], readings [5, 5, 4, 5], shortest / 5 = 701
+  k1000.s2: 16136 windows, phases [4424, 4151, 3588, 3973], readings [5, 5, 5, 5], shortest / 5 = 718
+  k0_nuis.s0: 19853 windows, phases [4964, 5017, 5015, 4857], readings [5, 6, 6, 6], shortest / 5 = 971
+  k0_nuis.s1: 19344 windows, phases [4999, 4803, 4806, 4736], readings [5, 6, 6, 6], shortest / 5 = 947
+  k0_nuis.s2: 19629 windows, phases [4924, 4947, 4946, 4812], readings [5, 6, 6, 6], shortest / 5 = 962
+  k0_rerun.s0: 19853 windows, phases [4964, 5017, 5015, 4857], readings [5, 6, 6, 6], shortest / 5 = 971
+POOL: the first progress line at n_live >= 4096, n_live at the end (fab.n_live) and the slots free
+  k0.s0: full from window 13401; n_live at the end 3949, 147 free
+  k0.s1: full from window -; n_live at the end 3413, 683 free
+  k0.s2: full from window -; n_live at the end 3853, 243 free
+  k3000.s0: full from window -; n_live at the end 3643, 453 free
+  k3000.s1: full from window -; n_live at the end 3002, 1094 free
+  k3000.s2: full from window -; n_live at the end 3733, 363 free
+  k1000.s0: full from window -; n_live at the end 3974, 122 free
+  k1000.s1: full from window -; n_live at the end 3498, 598 free
+  k1000.s2: full from window -; n_live at the end 3376, 720 free
+  k0_nuis.s0: full from window -; n_live at the end 3415, 681 free
+  k0_nuis.s1: full from window -; n_live at the end 2469, 1627 free
+  k0_nuis.s2: full from window -; n_live at the end 3831, 265 free
+  k0_rerun.s0: full from window 13401; n_live at the end 3949, 147 free
+  full in 2 of 13 runs (the replicate k0_rerun included), 1 of 12 without it; slots free at the end 122-1627
+  k0.s0 at its 19 kept windows: n_live 2479-4073 (23-1617 free); w1001:2479 w2001:2917 w3001:3125 w4001:3479 w5001:3933 w6001:3905 w7001:3871 w8001:3837 w9001:3800 w10001:3769 w11001:3873 w12001:4004 w13001:4006 w14001:4073 w15001:4069 w16001:4036 w17001:3993 w18001:3962 w19001:3960
+  k0.s1 at its 19 kept windows: n_live 2320-3464 (632-1776 free); w1001:2320 w2001:2584 w3001:2834 w4001:2933 w5001:3042 w6001:3032 w7001:3008 w8001:2993 w9001:2943 w10001:3027 w11001:3031 w12001:3240 w13001:3330 w14001:3303 w15001:3291 w16001:3464 w17001:3432 w18001:3420 w19001:3413
+  k0.s2 at its 19 kept windows: n_live 2151-3944 (152-1945 free); w1001:2151 w2001:2506 w3001:3243 w4001:3364 w5001:3554 w6001:3557 w7001:3570 w8001:3613 w9001:3598 w10001:3559 w11001:3699 w12001:3821 w13001:3832 w14001:3944 w15001:3915 w16001:3899 w17001:3887 w18001:3876 w19001:3856
+BYTES PER TOKEN AGAINST THE BUILD-TIME VALUE, at each act (the act line's tail figure)
+  k3000.s0: w3001 +6.1% w6001 +8.7% w9001 +20.7% w12001 +23.3% w15001 +25.2%
+  k3000.s1: w3001 +8.5% w6001 +11.8% w9001 +20.7% w12001 +19.2% w15001 +27.0%
+  k3000.s2: w3001 +6.7% w6001 +10.3% w9001 +20.7% w12001 +20.0% w15001 +25.9%
+  k1000.s0: w1001 +2.7% w2001 +5.0% w3001 +6.7% w4001 +7.3% w5001 +7.4% w6001 +10.1% w7001 +15.4% w8001 +18.8% w9001 +21.8% w10001 +23.1% w11001 +23.6% w12001 +21.4% w13001 +21.0% w14001 +23.6% w15001 +31.2% w16001 +49.1%
+  k1000.s1: w1001 +4.7% w2001 +7.4% w3001 +9.0% w4001 +9.7% w5001 +11.2% w6001 +13.1% w7001 +16.8% w8001 +19.8% w9001 +20.9% w10001 +21.7% w11001 +20.0% w12001 +17.0% w13001 +20.0% w14001 +24.2% w15001 +30.1%
+  k1000.s2: w1001 +3.2% w2001 +5.8% w3001 +7.0% w4001 +7.6% w5001 +8.1% w6001 +11.3% w7001 +15.5% w8001 +19.2% w9001 +20.9% w10001 +21.3% w11001 +20.4% w12001 +18.4% w13001 +20.6% w14001 +23.6% w15001 +29.2% w16001 +31.6%

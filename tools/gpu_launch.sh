@@ -15,6 +15,10 @@
 # Every other knob -- WINDOWS, SEEDS, EXTRA, PAR, MPS, OUT, KEEP_CKPT, RETOK_ARMS, DEVICE, ... -- is
 # read from this environment for the checks and reaches gpu_world.sh unchanged:
 #     EXP=retok SEEDS="0 1" WINDOWS=5000 bash tools/gpu_launch.sh --go
+# Without --go, a clean check ends in a "ready:" line that carries every knob set here -- each one
+# gpu_world.sh or this launcher reads, and every lever a run would inherit -- so the pasted line
+# launches the fleet that was checked (2026-09-28: it carried EXP and OUT alone, and after the cooldown
+# fleet's knobs its paste would have launched the default retok fleet).
 #
 # THE CHECKS, fast, in order: EXP; python3 >= 3.10; torch imports, sees CUDA, and names the card; the
 # torch version against requirements.txt's floor (torch>=2.11, which is load-bearing on aarch64, where
@@ -53,6 +57,26 @@ for a in "$@"; do
   esac
 done
 
+# THE KNOBS SET HERE, TAKEN BEFORE ANY DEFAULT IS ASSIGNED BELOW (2026-09-28, review of 88d3fae and
+# 510c3a5). The ready line printed EXP (and OUT) alone, so run without --go with the cooldown fleet's
+# knobs -- EXP=retok RETOK_ARMS="1000" COOLDOWN_ARM=100 SEEDS="0 1 2 3 4" KEEP_CKPT=0 -- its paste would
+# have launched the default retok fleet: k0, k3000, k1000 and k0_nuis at seeds 0-2, with kept
+# checkpoints. READYENV holds every knob gpu_world.sh or this launcher reads (KNOBS), then every lever a
+# run would inherit (a name under a package PREFIX the tree declares in src/*/levers.py), each one set
+# and not empty, once, quoted for the shell.
+KNOBS="EXP OUT WINDOWS SEEDS BYTES RETOK_BYTES EPOCH_BYTES SMOKE_WINDOWS EXTRA ARCH_ALSO LONG PAR MPS FILL
+       MAX_SEEDS DEVICE CAL_WINDOWS LADDER RETOK_ARMS COOLDOWN_ARM KEEP_CKPT KEEP_POLL KEEP_EVERY PIN_RETOK
+       GO_WORLD_EPOCH EPS RETOK_INCUMBENT HB_EVERY ALLOW_CONCURRENT STOP_WAIT LOG WAIT_S FETCH CKPT_MB"
+PFX=$(sed -n 's/^ *PREFIX = "\([A-Z][A-Z0-9]*\)".*/\1/p' src/*/levers.py 2>/dev/null | sort -u | paste -sd'|' -)
+shq() {  # one word for the shell: as it is when it is safe bare, else single-quoted
+  if [[ "$1" =~ ^[A-Za-z0-9_./:,@%+=-]+$ ]]; then printf '%s' "$1"; else printf "'%s'" "${1//\'/\'\\\'\'}"; fi
+}
+READYENV=""; _seen=" "
+for _k in $KNOBS $([[ -n "$PFX" ]] && compgen -e | grep -E "^($PFX)_[A-Z0-9_]+$" | sort); do
+  [[ "$_seen" == *" $_k "* || -z "${!_k:-}" ]] && continue
+  _seen="$_seen$_k "; READYENV="$READYENV$_k=$(shq "${!_k}") "
+done
+
 NP=0; NW=0; NF=0
 if [[ -t 1 ]]; then C_P=$'\033[32m'; C_W=$'\033[33m'; C_F=$'\033[31m'; C_0=$'\033[0m'; else C_P=""; C_W=""; C_F=""; C_0=""; fi
 pass() { NP=$(( NP + 1 )); printf '  %sPASS%s %s\n' "$C_P" "$C_0" "$1"; }
@@ -76,6 +100,7 @@ LOG_ABS=$(realpath -m -- "$LOG")
 echo "=== gpu_launch.sh $(date -u +%Y-%m-%dT%H:%M:%SZ) in $ROOT"
 echo "    EXP=${EXP_SET:-(unset)} WINDOWS=${WINDOWS:-(default)} SEEDS='${SEEDS:-(default)}' EXTRA='${EXTRA:-}'" \
      "PAR=${PAR:-auto} MPS=${MPS:-auto} OUT=$OUT DEVICE=$DEVICE LOG=$LOG"
+echo "    knobs set here (a ready line carries them all): ${READYENV:-(none)}"
 
 # ------------------------------------------------------------------------------------------ the experiment
 case "$EXP_SET" in
@@ -281,7 +306,7 @@ command -v setsid > /dev/null 2>&1 || warn "setsid not found: the fleet stays in
 
 echo "=== $NP PASS, $NW WARN, $NF FAIL"
 if [[ "$GO" != 1 ]]; then
-  (( NF == 0 )) && echo "    ready: ${CMDENV}bash $(printf %q "$ROOT/tools/gpu_launch.sh") --go" || echo "    fix the FAILs, then run this again"
+  (( NF == 0 )) && echo "    ready: ${READYENV}bash $(printf %q "$ROOT/tools/gpu_launch.sh") --go" || echo "    fix the FAILs, then run this again"
   exit $(( NF > 0 ))
 fi
 if (( NF > 0 )); then
