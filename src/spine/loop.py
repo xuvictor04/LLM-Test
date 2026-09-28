@@ -291,8 +291,8 @@ _GATED = {
     "FAB.own_lr_scale": ("a flush on which the optimizer actually stepped", "fab.lr_calls"),
     # THE RETENTION PROBE (2026-09-27, Q-EVAL-12). Its book is the ROOT's -- System.eval_books --
     # because the calls it counts are ones the root makes across five packages; it is ABSENT where
-    # the probe is not armed (EVAL_RETENTION_EVERY=0, or no area holds a held-out block) and
-    # PRESENT-and-0 where it is.
+    # the probe is not armed (EVAL_RETENTION_EVERY=0, no area holds a held-out block, or no half of
+    # one can hold a window behind its prefix) and PRESENT-and-0 where it is.
     "EVAL.holdout_probe": ("the retention probe's arm test (EVAL_RETENTION_EVERY > 0 and a pinned "
                            "ProbeSet), then its cadence or a phase start at B, and the boundary "
                            "readings at R and at a resume's start",
@@ -1054,9 +1054,10 @@ def run(sysm, *, max_windows=None, progress=True):
     _timing = sysm.mode.timing
 
     # ---- THE RETENTION PROBE (2026-09-27, Proposal 04 SR0 and NEW-03, Q-EVAL-12) ---------------
-    # ARMED ONLY WHERE compose PINNED A ProbeSet -- EVAL_RETENTION_EVERY > 0 and at least one area
-    # holding a held-out block -- and on every other run nothing below runs: the arm test comes
-    # before Cadences.due('retention', ...), so the gate is never asked and no eval.* key exists.
+    # ARMED ONLY WHERE compose PINNED A ProbeSet -- EVAL_RETENTION_EVERY > 0 and at least one
+    # held-out window pinned, in a half long enough to hold one behind its prefix -- and on every
+    # other run nothing below runs: the arm test comes before Cadences.due('retention', ...), so
+    # the gate is never asked and no eval.* key exists.
     ev_cfg = cfg["EVAL"]
     _armed = _c_probe_armed(sysm)
     _ebook = sysm.eval_books if sysm.eval_books is not None else {}
@@ -1074,19 +1075,44 @@ def run(sysm, *, max_windows=None, progress=True):
         if _evc.get("arrived") is not None:
             _parent_arrived = [str(a) for a in _evc["arrived"]]
         elif sysm.snapshot is not None:
-            # A PRE-PROBE PARENT RECORDED NO ARRIVED SET. Every area it held is ASSUMED arrived,
-            # and said: a parent stopped in its first phase had not reached them all.
+            # A PARENT THAT ARMED NO PROBE RECORDED NO ARRIVED SET: one from before the probe, or
+            # one run with it off, whose record is at most the pinned geometry and the book's
+            # counts it inherited (spine/compose.py's 'probe' stage says why nothing more). Every
+            # area it held is ASSUMED arrived, and said: a parent stopped in its first phase had
+            # not reached them all.
             _parent_arrived = [str(a) for a in (sysm.areas.parent_names or ())]
             if _parent_arrived:
                 warnings.append(
-                    f"loop: the checkpoint records no retention-probe state (it predates the "
-                    f"probe, or ran with it off), so the areas its run had reached are "
+                    f"loop: the checkpoint records no retention reading state (it predates the "
+                    f"probe, or its run had the probe off, which carries forward at most the "
+                    f"pinned geometry and the book), so the areas its run had reached are "
                     f"ASSUMED to be all {len(_parent_arrived)} it held "
                     f"({', '.join(_parent_arrived)}); a parent stopped before its last phase "
                     f"had not reached them all, and those areas' readings are then of text "
                     f"this lineage has not trained on.")
         arrived = set(_parent_arrived)
         last_phase = _evc.get("last_phase")
+        # A CONTINUING RESUME WHOSE PARENT RECORDED NO PHASE STARTS IN THE PHASE ITS PARENT STOPPED
+        # IN (2026-09-27, Q-EVAL-12's review). With no last (epoch, phase) the child's first window
+        # read as a phase start wherever it fell: driven, a probe-off parent stopped at window 41
+        # and its probe-on child read 'phase' at 42, mid-phase 0 -- an extra memory-off reading,
+        # eval.holdout.phase_reads 1 for no phase start, and a Reading handed to the consumers (a
+        # .best save with CKPT_DIR) that no uninterrupted run takes. The parent's last window is
+        # this stream's window in_epoch - 1 (the seg-log replay rebuilt the parent's stream), so its
+        # first byte names the phase, and the areas live there were live in the parent's last
+        # window: arrived, and seen by the parent. At in_epoch 0 -- a fresh run, an epoch-boundary
+        # resume, a resume that replays its epoch from the first window -- the first window opens a
+        # phase of the stream this process reads, and a read there is the one every epoch's first
+        # window gets, so nothing is seeded.
+        if last_phase is None and win_in_epoch > 0:
+            _k0 = _c_phase_of(sysm.stream.phase_bounds,
+                              sysm.segmentation.byte_pos[(win_in_epoch - 1) * ctx])
+            last_phase = [int(_c_start["epoch"]), int(_k0)]
+            for _ai in (sysm.plan.schedule[_k0] if _k0 < len(sysm.plan.schedule) else ()):
+                _an = str(sysm.areas.names[int(_ai)])
+                arrived.add(_an)
+                if _an not in _parent_arrived:
+                    _parent_arrived.append(_an)
         series = {str(k): list(v) for k, v in (_evc.get("series") or {}).items()}
         _rearm = bool(_evc.get("rearm", False))
         _prev_read = _reading_from_state(_evc.get("last_read"))
@@ -1617,8 +1643,17 @@ def run(sysm, *, max_windows=None, progress=True):
                     _cm = _rd.control_mean
                     if _cm is None or not math.isfinite(float(_cm.value)):
                         # NOT FORWARDED: no consumer is handed a reading with no finite window in
-                        # it, and CKPT.Retention.consider refuses one by name.
-                        _ebook["eval.holdout.nonfinite"] += 1
+                        # it, and CKPT.Retention.consider refuses one by name. BOOKED BY WHY
+                        # (2026-09-27, Q-EVAL-12's review): nonfinite where a control window scored
+                        # non-finite (or the mean overflowed), empty where the control half scored
+                        # no window at all -- both were nonfinite, and a probe that could read
+                        # nothing reported non-finite readings it never took.
+                        _cnf = sum(int(_row.get("control_nonfinite", 0))
+                                   for _row in _rd.areas.values())
+                        if _cm is None and _cnf == 0:
+                            _ebook["eval.holdout.empty"] += 1
+                        else:
+                            _ebook["eval.holdout.nonfinite"] += 1
                     else:
                         sysm.probe_reading = _cm
                         for _an, _row in _rd.areas.items():
@@ -2092,7 +2127,9 @@ def run(sysm, *, max_windows=None, progress=True):
 # ---- THE RETENTION PROBE'S RECORDS, AS PLAIN DATA (2026-09-27, Q-EVAL-12) ----------------------
 def _reading_state(rd):
     """What LOOP.eval carries of one HoldoutReading so a resume can pair against it: the per-area
-    values and the step, as plain Python. None for None."""
+    values and the step, as plain Python. None for None. The values are EVAL's slots as they stand
+    -- one per item read, None where a window gave no value -- because EVAL.holdout_probe pairs slot
+    i with slot i, and a restored reading must hold its items in the places the live one did."""
     if rd is None:
         return None
     return {"areas": {a: {k: (list(v) if isinstance(v, (list, tuple)) else v)
@@ -2127,12 +2164,13 @@ def _reading_row(rd, kind):
 def _probe_rows(sysm, armed, book, last_read, boundary, series, gen, ev_cfg):
     """The R stage's three EVAL rows: EVAL(holdout), EVAL(blowup), EVAL(generate).
 
-    UNARMED, EACH SAYS WHY IN THE GATE'S WORDS -- EVAL_RETENTION_EVERY=0, or no area holding a
-    held-out block (DATA_SYNTH_HOLDOUT=0 on the synthetic source) -- and no eval.* key is printed,
-    which is this tree's ABSENT. ARMED, EVAL(holdout) is the book (integers, and the two floats to
-    six places, which never read as an integer counter line) beside the last in-run reading and the
-    boundary readings; EVAL(blowup) is one line per series; EVAL(generate) the first continuation
-    per closure and area."""
+    UNARMED, EACH SAYS WHY IN THE GATE'S WORDS -- EVAL_RETENTION_EVERY=0, no area holding a
+    held-out block (DATA_SYNTH_HOLDOUT=0 on the synthetic source), or no half of one long enough to
+    hold a window behind its prefix (ProbeSet.reason, naming the geometry and DATA_HOLDOUT_FRAC) --
+    and no eval.* key is printed, which is this tree's ABSENT. ARMED, EVAL(holdout) is the book
+    (integers, and the two floats to six places, which never read as an integer counter line) beside
+    the last in-run reading and the boundary readings; EVAL(blowup) is one line per series;
+    EVAL(generate) the first continuation per closure and area."""
     ps = sysm.probe_set
     if not armed:
         why = (ps.reason if ps is not None and ps.reason else

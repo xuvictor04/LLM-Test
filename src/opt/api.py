@@ -1817,7 +1817,8 @@ def maybe_step(opt: Config, st, *, best_bpb=None, shift_at=None):
          opt.grad_clip DEFAULTS TO 0.0 = OFF, so nothing in any recorded result moves; see Q-OPT-3
          in docs/04_CONTRACT.md for what measurement settles the default.
 
-    RECEIVES: best_bpb <- EVAL, a Reading carrying (value, seed_count) or None; shift_at <- the
+    RECEIVES: best_bpb <- EVAL, a Reading carrying (value, seed_count, at) or None -- the root's
+    System.probe_reading since 2026-09-27 (Q-OPT-13); shift_at <- the
     composition root, the optimizer step of the last self-inflicted shift (epoch resample, retok,
     added area). Both are runtime arguments; the old code read `_shift_at` as a CLOSURE VARIABLE
     written by DATA's resample branch (:6518-6521), which is the L2 violation this replaces. Until
@@ -1868,11 +1869,17 @@ def maybe_step(opt: Config, st, *, best_bpb=None, shift_at=None):
                  damping, not a refusal, and formerly counted as the second),
                  opt.restart.readings (ADDED BY P4, 2026-09-03: the mirror of
                  opt.shift.notifications on the other runtime argument. compose.py's LOOP_ORDER row
-                 states that best_bpb HAS NO PRODUCER, so opt.restart.damped and
-                 opt.restart.damp_refused_n1 are "UNREACHABLE, not zero" -- and with only those two
+                 then stated that best_bpb HAD NO PRODUCER, so opt.restart.damped and
+                 opt.restart.damp_refused_n1 were "UNREACHABLE, not zero" -- and with only those two
                  counters nothing at RUNTIME can tell a run where no Reading ever arrived from a
                  run where every Reading said the cycle paid. This is the count that makes that
-                 declared UNREACHABLE checkable instead of asserted),
+                 declared UNREACHABLE checkable instead of asserted. SINCE 2026-09-27 (Q-OPT-13)
+                 THE PRODUCER EXISTS: the row hands System.probe_reading, the retention probe's
+                 last forwarded control mean, re-delivered on every flush until the next reading,
+                 and this counts ONE PER DISTINCT `at` -- one per measurement, not per delivery;
+                 a Reading with no `at` counts on every arrival. At the shipped
+                 OPT_DAMP_SOURCE='off' the Reading is dropped before it is read and this stays 0.
+                 This entry still said "HAS NO PRODUCER" until Q-EVAL-12's review),
                  opt.lr.writes.base and opt.lr.writes.encoder (each must equal opt.step -- the
                  rate is written to both optimizers on every step; the old single counter said
                  "must equal opt.step, on BOTH optimizers" and could not distinguish a missing

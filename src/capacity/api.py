@@ -32,9 +32,13 @@ refused by the type system rather than by discipline.
     reveal it, because compose() THEN stopped at RUN.process_setup, long before the valve; a
     reviewer found it by reading the two surfaces against each other.
     THAT IS NO LONGER WHERE IT STOPS, AND THIS SENTENCE SAID IT WAS UNTIL 2026-09-04. Re-measured
-    by running it: RUN.process_setup has a body, and `compose(environ={})` now halts on the 29th of
-    the 40 rows in spine/compose.py::ASSEMBLY_ORDER, at CAP.startup_refusals -- which is PAST the
-    valve's own row, so new_valve IS built on every compose() today and all THREE of its Gates are
+    by running it: RUN.process_setup has a body, and `compose(environ={})` then halted at
+    CAP.startup_refusals -- PAST the valve's own row. IT NO LONGER HALTS AT ALL, and this sentence
+    said "now halts on the 29th of the 40 rows" until Q-EVAL-12's review (2026-09-27), long after
+    CAP.startup_refusals got a body: compose(environ={}) returns a System at stage 'assembled' with
+    no refusal (measured 2026-09-27), and CAP.startup_refusals is the 30th of the 41 rows in
+    spine/compose.py::ASSEMBLY_ORDER. Either way new_valve IS built on every compose() today and all
+    THREE of its Gates are
     readable without writing a line -- THREE, corrected 2026-09-05: this said "both its Gates" from
     the edit that added cap.clamp, a count-in-prose falsified in the file that respells "EIGHT keys
     to TEN" twice for exactly this reason and that no check catches, because K13 reads digits and

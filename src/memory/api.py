@@ -1880,7 +1880,9 @@ def encode_queries(mem: Config, *, contexts, key_fn):
 
     LEVERS READ: key_win, key_depth, key_src
     WIRES READ: none
-    DID IT FIRE: none; it holds no store, and the caller counts its encodes (eval.mem.key_encodes)
+    DID IT FIRE: none; it holds no store, and the caller counts the query ROWS it encodes
+                 (eval.mem.key_encodes, B*L per call) -- every row in ONE key_fn call, so one
+                 LM.encode call per call here (Q-EVAL-12's accounting)
     """
     mem = mem.owned_by("MEM")
     kwin, kdepth, ksrc = int(mem.key_win), int(mem.key_depth), str(mem.key_src)

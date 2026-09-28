@@ -761,9 +761,14 @@ def opt_steps_from_windows(run_windows, effective_batch_windows):
     stubbed to [] so the walk gets past the P4 blocker: compose(RUN_EPOCHS=-1) now ends in
     run_windows_from_epochs, at the `n_epochs.n < 0` arm, and never reaches this one; before
     2026-09-05 it reached here as Windows(-634) and this function answered Steps(1). (2) Unstubbed,
-    capacity/api.py::startup_refusals is ASSEMBLY_ORDER row 29 and raises NotImplementedError one
-    row before OPT.build at row 30, which is where opt/api.py::build makes this file's only
-    executable call to this function -- so even the first block is not the one a run meets first.
+    capacity/api.py::startup_refusals raised NotImplementedError one row before OPT.build, which is
+    where opt/api.py::build makes this file's only executable call to this function -- so even the
+    first block was not the one a run met first. (2) IS HISTORY, and this said "is ASSEMBLY_ORDER row
+    29 and raises" until Q-EVAL-12's review (2026-09-27): startup_refusals has a body, it is the 30th
+    of the 41 rows and OPT.build the 31st, and compose(environ={}) returns a System at stage
+    'assembled'. What a run meets first today is earlier still -- measured the same day,
+    compose(RUN_EPOCHS=-1) is a RefusedRun from RUN.startup_refusals at the `refuse` stage, before
+    any model is built.
     WHAT WOULD MAKE IT REACHABLE, stated so it is not guessed at: a caller that hands OPT.build a
     run_windows it did not get from _run_windows, or the removal of run_windows_from_epochs'
     negative arm, or a second producer of the horizon's window count. IT IS KEPT AND NOT DELETED:

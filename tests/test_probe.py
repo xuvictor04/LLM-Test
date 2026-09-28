@@ -18,7 +18,9 @@ where it is taken, who reads it, and what a resume does with it. Each check belo
       (tests/_state_digest.py) but LOOP.eval and RUN.cadences' 'retention' key; every integer counter
       equal but the exempt set; OPT's reading_at None on both (OPT_DAMP_SOURCE='off'). The ON run reads
       at every phase start, on the cadence the ledger fired (>= 10 on the full epoch), once at R through
-      both closures, and generates.
+      both closures, and generates. THE OFF ARMS -- the shipped 0, 20 with no block, and 20 where no
+      held-out half can hold a window behind its routing prefix (DATA_STREAM_BYTES=20000) -- pin, draw,
+      read and count nothing, and every EVAL row and gate says why.
   P2  THE EXEMPT SET MOVES BY THE BOOK'S OWN COUNTS, EXACTLY: tok.segment_remap by eval.holdout.cuts;
       fab.eval_passes, lm.embed.*, world.forecast.calls (and .inert where the forecast is off) by the
       forwards; lm.decode.calls by the decodes; sig.encode_calls and .encode_windows by the SIG encodes;
@@ -36,7 +38,9 @@ where it is taken, who reads it, and what a resume does with it. Each check belo
       the block's; the control and report streams issued by name; the cadence reading's windows a prefix
       of the boundary reading's (P3); consumers read the control half only -- the retention best, the
       forwarded Reading and the alarm's series are control means, and a report half planted non-finite
-      moves none of them (P14).
+      moves none of them (P14). A half too short to hold one window behind its prefix pins nothing and
+      mints no stream; an area with no window is unpinned; with none anywhere the ProbeSet is empty,
+      and its reason names the geometry and the DATA levers that size a block.
   P5  ARRIVAL: each reading holds exactly the areas of the phases entered by its window, computed here
       from the plan, the phase bounds and the segmentation; a phase start reads at its first window; an
       unarrived area has no row anywhere and is the areas_unarrived gauge.
@@ -51,20 +55,30 @@ where it is taken, who reads it, and what a resume does with it. Each check belo
       train the same losses; 'probe' at EVAL_RETENTION_EVERY=0 is refused at startup.
   P8  EVAL.blowup IS blowup_test.py's CALL-SITE RULE: fire for fire on its curves (:95-141) and at
       test_derive.py's threshold (:944-949); the all-area series re-arms at an arrival, in-run too.
-  P9  GENERATION: its sizes; two runs identical; both closures identical at MEM_BLEND_MAX=0; the final
-      checkpoint byte-identical with EVAL_GENERATE on and off; a second loop.run over one System reads its
-      arrived areas and does not raise.
+  P9  GENERATION: its sizes; two runs identical; both closures identical at MEM_BLEND_MAX=0; each
+      continuation records the text it continued -- `prompt` the pinned report window, whose prompt ids
+      decode back to it, `prefix` the routing prefix before it; the final checkpoint byte-identical with
+      EVAL_GENERATE on and off; a second loop.run over one System reads its arrived areas and does not
+      raise.
   P10 MEM's NULLS: blend at MEM_BLEND_MAX=0 hands back the model's distribution itself; an empty store
       misses everywhere at weight 0; a planted exact match reads conf 1 at weight blend_max, and at
       MEM_BLEND_MAX=1 the clamped blend's log is finite everywhere.
   P11 DOM.nearest IS _assign's DECISION: re-entry, spawn (-1) and the cap arm against _assign on a deep
       copy, with nothing written.
   P12 A LEGACY CHECKPOINT (LOOP.eval and OPT.reading_at stripped) RESUMES EXACTLY, probe off and on; on,
-      it warns that the parent's areas are ASSUMED arrived.
+      it warns that the parent's areas are ASSUMED arrived, and reads a phase start only where a phase
+      begins -- none at its first window, mid-phase. ON -> OFF -> ON: a probe-off run between two
+      probe-on ones continues exactly and writes only the parent's geometry and book, so the probe-on
+      grandchild takes the ASSUMED path, pairs its start read with nothing, reads no phase start at its
+      first window, hands OPT no Reading until its own, and totals the lineage's book.
   P13 THE CLOSURE IS THE FLUSH'S PATH: on a System built identically to one taken before its first flush
       (FAB_EXPLORE=0 FAB_SPAWN=0 FAB_CENT_EMA=0 FAB_DISCOVER=0 LM_DROPOUT=0), the memory-off closure on the
       first window, with the all-pad prefix, returns that flush's logits exactly.
-  P14 A NON-FINITE READING IS COUNTED AND NOT FORWARDED; non-finite windows are left out of the means.
+  P14 A NON-FINITE READING IS COUNTED AND NOT FORWARDED; non-finite windows are left out of the means; a
+      reading whose control half scored no window is booked eval.holdout.empty, not non-finite, and is
+      not forwarded either. PAIRING IS BY ITEM: a window skipped in one reading (non-finite, or cut to
+      fewer than two ids) keeps its slot, so every other window pairs with itself -- through a reading
+      restored from its carried state too.
   P15 B1, B3, B3r and B5 reproduce at the defaults (tests/test_baseline.py, run from here).
 
 WHAT THIS FILE CANNOT SEE: whether a reading means anything. CPU runs establish operation only; the
@@ -478,9 +492,17 @@ try:
     # =============================================================================================
     # P1 (the off arms): nothing pinned, drawn, read or counted, and the report says why
     # =============================================================================================
+    # THE THIRD ARM IS Q-EVAL-12's REVIEW: at DATA_STREAM_BYTES=20000 every held-out half is 250 bytes,
+    # shorter than the 192-byte prefix plus the 129-byte window, and the probe counted itself armed
+    # with nothing pinned -- driven at EVAL_RETENTION_EVERY=10 over 40 windows, 7 readings of 0
+    # windows, the 5 in-run ones booked non-finite, and the gate "fired 7 time(s)".
     for tag, env, word in (("the shipped EVAL_RETENTION_EVERY=0", dict(H), "EVAL_RETENTION_EVERY=0"),
                            ("EVAL_RETENTION_EVERY=20 with no block (DATA_SYNTH_HOLDOUT=0)",
-                            {"EVAL_RETENTION_EVERY": 20}, "DATA_SYNTH_HOLDOUT=0")):
+                            {"EVAL_RETENTION_EVERY": 20}, "DATA_SYNTH_HOLDOUT=0"),
+                           ("EVAL_RETENTION_EVERY=20 whose halves cannot hold a window behind its "
+                            "prefix (DATA_STREAM_BYTES=20000)",
+                            dict(H, EVAL_RETENTION_EVERY=20, DATA_STREAM_BYTES="20000"),
+                            "DATA_HOLDOUT_FRAC")):
         so = build(**env)
         _minted = sorted(k for k in rng.issued() if k.startswith("eval."))
         ro = loop.run(so, max_windows=3, progress=False)
@@ -493,9 +515,57 @@ try:
               and ro.cadence_ledger["retention"][0] == 0
               and "fab.eval_passes" not in so.fabric.counters
               and all(isinstance(r, str) and r.startswith("UNREACHABLE") and word in r for r in _rows)
+              and all("UNREACHABLE" in g for g in _gl) and len(_gl) == 2
               and so.eval_carried is None,
               f"minted {_minted}; rows {[str(r)[:60] for r in _rows]}; gated {[g[:80] for g in _gl]}")
+    _ps0 = so.probe_set
+    _W0, _P0 = int(_ps0.window_bytes), int(_ps0.prefix_bytes)
+    _inert0 = ro.report["CKPT.Retention.counters"]["inert_reason"]
+    check("P1 off where no half can hold a window: the empty ProbeSet keeps every area's halves, each "
+          "too short for prefix + window, and its whole need as shortfall; its reason names the "
+          "geometry and DATA_VAL_CAP; CKPT's inert reason names the cause beside the other two",
+          len(_ps0.halves) == 4
+          and all(max(m, n - m) < _P0 + _W0 for m, n in _ps0.halves.values())
+          and all(v == {"control": 16, "report": 16} for v in _ps0.shortfall.values())
+          and f"{_P0} + {_W0} = {_P0 + _W0}" in _ps0.reason and "DATA_VAL_CAP" in _ps0.reason
+          and not _ps0.rng_names
+          and all(x in _inert0 for x in ("EVAL_RETENTION_EVERY=0", "DATA_SYNTH_HOLDOUT=0",
+                                         "DATA_HOLDOUT_FRAC")),
+          f"halves {_ps0.halves}; reason {_ps0.reason[:160]!r}")
     del so, ro
+
+    # ---- P4 (pure): a half with no room pins nothing, draws nothing, mints nothing ---------------
+    ev20p = configs(EVAL_RETENTION_EVERY=20)["EVAL"]
+    _blk = {"a": bytes(range(256)) + bytes(144),          # 400: two 200-byte halves, no room
+            "b": bytes(i % 251 for i in range(2000)),      # 2000: two 1000-byte halves, room for 16
+            "c": bytes(i % 247 for i in range(641))}       # 641: control 320 has none, report 321 one
+    rng.reset_issued()
+    _pm = eval_api.pin_holdout(ev20p, blocks=_blk, seed=0, window_bytes=129, prefix_bytes=192)
+    _iss = sorted(k for k in rng.issued() if k.startswith("eval.holdout."))
+    rng.reset_issued()
+    _pe = eval_api.pin_holdout(ev20p, blocks={"a": _blk["a"]}, seed=0, window_bytes=129,
+                               prefix_bytes=192)
+    _iss_e = sorted(k for k in rng.issued() if k.startswith("eval.holdout."))
+    rng.reset_issued()
+    _pb = eval_api.pin_holdout(ev20p, blocks={"b": _blk["b"]}, seed=0, window_bytes=129,
+                               prefix_bytes=192)
+    check("P4 a half that cannot hold one window behind its prefix pins nothing and mints no stream: "
+          "an area with none is unpinned (its need all shortfall), an area with one half pinned keeps "
+          "the other as (), and only the halves that drew are issued -- the roomy area's windows "
+          "unmoved by its neighbours",
+          sorted(_pm.items) == ["b", "c"] and _pm.items["c"]["control"] == ()
+          and len(_pm.items["c"]["report"]) == 1 and len(_pm.items["b"]["control"]) == 16
+          and _pm.shortfall["a"] == {"control": 16, "report": 16}
+          and _pm.shortfall["c"] == {"control": 16, "report": 15} and _pm.reason == ""
+          and _iss == ["eval.holdout.b.control", "eval.holdout.b.report", "eval.holdout.c.report"]
+          and sorted(_pm.rng_names) == _iss and _pm.items["b"] == _pb.items["b"],
+          f"items {sorted(_pm.items)}; shortfall {_pm.shortfall}; issued {_iss}")
+    check("P4 with no half anywhere able to hold a window the ProbeSet is empty -- unarmed -- with its "
+          "halves, its shortfall and a reason naming the geometry and DATA_HOLDOUT_FRAC, and no stream",
+          not _pe.items and _pe.halves == {"a": (200, 400)} and not _iss_e and not _pe.rng_names
+          and "192 + 129 = 321" in _pe.reason and "DATA_HOLDOUT_FRAC" in _pe.reason
+          and "a 200/200" in _pe.reason,
+          _pe.reason[:200])
 
     # =============================================================================================
     # P13: the memory-off closure is the flush's path (before any other run moves the process)
@@ -815,12 +885,77 @@ try:
           and all(v["seen_by_parent"] for v in rk_on.probe_series[0]["areas"].values())
           and not [w for w in rk_off.warnings if "ASSUMED" in w],
           _warn[0][:160] if _warn else "no warning")
-    del pl, k_off, k_on, p, c
+    # THE PHASE RECORD A RECORD-LESS PARENT NEVER WROTE (Q-EVAL-12's review). The parent stopped at 41,
+    # mid-phase 0, and its child read its first window (42) as a phase start: a reading, phase_reads 1
+    # and the consumers fed where the uninterrupted run reads nothing. The loop now seeds the record
+    # from the parent's last window, so the child reads a phase start only where one begins.
+    _ph_on = [e["step"] for e in rk_on.probe_series if e["kind"] == "phase"]
+    _ph_u = [e["step"] for e in su if e["kind"] == "phase" and e["step"] > 41]
+    check("P12 on, a continuing resume whose parent recorded no phase reads a phase start only where a "
+          "phase begins: none at its first window (42, mid-phase 0), and the uninterrupted run's after "
+          "41 (80)",
+          _ph_on == _ph_u == [80] and book(rk_on).get("eval.holdout.phase_reads") == 1,
+          f"phase starts read at {_ph_on}; the uninterrupted run's after 41 {_ph_u}")
+
+    # ---- P12, ON -> OFF -> ON: a probe-off run carries the geometry and the book, and nothing else --
+    # Q-EVAL-12's review: LOOP.eval passed through a probe-off run unchanged and went into its
+    # checkpoints as its own, so a probe-on descendant took the grandparent's arrived set, phase,
+    # series, pairing and Reading for its parent's. The probe-off child here trains 42..100 over P3's
+    # probe-on parent (41) -- num arrives at 80 -- and its probe-on child resumes at 100.
+    _gauges = ("eval.holdout.areas_unarrived", "eval.blowup.since_best")
+    m12 = build(CKPT_RESUME=f"{TMP}/p3p", CKPT_DIR=f"{TMP}/p12m", **H, EVAL_GENERATE=0)
+    rm12 = loop.run(m12, max_windows=59, progress=False)
+    _mev = torch.load(f"{TMP}/p12m/ckpt.pt", map_location="cpu",
+                      weights_only=False)["payload"]["LOOP"].get("eval")
+    _pev = p.eval_carried
+    check("P12 ON -> OFF: the probe-off child continues the uninterrupted run exactly, counts nothing, "
+          "and writes only its parent's pinned geometry and book (the two gauges left behind with the "
+          "reading state they gauge)",
+          rm12.loss_curve == ru.loss_curve[41:100] and m12.eval_books == {}
+          and not any(str(k[1]).startswith("eval.") for k in flat_ints(rm12.report))
+          and _mev == m12.eval_carried
+          and _mev == {"geometry": _pev["geometry"],
+                       "books": {k: v for k, v in _pev["books"].items() if k not in _gauges}},
+          f"LOOP.eval keys {sorted(_mev or {})}")
+    _first_bpb.clear()
+    loop.opt_api.maybe_step = _spy_ms
+    try:
+        with spy_readings() as rd_g:
+            g12 = build(CKPT_RESUME=f"{TMP}/p12m", **EB)
+            rg12 = loop.run(g12, max_windows=5, progress=False)
+    finally:
+        loop.opt_api.maybe_step = _real_ms
+    sg = rg12.probe_series
+    _gw = [w for w in rg12.warnings if "ASSUMED" in w]
+    _start = [(e, rd) for e, rd in zip(sg, rd_g) if e["kind"] == "resume"]
+    check("P12 OFF -> ON: the grandchild takes the ASSUMED path -- warned once, its start read at 100 "
+          "reading every area as seen by its parent, num (which the probe-off child trained) among "
+          "them -- and pairs that read with nothing: no reading crossed the probe-off run",
+          len(_gw) == 1 and len(_start) == 2 and all(e["step"] == 100 for e, _rd in _start)
+          and all(set(e["areas"]) == set(ps.items)
+                  and all(v["seen_by_parent"] for v in e["areas"].values()) for e, _rd in _start)
+          and all(rd.paired == {} and rd.paired_sd is None for _e, rd in _start),
+          f"{[(e['step'], e['kind'], sorted(e['areas'])) for e in sg]}; warned {len(_gw)}")
+    _fwd12 = [e for e in sg if e["kind"] in ("cadence", "phase") and e["control"] is not None]
+    check("P12 OFF -> ON: no phase start at its first window (101 opens nothing: phase 1 began at 80), "
+          "OPT's first best_bpb None, the alarm's series its own readings alone, and its book the "
+          "lineage's total -- the parent's counts carried through the probe-off child, plus its own",
+          not [e for e in sg if e["kind"] == "phase"] and _first_bpb == [None]
+          and len(g12.eval_carried["series"].get("all", [])) == len(_fwd12)
+          and g12.eval_books["eval.holdout.calls"] == _pev["books"]["eval.holdout.calls"] + len(sg)
+          and g12.eval_books["eval.holdout.phase_reads"] == _pev["books"]["eval.holdout.phase_reads"],
+          f"{[(e['step'], e['kind']) for e in sg]}; first best_bpb {_first_bpb}; calls "
+          f"{g12.eval_books.get('eval.holdout.calls')} against {_pev['books'].get('eval.holdout.calls')}"
+          f" + {len(sg)}")
+    del pl, k_off, k_on, p, c, m12, g12
 
     # ---- P14: a non-finite reading is counted and not forwarded ------------------------------------
+    # AND A READING WITH NO CONTROL WINDOW IS BOOKED eval.holdout.empty (Q-EVAL-12's review): at 61 the
+    # control halves are taken away, so that reading scores the report half alone -- planted
+    # non-finite -- and no control window at all. Until the review it was booked non-finite.
     _report_prefixes = {pre for it in ps.items.values() for _s, pre, _w in it["report"]}
     _control_prefixes = {pre for it in ps.items.values() for _s, pre, _w in it["control"]}
-    _real_fn = loop._c_logits_fn
+    _real_fn, _real_units = loop._c_logits_fn, loop._c_holdout_units
 
     def _planted(sysm, **kw):
         fn = _real_fn(sysm, **kw)
@@ -832,15 +967,22 @@ try:
             return out
         g.name = fn.name
         return g
-    loop._c_logits_fn = _planted
+
+    def _no_control(sysm, arrived, parent=()):
+        got = _real_units(sysm, arrived, parent)
+        if int(sysm.clock.step) == 61:
+            return {a: dict(row, control=[]) for a, row in got.items()}
+        return got
+    loop._c_logits_fn, loop._c_holdout_units = _planted, _no_control
     try:
         with spy_readings() as rd_n:
             n14 = build(**EB)
-            rn = loop.run(n14, max_windows=45, progress=False)
+            rn = loop.run(n14, max_windows=65, progress=False)
     finally:
-        loop._c_logits_fn = _real_fn
+        loop._c_logits_fn, loop._c_holdout_units = _real_fn, _real_units
     sn = rn.probe_series
     _r21 = next(e for e in sn if e["step"] == 21)
+    _r61 = next((e for e in sn if e["step"] == 61), {})
     _u_by = {e["step"]: rd for e, rd in zip(su, rd_u) if e["kind"] != "boundary"}
     _n_by = {e["step"]: rd for e, rd in zip(sn, rd_n) if e["kind"] != "boundary"}
     check("P14 a reading whose every window is non-finite (planted at 21) is counted in "
@@ -858,7 +1000,65 @@ try:
               for a in _u_by[s].areas)
           and all(_n_by[s].report_mean is None and _n_by[s].nonfinite == 6 for s in (1, 41))
           and n14.probe_reading.value == _u_by[41].control_mean.value)
+    check("P14 a reading whose control half scored no window (taken away at 61; its report half, planted "
+          "non-finite, scored 6) is booked eval.holdout.empty and not non-finite, and reaches no consumer",
+          book(rn).get("eval.holdout.empty") == 1 and book(rn).get("eval.holdout.nonfinite") == 1
+          and _r61.get("kind") == "cadence" and _r61.get("control") is None
+          and _r61.get("windows") == _r61.get("nonfinite") == 6
+          and n14.retention.counters()["probes_seen"] == 2 and n14.probe_reading.at == 41,
+          f"reading at 61 {({k: v for k, v in _r61.items() if k != 'areas'})}; book empty "
+          f"{book(rn).get('eval.holdout.empty')}, nonfinite {book(rn).get('eval.holdout.nonfinite')}")
     del n14
+
+    # ---- P14 (pure): pairing is by item -- a window skipped in one reading keeps its slot ----------
+    # Q-EVAL-12's review: a half's list held its finite values alone, so one skipped window moved every
+    # later one up a place and the pairing compared different windows. Three control items tagged by
+    # their prefix's first byte (10, 20, 30) and one report item (40); the planted closure's logits are
+    # the tag's alone, so every true paired difference is exactly 0.
+    class _Cut:
+        """TOK.tokenize's shape, one id per byte."""
+        def __init__(self, data):
+            self.ids, self.byte_pos = list(data), list(range(len(data) + 1))
+
+    def _tagged(nan_tag=None):
+        def fn(x, *, prefix_bytes):
+            tag = int(bytes(prefix_bytes[0])[0])
+            lg = torch.randn(1, int(x.shape[1]), 8, generator=torch.Generator().manual_seed(tag))
+            return torch.full_like(lg, float("nan")) if tag == nan_tag else lg
+        fn.name = "tagged"
+        return fn
+
+    def _items(first):
+        return {"a": {"control": [(bytes([10]), first), (bytes([20]), bytes([2]) * 20),
+                                  (bytes([30]), bytes([3]) * 20)],
+                      "report": [(bytes([40]), bytes([4]) * 20)], "seen_by_parent": False}}
+
+    def _read(first, nan_tag=None, previous=None, at=1):
+        return eval_api.holdout_probe(ev20, units_by_domain=_items(first), logits_fn=_tagged(nan_tag),
+                                      tokenize_fn=_Cut, step=U.Windows(at), previous=previous)
+    _W20 = bytes([1]) * 20
+    _nan = _read(_W20, nan_tag=10)
+    _short = _read(b"\x01")
+    _state = copy.deepcopy(loop._reading_state(_nan))
+    _now = _read(_W20, previous=_nan, at=2)
+    _pairs = {"with the non-finite one": _now,
+              "with it restored from LOOP.eval's state": _read(_W20, previous=loop._reading_from_state(
+                  _state), at=2),
+              "with the one cut short": _read(_W20, previous=_short, at=2),
+              "the other way round": _read(_W20, nan_tag=10, previous=_now, at=3)}
+    _cn, _cs, _cf = (rd.areas["a"]["control"] for rd in (_nan, _short, _now))
+    check("P14 pairing is by item: a window skipped in one reading -- non-finite (counted in its half's "
+          "nonfinite) or cut to fewer than two ids (no window) -- keeps its slot as None, the means leave "
+          "it out, and the other windows pair with themselves: 2 control differences of exactly 0 and the "
+          "report's 1, against the live reading, a restored one, and the other way round",
+          _cn[0] is None and _cs[0] is None and None not in _cf and _cn[1:] == _cs[1:] == _cf[1:]
+          and _nan.areas["a"].get("control_nonfinite") == 1 and (_nan.windows, _nan.nonfinite) == (4, 1)
+          and _short.areas["a"].get("control_nonfinite") == 0
+          and (_short.windows, _short.nonfinite) == (3, 0)
+          and _nan.control_mean.value == (_cf[1] + _cf[2]) / 2 and _state["areas"]["a"]["control"][0] is None
+          and all(rd.paired == {"a": {"control": (2, 0.0, 0.0), "report": (1, 0.0, None)}}
+                  and rd.paired_sd == 0.0 for rd in _pairs.values()),
+          "; ".join(f"{k}: {rd.paired}" for k, rd in _pairs.items()))
 
     # ---- P3 (boundary): a boundary resume's start read is the parent's R read ----------------------
     # A SHORT EPOCH NEEDS A LARGER BLOCK: at DATA_STREAM_BYTES=20000 each area is generated at 10,000
@@ -998,6 +1198,21 @@ try:
     _all_ids = [t for s in g1 for rows in s.population.values() for r in rows for t in r["generated"]]
     check("P9 every generated id is one the vocabulary can print (below TOK.Vocabulary.size())",
           all(0 <= t < int(s9.vocab.size()) for t in _all_ids), f"max {max(_all_ids)}")
+    # THE TEXT CONTINUED (Q-EVAL-12's review): the rows recorded the routing prefix under `prompt`, so
+    # prompt + generation printed text the model never continued.
+    _rep9 = s9.probe_set.items
+    _bad9 = [(s.closure, a, i) for s in g1 for a, rows in s.population.items()
+             for i, r in enumerate(rows)
+             if not (r.get("prompt") == _rep9[a]["report"][i][2]
+                     and r.get("prefix") == _rep9[a]["report"][i][1]
+                     and bytes(s9.vocab.decode(r["ids"][:len(r["ids"]) - len(r["generated"])]))
+                     == r.get("prompt"))]
+    check("P9 each continuation records the text it continued: `prompt` is its pinned report window, "
+          "whose prompt ids decode back to it, and `prefix` the routing prefix before it",
+          not _bad9 and sum(len(rows) for s in g1 for rows in s.population.values()) == 8
+          and all(r.get("prompt") != r.get("prefix") for s in g1 for rows in s.population.values()
+                  for r in rows),
+          f"rows that do not: {_bad9[:4]}")
     r9b = loop.run(s9, max_windows=10, progress=False)
     check("P9 a second loop.run over one System does not raise and keeps its arrived areas",
           any(e["kind"] == "cadence" and set(e["areas"]) == {"eng", "py"} for e in r9b.probe_series),

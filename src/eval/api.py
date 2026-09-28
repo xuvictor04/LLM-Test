@@ -142,7 +142,8 @@ from spine import rng as _rng
 # ==================================================================================================
 
 REFUSE_NEGATIVE_PERIOD = True
-"""Whether curve_period refuses a negative EVAL_CURVE_EVERY. True is the shipped state; False lets
+"""Whether curve_period refuses a negative EVAL_CURVE_EVERY -- and, since 2026-09-27, whether
+retention_period refuses a negative EVAL_RETENTION_EVERY. True is the shipped state; False lets
 the value through to units.Windows exactly as it did before 2026-09-04.
 
 THE RULING (owner, 2026-09-04): "On the periods, let's refuse for now. If it has a bad effect, we
@@ -155,8 +156,10 @@ ONCE, AT ckpt/api.py::REFUSE_NEGATIVE_PERIOD, and are not restated here: CKPT is
 was opened and where the first of the five refusals shipped. WHAT IS THIS FILE'S OWN, and the reason
 the name is spelled here rather than imported: tests/test_ownership.py::check_o10_no_backdoor_imports
 forbids EVAL to import ckpt, so the five switches are five per-package policies that happen to share
-a default, each governing only its own package's lever. This one governs EVAL_CURVE_EVERY and
-nothing else, and turning it off here leaves the other four refusing.
+a default, each governing only its own package's levers. This one governs EVAL_CURVE_EVERY and,
+since 2026-09-27, EVAL_RETENTION_EVERY (retention_period, Q-EVAL-12) and nothing else, and turning
+it off here leaves the other four refusing. (It said "EVAL_CURVE_EVERY and nothing else" until
+Q-EVAL-12's review, beside the retention_period whose docstring says this switch governs it too.)
 
 THE COST, SO IT IS NOT DISCOVERED: turning it off is a CODE EDIT. There is no
 EVAL_REFUSE_NEGATIVE_PERIOD, no census row and no row in the generated lever document -- deliberately,
@@ -193,13 +196,16 @@ class ProbeSet:
     items         {area: {"control": ((start, prefix, window), ...), "report": (...)}} -- `start`
                   is the window's byte offset in the area's held-out BLOCK, `prefix` the
                   prefix_bytes bytes before it, `window` the window_bytes bytes it scores; both
-                  inside the same half, so neither half ever reads the other's text
+                  inside the same half, so neither half ever reads the other's text. ONLY AREAS
+                  HOLDING AT LEAST ONE WINDOW (2026-09-27, Q-EVAL-12's review): an area neither of
+                  whose halves can hold one is unpinned and absent here, and a half that cannot is ()
     halves        {area: (mid, block_len)} -- control is block[:mid], report is block[mid:]
     window_bytes  the scored window's width in bytes (LM.ctx + 1 when first pinned)
     prefix_bytes  the routing prefix's width in bytes (the SIG width when first pinned)
     shortfall     {area: {"control": n, "report": n}} -- items a half was too short to supply
-    reason        "" when pinned; otherwise why nothing was (the probe off, no block)
-    rng_names     the child streams drawn, in draw order
+    reason        "" when pinned; otherwise why nothing was (the probe off, no block, or no half
+                  long enough to hold a window behind its prefix)
+    rng_names     the child streams drawn, in draw order -- only halves that pinned a window draw
     """
     items: dict
     halves: dict
@@ -214,14 +220,20 @@ class ProbeSet:
 class HoldoutReading:
     """One reading of the pinned windows through one closure. Returned by holdout_probe.
 
-    areas         {area: {"control": [bits/byte per window], "report": [...], "control_mean",
-                  "report_mean", "seen_by_parent"}}
+    areas         {area: {"control": [one slot per item read], "report": [...], "control_mean",
+                  "report_mean", "control_nonfinite", "report_nonfinite", "seen_by_parent"}} --
+                  slot i is the i-th pinned item of that half, in pin order: its bits/byte, or None
+                  where the window gave no finite value (non-finite, counted in <half>_nonfinite,
+                  or cut to fewer than two ids). ONE SLOT PER ITEM, NOT PER VALUE (2026-09-27,
+                  Q-EVAL-12's review): a list of the finite values alone shifted every later
+                  window one place, and the pairing below compared different windows
     control_mean  Reading(mean over areas of each area's control mean, 1, step) -- the number
-                  CKPT, EVAL's blow-up alarm and OPT consume; None when no window was scored
+                  CKPT, EVAL's blow-up alarm and OPT consume; None when no finite control window
+                  was scored
     report_mean   Reading(the same over the report halves, 1, step) -- the number the run reports
-                  and nothing acts on; None when no window was scored
+                  and nothing acts on; None when no finite report window was scored
     paired        {area: {half: (n, mean_diff, sd_diff)}} against `previous`, on the items both
-                  readings scored; {} with no previous
+                  readings scored -- slot i of each, the same pinned item; {} with no previous
     paired_sd     the SD of every paired per-window difference, both halves, all areas; None with
                   fewer than two
     closure       the name of the logits_fn that produced it ('memory-off' / 'memory-on')
@@ -269,7 +281,12 @@ class BlowupReading:
 class Sample:
     """What generate returns: the measured population, its SIZE, and the rule that drew it.
 
-    population  {area: [{"prompt": bytes, "ids": [prompt ids + generated ids], "generated": [ids]}]}
+    population  {area: [{"prefix": bytes, "prompt": bytes, "ids": [prompt ids + generated ids],
+                "generated": [ids]}]} -- `prompt` is the text the model continued (the bytes the
+                prompt ids were cut from; None where the caller handed ids alone) and `prefix` the
+                routing prefix before it, which the model read only through its signature. Until
+                2026-09-27's review `prompt` held the prefix, so prompt + generation printed text
+                the model never continued
     size        the number of continuations
     rule        how the prompts were chosen and the tokens drawn, as a sentence
     per_domain  {area: continuations}
@@ -437,11 +454,23 @@ def pin_holdout(ev: Config, *, blocks, seed, window_bytes, prefix_bytes):
     source), the ProbeSet is empty, carries the reason, and no stream is minted -- so rng.issued()
     reads exactly as it did before this entry point existed.
 
+    AND A BLOCK WITH NO ROOM IS NO BLOCK (2026-09-27, Q-EVAL-12's review). A half shorter than
+    prefix_bytes + window_bytes can hold no window: it draws nothing and mints no stream, an area
+    neither of whose halves holds one is left out of `items` (its whole need is `shortfall`), and
+    where no half anywhere holds one the ProbeSet is empty with a reason naming the geometry, the
+    halves and the DATA levers that size a block -- so the root's arm test fails and every row says
+    UNREACHABLE. Until then such a ProbeSet carried every area with () in both halves and reason
+    "", the root counted it armed, and every reading scored no window: driven at
+    DATA_STREAM_BYTES=20000, 250-byte halves against 192 + 129 bytes, 7 readings of 0 windows, the
+    gated report saying the probe fired 7 times and CKPT's inert reason blaming
+    EVAL_RETENTION_EVERY=0 or DATA_SYNTH_HOLDOUT=0, neither of which held. `halves` and `shortfall`
+    are kept on that empty ProbeSet, so its reason's arithmetic can be read off the record.
+
     LEVERS READ: holdout_windows, retention_n, retention_every
     WIRES READ: none
     DID IT FIRE: ProbeSet.items per (area, half), ProbeSet.shortfall, ProbeSet.rng_names (and
-                 rng.issued(), where each child appears with its draw count); the root books
-                 eval.holdout.shortfall from it
+                 rng.issued(), where each child that drew appears with its draw count); the root
+                 books eval.holdout.shortfall from it
     """
     ev = ev.owned_by("EVAL")
     every = int(ev.retention_every)
@@ -470,24 +499,45 @@ def pin_holdout(ev: Config, *, blocks, seed, window_bytes, prefix_bytes):
         blk = have[area]
         mid = len(blk) // 2
         halves[area] = (mid, len(blk))
-        items[area], shortfall[area] = {}, {}
+        got, shortfall[area] = {}, {}
         for half, (h0, h1) in (("control", (0, mid)), ("report", (mid, len(blk)))):
             lo, hi = P, (h1 - h0) - W
             avail = max(0, hi - lo + 1)
             k = min(need[half], avail)
-            name = f"eval.holdout.{_derive.stream_key(area)}.{half}"
-            stream = _rng.rng_for(name, seed)
-            names.append(name)
-            starts, seen = [], set()
-            while len(starts) < k:
-                s = stream.randint(lo, hi)
-                if s in seen:
-                    continue
-                seen.add(s)
-                starts.append(s)
-            items[area][half] = tuple(
+            starts = []
+            # ONLY A HALF THAT PINS A WINDOW MINTS ITS STREAM: one that can hold none has nothing to
+            # draw, and a stream issued with no draw would read as armed in rng.issued(). Each
+            # stream's seed is its name's, so skipping one moves no other half's starts.
+            if k > 0:
+                name = f"eval.holdout.{_derive.stream_key(area)}.{half}"
+                stream = _rng.rng_for(name, seed)
+                names.append(name)
+                seen = set()
+                while len(starts) < k:
+                    s = stream.randint(lo, hi)
+                    if s in seen:
+                        continue
+                    seen.add(s)
+                    starts.append(s)
+            got[half] = tuple(
                 (h0 + s, blk[h0 + s - P:h0 + s], blk[h0 + s:h0 + s + W]) for s in starts)
             shortfall[area][half] = need[half] - k
+        if got["control"] or got["report"]:
+            items[area] = got
+    if not items:
+        longest = max(max(m, n - m) for m, n in halves.values())
+        return ProbeSet(
+            items={}, halves=halves, window_bytes=W, prefix_bytes=P, shortfall=shortfall,
+            reason=(f"no held-out half can hold a window behind its routing prefix: one needs "
+                    f"prefix_bytes + window_bytes = {P} + {W} = {P + W} bytes inside a half (the "
+                    f"SIG width and LM.ctx + 1, or the geometry a parent recorded), and the longest "
+                    f"half here is {longest} bytes ("
+                    + "; ".join(f"{a} {m}/{n - m}" for a, (m, n) in sorted(halves.items()))
+                    + " bytes, control/report). A block is DATA's carve, the area's body x "
+                      "DATA_HOLDOUT_FRAC capped at DATA_VAL_CAP, so nothing is pinned, no stream is "
+                      "drawn and the probe reads nothing until a larger DATA_HOLDOUT_FRAC or a "
+                      "longer body gives a half room."),
+            rng_names=())
     return ProbeSet(items=items, halves=halves, window_bytes=W, prefix_bytes=P,
                     shortfall=shortfall, reason="", rng_names=tuple(names))
 
@@ -600,8 +650,19 @@ def holdout_probe(ev: Config, *, units_by_domain, logits_fn, tokenize_fn, step, 
     DOMINANT error bar is neither: PLAN 3.8 records a between-seed spread of 0.066-0.131 b/B, so
     every Reading here carries seed_count 1.
 
-    A NON-FINITE WINDOW IS COUNTED AND LEFT OUT OF EVERY MEAN (HoldoutReading.nonfinite): a reading
-    that averaged a nan would hand a nan to three consumers, and CKPT.Retention.consider refuses one.
+    PAIRED BY ITEM, NOT BY POSITION IN A LIST OF VALUES (2026-09-27, Q-EVAL-12's review). Each half
+    keeps ONE SLOT PER ITEM READ, in pin order -- the value, or None where the window gave none --
+    so slot i is the same pinned item in every reading of a lineage, a restored `previous` included,
+    and a pair is taken only where both slots hold a value. Until then a skipped window was dropped
+    from its list and every later window moved up one place: driven on tests/test_probe.py P14's
+    planted case, one non-finite window in the earlier reading paired the next reading's windows 10
+    with 20 and 20 with 30 (n 2, mean -0.012, SD 0.255), where both true differences were exactly 0,
+    and a window cut to fewer than two ids did the same.
+
+    A NON-FINITE WINDOW IS COUNTED AND LEFT OUT OF EVERY MEAN AND EVERY PAIR
+    (HoldoutReading.nonfinite, and <half>_nonfinite per area): a reading that averaged a nan would
+    hand a nan to three consumers, and CKPT.Retention.consider refuses one. A window that cuts to
+    fewer than two ids scores nothing and is not counted as a window at all; its slot is None too.
 
     G7, BOTH HALVES. It runs under spine/rng.py::frozen_rng(strict=True) and refuses a body that
     moved a global stream -- the closure computes under no_grad in eval mode, and a dropout left on
@@ -611,8 +672,9 @@ def holdout_probe(ev: Config, *, units_by_domain, logits_fn, tokenize_fn, step, 
 
     LEVERS READ: holdout_windows, retention_n
     WIRES READ: none
-    DID IT FIRE: HoldoutReading.windows and .nonfinite, windows per area and half, and the SEED
-                 COUNT carried on each Reading; plus the PAIRED SD. The root books the rest --
+    DID IT FIRE: HoldoutReading.windows and .nonfinite (each area's <half>_nonfinite splits it),
+                 windows per area and half, and the SEED COUNT carried on each Reading; plus the
+                 PAIRED SD and each pair's n. The root books the rest --
                  eval.holdout.calls and its three arms, and the closure's own forwards, decodes,
                  cuts and SIG encodes -- in its eval book, because a count here would be a second
                  ledger for the same event
@@ -633,11 +695,14 @@ def holdout_probe(ev: Config, *, units_by_domain, logits_fn, tokenize_fn, step, 
             row = units_by_domain[area]
             got = {"seen_by_parent": bool(row.get("seen_by_parent", False))}
             for half in ("control", "report"):
-                vals = []
+                # ONE SLOT PER ITEM, None WHERE THE WINDOW GAVE NO VALUE (see the docstring): the
+                # pairing below compares slot i with slot i, the same pinned item in both readings.
+                vals, nf = [], 0
                 for prefix, window in list(row.get(half) or ())[:take[half]]:
                     seg = tokenize_fn(bytes(window))
                     ids = list(seg.ids)
                     if len(ids) < 2:
+                        vals.append(None)
                         continue
                     span = len(window) - int(seg.byte_pos[1])
                     x = torch.tensor([ids[:-1]], dtype=torch.long)
@@ -649,10 +714,13 @@ def holdout_probe(ev: Config, *, units_by_domain, logits_fn, tokenize_fn, step, 
                     windows += 1
                     if not math.isfinite(bpb):
                         nonfinite += 1
+                        nf += 1
+                        vals.append(None)
                         continue
                     vals.append(bpb)
                 got[half] = vals
-                got[half + "_mean"] = _mean(vals)
+                got[half + "_mean"] = _mean([v for v in vals if v is not None])
+                got[half + "_nonfinite"] = nf
             areas[area] = got
     if fr.moved:
         raise _rng.RngError(
@@ -674,10 +742,10 @@ def holdout_probe(ev: Config, *, units_by_domain, logits_fn, tokenize_fn, step, 
             paired[area] = {}
             for half in ("control", "report"):
                 a, b = list(got.get(half) or ()), list(was.get(half) or ())
-                k = min(len(a), len(b))
-                d = [a[i] - b[i] for i in range(k)]
+                d = [a[i] - b[i] for i in range(min(len(a), len(b)))
+                     if a[i] is not None and b[i] is not None]
                 diffs += d
-                paired[area][half] = (k, _mean(d), _sd(d))
+                paired[area][half] = (len(d), _mean(d), _sd(d))
     return HoldoutReading(areas=areas, control_mean=control, report_mean=report, paired=paired,
                           paired_sd=_sd(diffs), closure=closure, boundary=bool(boundary),
                           windows=windows, nonfinite=nonfinite, step=at)
@@ -782,14 +850,18 @@ def generate(ev: Config, *, logits_fn, prompts_by_domain, rng):
     the environment.
 
     THE BODY, 2026-09-27 (Q-EVAL-12). `prompts_by_domain` is the root's (spine/compose.py::
-    _gen_prompts): {area: [{"prefix": bytes, "ids": [token ids]}, ...]} -- report-half held-out
-    windows of the arrived areas, tokenized at the view the stream was last cut at, so a prompt is
-    text the run never trained on. The FIRST gen_domains areas in sorted order each give their
-    first gen_samples prompts, and each prompt is continued by gen_len tokens: logits_fn over the
-    whole sequence so far, the last position's logits over gen_temp, and one draw by INVERSE CDF on
-    a uniform from rng.torch_generator() -- the stream the root minted once per System at the
-    'probe' row as rng_for('eval.generate', seed), so two runs of one seed generate the same text
-    and no training stream is touched. gen_temp <= 0 takes the argmax.
+    _gen_prompts): {area: [{"prefix": bytes, "prompt": bytes, "ids": [token ids]}, ...]} --
+    report-half held-out windows of the arrived areas, `prompt` the window's bytes and `ids` their
+    cut at the view the stream was last cut at, `prefix` the routing prefix before the window, so a
+    prompt is text the run never trained on. Each Sample row records the prompt's bytes as `prompt`
+    and the prefix as `prefix`: the model continues the prompt and reads the prefix only through the
+    signature it routes on, so prompt + generation is the text as it was continued (until
+    Q-EVAL-12's review the row's `prompt` held the prefix). The FIRST gen_domains areas in sorted
+    order each give their first gen_samples prompts, and each prompt is continued by gen_len tokens:
+    logits_fn over the whole sequence so far, the last position's logits over gen_temp, and one draw
+    by INVERSE CDF on a uniform from rng.torch_generator() -- the stream the root minted once per
+    System at the 'probe' row as rng_for('eval.generate', seed), so two runs of one seed generate
+    the same text and no training stream is touched. gen_temp <= 0 takes the argmax.
     THE CLOSURE OWNS THE WINDOW AND THE PREFIX: this body hands it the whole sequence, and the root's
     closure keeps the last LM.ctx tokens and rebuilds the routing prefix by decoding the dropped
     ids (TOK.Vocabulary.decode), because EVAL can read neither LM's context nor TOK's vocabulary.
@@ -839,7 +911,9 @@ def generate(ev: Config, *, logits_fn, prompts_by_domain, rng):
                                 int(probs.shape[0]) - 1))
                 seq.append(t)
                 made.append(t)
-            rows.append({"prompt": bytes(p.get("prefix", b"")), "ids": seq, "generated": made})
+            rows.append({"prefix": bytes(p.get("prefix", b"")),
+                         "prompt": None if p.get("prompt") is None else bytes(p["prompt"]),
+                         "ids": seq, "generated": made})
         pop[area] = rows
         per[area] = len(rows)
     size = sum(per.values())

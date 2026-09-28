@@ -91,14 +91,20 @@ THIS refusal to be turn-off-able, by name, in the same breath as ordering it -- 
 one in the tree that was asked for.
 
 WHERE THE FIVE REFUSALS ARE REACHABLE FROM TODAY, because "it refuses at startup" would be a claim
-about a path that does not run yet. spine/compose.py::compose halts at CAP.startup_refusals, which
-is row 29 of the 39 in spine/compose.py::ASSEMBLY_ORDER, while all five accessors are called at the
+about a path that does not run yet. spine/compose.py::compose halted at CAP.startup_refusals, then
+row 29 of the 39 in spine/compose.py::ASSEMBLY_ORDER, while all five accessors are called at the
 `cadence` row further down -- measured by running compose(environ={'DOM_MANAGE_EVERY': '-5'}) and the
 four siblings' equivalents in fresh processes on 2026-09-04, every one of which ended at
-CAP.startup_refusals and never reached an accessor. So the refusals are live for anything that calls
-an accessor (spine/compose.py::_periods, a probe, a test) and become live for the composition root
-on the day CAP.startup_refusals gets a body. That is the standing this accessor's own refusal has
-had since it shipped; the four siblings inherit it rather than introduce it.
+CAP.startup_refusals and never reached an accessor. So the refusals were live for anything that
+calls an accessor (spine/compose.py::_periods, a probe, a test) and became live for the composition
+root on the day CAP.startup_refusals got a body. That is the standing this accessor's own refusal
+has had since it shipped; the four siblings inherit it rather than introduce it. THAT DAY HAS COME
+AND THIS PARAGRAPH SAID "halts" UNTIL Q-EVAL-12's REVIEW (2026-09-27): CAP.startup_refusals has a
+body, it is the 30th of the 41 rows, and compose(environ={}) returns a System at stage 'assembled'.
+Measured the same day: CKPT_EVERY, DOM_MANAGE_EVERY, MEM_REKEY_EVERY and EVAL_CURVE_EVERY at -5
+each raise their LeverError from the `cadence` row's _periods, as EVAL_RETENTION_EVERY=-5 does --
+a sixth refusal, under EVAL's switch, since Q-EVAL-12 -- while FAB_MANAGE_EVERY=-5 never reaches
+its accessor: assembly refuses it first, a UnitError out of derive.flush_period_windows.
 
 THREE SHAPES WERE WEIGHED AND TWO LOST, priced against what the tree actually has rather than
 against preference.
@@ -1614,11 +1620,20 @@ class Retention:
                 f"is nowhere to write, so no probe can earn a slot however good it is. Raising "
                 f"CKPT_BEST_KEEP changes nothing; setting CKPT_DIR does.")
         if self._probes_seen == 0:
+            # EVERY CAUSE, BECAUSE THIS PACKAGE CANNOT TELL WHICH HELD (2026-09-27, Q-EVAL-12's
+            # review): CKPT never sees the probe, only its values. The clause named two, and there
+            # are two more -- halves too short for a window behind its prefix, where the probe now
+            # stays unarmed, and an armed probe whose every reading had no finite control window;
+            # driven at DATA_STREAM_BYTES=20000, this sentence blamed EVAL_RETENTION_EVERY=0 or
+            # DATA_SYNTH_HOLDOUT=0 on a run with neither. The EVAL(holdout) row names the one.
             clauses.append(
                 "no curve value has ever arrived: CKPT.Retention.consider has not been called "
                 "once, so 0 new bests and 0 rotations are not a measurement of this run's curve. "
                 "Its caller is the held-out retention probe (spine/loop.py, EVAL.holdout_probe's "
-                "control mean), which EVAL_RETENTION_EVERY=0 disarms and which reads nothing "
-                "where no area has a held-out block (DATA_SYNTH_HOLDOUT=0 on the synthetic "
-                "source).")
+                "control mean), which EVAL_RETENTION_EVERY=0 disarms, which pins nothing where "
+                "no area has a held-out block (DATA_SYNTH_HOLDOUT=0 on the synthetic source) or "
+                "no half of one can hold a window behind its routing prefix (DATA_HOLDOUT_FRAC, "
+                "DATA_VAL_CAP), and which forwards no reading whose control half scored no "
+                "finite window (eval.holdout.nonfinite, eval.holdout.empty); the EVAL(holdout) "
+                "row says which.")
         return " ".join(clauses)
