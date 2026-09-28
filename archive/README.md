@@ -12,8 +12,8 @@ went. It was the root's `ARCHIVE.md` until 2026-09-28 and moved here with `git m
 `git log --follow archive/README.md` keeps its history. `garry/`, `legacy/`, `handoff/`, `docs/`,
 `STATE.md` and `CL_TESTBED.md` moved here from the root on 2026-08-27, so that a repository-wide grep does
 not return them beside live code; the old tree and `.rework/QUESTIONS.md` followed on 2026-09-28, and
-`agent-transcripts/` was committed here directly. Nothing in `src/`, `tests/` or `tools/`, nor `run.py` or `gpu_world.sh`,
-imports or executes any of it; the old tree runs when someone runs it (below), and
+`agent-transcripts/` was committed here directly. Nothing in `src/`, `tests/` or `tools/`, nor `run.py`
+or `gpu_world.sh`, imports or executes any of it; the old tree runs when someone runs it (below), and
 `.rework/capture_oracle.py`, the P0 capture of the oracle `tests/test_derive.py` replays, reads
 `old-tree/self_organize.py` if it is ever run again.
 
@@ -125,9 +125,9 @@ move prompts from the root as described above.
 
 ## Where each moved path went
 
-Records written before a move keep the paths of their day and are not rewritten: the notes corpus, the
-dated entries of `.rework/`'s ledgers, the survey and audit JSON, `results/`, the agent transcripts and
-the commit messages. This table resolves them.
+Records written before a move keep the paths of their day, and are not rewritten to follow it: the notes
+corpus, the dated entries of `.rework/`'s ledgers, the survey and audit JSON, `results/`, the agent
+transcripts and the commit messages. This table resolves them.
 
 | was | is | moved |
 |---|---|---|
