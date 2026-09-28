@@ -29,8 +29,8 @@
 # fabric's growth ramp over thousands of experts. It is the cheapest thing that can FALSIFY inertness.
 set -u
 
-ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)          # this repo, however it was invoked
-[ -d "$ROOT/.git" ] || { echo "!! $ROOT is not a git repo"; exit 1; }
+ROOT=$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel 2>/dev/null)   # the checkout this file is in (in archive/old-tree/ since 2026-09-28), however it was invoked
+[ -n "$ROOT" ] && [ -e "$ROOT/.git" ] || { echo "!! $(dirname "${BASH_SOURCE[0]}") is not inside a git checkout"; exit 1; }
 
 A=${1:-}; B=${2:-HEAD}
 [ -n "$A" ] || { echo "usage: bash equiv.sh <ref> [ref2]   (compares <ref> against ${2:-HEAD})"; exit 1; }
@@ -73,7 +73,7 @@ echo "  output -> $OUT      (created and writable; nothing here is inside a work
 
 if [ "$(cat "$PDIR/train/eng"/part*.txt 2>/dev/null | wc -c)" -lt 50000 ]; then
   echo "!! $PDIR/train/eng has under 50 kB of text -- not enough to run. Pull it first:"
-  echo "   python3 fetch_big.py --dataset fineweb-edu --domain eng --gb 0.06 --out $PDIR --resume"
+  echo "   python3 $ROOT/archive/old-tree/fetch_big.py --dataset fineweb-edu --domain eng --gb 0.06 --out $PDIR --resume"
   exit 1
 fi
 
@@ -88,7 +88,7 @@ run_side() {                                              # run_side <sha> <logf
   _wt=$(mktemp -d "/tmp/equiv_${_sha}_XXXX")
   git -C "$ROOT" worktree add -q --detach "$_wt" "$_sha" || { echo "  !! worktree failed for $_sha"; return 1; }
   echo "  $_sha: running in $_wt"
-  ( cd "$_wt" && env $COMMON $CFG python3 self_organize.py ) > "$_log" 2>&1
+  ( cd "$_wt" && { [ -f self_organize.py ] || cd archive/old-tree; } && env $COMMON $CFG python3 self_organize.py ) > "$_log" 2>&1
   _rc=$?
   # The log lives in $OUT, never in $_wt, so removing the worktree cannot destroy the result.
   git -C "$ROOT" worktree remove --force "$_wt" 2>/dev/null

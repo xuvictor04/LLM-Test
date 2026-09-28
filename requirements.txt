@@ -11,16 +11,19 @@
 #   torch 2.11+ is CUDA 13 and needs driver r580+. On an older GH200 image, install from the CUDA 12 index
 #   instead -- those ARE aarch64 CUDA (sbsa) builds at every version:
 #       pip install torch --index-url https://download.pytorch.org/whl/cu128
-#   `bash preflight.sh` checks the driver, the sm_90 cubin, and runs the actual cuDNN GRU kernel.
+#   The old tree's `bash archive/old-tree/preflight.sh` checks the driver, the sm_90 cubin, and runs the actual
+#   cuDNN GRU kernel; for the new tree, `tools/gpu_launch.sh` checks the installed torch against this floor.
 torch>=2.11
 
-# numpy is NOT a dependency of this project. Nothing on the product path imports it -- self_organize.py,
-# memory.py, world_model.py, tokenizer.py, datastream.py, prompt.py and verification.py are pure torch+stdlib
-# (only legacy/, which nothing runs, uses numpy). torch prints "UserWarning: Failed to initialize NumPy" when it
-# is absent; that is cosmetic and the training loop is unaffected.
+# numpy is NOT a dependency of this project. Nothing on the product path imports it -- src/, run.py and tools/,
+# and the old tree's self_organize.py, memory.py, world_model.py, tokenizer.py, datastream.py, prompt.py and
+# verification.py (in archive/old-tree/), are pure torch+stdlib (only archive/legacy/, which nothing runs, uses
+# numpy). torch prints "UserWarning: Failed to initialize NumPy" when it is absent; that is cosmetic and the
+# training loop is unaffected.
 #   It was listed here as numpy>=1.21, which on a fresh box resolves to numpy 2.x and can ABI-clash with a torch
 #   built against 1.x -- an install-time risk taken for a package the code never calls. Removed.
-#   `fetch_big.py` needs `datasets` (which pulls numpy/pyarrow/pandas, all of which have aarch64 wheels). Install
-#   that into a THROWAWAY env so it can never upgrade numpy underneath the torch you train with:
+#   The old tree's `archive/old-tree/fetch_big.py` needs `datasets` (which pulls numpy/pyarrow/pandas, all of which
+#   have aarch64 wheels). Install that into a THROWAWAY env so it can never upgrade numpy underneath the torch you
+#   train with:
 #       python3 -m venv ~/fetchenv && ~/fetchenv/bin/pip install datasets
-#       ~/fetchenv/bin/python fetch_big.py --dataset fineweb-edu --gb 40 --out data_big
+#       ~/fetchenv/bin/python archive/old-tree/fetch_big.py --dataset fineweb-edu --gb 40 --out data_big

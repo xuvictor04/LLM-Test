@@ -1,7 +1,7 @@
 # CURRENT DEFAULTS
 
-**GENERATED FILE — do not edit.** `python3 notes_check.py --write` regenerates it from `_SPEC` in
-`self_organize.py`, and `notes_check.py` (wired into `selftest.sh`) fails if it is out of date.
+**GENERATED FILE — do not edit.** `python3 archive/old-tree/notes_check.py --write` regenerates it
+from `_SPEC` in `archive/old-tree/self_organize.py`, and `notes_check.py` (wired into `selftest.sh`) fails if it is out of date.
 
 This file exists because the notes have been wrong about the defaults twice at real cost — once
 telling the user a built mechanism did not exist, once stating `FAB_N0=3` in nine files a week after

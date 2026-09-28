@@ -94,7 +94,7 @@ culls under its own selection pressure.
 - **B — continual learning without catastrophic forgetting.**
 
 **Read this before anything else: the repository is mid-rebuild.** There are two trees here. The old
-one still runs and is what every recorded result came from. The new one — `src/` — has a complete,
+one — `archive/old-tree/` — still runs and is what every recorded result came from. The new one — `src/` — has a complete,
 frozen public surface and **48 of its 132 entry points have bodies**. Nothing has been trained at
 scale under it. Do not read the numbers in this file's history as current; see *Status* below.
 
@@ -208,18 +208,25 @@ schedules, checkpoints or measures — the hand-built loop above is still hand-b
 
 ## The old tree
 
-Still at the repository root and still runnable — `self_organize.py` (828 KB), `memory.py`,
-`tokenizer.py`, `vocab.py`, `datastream.py`, `world_model.py`, `run_full_unfrozen.sh`, `prompt.py`,
-`cl_bench.py`, and ~40 other scripts. It is the only thing that has ever trained at scale, and it is
-frozen: it is the evidence the rebuild is read against, not something to extend.
+In `archive/old-tree/` since 2026-09-28, moved from the repository root with `git mv`:
+`self_organize.py` (9,859 lines), `memory.py`, `tokenizer.py`, `vocab.py`, `datastream.py`,
+`world_model.py`, `run_full_unfrozen.sh`, `prompt.py`, `cl_bench.py`, and 42 other files: the rest of
+its modules, its tests, harness, probes and fetchers, and the run registry. The files `src/`, `docs/`
+and `tests/` cite by line did not change by a byte, so every `self_organize.py:NNNN` still lands on its
+line. It is the only thing that has ever trained at scale, and it is frozen: it is the evidence the
+rebuild is read against, not something to extend. It still runs, from its own directory:
 
 ```bash
-bash run_full_unfrozen.sh          # the whole old system (needs a CUDA GPU)
-python3 prompt.py CKPT=runs/<tag>  # message a trained checkpoint
+cd archive/old-tree                         # its data/ is a link to the root's data/
+mkdir -p runs && bash run_full_unfrozen.sh  # the whole old system (needs a CUDA GPU); runs/ here, gitignored
+python3 prompt.py CKPT=runs/<tag>           # message a checkpoint it wrote here
 ```
 
-`STATE.md`, `CL_TESTBED.md` and `garry/GARRY.md` moved under `archive/` on 2026-08-27. Earlier
-versions of this file told readers to start with them at their old paths.
+A checkpoint the old tree wrote at the root before the move is prompted from the root, as
+`python3 archive/old-tree/prompt.py CKPT=runs/<tag>`: a checkpoint records its vocabulary's path
+relative to the directory it was trained in. `STATE.md`, `CL_TESTBED.md` and `garry/GARRY.md` moved
+under `archive/` on 2026-08-27. `archive/README.md` says what every archived record is, how to run the
+old tree against the corpora and runs kept at the root, and where every moved path went.
 
 ## Status, honestly
 
@@ -279,28 +286,66 @@ is numerically identical, so a units defect is invisible. The full generated ref
 
 | file | for whom | what it is |
 |---|---|---|
+| `notes/OWNER_BRIEF.md` | the owner | the one page: how we work, the GPU test queue with its copy-paste commands, and the rulings that touch the owner's own |
+| `docs/proposals/05_DECISIONS.md` | anyone deciding what is next | the decision register, and the staged test plan (its section 8) that orders the work |
 | `docs/04_CONTRACT.md` | anyone writing a body | the frozen signature set: every entry point, its levers, its wires, its DID-IT-FIRE surface, and the `FOR THE OWNER` questions. Large; the counts in it are machine-synced |
+| `docs/05_DEFAULTS.md` | anyone reading a run | every lever's default, and what is on and off at the defaults. **Generated** by `tools/render_defaults.py`; `tests/test_assemble.py`'s A10 fails if it has drifted |
 | `docs/03_WIRING.md` | anyone touching a coupling | the coupling graph. **Generated** by `tools/render_wiring.py`; `--check` fails if it has drifted |
-| `docs/02_OPERATIONS.md` | operators | how to run things |
-| `docs/proposals/` | future work | multimodal generation/reading, and a recursive router hierarchy |
+| `docs/02_OPERATIONS.md` | operators | the owner's machine, this container and the working agreement, from the chat record to 2026-08-29; the roles in force now are `notes/OWNER_BRIEF.md`'s "How we work" |
+| `docs/proposals/` | future work | 01 modalities, 02 router recursion, 03 audio and video, 03b the live codec, 04 self-regulation (designs); 05, the register above |
+| `notes/AGENT_STATE.md` | the agent, after a reset | where things stand, the owner's rulings in his words, and the working rules |
 | `.rework/PLAN.md` | orientation | the phase plan P1–P9 and its rules |
 | `.rework/ISSUES.md` | anyone fixing anything | every defect the survey found, in four parts, each id qualified by its part (`P1-C11`, `P2-C3`, `P3-H22`) |
 | `.rework/CENSUS.md` + `census.json` | anyone adding a lever | every old knob and where it went; a new lever needs a row here |
 | `.rework/DECISIONS.md` | anyone about to re-litigate | the owner's rulings, dated |
 | `.rework/QUESTIONS.md` | the owner | what is still open |
+| `archive/README.md` | anyone reading history | what is frozen, why each record is kept, how to run the old tree, and where every moved path went |
 
 ## Repository layout
 
+The root holds what a reader or the owner starts from; everything else is a folder with one job.
+Where to start: the owner, `notes/OWNER_BRIEF.md`; anyone else, this page and then
+`docs/04_CONTRACT.md`; the agent after a reset, `notes/AGENT_STATE.md`.
+
 ```
-src/spine/      the assembly: lever, registry, units, wire, derive, rng, gate, init, assemble, compose
-src/<pkg>/      13 packages, each levers.py (declarations) + api.py (frozen surface)
-tests/          the check suite; test_derive.py replays 575 captured oracle cases
-tools/          render_wiring.py, sync_counts.py — generate and verify the generated documents
-docs/           the contract, the wiring graph, operations, proposals
-.rework/        the survey, the census, the plan, the issues, the decisions
-archive/        the frozen old-tree documents and snapshots
-*.py *.sh       the old tree, still runnable, frozen
+README.md            this page
+LICENSE              all rights reserved
+requirements.txt     torch>=2.11; tools/gpu_launch.sh reads the floor from here
+run.py               one run of the new tree; every knob is an environment lever (docs/05_DEFAULTS.md)
+gpu_world.sh         the GPU fleet: EXP=world|retok|world_epoch, and --status, --stop, --analyze
+sweep_gpu.sh         a run.py sweep: steps/s, GPU utilisation and memory per run shape
+sweep_world.sh       a run.py sweep: the WORLD-loss arms, paired by seed (Q-WORLD-10)
+
+src/                 the new tree
+  spine/             the assembly: lever, registry, units, wire, derive, rng, gate, init, assemble,
+                     compose, loop
+  <pkg>/             13 lever-owning packages (capacity ckpt data domains eval fabric lm memory opt
+                     sig tok train world), each levers.py (declarations) + api.py (the surface)
+tests/               the suite of record, one file per topic: python3 tests/test_<topic>.py, exit 0 = pass
+tools/               gpu_launch.sh (check the box, then launch a fleet), fleet_dash.sh (watch it),
+                     read_fleet_archive.sh (a fleet archive's extra reads); render_wiring.py,
+                     render_defaults.py, sync_counts.py (write, or --check, the generated documents)
+docs/                04_CONTRACT (the frozen surface and the FOR THE OWNER questions), 05_DEFAULTS and
+                     03_WIRING (generated), 02_OPERATIONS (the machines and the working agreement, to
+                     2026-08-29), proposals/ (01-04 designs; 05_DECISIONS, the register and test plan)
+notes/               OWNER_BRIEF.md (the owner's page), AGENT_STATE.md (the agent's state after a reset);
+                     the rest is the 2026-08 notes corpus about the old tree (00_INDEX.md first) and
+                     CURRENT_DEFAULTS.md, the old tree's generated defaults
+data/                the tracked corpus, DATA_DIR's default: train/ (eng py num c), continual/, ood/
+results/             dated evidence, one folder per workflow or GPU fleet
+.rework/             the rework's ledgers (DECISIONS, CENSUS.md + census.json, ISSUES, PLAN), the oracle/
+                     tests/test_derive.py replays, and the records they were built from
+archive/             frozen records, never current; README.md says what each was and why it is kept:
+                     old-tree/ (the old system, at the root until 2026-09-28), garry/, legacy/,
+                     handoff/, docs/, agent-transcripts/
 ```
+
+Run output is not tracked, and lands at the root of the checkout: a fleet's `gpu_<exp>_out/`, its
+`<name>_<date>.tgz` and `<EXP>_fleet.log`, and the sweeps' `sweep_out/` and `world_out/`. The root's
+`runs/`, where a box has one, holds the old tree's runs from before 2026-09-28, and the standing rule is
+that nothing in it is overwritten. Run from its own directory, the old tree now writes
+`archive/old-tree/runs/` instead; `equiv.sh` alone keeps its comparisons in the root's `runs/equiv_*`,
+beside the earlier ones. Both `runs/` are gitignored.
 
 ## Requirements
 

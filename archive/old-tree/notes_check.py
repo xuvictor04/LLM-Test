@@ -23,17 +23,17 @@ Fixing those instances once would leave the CLASS alone, and the class is what k
      the corpus is a record and rewriting it would destroy the thing it is for -- but it must SAY it is
      history. Any line that names a knob and a value and does not read as historical is reported here.
 
-Run:  python3 notes_check.py           check, and report drift
-      python3 notes_check.py --write   regenerate notes/CURRENT_DEFAULTS.md as well
+Run:  python3 archive/old-tree/notes_check.py           check, and report drift (from any directory)
+      python3 archive/old-tree/notes_check.py --write   regenerate notes/CURRENT_DEFAULTS.md as well
 """
 import ast
 import os
 import re
 import sys
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
-SRC = os.path.join(ROOT, "self_organize.py")
-NOTES = os.path.join(ROOT, "notes")
+HERE = os.path.dirname(os.path.abspath(__file__))          # archive/old-tree/, beside self_organize.py
+ROOT = os.path.dirname(os.path.dirname(HERE))              # the repository: README.md, notes/, archive/
+SRC, NOTES = os.path.join(HERE, "self_organize.py"), os.path.join(ROOT, "notes")
 GENERATED = os.path.join(NOTES, "CURRENT_DEFAULTS.md")
 
 # --- the one source of truth ------------------------------------------------------------------------------
@@ -64,8 +64,8 @@ def generate():
         by_group.setdefault(kind, []).append((k, dflt))
     out = [
         "# CURRENT DEFAULTS", "",
-        "**GENERATED FILE — do not edit.** `python3 notes_check.py --write` regenerates it from `_SPEC` in",
-        "`self_organize.py`, and `notes_check.py` (wired into `selftest.sh`) fails if it is out of date.", "",
+        "**GENERATED FILE — do not edit.** `python3 archive/old-tree/notes_check.py --write` regenerates it",
+        "from `_SPEC` in `archive/old-tree/self_organize.py`, and `notes_check.py` (wired into `selftest.sh`) fails if it is out of date.", "",
         "This file exists because the notes have been wrong about the defaults twice at real cost — once",
         "telling the user a built mechanism did not exist, once stating `FAB_N0=3` in nine files a week after",
         "it became 2048. Every other note in this directory is a RECORD of what was true when it was written.",
@@ -166,7 +166,7 @@ if __name__ == "__main__":
         print(f"wrote {os.path.relpath(GENERATED, ROOT)} ({len(SPEC)} knobs)")
     elif have != text:
         print(f"!! {os.path.relpath(GENERATED, ROOT)} is out of date with _SPEC -- "
-              f"run: python3 notes_check.py --write")
+              f"run: python3 {min(os.path.relpath(__file__), os.path.abspath(__file__), key=len)} --write")
         sys.exit(1)
 
     _arch = os.path.join(ROOT, "archive")

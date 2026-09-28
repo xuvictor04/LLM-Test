@@ -21,7 +21,7 @@ wrong (cap_test.py records exactly that failure).
 """
 import ast, json, itertools, os, sys, textwrap
 
-SRC_PATH = "self_organize.py"
+SRC_PATH = "archive/old-tree/self_organize.py"   # at the repository root until 2026-09-28 (moved by git mv, unchanged)
 SRC = open(SRC_PATH).read()
 TREE = ast.parse(SRC)
 
