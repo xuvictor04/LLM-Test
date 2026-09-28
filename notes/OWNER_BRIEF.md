@@ -4,7 +4,7 @@ The one page for the owner. Everything else — how decisions were made, the evi
 rules — is in the repo for reference (`docs/proposals/05_DECISIONS.md`, `docs/04_CONTRACT.md`,
 `results/`, `notes/AGENT_STATE.md`) and is not brought up here.
 
-Updated 2026-09-28 (88d3fae).
+Updated 2026-09-28 (7d9bea1).
 
 ## How we work
 - **Owner:** leads and monitors, keeps the goals from drifting, adds ideas, expands the project, and
@@ -33,8 +33,9 @@ Updated 2026-09-28 (88d3fae).
    the expert pool hit its hard ceiling (4,096) in 20 of 21 runs, by about a third of the way in, on
    a simple two-area stream. After training, new material would find no free room. The manager is
    handling it with GPU tests of more headroom and of how old experts make room (register NEW-20).
-   The 2026-09-27 fleet, on a four-phase stream and newer code, reached the ceiling in only 1 of 12
-   runs; which of the two differences explains that is not yet known. No decision needed.
+   The 2026-09-27 fleet, on a four-phase stream and newer code, reached the ceiling in only 2 of 13
+   runs (counting each fleet's repeat run, as the 20 of 21 does), and every run ended with room free;
+   which of the two differences explains that is not yet known. No decision needed.
 
 ## Potential expansions
 (none raised yet)
@@ -44,14 +45,17 @@ Updated 2026-09-28 (88d3fae).
 |---|---|---|---|
 | 1 | Read the 2026-09-24 fleet archive | **done** (you uploaded it; `results/gpu_world_2026-09-24/ARCHIVE_READS.md`) | data source; expert pool; culls; gradients |
 | 2 | Retokenization fleet (`EXP=retok bash tools/gpu_launch.sh --go`) | **done** 2026-09-27, 13 of 13 runs. Rebuilding every 1000 windows now ships: better than every 3000, and within budget against no rebuilding. Provisional until SR0's held-out check, which must watch older text rebuilt late in a run (`results/gpu_retok_2026-09-27/RESULTS.md`) | which re-segmentation cadence ships; post-fix GPU speed; checkpoints for the first post-training test |
-| 3 | Cooldown fleet (below) | **ready** | whether the 400-window growth pause costs learning at the shipped cadence (a measured cost; the pause stays); 1000 against no rebuilding, re-read at 5 seeds |
+| 3 | Cooldown fleet (below) | **ready** | whether the 400-window pause of the pool's growth requests costs learning at the shipped cadence (a measured cost; the pause stays); 1000 against no rebuilding, re-read at 5 seeds |
 
 ### Test 3: the cooldown fleet (about 20-25 minutes)
-After each stream rebuild, and after each growth step, the expert pool may not grow again for 400
-windows. With a rebuild every 1000 windows, the pauses after rebuilds alone cover 38% of the run, past
-the 20% alarm. This fleet runs the shipped cadence beside the same cadence with the pause cut to 100
-windows, at 5 seeds, and reads whether the pause costs learning. It also re-reads 1000 against no
-rebuilding at 5 seeds. It keeps no checkpoints: your 2026-09-27 tars hold what the next tests need.
+After each stream rebuild, the expert pool's growth requests (the route to about 1% of new experts)
+pause for 400 windows; spawning, which adds the rest, carries on. The same setting also keeps growth
+steps 400 windows apart. With a rebuild every 1000 windows, the pauses after rebuilds cover 38% of
+the run, past the 20% alarm. This fleet runs the shipped cadence beside the same cadence with the pause
+cut to 100 windows, at 5 seeds, and reads whether the pause costs learning. It also re-reads 1000
+against no rebuilding at 5 seeds; if 1000 is shown to harm learning there, it stops shipping and every
+3000 windows and the other remedies are tested next (nothing comes to you unless they fail too). It
+keeps no checkpoints: your 2026-09-27 tars hold what the next tests need.
 On the GPU box, in the repo checkout:
 ```bash
 cd /workspace/LLM-Test

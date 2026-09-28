@@ -1,6 +1,6 @@
 # Agent state — read this first after a session reset
 
-Updated 2026-09-28 (the 2026-09-27 retok fleet read: `TOK_RETOK_EVERY` ships 1000) on `rm-predict-DC` (the only branch pushed to; no PRs unless asked).
+Updated 2026-09-28 (the retok fleet read and its review: `TOK_RETOK_EVERY` ships 1000) on `rm-predict-DC` (the only branch pushed to; no PRs unless asked).
 
 ## Where things stand
 - **WORLD_FEEDBACK ships False** (d97779d) on the 20k-window GPU fleet: the forecast was within
@@ -188,6 +188,22 @@ Updated 2026-09-28 (the 2026-09-27 retok fleet read: `TOK_RETOK_EVERY` ships 100
   firings, so isolating the blackout needs a k0 cooldown control (not built).
   Named risk for E2: per area, num in phase 4 is +0.10 at 1000. Owed: the spike test's offline
   analysis, the continuation (§8 6.1), an ETA priced by waves and a FILL that fills the last wave.
+- 2026-09-28, REVIEW OF THE RETOK FLEET READ (88d3fae, 510c3a5; 8 findings, each reproduced, fixed in
+  7d9bea1): a fleet of one cadence never escalates -- the cooldown fleet's FAIL of 1000 reads "does
+  not ship; 3000 and the remedy arms run next" (O14, note retok fleet (3)), where it read ESCALATE with
+  the act ON at 1000; `--analyze` of an unpacked archive keeps and reads its KEPT.txt, and SUMMARY's
+  record says "none here" or "KEEP_CKPT off" (it had deleted KEPT.txt and repacked without it), and a
+  committed archive is re-read only on a scratch copy; the launcher's ready line carries every knob set
+  (it carried EXP alone: pasted after the cooldown knobs it would have launched the default fleet).
+  Docs: the register reads the shipped 1000 (C40, hazards, 03b-16.33, C27; 04-Q9 with E2's splice re-run
+  at 16 acts: ACT_EVERY 3 about 12% at 0.96 s per act, 9% at the fleet's measured 0.70-0.74 s; the
+  preset's CKPT_EVERY and EVAL_RETENTION_EVERY 333), 03b's per-act probe cost is +106%, O20 and NEW-20
+  carry the pool re-read (2 of 13 full with the replicate, 122-1,627 slots free at the end: 6.1's W arm
+  tops up a partly free pool), LOW-GPU-WORLD-ETA's raise is not taken (the miss was scheduling),
+  EXP=world is unpinned (a re-run that decides names the cadence in EXTRA), and RESULTS.md's heartbeat
+  ETA (7.5% late, time left) and spike lateness are corrected, the spikes labelled descriptive. The
+  brief's test 3 now says the pause is the pool's growth requests (about 1% of births), spawning
+  carrying on.
 0. Proposal 05 §8 orders everything: Stage 0 (owner rulings O1-O20; the fleet-archive reads; the
    k0_nuis pair; phase-traversal resizing), then Stage 1's small builds (vocab `.prev` rotation, DOM
    Levels, counters, OPT_LR_CONTINUE 'as_logged', gpu_world.sh kept checkpoints) before the owner's
@@ -217,7 +233,8 @@ Updated 2026-09-28 (the 2026-09-27 retok fleet read: `TOK_RETOK_EVERY` ships 100
   calibrate on 600 since §8 1.5 (2026-09-27), and the retok fleet's paste-back block prints its ETA
   against wall: past 1.5x, raise EXP=world's default to >= 520 (LOW-GPU-WORLD-ETA). That fleet missed
   by 1.95x at CAL_WINDOWS 600, so the advice does not fit it: 13 runs at PAR 12 left k0_rerun running
-  alone from +590 s to +986 s. Owed: an ETA priced by waves, and a FILL that fills a partial last wave.
+  alone from +590 s to +986 s. The register's row records that the raise is not taken (2026-09-28).
+  Owed: an ETA priced by waves, and a FILL that fills a partial last wave.
 - Next hunt classes: lever isolation, efficacy vs labels, long-horizon mechanisms, SIGUSR1 saves.
 
 ## Working rules this repo has taught
