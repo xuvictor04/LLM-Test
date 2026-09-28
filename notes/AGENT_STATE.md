@@ -1,6 +1,6 @@
 # Agent state — read this first after a session reset
 
-Updated 2026-09-28 (the retok fleet read and its review: `TOK_RETOK_EVERY` ships 1000; the file-structure reorganisation's Phase A, with Phase B after the Stage 3 merge) on `rm-predict-DC` (the only branch pushed to; no PRs unless asked).
+Updated 2026-09-28 (the retok fleet read and its review: `TOK_RETOK_EVERY` ships 1000; the file-structure reorganisation's Phase A, with Phase B after the Stage 3 merge; the cooldown fleet read: 1000 and `FAB_COOLDOWN` 400 stay) on `rm-predict-DC` (the only branch pushed to; no PRs unless asked).
 
 ## Where things stand
 - **WORLD_FEEDBACK ships False** (d97779d) on the 20k-window GPU fleet: the forecast was within
@@ -212,6 +212,12 @@ Updated 2026-09-28 (the retok fleet read and its review: `TOK_RETOK_EVERY` ships
   to tools/, the 2026-08 notes corpus and its defaults file to archive/notes/, and the lines in Stage 3
   files that still place the old tree at the root are rewritten. docs/REORGANISATION.md is the plan,
   with every reference to update and the searches that re-find them after the merge.
+- 2026-09-28, THE COOLDOWN FLEET READ (§8 2.2; H100 PCIe at 5c28ca4, 21/21 rc=0;
+  results/gpu_retok_2026-09-28/RESULTS.md): 1000 stays, FAB_COOLDOWN stays 400 (cd100 null), M 0.079
+  (seed 1's late loss drop). Per area num in p4 +0.091 [lower +0.065], FAIL level and not
+  pre-registered: E2 decides, and O14's remedy arms are owed (a design before E2). Training-run
+  endpoints decide after the loss drop; 5.1 calibrates the between-run SD (note NEW-02). No GPU test
+  is ready until SR0.
 0. Proposal 05 §8 orders everything: Stage 0 (owner rulings O1-O20; the fleet-archive reads; the
    k0_nuis pair; phase-traversal resizing), then Stage 1's small builds (vocab `.prev` rotation, DOM
    Levels, counters, OPT_LR_CONTINUE 'as_logged', gpu_world.sh kept checkpoints) before the owner's
@@ -243,6 +249,12 @@ Updated 2026-09-28 (the retok fleet read and its review: `TOK_RETOK_EVERY` ships
   by 1.95x at CAL_WINDOWS 600, so the advice does not fit it: 13 runs at PAR 12 left k0_rerun running
   alone from +590 s to +986 s. The register's row records that the raise is not taken (2026-09-28).
   Owed: an ETA priced by waves, and a FILL that fills a partial last wave.
+- OWED after the Stage 3 merge (src/ and gpu_world.sh are left alone until then). Text:
+  grow_check's docstring on the stall counter (Q-RUN-17 is corrected); gpu_world.sh:142's "paired
+  noise floor" (M decides nothing); the C13 alarm's COOLDOWN_ARM=100 advice, read null on 2026-09-28
+  (with tests/test_gpu_world.py:484, which pins it); the block's "at PAR" when fewer runs ran, its ETA
+  on nominal windows, and "ESTIMATED" on a split the act windows give exactly. Code: a FILL guard for
+  a capped seed count (until then a capped command passes FILL=0); per-area cells in analyze_retok.
 - Next hunt classes: lever isolation, efficacy vs labels, long-horizon mechanisms, SIGUSR1 saves.
 
 ## Working rules this repo has taught
