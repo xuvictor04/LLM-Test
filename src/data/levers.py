@@ -791,9 +791,11 @@ class DATALevers(LeverSet):
     # CENSUS AMENDMENT, 2026-09-28 (Proposal 04 §1 item 8 and SR3; register 04-6.3, §8 3.4;
     # docs/04_CONTRACT.md Q-DATA-11). BUILT 'off', AND 'off' IS THE WHOLE BOOK ABSENT: DATA.new_focus
     # allocates nothing, the loop's arm test withholds every DATA.claims_observe call before the
-    # 'data.trust' gate is asked, and no data.trust.* key exists -- so a default run is this tree
-    # before the book, bit for bit (SR3's bit-identity, tests/test_trust.py). 04-6.3 rules 'observe'
-    # ON after that bit-identity, and the flip lands last and alone.
+    # 'data.trust' gate is asked, and no data.trust.* key exists -- so a default run trains as this
+    # tree before the book did, bit for bit (SR3's bit-identity, tests/test_trust.py); what it
+    # prints beside -- the DATA(trust) row, the ledger key, the cadence audit's one startup line --
+    # is Q-DATA-11's "What the default changes". 04-6.3 rules 'observe' ON after that bit-identity,
+    # and the flip lands last and alone.
     # 'loss' AND 'loss+draw' ARE REFUSED AT STARTUP WITH spine/gate.py::NotBuilt (OPT_LR_CONTINUE=
     # 'regulated' is the precedent): each needs DATA.token_weights and LM.lm_loss(token_weights=),
     # which this tree does not build, and 04-6.3's standing rules forbid either as a default before

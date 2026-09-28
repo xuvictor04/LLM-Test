@@ -141,7 +141,7 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `DATA_TRUST` | `'off'` | name | choices `'off'`, `'observe'`, `'loss'`, `'loss+draw'` | The source-reliability book: 'off' keeps none; 'observe' reads every source's claims, votes, and reports each source's reliability and trust while changing nothing the run trains on; 'loss' and 'lo... |
 | `DATA_TRUST_CLAIM` | `'kv'` | name | choices `'kv'`, `'ctx'` | What counts as one claim: 'kv' a normalised (key, value) pair around a DATA_TRUST_DELIMS delimiter, 'ctx' a raw DATA_TRUST_CTX-unit context and the unit after it. |
 | `DATA_TRUST_CTX` | `5` | tokens | domain (1, ∞) | Key length in TOK units: the most units before a delimiter a 'kv' key reads, or the context length of a 'ctx' claim. |
-| `DATA_TRUST_DELIMS` | `'=|:| is | are | was | were '` | name |  | The 'kv' delimiter class, '\|'-separated byte strings: a claim is read around each occurrence. |
+| `DATA_TRUST_DELIMS` | `'=\|:\| is \| are \| was \| were '` | name |  | The 'kv' delimiter class, '\|'-separated byte strings: a claim is read around each occurrence. |
 | `DATA_TRUST_EVERY` | `160` | Windows | domain (0, ∞) | Windows between passes of the book over the stream consumed since the last one (0 = epoch-end passes only). |
 | `DATA_TRUST_HOT` | `20` | count | domain (1, ∞) | Count-sketch pre-filter: a claim enters the table once its sketch bucket has counted this many claims. |
 | `DATA_TRUST_MIN` | `0.3` | fraction 0..1 | domain (0.0, 1.0) | Trust floor: the least trust a source is given, however unreliable its claims. |

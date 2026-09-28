@@ -44,10 +44,24 @@ pass reads, and what a checkpoint carries.
   T6  A CHECKPOINT WITH NO BOOK (one written before this build: the key stripped) RESUMES WITH A
       FRESH ONE, reading its epoch from the first unit; a sketch of another size or a claim shape
       that moved is refused by name; an 'off' run carries a checkpoint's book unchanged, so ON ->
-      OFF -> ON resumes it; and stream_state -> new_focus(restored=) round-trips the book.
+      OFF -> ON resumes it; and stream_state -> new_focus(restored=) round-trips the book. WHAT THE
+      NEXT 'observe' LEG READS OF AN 'off' LEG IS RULED (Q-DATA-11's review), and both sides of the
+      rule are driven: an 'off' leg inside one epoch is read whole at the next leg's first pass,
+      from the held cursor, and the lineage ends with the uninterrupted run's book; one that crosses
+      the roll leaves the next leg reading the epoch it resumes in from its first unit and none of
+      the earlier epoch's, the book short of the uninterrupted run's by exactly the units the 'off'
+      leg consumed before the roll, the losses continuing exactly.
   T7  DATA_TRUST='loss' AND 'loss+draw' ARE REFUSED WITH NotBuilt, by new_focus and through compose.
   T8  data.trust.wall_s IS PRINTED AS A FLOAT, AND tests/test_baseline.py's COUNTER NEVER READS IT,
       while the integer data.trust.* lines it does read are there.
+  T9  THE CADENCE AUDIT'S LINE FOR THE BOOK IS THE ROOT'S (spine/compose.py::_trust_audit,
+      Q-DATA-11's review). At 'off' it names DATA_TRUST='observe' as what arms the book -- the same
+      line at DATA_TRUST_EVERY=1, a period that arms nothing there -- and never RUN's "Set a period
+      of 1 or more"; at 'observe' a period of 0, or one the run is too short for, is reported with
+      the epoch-end and tail passes that still run, and a period the run can reach gets no line;
+      every other audit line is RUN's, unchanged. And the passes the line promises run: at
+      DATA_TRUST_EVERY=0 a whole run passes once, at its finishing roll, over every unit it
+      consumed, and a stopped one once, at its tail.
 
 WHAT THIS FILE CANNOT SEE: whether the trust the book reports is right about real sources. CPU runs
 establish operation only; the book's readings on real text are E3's (register §8 6.2), on GPU.
@@ -76,7 +90,10 @@ from spine import assemble                                         # noqa: E402
 from spine import units as U                                       # noqa: E402
 from spine.gate import NotBuilt                                    # noqa: E402
 from spine.compose import compose, _trust_units, _stream_digest    # noqa: E402
+from spine.compose import _periods, _run_windows                   # noqa: E402
+from spine import compose as C                                     # noqa: E402
 from data import api as D                                          # noqa: E402
+from train import api as run_api                                  # noqa: E402
 from lm import api as lm_api                                       # noqa: E402
 import _state_digest as sd                                         # noqa: E402
 from test_baseline import COUNTER as BASELINE_COUNTER              # noqa: E402
@@ -673,8 +690,10 @@ def _main(tmp):
                       weights_only=False)["payload"]["DATA"].get("focus")
     on = build(CKPT_RESUME=d + "/off", CKPT_DIR=d + "/on", **E5)
     ro = loop.run(on, progress=False)
-    check("T6 ON -> OFF -> ON: the 'off' run writes the parent's book back unchanged and reads nothing, "
-          "and the grandchild resumes it -- reading the 'off' leg's units at its first pass -- and ends "
+    _f0 = ro.trust_series[0] if ro.trust_series else {}
+    check("T6 ON -> OFF -> ON inside one epoch: the 'off' run writes the parent's book back "
+          "unchanged and makes no pass, and the grandchild's first pass starts at the held cursor "
+          "and reads past the 'off' leg's last unit -- the ruled placement -- so the lineage ends "
           "with the uninterrupted run's book, every counter equal but the parent's tail pass",
           held is not None and sd.digest_payload({"f": held}) == sd.digest_payload({"f": rec})
           and not off.focus.counters and not book_diff(on.focus, fu) and len(p_tail) == 1
@@ -684,9 +703,36 @@ def _main(tmp):
               **({"data.trust.updates": (fu.counters["data.trust.updates"],
                                          fu.counters["data.trust.updates"] + 1)}
                  if p_tail and p_tail[0]["conflicted_claims"] else {}))
-          and ro.trust_series[0]["at"] == 70 * 128 + 1,
+          and _f0.get("at") == 70 * 128 + 1
+          and _f0.get("at", 0) + _f0.get("units", 0) > 90 * 128 + 1,
           f"book {book_diff(on.focus, fu)}, counters {counter_diff(fu, on.focus)}, "
-          f"first pass {ro.trust_series[0] if ro.trust_series else None}")
+          f"first pass {_f0 or None}")
+    # AN 'off' LEG THAT CROSSES THE ROLL (Q-DATA-11's review). The 'off' leg runs from the parent's
+    # window 70 past the roll at w0, so its checkpoint sits in epoch 1 and the held book's last pass
+    # -- the parent's tail -- in epoch 0: the next 'observe' leg reads epoch 1 from its first unit
+    # and none of epoch 0's units the 'off' leg consumed, whose segmentation went at the roll. The
+    # book then holds every unit of the lineage but those, exactly, and training is untouched.
+    off2 = build(CKPT_RESUME=d + "/p", CKPT_DIR=d + "/off2", **dict(E5, DATA_TRUST="off"))
+    loop.run(off2, max_windows=70, progress=False)
+    blob2 = torch.load(os.path.join(d, "off2", "ckpt.pt"), map_location="cpu", weights_only=False)
+    at2 = int(blob2["step"])
+    on2 = build(CKPT_RESUME=d + "/off2", CKPT_DIR=d + "/on2", **E5)
+    ro2 = loop.run(on2, progress=False)
+    _f2 = ro2.trust_series[0] if ro2.trust_series else {}
+    lost = end0 - (70 * 128 + 1)
+    check(f"T6 ON -> OFF -> ON across the roll (the 'off' leg from 70 to {at2}, the roll after "
+          f"{w0}): the grandchild's first pass opens epoch 1 at unit 0, and the book ends holding "
+          f"every unit of the lineage but the {lost} the 'off' leg consumed in epoch 0 -- the "
+          f"uninterrupted run's units less exactly those, its cursor and stream ordinal, a "
+          f"different sketch -- the losses continuing exactly, and the 'off' leg's reason saying so",
+          w0 < at2 and _f2.get("at") == 0 and _f2.get("step", 0) > w0
+          and on2.focus.counters["data.trust.units"] == fu.counters["data.trust.units"] - lost
+          and on2.focus.cursor == fu.cursor and on2.focus.stream == fu.stream
+          and "sketch" in book_diff(on2.focus, fu)
+          and list(ro2.loss_curve) == list(ru.loss_curve[at2:])
+          and "none of an earlier epoch's" in off2.focus.gates[0].reason,
+          f"first pass {_f2 or None}, units {on2.focus.counters['data.trust.units']} against "
+          f"{fu.counters['data.trust.units']} - {lost}, book {book_diff(on2.focus, fu)}")
 
     # ---- T8: wall_s outside the integer channel ----------------------------------------------------------
     env = dict(os.environ, OMP_NUM_THREADS="1", MKL_NUM_THREADS="1", DATA_TRUST="observe",
@@ -706,6 +752,73 @@ def _main(tmp):
           and "data.trust.units" in parsed and isinstance(series, list)
           and [r["kind"] for r in series] == ["cadence", "cadence", "tail"],
           f"rc {p.returncode}; {wall}; series {None if series is None else len(series)}")
+
+    # ---- T9: the cadence audit's line for the book is the root's ---------------------------------------
+    # RUN's two sentences are a cadence's, and the book is armed by DATA_TRUST and passes beside its
+    # gate; so the root words the one line (spine/compose.py::_trust_audit) and hands the rest back
+    # as RUN wrote them -- compared here against RUN.cadence_audit called afresh on the same mapping.
+    # The join is fetched by name, so this file still runs, and these checks fail, on a tree
+    # without it.
+    tag = "cadence audit: 'data.trust' "
+    _trust_audit = getattr(C, "_trust_audit", lambda s, lines, **kw: None)
+    seen = {}
+    for label, env in (("off", {}), ("off1", {"DATA_TRUST_EVERY": "1"}),
+                       ("obs0", {"DATA_TRUST": "observe", "DATA_TRUST_EVERY": "0"}),
+                       ("obs_long", {"DATA_TRUST": "observe", "DATA_TRUST_EVERY": "100000"}),
+                       ("obs10", {"DATA_TRUST": "observe", "DATA_TRUST_EVERY": "10"})):
+        s = build(**env)
+        rw = _run_windows(s)
+        audit = [w for w in s.warnings if w.startswith("cadence audit:")]
+        theirs = run_api.cadence_audit(s.configs["RUN"], run_windows=rw, periods=_periods(s))
+        seen[label] = ([w for w in audit if w.startswith(tag)], int(rw),
+                       [w for w in audit if not w.startswith(tag)]
+                       == [w for w in theirs if not w.startswith(tag)]
+                       and len(audit) == len(theirs)
+                       and _trust_audit(s, theirs, run_windows=rw, periods=_periods(s)) == audit)
+    off_l, off1_l = seen["off"][0], seen["off1"][0]
+    check("T9 at the shipped 'off' the audit's one 'data.trust' line is the root's: DISARMED by "
+          "DATA_TRUST='off', DATA_TRUST='observe' named as what arms the book, never RUN's 'Set a "
+          "period of 1 or more' -- and at DATA_TRUST_EVERY=1, a period that arms nothing there, the "
+          "same line",
+          len(off_l) == 1 and "DISARMED by DATA_TRUST='off'" in off_l[0]
+          and "DATA_TRUST='observe' arms it" in off_l[0] and "this run's is 160" in off_l[0]
+          and "Set a period of 1 or more" not in off_l[0]
+          and off1_l == [off_l[0].replace("this run's is 160", "this run's is 1")],
+          f"{off_l} {off1_l}")
+    obs0, obs_long = seen["obs0"][0], seen["obs_long"][0]
+    check("T9 at 'observe' a period of 0, and one the run is too short for, are reported with the "
+          "passes that still run -- the window that rolls each epoch and a stop's tail -- and never "
+          "as 'Whatever it gates does not happen in this run'",
+          len(obs0) == 1 and "(DATA_TRUST_EVERY=0)" in obs0[0]
+          and "PERIODIC pass is DISARMED" in obs0[0]
+          and len(obs_long) == 1 and "CANNOT FIRE ONCE" in obs_long[0]
+          and f"has a period of 100000 windows and this run is {seen['obs_long'][1]} windows long"
+          in obs_long[0]
+          and all("rolls each epoch" in ln and "once more at the end" in ln
+                  and "Whatever it gates" not in ln for ln in obs0 + obs_long), f"{obs0} {obs_long}")
+    check("T9 a period the run can reach gets no 'data.trust' line, and in all five configurations "
+          "every other audit line is RUN's own, the count unchanged: the root rewords one line and "
+          "adds none",
+          seen["obs10"][0] == [] and all(v[2] for v in seen.values()),
+          str({k: v[2] for k, v in seen.items()}))
+    # THE PASSES THE LINE PROMISES, DRIVEN at DATA_TRUST_EVERY=0 on a 12,000-byte real stream: a whole
+    # run passes once, at its finishing roll, and a stopped one once, at its tail -- each over every
+    # unit it consumed -- while the gate is asked every window and fires never.
+    s = build(DATA_SOURCE="real", DATA_STREAM_BYTES=12000, DATA_TRUST="observe", DATA_TRUST_EVERY=0)
+    rw = int(_run_windows(s))
+    r_all = loop.run(s, progress=False)
+    all_ser = [(x["kind"], x["at"], x["units"]) for x in r_all.trust_series]
+    claims = s.focus.counters["data.trust.claims"]
+    s = build(DATA_SOURCE="real", DATA_STREAM_BYTES=12000, DATA_TRUST="observe", DATA_TRUST_EVERY=0)
+    r_30 = loop.run(s, max_windows=30, progress=False)
+    stop_ser = [(x["kind"], x["at"], x["units"]) for x in r_30.trust_series]
+    check(f"T9 at DATA_TRUST_EVERY=0 the book passes as the line says: a whole {rw}-window run once, "
+          f"at its finishing roll, over its {rw * 128 + 1} units ({claims} claims formed), a run "
+          f"stopped at 30 once, at its tail, over 3841; the gate asked every window and fired never",
+          r_all.windows == rw and all_ser == [("roll", 0, rw * 128 + 1)] and claims > 0
+          and r_all.cadence_ledger["data.trust"][:2] == (rw, 0)
+          and stop_ser == [("tail", 0, 30 * 128 + 1)]
+          and r_30.cadence_ledger["data.trust"][:2] == (30, 0), f"{all_ser} {stop_ser}")
 
 
 if __name__ == "__main__":

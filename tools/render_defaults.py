@@ -111,12 +111,24 @@ def _unit(lv):
 
 
 def _cell(v):
-    return "`" + repr(v) + "`"
+    """A value as a table cell's code span, PIPES ESCAPED.
+
+    GitHub-flavoured Markdown splits a table row on every unescaped '|', INSIDE A CODE SPAN TOO, and
+    `\\|` is the one spelling that keeps it in the cell. _sentence and _whole escaped the help text
+    from the start and this did not, which cost nothing until DATA_TRUST_DELIMS (2026-09-28,
+    Q-DATA-11) shipped the first default holding a pipe, '=|:| is | are | was | were ': its row
+    split into ten cells where every other row of the table has five, so it read default `'=,
+    unit ':', accepts ' is ' and help ' are ', and the rest fell off the row (Q-DATA-11's review).
+    .rework/CENSUS.md escapes the same value the same way.
+    """
+    return "`" + repr(v).replace("|", "\\|") + "`"
 
 
 def _bounds(lv):
+    # THE SAME ESCAPE, for a choice holding a pipe: no lever declares one today, and a table row that
+    # splits in silence is how the default above went unseen.
     if lv.choices is not None:
-        return "choices " + ", ".join("`%r`" % c for c in lv.choices)
+        return "choices " + ", ".join(_cell(c) for c in lv.choices)
     if lv.domain is not None:
         lo, hi = lv.domain
         return "domain (%s, %s)" % ("−∞" if lo is None else lo, "∞" if hi is None else hi)

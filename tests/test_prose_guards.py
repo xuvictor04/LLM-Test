@@ -147,7 +147,8 @@ def g3_negative_period_text():
     # THE BOOK'S CADENCE (2026-09-28, Q-DATA-11): DATA_TRUST_EVERY declares domain=(0, None), so a
     # negative never reaches DATA.trust_period -- the first read refuses it by the domain, naming the
     # lever -- and the accessor adds no second refusal of its own (O15). It is the lever's period at
-    # 'observe' and 0, the disarmed period RUN.cadence_audit reports as such, at 'off'.
+    # 'observe' and 0, the disarmed period the cadence audit reports as such, at 'off' -- in the
+    # root's line for the key since Q-DATA-11's review (tests/test_trust.py T9 reads it).
     from data import api as data_api
     _reopen()
     try:

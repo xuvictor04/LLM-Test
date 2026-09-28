@@ -2516,7 +2516,14 @@ class Focus:
     data.trust.* keys are ABSENT -- and two UNREACHABLE gates saying why. `held` is the one
     exception: a checkpoint's book, carried through an 'off' run's saves unchanged, so a lineage
     that switches the book off for one leg and on again resumes it (the retention probe's ON -> OFF
-    -> ON rule, Q-EVAL-12). The book reads nothing of what that leg consumes.
+    -> ON rule, Q-EVAL-12). That leg makes no pass, and what the next 'observe' leg reads of it is
+    RULED (Q-DATA-11's review; this said "the book reads nothing of what that leg consumes", which
+    the code never did): its first pass is placed as any mid-epoch resume's is -- at the held
+    cursor where the book's last pass fell in the epoch that leg resumes in, at the epoch's first
+    unit otherwise -- so it reads the units the 'off' leg consumed in that epoch, and none of an
+    earlier epoch's, whose segmentation went at its roll. An 'off' leg inside one epoch costs the
+    book nothing (the lineage ends with the uninterrupted run's book); one that crosses a roll costs
+    it the units it consumed before the last roll it crossed.
 
     AT 'observe' (the fields a checkpoint carries, `state['focus']`):
       rule, claim, ctx, val,   the estimator and the claim shape -- DATA_TRUST_RULE, _CLAIM, _CTX,
@@ -2619,8 +2626,15 @@ def _trust_gates(dat, focus):
                "draw here. Under DATA_TRUST='observe' a source's t is the weight a built actuation "
                "would apply, and it multiplies nothing")
     if mode == "off":
-        held = (" A checkpoint's book is carried unchanged to this run's saves, and it reads "
-                "nothing this run consumes." if focus.held is not None else "")
+        # WHAT A LATER 'observe' LEG READS OF THIS RUN IS RULED (Q-DATA-11's review): this said the
+        # held book "reads nothing this run consumes", and the next leg's first pass reads, from the
+        # held cursor, every unit this run consumed in the epoch it resumes in.
+        held = (" A checkpoint's book is carried unchanged to this run's saves, and no pass of "
+                "this run reads into it. A later DATA_TRUST=observe leg's first pass reads the "
+                "units this run consumed in the epoch that leg resumes in -- from the book's "
+                "cursor, or from the epoch's first unit where the book's last pass fell in an "
+                "earlier epoch -- and none of an earlier epoch's, whose segmentation went at its "
+                "roll." if focus.held is not None else "")
         return [Gate("data.trust", False, None, None, reachable=False,
                      reason="DATA_TRUST='off': no book is kept -- DATA.new_focus allocates nothing "
                             "and the loop's arm test withholds every DATA.claims_observe call "
@@ -2774,10 +2788,13 @@ def trust_period(dat: Config):
     Config hands one back for every Clock-unit lever, so the period arrives through this package's
     typed accessor and spine/compose.py::_periods carries it under the key 'data.trust' (2026-09-28,
     Q-DATA-11). It is DATA_TRUST_EVERY at DATA_TRUST='observe', and 0 at 'off' -- the gate is
-    disarmed there, and RUN.cadence_audit says so in those words rather than calling a gate the
-    arm test never asks one that "can fire". The loop's arm test runs before the gate is asked
-    either way, so at 'off' the ledger reads 'data.trust' with zero checks. DATA_TRUST_EVERY=0 is
-    the other disarmed arm: the book then passes at each epoch's end only.
+    disarmed there, and the cadence audit says so rather than calling a gate the arm test never
+    asks one that "can fire", in a line the root words for this key (spine/compose.py::_trust_audit,
+    Q-DATA-11's review): RUN's own advice for a disarmed gate, a period of 1 or more, arms nothing
+    at 'off', so the line names DATA_TRUST='observe' instead. The loop's arm test runs before the
+    gate is asked either way, so at 'off' the ledger reads 'data.trust' with zero checks.
+    DATA_TRUST_EVERY=0 is the other disarmed arm: the book then passes at each epoch's end and at a
+    stop's tail only, which the root's line says.
 
     A NEGATIVE IS REFUSED AT THE FIRST READ, BY THE LEVER'S DECLARED DOMAIN (0, None), and not here:
     the six other period accessors refuse one under their packages' REFUSE_NEGATIVE_PERIOD, and a

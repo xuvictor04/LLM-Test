@@ -524,8 +524,10 @@ Q-DATA-11): `stream_state(..., focus=)` writes `state['focus']` at `trust='obser
 shape, the int32 sketch, the claim table in LRU order, each source's evidence, trust and first
 sight, the per-epoch cursor and stream ordinal, the carried units and the `data.trust.*` counters —
 and nothing at `'off'`, so an `'off'` payload is the one written before the book (a Focus holding a
-checkpoint's book writes it back unchanged). `Areas.sources` and `Stream.sources` are **not**
-checkpointed: `open_areas` and `draw_stream` recompute both from the same files and draw.
+checkpoint's book writes it back unchanged, and a later `'observe'` leg reads the units that `'off'`
+run consumed in the epoch the leg resumes in and none of an earlier epoch's — Q-DATA-11's review).
+`Areas.sources` and `Stream.sources` are **not** checkpointed: `open_areas` and `draw_stream`
+recompute both from the same files and draw.
 **Counters:** `data.area_open`, `corpus_cap_trip`, `holdout_block`, `val_cap_trip`, `area_refused`,
 `stream_draw`, `segment`, `contig_wrap`, `resample`, `phase_entered`, `phase_resolved`,
 `state_written/restored/refused` (with `state_written_here`, the process twin of the lineage
@@ -605,7 +607,8 @@ keys, iterated 10 times, a tie within 1e-9 deciding nothing, evidence only at n 
 trust t = clip(r/max r, `trust_min`, 1) only when two or more sources carry it. Its cursor is **per
 epoch**: a pass at 0 opens a new stream (the carry and cursor reset), a pass at the cursor continues
 it, and anything else is refused by name. `trust='loss'` and `'loss+draw'` are refused at startup
-with `NotBuilt`; `trust_period` is 0 at `'off'` and `trust_every` at `'observe'`. It moves nothing
+with `NotBuilt`; `trust_period` is 0 at `'off'` and `trust_every` at `'observe'`, and the cadence
+audit's line for it is the root's (`compose.py::_trust_audit`, Q-DATA-11's review). It moves nothing
 the run trains on: SR3's bit-identity is `tests/test_trust.py`.
 
 **The synthetic source's held-out law is a lever (2026-09-27, Q-DATA-9).** At `synth_holdout=True`
@@ -632,7 +635,8 @@ Two levers (`dir`, `corpus_cap`) are **arm-dead** under `source="synthetic"`, an
 are arm-dead under `source="real"`; `replay_share` and `replay_newest` are read only at
 `draw='replay'`, and `rehearse_parent` moves a byte only there (2026-09-28); the book's thirteen
 `trust_*` levers are read only at `trust='observe'` (2026-09-28, Q-DATA-11), `trust_every` also by
-`trust_period` at `'off'`, where it is not the period. That is a declared arm reported through a
+`trust_period` at `'off'`, where it is not the period, and by the root's audit line, which prints it
+there as the period that arms nothing (Q-DATA-11's review). That is a declared arm reported through a
 Gate, not an unread lever. (`seg_contig` was listed here as arm-dead under `source="synthetic"`
 until 2026-09-27, and it is not: `draw_stream` reads it on both sources.)
 **Where they are called (§3):** `draw_stream` is the first statement of stage `E` **and** an
@@ -1360,6 +1364,7 @@ training path and 1 byte on the eval path with every check green.
 | `_phase_of` / `_phase_windows` / `_probe_notices` | the phase a window's first byte falls in (the phase-start read's test) and the startup notices, printed and never applied — Q-EVAL-12. |
 | `_area_ids` / `_window_areas` / `_faded_ids` | `area_id` (`FAB.observe`: one per window, its first token's area), `areas` (`MEM.write`: one per position, beside `positions`) and `faded` (`FAB.manage`: `Plan.faded` at the window's phase plus `Plan.parent_faded`), each as `spine/derive.py::area_id` numbers over `Stream.area_names` — Q-FAB-18, Q-MEM-16. |
 | `_trust_units(sysm, lo, hi)` | `units` and `sources` (`DATA.claims_observe`): each TOK unit's **bytes** over this epoch's `ids[lo:hi]`, cut out of `Stream.bytes` at `Segmentation.byte_pos`, and each unit's source name off `Stream.sources`/`Stream.source_names` — `None` where a source run starts inside the unit. It replaces 04's `ids` plus a root-composed `decode` (DATA may not import TOK) — Q-DATA-11. |
+| `_trust_audit(sysm, lines, *, run_windows, periods)` | the `audit` stage's warnings: `RUN.cadence_audit`'s lines, the one for `'data.trust'` in the root's words and every other as RUN wrote it. At `DATA_TRUST='off'` it names `DATA_TRUST='observe'` as what arms the book, since no period does; at `'observe'` a period of 0, or one the run is too short for, is reported with the epoch-end and tail passes that still run. Compose-side, beside `_probe_notices` — Q-DATA-11's review. |
 
 What is deliberately **not** there, because writing it would be inventing a producer rather than
 naming one: an `improving` EMA pair (FAB already keeps one, and a second would be two mechanisms
@@ -1474,7 +1479,7 @@ Every periodic row names a period a package **declares**, evaluated through
 | `dom.rekey` | **`MEM.rekey_period(mem)`** ← `MEM.rekey_every` | MEM — delivered by the spine, with the `SIG.mode == "learned"` arm also evaluated here, because the old line made *two foreign reads in one line* (`:6688-6689`) |
 | `ckpt` | `CKPT.save_period(ck)` ← `CKPT.every` | CKPT |
 | `retention` | `EVAL.retention_period(ev)` ← `EVAL.retention_every` | EVAL — the retention probe, since 2026-09-27 (Q-EVAL-12); its arm test is asked first, so at the shipped 0 the key reads `checks == 0` |
-| `data.trust` | `DATA.trust_period(dat)` ← `DATA.trust_every` at `DATA_TRUST='observe'`, **0** at `'off'` | DATA — the source-reliability book, since 2026-09-28 (Q-DATA-11); its arm test (`DATA_TRUST != 'off'`) is asked first, so at the shipped `'off'` the key reads `checks == 0` at period 0, which `RUN.cadence_audit` reports DISARMED |
+| `data.trust` | `DATA.trust_period(dat)` ← `DATA.trust_every` at `DATA_TRUST='observe'`, **0** at `'off'` | DATA — the source-reliability book, since 2026-09-28 (Q-DATA-11); its arm test (`DATA_TRUST != 'off'`) is asked first, so at the shipped `'off'` the key reads `checks == 0` at period 0, which the audit reports DISARMED — **in the root's line for the key** (`compose.py::_trust_audit`, Q-DATA-11's review), naming `DATA_TRUST='observe'` as the arm, where RUN's own advice, a period of 1 or more, arms nothing. At `'observe'` the book also passes on the window that rolls each epoch and at a stop's tail, so a period of 0, or one the run is too short for, is reported with those passes |
 | `progress` | `RUN.PROGRESS_WINDOWS`, a module constant written `units.Windows` | RUN — the progress/ETA line (Q-RUN-1); no lever and no row of its own |
 | MEM's probe/rekey | `MEM.probe_every`, `MEM.rekey_every`, compared inside `maintain` against a Windows `now` | MEM — **NOT ledger gates**, see below |
 
@@ -7695,7 +7700,9 @@ Clock-unit levers, `_periods` spanning seven packages, EIGHT gates in `RUN.new_c
   E puts both back to 0. A process starts at 0 at `in_epoch` 0 and, mid-epoch, at the book's cursor
   only if its last pass fell in this epoch (`Focus.last_step` past `clock.step - in_epoch`) — so a
   periodic save taken after a roll and before the next pass (whose cursor is the last epoch's) resumes
-  reading this epoch from unit 0, as the uninterrupted run does (T5).
+  reading this epoch from unit 0, as the uninterrupted run does (T5). A book an 'off' leg carried is
+  placed the same way, so the next 'observe' leg reads the units that leg consumed in the epoch it
+  resumes in and none of an earlier epoch's — ruled in the review below (T6).
 * **The loop.** A `B` row at the flush tail, after the X block and before the retention probe: the arm
   test (`DATA_TRUST != 'off'`) before `Cadences.due('data.trust', DATA.trust_period(dat), clock)`, and
   a pass on the window that rolls the epoch, due or not (on a rolling tick that cut no window, after
@@ -7709,20 +7716,25 @@ Clock-unit levers, `_periods` spanning seven packages, EIGHT gates in `RUN.new_c
   `RunResult.trust_series` holds one dict per pass and `run.py --trust-series` writes it; the gated
   call-site report carries `DATA.claims_observe` on `data.trust.passes`; `_CALLS` lists it at B and R.
 * **`DATA.trust_period(dat)`** is `units.Windows(DATA_TRUST_EVERY)` at 'observe' and **0 at 'off'**, so
-  `RUN.cadence_audit` calls the gate DISARMED there rather than one that can fire; `_periods` carries it
-  as `'data.trust'`, the eighth key, and the mapping now spans seven packages. `DATA_TRUST_EVERY=0` is
-  the other disarmed arm: the epoch-end and tail passes only.
+  the cadence audit calls the gate DISARMED there rather than one that can fire — in the root's line
+  for the key since the review (`compose.py::_trust_audit`), which names `DATA_TRUST='observe'` as what
+  arms the book, because RUN's own advice for a disarmed gate, a period of 1 or more, arms nothing at
+  'off'; `_periods` carries it as `'data.trust'`, the eighth key, and the mapping now spans seven
+  packages. `DATA_TRUST_EVERY=0` is the other disarmed arm: the epoch-end and tail passes only, which
+  the root's line says, as it does for a period the run is too short for.
 * **The checkpoint.** `stream_state(..., focus=)` writes `state['focus']` at 'observe' — mode, rule and
   claim shape, the sketch, the table in LRU order, evidence, trust, first sights, cursor, stream
   ordinal, `last_step`, carry and counters — and at 'off' nothing, unless the Focus holds a
-  checkpoint's book, written back unchanged (ON → OFF → ON resumes it: T6). The sketch is DATA's
-  payload and never a manifest field: `CKPT.check_geometry` refuses a field a checkpoint does not
-  record, so a new one would refuse every checkpoint written before it. `new_focus(restored=)` puts
-  it back and **refuses by name** a sketch of another size (`DATA_TRUST_SKETCH`) and another
-  estimator or claim shape (`DATA_TRUST_RULE`, `_CLAIM`, `_CTX`, `_VAL`, `_DELIMS`), since every
-  bucket and key is theirs; a smaller `DATA_TRUST_TABLE` evicts the least recently claimed keys to
-  fit, counted. A checkpoint with no book — before this build, or from an 'off' lineage — gives an
-  empty one, which reads a mid-epoch resume's epoch from its first unit.
+  checkpoint's book, written back unchanged (ON → OFF → ON resumes it, the next 'observe' leg reading
+  the units the 'off' leg consumed in the epoch it resumes in and none of an earlier epoch's — the
+  review's ruling: T6). The sketch is DATA's payload and never a manifest field:
+  `CKPT.check_geometry` refuses a field a checkpoint does not record, so a new one would refuse every
+  checkpoint written before it. `new_focus(restored=)` puts it back and **refuses by name** a sketch
+  of another size (`DATA_TRUST_SKETCH`) and another estimator or claim shape (`DATA_TRUST_RULE`,
+  `_CLAIM`, `_CTX`, `_VAL`, `_DELIMS`), since every bucket and key is theirs; a smaller
+  `DATA_TRUST_TABLE` evicts the least recently claimed keys to fit, counted. A checkpoint with no book
+  — before this build, or from an 'off' lineage — gives an empty one, which reads a mid-epoch resume's
+  epoch from its first unit.
 * **The surface it reports.** `data.trust.passes` (every pass), `.updates` (passes whose vote had a
   conflicted claim), `.units`, `.claims` (formed), `.claims_kv` or `.claims_ctx` (recorded),
   `.conflicted_claims`, `.sources`, `.evidence_absent` (readings of the last vote), `.table_evictions`
@@ -7755,11 +7767,14 @@ as written.**
    `data.trust.passes` (and `.updates` where its vote had a conflict), so a lineage stopped mid-epoch
    reads one pass more than an uninterrupted run; every other field of the book is the same (T5).
 4. **`trust_period` is 0 at 'off'**, reading `trust` beside `trust_every`, so the audit's word is
-   DISARMED; the plan's arm test still comes first.
+   DISARMED; the plan's arm test still comes first. Since the review the line that says so is the
+   root's, because RUN's remedy for a disarmed gate — a period — arms nothing there.
 5. **A claim-shape change is refused on a resume**, beside the plan's sketch-size refusal: a table
    read under another rule, context length, value length or delimiter class is another table.
 6. **An 'off' run carries a checkpoint's book**, so switching the book off for one leg of a lineage
-   does not destroy it (the retention probe's ON → OFF → ON rule, Q-EVAL-12).
+   does not destroy it (the retention probe's ON → OFF → ON rule, Q-EVAL-12). What the next
+   'observe' leg reads of that leg was left unruled here and is ruled in the review below: the units
+   it consumed in the epoch the next leg resumes in, and none of an earlier epoch's.
 7. **`first_seen` is a position** ([stream ordinal, unit index]) and not a step, so a continuation
    records what an uninterrupted run records.
 8. **`data.trust.units`, the `DATA(trust)` row, `RunResult.trust_series` and `run.py
@@ -7790,16 +7805,89 @@ on a planted corpus of four files, one stating the next letter, on which the boo
 evidence ABSENT below `MIN_EV`, forty random pass cuts reading one pass's book, the vote against the
 prototype's), T4 (`PYTHONHASHSEED` 0, 1 and 12345, in subprocesses), T5 (continuing, boundary and
 periodic-save resumes across the epoch roll, each ending with the uninterrupted run's book), T6 (a
-book-less checkpoint, the two refusals, ON → OFF → ON, the round trip), T7 (`NotBuilt`), T8
-(`wall_s` outside the channel, run.py end to end). `tests/test_prose_guards.py` G2 gains 'loss' and
+book-less checkpoint, the two refusals, ON → OFF → ON inside one epoch and, since the review, across
+the roll, the round trip), T7 (`NotBuilt`), T8 (`wall_s` outside the channel, run.py end to end), and
+since the review T9 (the audit's line for the book). `tests/test_prose_guards.py` G2 gains 'loss' and
 'loss+draw'; G3 gains `DATA_TRUST_EVERY=-1` refused by its domain and `trust_period`'s two arms. CPU
 runs establish operation only: whether the book is right about real sources is E3's, on GPU.
 
 **What the default changes:** nothing a run trains on and no integer counter a default run prints.
 At 'off' the book allocates nothing and is never called; the report gains the `DATA(trust)` row (two
 UNREACHABLE gates), a gated-call line and the ledger's `'data.trust'` key at 0 checks and period 0,
-and a checkpoint's `RUN.cadences` carries that key. `Stream.sources` is bookkeeping over a draw that
-did not change. B1, B3, B3r, B5, B6 and B6r reproduce their fixtures.
+and a checkpoint's `RUN.cadences` carries that key. **The run also prints one more startup warning**
+— the cadence audit's `'data.trust'` line, DISARMED by `DATA_TRUST='off'`, in the root's words since
+the review (below); this list left it out until then. `Stream.sources` is bookkeeping over a draw
+that did not change. B1, B3, B3r, B5, B6 and B6r reproduce their fixtures.
+
+**AMENDED 2026-09-28 — THE REVIEW OF THIS RULING.** Three findings, each driven on the tree before it
+(00e6fc3; CPU, operation only). The two that printed something false are repaired and held:
+`tests/test_trust.py` T9's three checks of the audit's line fail when run on that tree's `src/` (its
+fourth, the passes the line promises, passes on both), and `tests/test_assemble.py` A10's new row
+check fails on that tree's generator. The third's behaviour is ruled as the code already does it,
+its prose corrected where it stood and both of its sides driven in T6, whose new crossing check
+fails on that tree only on the reason's words: its numbers are the old tree's too.
+* **The cadence audit's line for the book is the root's.** `trust_period` is 0 at 'off', so
+  `RUN.cadence_audit` printed its DISARMED sentence for `'data.trust'` on every default run — one
+  startup warning more than b2361e4 printed, which "What the default changes" did not list — and
+  ended it "Set a period of 1 or more on the package that owns this threshold", which arms nothing at
+  'off': `DATA_TRUST_EVERY=1` printed the same line. At 'observe' with `DATA_TRUST_EVERY=0` the same
+  sentence said "Whatever it gates does not happen in this run" while the book passed — driven: a
+  30-window real-source run made one tail pass over 3841 units that formed 38 claims, the ledger
+  reading (30, 0, None, Windows(0)) — and a period the run is too short for (100000 against a
+  317-window run) printed RUN's starved sentence, which says the same. **Ruled:** the root words that
+  one line, `compose.py::_trust_audit` (§3.0.2), and hands every other back as RUN wrote it; the
+  mapping RUN audits is still the one `new_cadences` was given, so this rewords a line and adds no
+  second audit. At 'off' the line says the gate is DISARMED by `DATA_TRUST='off'` at any
+  `DATA_TRUST_EVERY` and any run length, and names `DATA_TRUST='observe'` as what arms the book; at
+  'observe' a period of 0, or one the run cannot reach, reads as the periodic pass DISARMED or unable
+  to fire once, beside the passes that still run — the window that rolls each epoch, and a stop's
+  tail — so the book reads every unit the run consumes. A period the run reaches gets no line, as
+  before. `trust_period` is unchanged. The finding's other remedy — the lever's period at 'off', read
+  as 'curve's "declared and never asked" — would have silenced the default's line, but left 'off' at
+  `DATA_TRUST_EVERY=0`, or at a period past the run, printing advice that arms nothing, and 'observe'
+  needs the root's line either way. The default run keeps its extra warning, now true, and "What the
+  default changes" names it. T9 drives all five arms (the two 'off' lines, the two 'observe' ones,
+  none at a reachable period, RUN's other lines unchanged) and the passes the line promises: at
+  `DATA_TRUST_EVERY=0` a whole run passes once, at its finishing roll, over every unit, and a stopped
+  one once, at its tail.
+* **The generated defaults table escapes a pipe.** `tools/render_defaults.py::_cell` wrapped a
+  default's `repr` in a code span and escaped no `|`, and GitHub-flavoured Markdown splits a table
+  row on an unescaped `|` inside a code span too. `DATA_TRUST_DELIMS` is the first default holding
+  one: its row in `docs/05_DEFAULTS.md` split into ten cells where every other row has five, so it
+  read "`'=" as the default, ":" as the unit and " is " as what it accepts, and the help fell off the
+  row. `_cell` escapes it (`\|`, the spelling `.rework/CENSUS.md` already used), `_bounds` renders
+  each choice through `_cell`, and the document is re-rendered, one row moving. A10 compared the file
+  with its generator and so passed a malformed row; it now also holds every generated table row to
+  its header's cell count, which fails on 00e6fc3's generator at exactly that row.
+* **What an 'observe' leg reads of an 'off' leg is ruled.** The `Focus` docstring said the held book
+  "reads nothing of what that leg consumes", and the 'off' `data.trust` reason, printed in every such
+  run's report, that it "reads nothing this run consumes"; the code never did either. The next
+  'observe' leg places its first pass as any mid-epoch resume does — at the held cursor where the
+  book's last pass fell in the epoch it resumes in, at unit 0 otherwise. Driven on the planted corpus
+  (`RUN_EPOCHS=2`, `DATA_RESAMPLE=1`, 'observe' every 30 windows), the parent stopped at window 70
+  with its cursor at 8961: after a 20-window 'off' leg the grandchild's first pass read from 8961 over
+  2688 units — the 'off' leg's 2560 and one window of its own — and the lineage ended with the
+  uninterrupted run's book (T6 held that already); after a 70-window 'off' leg that crossed the roll
+  at window 121, the first pass read from 0 over 2561 units, and epoch 0's last 6528 units, all the
+  'off' leg's, were never read — the book ended at 24450 units against the uninterrupted 30978.
+  **Ruled, as the code does it:** a later 'observe' leg reads the units an 'off' leg consumed in the
+  epoch it resumes in, and none of an earlier epoch's, whose segmentation went at its roll. An 'off'
+  leg inside one epoch costs the book nothing; one that crosses a roll costs it exactly the units it
+  consumed before the last roll it crossed, so what the book covers across such a lineage depends on
+  where the rolls fell. The other remedy — a mark in the held book, and the next leg's first pass
+  starting at its resume point — was not taken: it needs a pass that skips units, which
+  `claims_observe` refuses by name because a skipped unit is a wrong count, and it would read less of
+  what the lineage trained on than the placement already reads. `Focus.stream` counts the streams
+  the book opened, so an 'off' leg that crosses two rolls or more leaves it behind the epoch count,
+  and `first_seen` positions are the book's own. The docstring, the reason (which now says what a
+  later leg reads), the loop's placement comment, the cursor and checkpoint bullets and departure 6
+  say so; T6 drives the crossing leg, which ends at exactly the uninterrupted run's units less those
+  6528, with its cursor and stream ordinal and another sketch, the losses continuing exactly.
+
+**What the review changes at the default:** nothing a run trains on, no integer it prints, and not
+the count of startup warnings: the default's `'data.trust'` line is reworded, not added. The held
+book's reason moves only where an 'off' run resumed one, and `docs/05_DEFAULTS.md` moves one row. B1,
+B3, B3r, B5, B6 and B6r reproduce their fixtures.
 
 ## 6. What `tests/test_contract.py` checks
 

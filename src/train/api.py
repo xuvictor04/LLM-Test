@@ -1324,14 +1324,17 @@ def cadence_audit(run: Config, *, run_windows, periods):
     refuses any other kind at both ends.
 
     IT COVERS EIGHT GATES SINCE 2026-09-28 ('data.trust', DATA.trust_period, reported DISARMED at
-    the shipped DATA_TRUST='off'), SEVEN FROM 2026-09-27 ('retention', EVAL.retention_period,
-    reported DISARMED at the shipped 0), AND SIX, NOT FIVE, FROM 2026-09-02. The sixth is
-    'progress', whose period is this module's PROGRESS_WINDOWS constant (Q-RUN-1). It is
-    deliberately 100 Windows so that it FIRES at the shipped defaults and never joins the list
-    above: a progress/ETA meter that prints zero times is a pure loss -- no measurement is
-    confounded by it -- and the old RATE_EVERY default of 2000 would have made this the eleventh
-    entry. That is a choice this audit can now check rather than a claim, which is the whole reason
-    the constant is in the mapping.
+    the shipped DATA_TRUST='off' -- the one key whose line the root rewords, spine/compose.py::
+    _trust_audit, since Q-DATA-11's review: DATA_TRUST arms that book and no period does, and at
+    'observe' the loop passes it beside its gate at each epoch's end and a stop's tail, so the two
+    sentences below, written for a gate that is its cadence alone, were wrong about it), SEVEN FROM
+    2026-09-27 ('retention', EVAL.retention_period, reported DISARMED at the shipped 0), AND SIX,
+    NOT FIVE, FROM 2026-09-02. The sixth is 'progress', whose period is this module's
+    PROGRESS_WINDOWS constant (Q-RUN-1). It is deliberately 100 Windows so that it FIRES at the
+    shipped defaults and never joins the list above: a progress/ETA meter that prints zero times is
+    a pure loss -- no measurement is confounded by it -- and the old RATE_EVERY default of 2000
+    would have made this the eleventh entry. That is a choice this audit can now check rather than a
+    claim, which is the whole reason the constant is in the mapping.
 
     LEVERS READ: none
     WIRES READ: none

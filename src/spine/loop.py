@@ -1190,8 +1190,11 @@ def run(sysm, *, max_windows=None, progress=True):
     # run, an epoch-boundary resume); on a continuing mid-epoch resume at the book's cursor if its
     # last pass fell in THIS epoch -- a step past the epoch's first, clock.step - in_epoch -- and at
     # 0 otherwise, so a cursor left by the previous epoch's last pass, or a book with no pass, reads
-    # this epoch from its first unit. Its seconds are a float of this process's, `data.trust.wall_s`
-    # in the DATA(trust) row, never checkpointed and never in the integer channel.
+    # this epoch from its first unit. A book an 'off' leg carried (Focus.held) is placed the same
+    # way, so this process's first pass reads the units that leg consumed in this epoch and none of
+    # an earlier one's -- ruled in Q-DATA-11's review, not an accident of the placement. Its
+    # seconds are a float of this process's, `data.trust.wall_s` in the DATA(trust) row, never
+    # checkpointed and never in the integer channel.
     _trust_on = str(dat_cfg.trust) != "off"
     _trust_lo, _trust_hi, _trust_wall, trust_series = 0, 0, 0.0, []
     if _trust_on:

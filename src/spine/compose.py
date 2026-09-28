@@ -829,7 +829,12 @@ ASSEMBLY_ORDER = (
                                               "EIGHT cannot fire at this run's length BEFORE the "
                                               "first window. Eight since 2026-09-28, when "
                                               "'data.trust' joined (DATA.trust_period, 0 at "
-                                              "DATA_TRUST='off' and so reported DISARMED there), "
+                                              "DATA_TRUST='off' and so reported DISARMED there -- "
+                                              "in a line the root words, _trust_audit, since "
+                                              "Q-DATA-11's review: RUN's advice to set a period "
+                                              "arms nothing DATA_TRUST keeps off, and at 'observe' "
+                                              "the book also passes at each epoch's end and a "
+                                              "stop's tail, beside its gate), "
                                               "seven from 2026-09-27, when "
                                               "'retention' joined (EVAL.retention_period, off at 0 "
                                               "and so reported DISARMED), and six before that, "
@@ -3433,9 +3438,15 @@ def compose(environ=None, *, restored=None):
     # 937-window run -- was never executed, while K6 credited the row and passed. It STATES, it does
     # not raise, so its lines join the warnings the report must print; an EMPTY list is a real
     # result and must be printed as one.
+    # THE BOOK'S LINE IS THE ROOT'S (2026-09-28, Q-DATA-11's review). RUN's sentence for a gate it
+    # flags is written for a gate that is its cadence and nothing more, and 'data.trust' is armed by
+    # DATA_TRUST and passes beside its cadence at each epoch's end and a stop's tail -- both this
+    # file's loop's -- so _trust_audit words that one line and returns the rest as RUN wrote them.
     sysm.stage = "audit"
-    sysm.warnings.extend(run_api.cadence_audit(
-        run, run_windows=_run_windows(sysm), periods=periods))
+    _rw = _run_windows(sysm)
+    sysm.warnings.extend(_trust_audit(
+        sysm, run_api.cadence_audit(run, run_windows=_rw, periods=periods),
+        run_windows=_rw, periods=periods))
 
     # -- 12. persistence: the one predicate, then the retention policy and the save signal --------
     # saving_on precedes new_retention because Retention.inert_reason is populated when best_keep
@@ -4326,6 +4337,57 @@ def _trust_units(sysm, lo, hi):
     return units, sources
 
 
+def _trust_audit(sysm, lines, *, run_windows, periods):
+    """RUN.cadence_audit's `lines`, with the one it writes for 'data.trust' in the root's words
+    (2026-09-28, Q-DATA-11's review). -> list of str, every other line RUN's, unchanged.
+
+    RUN'S TWO SENTENCES ARE WRITTEN FOR A GATE THAT IS ITS CADENCE AND NOTHING MORE, and the book's
+    is not: DATA_TRUST arms it -- the loop's arm test withholds every pass at 'off' before the gate
+    is asked -- and at 'observe' the loop passes it beside its cadence, on the window that rolls
+    each epoch and at a stop's tail. So RUN's line was wrong three ways, each driven on the build:
+      * at DATA_TRUST='off' DATA.trust_period is 0 whatever DATA_TRUST_EVERY is, and "Set a period
+        of 1 or more on the package that owns this threshold" arms nothing -- DATA_TRUST_EVERY=1 at
+        'off' printed the same line, and a default run gained it as one more startup warning;
+      * at 'observe' with DATA_TRUST_EVERY=0 it said "Whatever it gates does not happen in this
+        run", and a 30-window real-source run that printed it then made a tail pass over 3841 units
+        that formed 38 claims, the ledger reading (30, 0, None, Windows(0));
+      * at 'observe' with a period the run is too short for, the starved sentence said the same.
+    The arm test and both passes are spine/loop.py's, so the line for this key is the root's. It
+    replaces RUN's, found by the key RUN opens each of its lines with; a run in which the gate can
+    fire gets no line, as before, and the mapping RUN audits is the one new_cadences was given --
+    this is a rewording of one line, not a second audit. The default run's 'off' line is a warning
+    Q-DATA-11 lists among what the default changes."""
+    key = "data.trust"
+    tag = f"cadence audit: {key!r} "
+    if key not in periods or not any(str(ln).startswith(tag) for ln in lines):
+        return list(lines)
+    dat = sysm.configs["DATA"]
+    n, run_n, every = int(periods[key]), int(run_windows), int(dat.trust_every)
+    if str(dat.trust) == "off":
+        own = (f"cadence audit: {key!r} is DISARMED by DATA_TRUST='off' (DATA.trust_period is {n} "
+               f"windows there) -- no source-reliability book is kept, and the loop's arm test "
+               f"withholds every pass before this gate is asked, at any DATA_TRUST_EVERY (this "
+               f"run's is {every}) and any run length, so no period reaches it. Nothing the run "
+               f"trains on reads the book. DATA_TRUST='observe' arms it: the book then reads the "
+               f"units the windows consume, every DATA_TRUST_EVERY windows, on the window that "
+               f"rolls each epoch and at a stop's tail, and changes nothing the run trains on.")
+    else:
+        beside = ("-- but the book is kept, and it is not idle: the loop still passes it on the "
+                  "window that rolls each epoch and, where a stop leaves consumed units unread, "
+                  "once more at the end, so it reads every unit this run consumes, at those passes "
+                  "only.")
+        if n <= 0:
+            own = (f"cadence audit: {key!r} has a period of {n} windows "
+                   f"(DATA_TRUST_EVERY={every}), so the book's PERIODIC pass is DISARMED at any "
+                   f"run length {beside} Set DATA_TRUST_EVERY to 1 or more for a pass every that "
+                   f"many windows as well.")
+        else:
+            own = (f"cadence audit: {key!r} has a period of {n} windows and this run is {run_n} "
+                   f"windows long, so the book's PERIODIC pass CANNOT FIRE ONCE {beside} Shorten "
+                   f"DATA_TRUST_EVERY for a pass every that many windows as well.")
+    return [own if str(ln).startswith(tag) else ln for ln in lines]
+
+
 def _probe_notices(sysm, ev):
     """The two startup notices the register asks for, PRINTED AND NEVER APPLIED (04 section 6).
 
@@ -4642,7 +4704,9 @@ def _periods(sysm):
         "ckpt": ckpt_api.save_period(r["CKPT"]),
         "retention": eval_api.retention_period(r["EVAL"]),
         # THE SOURCE-RELIABILITY BOOK'S CADENCE (2026-09-28, Q-DATA-11): DATA_TRUST_EVERY at
-        # DATA_TRUST='observe', and 0 -- disarmed, which the audit says -- at 'off'.
+        # DATA_TRUST='observe', and 0 -- disarmed, which the audit says -- at 'off'. The audit's
+        # line for this key is _trust_audit's, naming DATA_TRUST='observe' as what arms it (the
+        # review).
         "data.trust": data_api.trust_period(r["DATA"]),
         "progress": run_api.PROGRESS_WINDOWS,
     }
