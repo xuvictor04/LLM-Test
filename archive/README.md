@@ -134,7 +134,6 @@ transcripts and the commit messages. This table resolves them.
 | `garry/`, `legacy/`, `handoff/`, `docs/FILES.md` and `docs/HANDOFF.md`, `STATE.md`, `CL_TESTBED.md`, at the root | the same names under `archive/` | 2026-08-27 |
 | `ARCHIVE.md` | `archive/README.md` | 2026-09-28 |
 | the old tree at the root, all 51 files: `bench_gpu.sh` `blowup_test.py` `cap_test.py` `cl_bench.py` `compare.py` `compare_test.py` `corpus_test.py` `curve_test.py` `datastream.py` `domain_test.py` `equiv.sh` `fetch_40g.sh` `fetch_big.py` `fetch_data.sh` `fetch_local.py` `growth_test.py` `harness_test.sh` `holdout.py` `keystone_probe.py` `levers.py` `longrun.sh` `lr_test.py` `mem_evict_test.py` `memory.py` `notes_check.py` `preflight.sh` `probe_ckpt_geometry.py` `probe_signature.py` `probe_stability.py` `proj_test.py` `prompt.py` `ramp_test.py` `rerun.sh` `rescue_ckpt.py` `resume_test.py` `run_cl_test.sh` `run_full_unfrozen.sh` `run_verify_test.py` `runs.csv` `runs.py` `self_organize.py` `selftest.sh` `sweep_domain_grid.sh` `sweep_domain_report.py` `sweep_domains.sh` `tok_test.py` `tokenizer.py` `verification.py` `verify_console_test.py` `vocab.py` `world_model.py` | `archive/old-tree/<same name>` | 2026-09-28 |
-
 | `.rework/QUESTIONS.md` | `archive/rework/QUESTIONS.md` | 2026-09-28 |
 
 The root kept `README.md`, `LICENSE`, `requirements.txt`, `run.py`, `gpu_world.sh`, `sweep_gpu.sh` and
