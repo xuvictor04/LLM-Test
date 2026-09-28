@@ -148,9 +148,9 @@ were compared name by name on 2026-09-14: 33 against 33, nothing in the report u
 declared the report did not name. The other **174** of the 207 numeric levers carry no pair, and
 that is the honest state rather than an unfinished one — see the ceiling population below. *(Those
 are the 2026-09-14 comparison's numbers. A lever minted since declares its pair where its ends are
-obvious, at birth: on 2026-09-28, 51 of the 227 numeric levers declare one — ten of them the
-source-reliability book's, Q-DATA-11, and three its copy detection's, Q-DATA-12 — and 176 carry
-none.)*
+obvious, at birth: on 2026-09-28, 52 of the 228 numeric levers declare one — ten of them the
+source-reliability book's, Q-DATA-11, three its copy detection's, Q-DATA-12, and `FAB_CONTRIB_MAX`,
+Q-FAB-19 — and 176 carry none.)*
 
 **`spine/lever.py::REFUSE_NON_FINITE_FLOAT` — the floor.** `nan`, `inf` and `-inf` are refused on a
 **float** lever inside `Lever.coerce`. Its scope is the 97 float levers and nothing else: the 110
@@ -862,8 +862,10 @@ loop, off DATA's labels and schedule as `spine/derive.py::area_id` numbers (Q-FA
 closure over the retention probe's pinned control half, with the closure's own `FAB.forward` inputs
 (Q-FAB-19).
 **Two alarms the report must carry:** `fab.balance_nonzero == 0` while `balance > 0` is **C2** back;
-`fab.contrib_distinct_values == 1` is **C3** back (and since Q-FAB-19 a pass whose walks moved no
-logit writes nothing and counts `fab.contrib_degenerate`).
+`fab.contrib_degenerate > 0` is **C3** back — a pass whose walks moved no logit, which writes
+nothing (Q-FAB-19). `fab.contrib_distinct_values == 1` stood here until Q-FAB-19's review: the body
+tests the walk itself, and on a pass that is not degenerate one distinct value is the float32 mean
+loss's resolution — the walks moved and every removal read one value — not C3.
 **`observe` splits `use` from `uage`** — a behaviour change with no measurement behind it, since
 `grace=48` was set against a clock that ticked once per window. On P9's list; see **Q-FAB-5**, which
 also supplies the number the retune is set from (`fab.mass_per_selection`) and the arithmetic that
@@ -1662,15 +1664,16 @@ shape it replaces: the run has no capacity valve (nothing lifts a cap, so `CAP.c
 starting ceilings and every block reason reads *unreachable*), no WORLD growth, no learning-curve
 probe at `EVAL_CURVE_EVERY`, and no wrongness sweep. *(It listed "no per-expert contribution and so
 no informed spare rule" until 2026-09-28: `FAB.contribution` has a body and a row since (Q-FAB-19),
-built OFF, so at the shipped `FAB_CONTRIB=0` `Population.contrib` still stays 0.0 and the spare rule
-is still uninformed. This paragraph also listed no best-model save, no restart damping and no memory
-retrieval until 2026-09-27: the retention probe (Q-EVAL-12) supplies the first and the reading the
-second judges on, and the memory-on closure is the report path's retrieval — built OFF, so at the
-shipped `EVAL_RETENTION_EVERY=0` `Retention.counters().inert_reason` still reports "no curve value
-has ever arrived" and `OPT_DAMP_SOURCE='off'` keeps the damping unjudged. The in-package read probe
-reached `MEM.read` from 2026-09-21, Q-MEM-9.)* **All of that was already inert**: the rows
-named calls whose arguments nothing supplies. The deferral does not remove a mechanism, it stops the
-tables claiming one, and it names the producer each is waiting on.
+built OFF, so at the shipped `FAB_CONTRIB=0` nothing is measured, `FAB.manage` reads no contribution
+(Q-FAB-19's review) and the spare rule is still uninformed. This paragraph also listed no best-model
+save, no restart damping and no memory retrieval until 2026-09-27: the retention probe (Q-EVAL-12)
+supplies the first and the reading the second judges on, and the memory-on closure is the report
+path's retrieval — built OFF, so at the shipped `EVAL_RETENTION_EVERY=0`
+`Retention.counters().inert_reason` still reports "no curve value has ever arrived" and
+`OPT_DAMP_SOURCE='off'` keeps the damping unjudged. The in-package read probe reached `MEM.read`
+from 2026-09-21, Q-MEM-9.)* **All of that was already inert**: the rows named calls whose arguments
+nothing supplies. The deferral does not remove a mechanism, it stops the tables claiming one, and it
+names the producer each is waiting on.
 
 ### 3.7 What could NOT be placed, and is therefore reported rather than rowed
 
@@ -6569,7 +6572,8 @@ tree's own `failing(e, comp_glob)` (self_organize.py:2189-2194, fed `asm.comp_gl
 window 1001 above (comp_glob 3.660) the same pass culls 3 of 13. `comp_glob` None (nothing attributed
 yet) means no failure cull. The additive `fail_tol` is unchanged. (2) the failure path also spares
 `contrib > 0`, the old tree's rule (inert while `FAB.contribution` is deferred; since 2026-09-28 it
-has a body, built OFF, and the spare can fire at `FAB_CONTRIB=1` — Q-FAB-19). (3) the
+has a body, built OFF, and the spare can fire at `FAB_CONTRIB=1` and only there — Q-FAB-19 and its
+review). (3) the
 **`comp_protect` spare compared `comp > comp_glob`**; comp is a LOSS, so it spared the worse experts
 (at window 1001 it would have spared the six at comp 3.72-8.12 and left the seven at 3.38-3.61 to the
 cull). It is `<` now, as the lever's help and the old tree's :2271 say. (4) `fabric.cull_eligible`,
@@ -7425,8 +7429,11 @@ docstring records: its baseline was scored by a different function than its coun
 **The ruling, as built.**
 * **The levers** (`fabric/levers.py` section 6; census amendments, the thirty-sixth and
   thirty-seventh). `FAB_CONTRIB` (flag, shipped **False**): at False the root never calls the entry
-  point, `Population.contrib` stays 0.0 on every expert, both `contrib > 0` spares in `FAB.manage`
-  are inert and no `fab.contrib_*` or `eval.contrib.*` key exists. `FAB_CONTRIB_MAX` (64,
+  point and `FAB.manage` reads no contribution, so both `contrib > 0` spares are inert and no
+  `eval.contrib.*` key exists; on a lineage that never armed it `Population.contrib` stays 0.0 on
+  every expert and no `fab.contrib_*` key exists either, and a child resumed at False from a
+  measuring parent carries the parent's books and `fab.contrib_*` counts, unread (the review
+  below, which ruled the read). `FAB_CONTRIB_MAX` (64,
   PROVISIONAL, NEW-19; `U.EXPERTS`, domain `(1, None)` — 0 would arm a measurement that measures
   nothing): how many past-grace experts one pass measures. `FAB_FADED_CULL` gains `'contrib'`.
 * **The batch** (`spine/compose.py::_contrib_material`). The first `(EVAL_RETENTION_N + 1) // 2`
@@ -7519,13 +7526,15 @@ docstring records: its baseline was scored by a different function than its coun
 * **The counters and the Gate.** `fab.contrib_passes` (the calls that walked — a candidate and a
   finite baseline, each one reference walk), `fab.contrib_measured` (candidates written),
   `fab.contrib_degenerate` and `fab.contrib_nonfinite` are seeded 0 by `FAB.build` at
-  `FAB_CONTRIB=1` on a routed arm and are ABSENT otherwise; each pass writes the gauges
+  `FAB_CONTRIB=1` on a routed arm and are ABSENT otherwise, unless a restored ledger carries its
+  lineage's (the review below); each pass writes the gauges
   `fab.contrib_distinct_values`, `fab.contrib_positive`, `fab.contrib_negative`,
   `fab.contrib_coverage` (a float: this pass's candidates over its past-grace count) and
   `fab.contrib_measured_live`. **Gate `fab.contrib`** is UNREACHABLE naming `FAB_CONTRIB=0` at the
   shipped value (and naming the arm at `FAB_ON=0` / `FAB_NORM_ONLY=1`), a prediction at 1 until the
-  first pass replaces it by name — the cull gate's treatment — re-rendered as RESTORED on a resume,
-  and its count is `fab.contrib_passes`. `RunResult.gated` gains `FAB.contribution` keyed to
+  first pass replaces it by name — the cull gate's treatment — re-rendered as RESTORED on a resume
+  (at 0 too, since the review below, where the restored books or ledger carry a measurement), and
+  its count is `fab.contrib_passes`. `RunResult.gated` gains `FAB.contribution` keyed to
   `fab.contrib_passes`. The root's book gains `eval.contrib.calls`, `.empty`, `.windows`, `.cuts`,
   `.forwards`, `.decodes`, `.sig_calls`, `.sig_windows` and `.domain_spawn` (PRESENT-and-0 where
   armed, carried by `LOOP.eval` like the probe's) and `eval.contrib.seconds` (a float, never carried).
@@ -7582,10 +7591,12 @@ outside autocast and its forward inside, as the probe's do; bitwise agreement th
 reading, not a CPU one.
 
 **Bit-identity.** At the shipped `FAB_CONTRIB=0` the arm test skips the row and nothing new is
-called; `Population.contrib` stays 0.0; `'as_is'` and `'defer'` are the bodies they were (the
-`'contrib'` branches are behind `gated`, which is False at both); the society blend is the same
-expression in the same order; `FAB.build` adds Gate `fab.contrib`, a gate row and not an integer
-counter line. B1, B3, B3r, B5, B6 and B6r reproduce their fixtures.
+called; `Population.contrib` stays 0.0 (every fixture's lineage never measured); `'as_is'` and
+`'defer'` are the bodies they were (the `'contrib'` branches are behind `gated`, which is False at
+both, and the spares' `FAB_CONTRIB` test, the review below, decides over a contrib of 0.0 as the
+unconditional read did); the society blend is the same expression in the same order; `FAB.build`
+adds Gate `fab.contrib`, a gate row and not an integer counter line. B1, B3, B3r, B5, B6 and B6r
+reproduce their fixtures.
 
 **Known answers** (`tests/test_contribution.py`, CPU, operation only). C-1 at the shipped
 `FAB_CONTRIB=0`, on a 100-window run that reads the probe (`EVAL_RETENTION_EVERY=20`, `DATA_SYNTH_HOLDOUT=1`) and reaches
@@ -7620,7 +7631,99 @@ and `eval.contrib` book exactly; a blob without `contrib_n` and the cursor resto
 unmeasured. C-9 the accounting above, on three passes: `fab.eval_passes` +9 (6 closure passes and
 3 reference walks), `fab.holdout_applied` +176, `lm.decode.calls` +370, `lm.embed.calls`,
 `lm.encode.calls` and `world.forecast.calls` +6, `lm.loss.calls` +3, `sig.encode_calls` +6,
-`sig.encode_windows` +36, `tok.segment_remap` +18.
+`sig.encode_windows` +36, `tok.segment_remap` +18. (C-3, C-6 and C-8 as the review below left them
+are in it.)
+
+**AMENDED 2026-09-28 — THE REVIEW OF THIS RULING.** Five findings, each driven on the tree before it
+(f7ffbe4; CPU, operation only) and each repaired; the ruling's lever bullet, its counters-and-Gate
+bullet and its bit-identity paragraph, the FAB section's alarm, Q-FAB-12's note on the spare, §3.6's
+cost paragraph and the lever-domain note are corrected in place. Run against that tree's `src/`,
+the six new C-8 checks fail; the new C-3 and C-6 checks pass there, since the code they read was
+right, and fail on the plants their findings name.
+* **`FAB_CONTRIB=0` reads no measurement, on a resumed lineage too.** `Population.contrib` and
+  `contrib_n` are books, checkpointed and restored whatever the lever, and both `contrib > 0` spares
+  read `contrib` without asking `FAB_CONTRIB`. So a child resumed at 0 from a measuring parent — E2's
+  `'defer'` arm, say — went on sparing on the parent's frozen measurements while Gate `fab.contrib`
+  printed build's "`Population.contrib` stays 0.0 on every expert and the `contrib > 0` spare in both
+  culls is inert" (`_refresh_build_predictions` re-rendered the line at 1 only), as the lever's
+  comment, `contribution`'s docstring, the census purpose and the lever bullet above said too.
+  Driven at that tree: C-7's utilization population measured at 1 with expert 0 at +0.25, saved by
+  `FAB.state_dict` and restored by `FAB.load_state_dict` into a build at 0, culled experts 1-5 with
+  `fab.spared_contrib` 1, where the same population never measured culls 0-4; C-2's run saved at
+  window 110 (four passes) and resumed at 0 restored 60 measured experts of 253, and the child's
+  report printed the parent's `fab.contrib_*` keys and "FAB.contribution: fired 4 time(s)" beside
+  that line. **Ruled:** the lever switches the reading with the measurement. `FAB.manage` reads
+  `Population.contrib` — in both spares and in `'contrib'`'s rule — at `FAB_CONTRIB=1` only, and its
+  `LEVERS READ` gains `contrib`; at 0 both spares are inert whatever the books hold, and `'contrib'`,
+  which startup refuses at 0, keeps every faded removal — `'defer'` under the rule's names, which is
+  what the lever's comment already said the value would be without a producer. The finding's other
+  remedy, keeping the read and saying so, was not taken: an arm whose report says the mechanism is
+  off would still cull on it. The books still cross a resume and are carried on unread, so a later
+  child at 1 reads them, stale as a merge's survivor's are ((a) of what this ruling does not see).
+  FAB's ledger crosses too, as every FAB count does (lineage, register LOW-FAB-MERGED-REPORT), so such
+  a child's report carries the lineage's `fab.contrib_*` counts — the gauges its last pass's — and its
+  gated-call line counts the lineage's passes; the root's `eval.contrib.*` book is seeded only where
+  armed and restores only the keys it seeded, so that child prints none and its checkpoint carries
+  none on. So each statement is scoped to what is true: at 0 **no decision reads a measurement**, on
+  every lineage, and **`contrib` stays 0.0 and no `fab.contrib_*` key exists on a lineage that never
+  armed it**. Build's line at 0 now says the first ("FAB.manage reads no contribution"), and
+  `_refresh_build_predictions` re-renders Gate `fab.contrib` at 0 as well wherever the restored books
+  or ledger carry a measurement — how many restored live experts carry one, that nothing reads them,
+  the lineage's pass count — while a lineage that never armed it keeps build's line.
+  `fab.spared_contrib` stays seeded on every pass at every value, as `fab.spared_comp` is at
+  `FAB_COMP_PROTECT=0` and as it was before the body existed (B3's fixture holds it at 0): the Gate's
+  UNREACHABLE line is what says the spare cannot fire at 0. The lever's
+  comment, `contribution`'s, `manage`'s and `load_state_dict`'s docstrings, the census purpose and
+  `.rework/CENSUS.md` row, the `A` row's note, the loop's comment and the lever bullet above say so.
+  `tests/test_faded.py`'s F5 sweep plants load-bearing experts to reach the spare and now builds at
+  `FAB_CONTRIB=1`, where the spare reads them as it did, and asserts that it spared some (39 over
+  the 150 populations at `'as_is'`); its verdict and its counts are unchanged (173 merge and 112
+  cull deferrals, on that tree as on this one). C-8 holds the
+  ruling on scripted populations saved by `FAB.state_dict` and restored by `FAB.load_state_dict`:
+  books measured at 1 and restored at 0 are carried and spare nothing — the utilization cull removes
+  0-4 as the population never measured does (at 1 the same books spare 0 and remove 1-5), the
+  failure cull removes both failing experts (at 1 the one at +0.3 is spared), and `'contrib'` at 0
+  by a direct call keeps the faded expert measured at −0.5 beside the unmeasured one. Gate
+  `fab.contrib` then names 2 of 10 restored measured experts, and a lineage that never armed it
+  keeps build's line. End to end, C-2's parent at window 110 resumed at 0, its 60 restored
+  measurements planted at +1.0 (load-bearing), makes no `FAB.contribution` call and trains and ends
+  exactly as a twin whose restored books were cleared: the same losses, the state but the two books,
+  the same FAB ledger, `fab.spared_contrib` the parent's 1. Its ledger's `fab.contrib_*` keys are the
+  parent's, its gated line reads "fired 4 time(s)" and no `eval.contrib.*` key exists. Gate
+  `fab.contrib` is UNREACHABLE, naming 60 of 253 restored live experts as measured. On that tree's
+  `src/` the planted child's passes spared 131 times — `fab.spared_contrib` 132 against the
+  parent's 1 — and its losses and state departed from the twin's.
+* **C-6's fold has a known answer.** Its second reading ran on an unchanged population and returned
+  the first exactly, and `(1 − 0.02) × first + 0.02 × first == first`, so an EMA that overwrote passed
+  (driven: a plant writing `contrib = d` passed all 50 checks). The planted expert's B is now cut to
+  a twentieth between the readings, +2.853 then +2.844, and `contrib` is their fold, neither reading;
+  the overwriting plant fails it.
+* **The society arm's leave-one-out has a known answer.** C-3 asserted only that nothing removed
+  re-forms the prediction, that removing a voter moves its rows and that removing a non-voter returns
+  it, and a plant dropping both the renormalisation and the sole-voter fall-back passed. A blend
+  written by hand now pins both, exact in float32 whatever the order of the sums (integer logits,
+  dyadic vote weights and halt mass): expert 1 removed from the two rows it voted in at weight 0.5
+  gives `(1 − held) × vote′ + held × base` with the rest renormalised (0.375 and 0.125 become 0.75
+  and 0.25), the row it did not vote in untouched; on a one-voter blend the rows it alone voted in
+  are the base logits exactly, at halt mass 0.25 and 0. Each plant alone fails its check.
+* **The C3 alarm is `fab.contrib_degenerate`.** The FAB section read "`fab.contrib_distinct_values ==
+  1` is C3 back", while C-2 above records a healthy pass reading 0.0 on all 64 candidates at window
+  51 — one distinct value beside `fab.contrib_degenerate` 0 — so a run ending after that pass would
+  have raised the alarm. **Ruled:** C3 is `fab.contrib_degenerate > 0`, a pass whose walks moved no
+  logit, which writes nothing; one distinct value on a pass that is not degenerate is the float32
+  mean loss's resolution — the walks moved and every removal read one value, there 0.0. The FAB
+  section, `contribution`'s DID IT FIRE and `ContribReport` say so. The finding's other remedy, a
+  finer difference, was not taken: the value stays the difference of two float32 means,
+  `baseline_loss` as `LM.lm_loss` scores it, and the walk test, not the value, tells a moved walk
+  from one that did not move.
+* **The domain count.** The domain note read "51 of the 227 numeric levers" after `FAB_CONTRIB_MAX`
+  became the 52nd of 228; it reads 52 of 228 and names it.
+
+**What the review changes at the default:** nothing a run trains on, and nothing a default run
+prints but Gate `fab.contrib`'s reason at the shipped 0, which now reads "FAB.contribution is not
+called and FAB.manage reads no contribution" — a gate row, not an integer counter line. Over a
+lineage that never measured every `contrib` is 0.0, so each spare decides as the unconditional read
+did. B1, B3, B3r, B5, B6 and B6r reproduce their fixtures.
 
 ### Q-MEM-16 — which area each stored entry came from, and the store's occupancy by area — **RESOLVED 2026-09-28 (Proposal 05 §8 3.1; register NEW-10): `MEM.write(..., areas=None)` FILLS A NEW PER-ENTRY `area` COLUMN; `MEM.census` RETURNS `by_area`; THE ROOT PRINTS `store.occupancy.<area>` BY NAME. A FROZEN SIGNATURE WIDENED WITH A DEFAULTED KEYWORD. NO LEVER, NO WIRE, AND NO NUMBER A DEFAULT RUN PRODUCES MOVES**
 NEW-10 rules that from SR0 on every training run reports "memory occupancy by area" — the reading

@@ -324,7 +324,9 @@ _GATED = {
     # fab.contrib_passes, seeded 0 by FAB.build at FAB_CONTRIB=1 on a routed arm and ABSENT
     # otherwise, and bumped once per call that walked -- a PER-CALL count, for the TOK rows' reason
     # above: fab.contrib_measured counts experts, so a line keyed to it would print one call that
-    # measured 64 experts as "fired 64 time(s)".
+    # measured 64 experts as "fired 64 time(s)". It is a LINEAGE count, as FAB's ledger is: a child
+    # resumed at FAB_CONTRIB=0 from a measuring parent prints the parent's passes here, and Gate
+    # fab.contrib says that none is this process's (Q-FAB-19's review).
     "FAB.contribution": ("its arm test (FAB_CONTRIB=1 on a routed arm, which startup allows only "
                          "with the retention probe armed), inside the fab.manage answer at A; a "
                          "manage pass with no arrived control window calls nothing and is booked "
@@ -1201,8 +1203,12 @@ def run(sysm, *, max_windows=None, progress=True):
     # ARMED AT FAB_CONTRIB=1 ON A ROUTED ARM, which startup makes the same test as "with the
     # retention probe armed": compose refuses FAB_CONTRIB=1 at EVAL_RETENTION_EVERY=0 and where the
     # probe pinned nothing. THE ARM TEST COMES FIRST, inside the one Cadences.due('fab.manage', ...)
-    # answer and before FAB.manage, so at the shipped FAB_CONTRIB=0 nothing below runs and no
-    # eval.contrib.* or fab.contrib_* key exists: a default run is this driver before the body.
+    # answer and before FAB.manage, so at the shipped FAB_CONTRIB=0 nothing below runs, no
+    # eval.contrib.* key exists and FAB.manage reads no contribution: a default run is this driver
+    # before the body. (A child resumed at 0 from a measuring parent carries the parent's
+    # fab.contrib_* counts in FAB's ledger, which crosses a resume, and its books unread --
+    # Q-FAB-19's review; the root's eval.contrib.* book is seeded, and so restored, only where
+    # armed.)
     _contrib_on = (_armed and bool(fab_cfg.contrib) and bool(fab_cfg.on)
                    and not bool(fab_cfg.norm_only))
 

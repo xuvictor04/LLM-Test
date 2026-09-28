@@ -983,9 +983,13 @@ class FABLevers(LeverSet):
     # CONTROL half, since the flush's own batch is the text the step just trained on.
     #   contrib (SHIPPED False): 02-R11 builds FAB.contribution "right after NEW-03" with training
     #     runs unchanged, and at True the contrib > 0 spare in both culls starts to fire, which moves
-    #     what a run culls. At False FAB.contribution is not called, Population.contrib stays 0.0 on
-    #     every expert, and every fab.contrib_* key is ABSENT. True needs the retention probe armed
-    #     (EVAL_RETENTION_EVERY > 0 and a pinned control half), which startup refuses otherwise.
+    #     what a run culls. At False FAB.contribution is not called and FAB.manage reads no
+    #     contribution -- both spares and 'contrib''s rule read Population.contrib at True only
+    #     (Q-FAB-19's review) -- so no decision reads a measurement, on a child resumed at False
+    #     from a measuring parent too: it carries the parent's books and fab.contrib_* counts,
+    #     unread. A lineage that never armed it holds 0.0 on every expert and no fab.contrib_* key.
+    #     True needs the retention probe armed (EVAL_RETENTION_EVERY > 0 and a pinned control
+    #     half), which startup refuses otherwise.
     #   contrib_max (64, PROVISIONAL, NEW-19): each candidate is one no_grad forward on the looped arm
     #     (a reweighted sum on the society arm), so this IS the pass's cost -- 64 forwards per
     #     FAB_MANAGE_EVERY windows, beside the pass's fixed three (the baseline's two closure passes

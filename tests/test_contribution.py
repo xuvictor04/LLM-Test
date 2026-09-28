@@ -30,7 +30,10 @@ never changed (C3, every contribution 0). Each check below pins one promise.
        System, FAB.forward handed the memory-off closure's own inputs (h, signature, novelty zeros,
        DOM.nearest's domain, live_domains, clock.step + 1) returns the closure's logits bit for bit;
        on the society arm the reweighted sum with nothing removed is the prediction bit for bit, and
-       a society run measures through it. A walk handed other inputs is refused by name.
+       a society run measures through it. A walk handed other inputs is refused by name. And the
+       society arm's leave-one-out has a known answer on a blend written by hand (Q-FAB-19's
+       review): the held-out voter's weight dropped and the rest renormalised,
+       (1 - held) * vote' + held * base, and a row whose only voter is removed the base logits.
   C-4  A DEGENERATE PASS WRITES NOTHING: candidates whose removal moves no logit (unrouted experts, and
        any expert of a one-expert population, which hold_out cannot remove) leave contrib and
        contrib_n as they were, count fab.contrib_degenerate, and the Gate says DEGENERATE.
@@ -39,7 +42,8 @@ never changed (C3, every contribution 0). Each check below pins one promise.
        baseline_loss one ulp away (another function's loss) is refused naming P1-H11.
   C-6  AN UNROUTED EXPERT READS 0; A PLANTED LOAD-BEARING EXPERT READS POSITIVE (and a planted harmful
        one negative), on a scripted population whose routing is set by its centroids; the first
-       measurement sets contrib, a later one folds in at FAB_COMP_EMA, contrib_n counts both; a
+       measurement sets contrib, a later one -- taken after the planted expert's B is cut to a
+       twentieth, so it differs from the first -- folds in at FAB_COMP_EMA, contrib_n counts both; a
        non-finite loss leaves the candidate unmeasured and counted.
   C-7  FAB_FADED_CULL='contrib' REMOVES A FADED-AREA EXPERT ONLY AT A MEASURED CONTRIBUTION <= 0 AND
        KEEPS AN UNMEASURED ONE, holding its budget slot: on scripted passes against 'as_is' and
@@ -51,7 +55,11 @@ never changed (C3, every contribution 0). Each check below pins one promise.
   C-8  THE CONTINUATION IS EXACT AT FAB_CONTRIB=1: C-2's run saved at window 110 -- between manage
        passes -- and continued by a second compose ends with C-2's losses, contrib books, cursor,
        fab.contrib_* counts and eval.contrib.* book. A checkpoint written before contrib_n and the
-       cursor restores every expert unmeasured and the cursor at 0.
+       cursor restores every expert unmeasured and the cursor at 0. AND A LINEAGE RESUMED AT
+       FAB_CONTRIB=0 READS NO MEASUREMENT (Q-FAB-19's review): books measured at 1 and restored at 0
+       are carried and spare nothing in either cull -- through FAB's entry points, and end to end,
+       where C-2's parent resumed at 0 with its restored measurements planted load-bearing trains
+       and ends as a twin whose books were cleared -- and the report names what the lineage carried.
   C-9  THE MEASUREMENT MOVES NOTHING IT DOES NOT OWN: with no consumer of contrib (FAB_CULL_FRAC=0,
        FAB_MERGE_DIST=0, FAB_FAIL_TOL=1000) at LM_DROPOUT=0.1, FAB_CONTRIB=1 against 0 trains the same
        losses float for float, ends in the same state but the contrib books, the cursor and LOOP.eval,
@@ -282,13 +290,25 @@ def units():
            led.get("fab.contrib_coverage")) == (3, 1, 3 + 4, 2, 1, 0, 0.75)
           and next(g for g in pop.gates if g.name == "fab.contrib").fired,
           f"{ {k: v for k, v in led.items() if 'contrib' in k or 'holdout' in k} }")
+    # THE SECOND READING MUST DIFFER FROM THE FIRST, or an EMA and an overwrite write one number: on
+    # an unchanged population the second measurement returns the first exactly, and
+    # (1 - ema) * first + ema * first == first, so this check passed a plant that overwrote
+    # (Q-FAB-19's review). The planted expert's B is cut to a twentieth between the two readings --
+    # still the expert every window routes to, now worth less.
     first = by[0]
+    with torch.no_grad():
+        pop.B[0] *= 0.05
     rep2 = measure(c, pop, h, sig, head, y, candidates=[0])
     ema = float(c["FAB"].comp_ema)
-    check("C-6 the first measurement SETS contrib and a later one folds in at FAB_COMP_EMA; contrib_n "
-          "counts both",
-          pop.contrib[0] == (1.0 - ema) * first + ema * rep2.values[0] and pop.contrib_n[0] == 2,
-          f"{pop.contrib[0]} against {(1.0 - ema) * first + ema * rep2.values[0]}")
+    second = rep2.values[0]
+    folded = (1.0 - ema) * first + ema * second
+    check("C-6 the first measurement SETS contrib and a later one FOLDS IN at FAB_COMP_EMA: with the "
+          "planted expert's B cut to a twentieth between them the second reading is smaller than the "
+          "first, and contrib is (1 - ema) * first + ema * second -- neither reading alone -- with "
+          "contrib_n 2",
+          0.0 < second < first and pop.contrib[0] == folded and folded not in (first, second)
+          and pop.contrib_n[0] == 2,
+          f"first {first}, second {second}; contrib {pop.contrib[0]} against {folded}")
     c, pop, h, sig, head, y = scripted(harmful=True)
     rep = measure(c, pop, h, sig, head, y, candidates=[0, 1])
     check("C-6 a planted HARMFUL expert (it pushes the prediction to the wrong class) reads negative",
@@ -336,6 +356,52 @@ def units():
         check("C-3 a walk handed other inputs than the baseline's (h moved by 1e-3) is refused by name: "
               "its reference walk does not reproduce the baseline bit for bit",
               "bit for bit" in str(e) and pop.contrib_n[:4] == [0] * 4, str(e)[:160])
+
+    # ---- C-3: the society arm's reweighted sum, by hand (Q-FAB-19's review) -------------------------
+    # c3_society below reads a real society pass, and there only "re-forms bit for bit", "a voter's
+    # removal moves its rows" and "a non-voter's returns the prediction" can be asserted, so a
+    # _reblend that dropped the renormalisation or the sole-voter fall-back passed it. Here the
+    # blend is written by hand and the answer computed by hand. EXACT IN float32, whatever the
+    # order of the sums: every logit a small integer, every vote weight and halt mass dyadic, and
+    # the held-out voter's weight 0.5, so what the rest renormalise by is 0.5 too.
+    pe = (torch.arange(3 * 3 * 2 * 4, dtype=torch.float32).reshape(3, 3, 2, 4) % 7) - 3.0
+    base_lg = (torch.arange(3 * 2 * 4, dtype=torch.float32).reshape(3, 2, 4) % 5) - 2.0
+    voters = torch.tensor([[1, 2, 3], [2, 3, 4], [1, 4, 2]])
+    vw = torch.tensor([[0.5, 0.375, 0.125], [0.25, 0.25, 0.5], [0.5, 0.25, 0.25]])
+    held = torch.tensor([0.25, 0.5, 0.0])
+
+    def by_hand(pe_, w, hl, b):
+        """(1 - held) * sum_j w_j * logits_j + held * base, row by row."""
+        rows = []
+        for r in range(int(w.shape[0])):
+            vote = sum(float(w[r, j]) * pe_[r, j] for j in range(int(w.shape[1])))
+            rows.append((1.0 - float(hl[r])) * vote + float(hl[r]) * b[r])
+        return torch.stack(rows)
+
+    blend = (voters, vw, held, base_lg)
+    whole = FAB._reblend(pe, blend, None, None)
+    # Expert 1 voted in rows 0 and 2 at weight 0.5: the rest of row 0 renormalise to 0.75 and 0.25,
+    # of row 2 to 0.5 and 0.5; row 1 it did not vote in.
+    w1 = torch.tensor([[0.0, 0.75, 0.25], [0.25, 0.25, 0.5], [0.0, 0.5, 0.5]])
+    want = by_hand(pe, w1, held, base_lg)
+    want[1] = whole[1]
+    got = FAB._reblend(pe, blend, 1, whole)
+    check("C-3 the society arm's leave-one-out, on a blend written by hand: nothing removed is "
+          "(1 - held) * the vote + held * base; expert 1 removed, each row it voted in is that blend "
+          "with its weight dropped and the rest RENORMALISED (row 0 0.375, 0.125 -> 0.75, 0.25), the "
+          "row it did not vote in is untouched, and a non-voter's removal returns the prediction",
+          torch.equal(whole, by_hand(pe, vw, held, base_lg)) and torch.equal(got, want)
+          and not torch.equal(got, whole) and FAB._reblend(pe, blend, 9, whole) is whole,
+          f"{(got - want).abs().max().item()}")
+    one = (voters[:, :1], torch.ones(3, 1), held, base_lg)
+    whole1 = FAB._reblend(pe[:, :1], one, None, None)
+    got1 = FAB._reblend(pe[:, :1], one, 1, whole1)
+    check("C-3 ... and a row whose ONLY voter is removed is the base logits exactly -- the society "
+          "arm's reading of 'no expert is needed' -- at every halt mass (rows 0 and 2, held 0.25 and "
+          "0.0), the other row the prediction's",
+          torch.equal(got1[0], base_lg[0]) and torch.equal(got1[2], base_lg[2])
+          and torch.equal(got1[1], whole1[1]) and not torch.equal(whole1[0], base_lg[0]),
+          f"{(got1[0] - base_lg[0]).abs().max().item()}, {(got1[2] - base_lg[2]).abs().max().item()}")
 
     # ---- C-6: a non-finite loss leaves the candidate unmeasured -------------------------------------
     c, pop, h, sig, head, y = scripted()
@@ -423,12 +489,13 @@ def units():
 F_, L_ = 101, 202        # a faded area's id and a live one's
 
 
-def util_population(mode, measured=()):
+def util_population(mode, measured=(), contrib=1):
     """tests/test_faded.py's utilization population: ten eligible experts, a budget of five, use
     ranks them 0..9, no failure cull, no merge; 0 and 2 serve the faded area, 3 has an empty book.
-    `measured` is ((slot, contrib), ...) -- the experts FAB.contribution has measured, and at what."""
+    `measured` is ((slot, contrib), ...) -- the experts FAB.contribution has measured, and at what;
+    `contrib` the FAB_CONTRIB value the population is built at."""
     c = configs(FAB_N0=10, FAB_SLOTS=12, FAB_GRACE=1, FAB_MERGE_DIST=0, FAB_PRESSURE=0.1,
-                FAB_CULL_FRAC=0.5, FAB_COMP_PROTECT=0, FAB_FADED_CULL=mode, FAB_CONTRIB=1)
+                FAB_CULL_FRAC=0.5, FAB_COMP_PROTECT=0, FAB_FADED_CULL=mode, FAB_CONTRIB=contrib)
     pop = FAB.build(c["FAB"], d_model=D, signature_dim=S, device=torch.device("cpu"),
                     generator=rng.rng_for("fabric", 1234, again=True))
     for i in range(10):
@@ -540,6 +607,98 @@ def c7_scripted():
           and rm.merge_faded_allowed_by_contrib == 1 and ru.merge_faded_deferred == 1,
           f"as_is {survivors(ma)} defer {survivors(md)} unmeasured {survivors(mu)} "
           f"measured- {survivors(mm)} measured+ {survivors(mp)}")
+
+
+def c8_resumed_off():
+    """C-8 (Q-FAB-19's review): books measured at FAB_CONTRIB=1, saved by FAB.state_dict and restored
+    by FAB.load_state_dict into a build at FAB_CONTRIB=0, are carried -- and FAB.manage reads none
+    of them there: both spares and 'contrib''s rule decide as over a population never measured."""
+    # THE UTILIZATION CULL'S SPARE: expert 0, the least-used victim, measured at +0.25.
+    c1, p1 = util_population("as_is", ((0, 0.25),))
+    blob = FAB.state_dict(c1["FAB"], p1)
+    c0, p0 = util_population("as_is", contrib=0)
+    FAB.load_state_dict(c0["FAB"], p0, blob, sidecar=blob["sidecar"])
+    carried = (p0.contrib[0], p0.contrib_n[0])
+    r0 = FAB.manage(c0["FAB"], p0, step_windows=U.Windows(500), faded=frozenset({F_}))
+    cf, pf = util_population("as_is", contrib=0)
+    rf = FAB.manage(cf["FAB"], pf, step_windows=U.Windows(500), faded=frozenset({F_}))
+    c1b, p1b = util_population("as_is", ((0, 0.25),))
+    r1 = FAB.manage(c1b["FAB"], p1b, step_windows=U.Windows(500), faded=frozenset({F_}))
+    check("C-8 books measured at FAB_CONTRIB=1 and restored into a build at 0 are carried (expert 0 at "
+          "+0.25, measured once) and the utilization cull reads none of them: it removes 0-4 with "
+          "fab.spared_contrib 0, as the population never measured does -- where at 1 the same books "
+          "spare 0 and the budget walks on to 5",
+          carried == (0.25, 1) and survivors(p0) == survivors(pf) == [5, 6, 7, 8, 9]
+          and r0.spared_contrib == 0 == rf.spared_contrib
+          and survivors(p1b) == [0, 6, 7, 8, 9] and r1.spared_contrib == 1,
+          f"carried {carried}; restored at 0 {survivors(p0)} spared {r0.spared_contrib}; never "
+          f"measured {survivors(pf)}; at 1 {survivors(p1b)} spared {r1.spared_contrib}")
+
+    # THE FAILURE CULL'S SPARE: 0 and 1 failing (both error EMAs far above comp_glob), 0 measured at
+    # +0.3 and so load-bearing where a measurement is read.
+    def failing(contrib, measured=()):
+        c = configs(FAB_N0=6, FAB_SLOTS=12, FAB_GRACE=1, FAB_MERGE_DIST=0, FAB_CULL_FRAC=0,
+                    FAB_CONTRIB=contrib)
+        pop = FAB.build(c["FAB"], d_model=D, signature_dim=S, device=torch.device("cpu"),
+                        generator=rng.rng_for("fabric", 1234, again=True))
+        for i in range(6):
+            pop.uage[i], pop.born[i], pop.use[i] = 5, 100 + i, 1.0
+            pop.ef[i] = pop.es[i] = 1.0
+            pop.area_use[i] = {L_: 1.0}
+        pop.comp_glob = 1.0
+        for i in (0, 1):
+            pop.ef[i] = pop.es[i] = 5.0
+        for slot, val in measured:
+            pop.contrib[slot], pop.contrib_n[slot] = float(val), 1
+        return c, pop
+    c1, p1 = failing(1, ((0, 0.3),))
+    blob = FAB.state_dict(c1["FAB"], p1)
+    c0, p0 = failing(0)
+    FAB.load_state_dict(c0["FAB"], p0, blob, sidecar=blob["sidecar"])
+    r0 = FAB.manage(c0["FAB"], p0, step_windows=U.Windows(500), faded=frozenset({F_}))
+    c1b, p1b = failing(1, ((0, 0.3),))
+    r1 = FAB.manage(c1b["FAB"], p1b, step_windows=U.Windows(500), faded=frozenset({F_}))
+    check("C-8 ... and the failure cull reads none either: restored at 0 both failing experts go "
+          "(fab.spared_contrib 0), where at 1 the one measured at +0.3 is spared as load-bearing",
+          survivors(p0) == [2, 3, 4, 5] and r0.cull_fail == 2 and r0.spared_contrib == 0
+          and survivors(p1b) == [0, 2, 3, 4, 5] and r1.cull_fail == 1 and r1.spared_contrib == 1,
+          f"restored at 0 {survivors(p0)} ({r0.cull_fail} culled, {r0.spared_contrib} spared); at 1 "
+          f"{survivors(p1b)} ({r1.cull_fail} culled, {r1.spared_contrib} spared)")
+
+    # 'contrib''S RULE AT 0 -- a pairing startup refuses, so only a direct call reaches it -- reads no
+    # measurement either: the faded expert measured at -0.5 is kept beside the unmeasured one.
+    cz, pz = util_population("contrib", ((0, -0.5),), contrib=0)
+    FAB.manage(cz["FAB"], pz, step_windows=U.Windows(500), faded=frozenset({F_}))
+    check("C-8 ... and FAB_FADED_CULL='contrib' at 0 (refused at startup; a direct call) keeps every "
+          "faded removal, the one measured at -0.5 included -- 'defer' under the rule's names",
+          survivors(pz) == [0, 2, 5, 6, 7, 8, 9]
+          and pz.counters.get("fab.cull_faded_refused_by_contrib") == 2
+          and pz.counters.get("fab.cull_faded_allowed_by_contrib") == 0,
+          f"{survivors(pz)}; { {k: v for k, v in pz.counters.items() if k.endswith('_by_contrib')} }")
+
+    # THE GATE: re-rendered at 0 where the restored books or ledger carry a measurement, and build's
+    # line kept where the lineage never armed it.
+    c1, p1 = util_population("as_is", ((0, 0.25), (4, -0.1)))
+    blob = FAB.state_dict(c1["FAB"], p1)
+    c0, p0 = util_population("as_is", contrib=0)
+    FAB.load_state_dict(c0["FAB"], p0, blob, sidecar=blob["sidecar"])
+    g0 = next(g for g in p0.gates if g.name == "fab.contrib")
+    cn, pn = util_population("as_is", contrib=0)
+    blob_n = FAB.state_dict(cn["FAB"], pn)
+    cq, pq = util_population("as_is", contrib=0)
+    FAB.load_state_dict(cq["FAB"], pq, blob_n, sidecar=blob_n["sidecar"])
+    gq = next(g for g in pq.gates if g.name == "fab.contrib")
+    gb = next(g for g in pn.gates if g.name == "fab.contrib")
+    check("C-8 restored at 0 from a lineage that armed the measurement, Gate fab.contrib stays "
+          "UNREACHABLE naming FAB_CONTRIB=0 and says what the restore carried (2 of the 10 live "
+          "experts measured, read by nothing) instead of build's line; from a lineage that never "
+          "armed it, it keeps build's line, which claims no 0.0 it cannot see",
+          not g0.reachable and g0.reason.startswith("FAB_CONTRIB=0")
+          and "RESTORED from a lineage that armed it: 2 of the 10" in g0.reason
+          and "FAB.manage reads no contribution" in g0.reason
+          and gq.reason == gb.reason and not gq.reachable and "RESTORED" not in gq.reason
+          and "FAB.manage reads no contribution" in gb.reason and "stays 0.0" not in gb.reason,
+          f"{g0.reason[:240]} || {gq.reason[:120]}")
 
 
 # ==================================================================================================
@@ -751,6 +910,62 @@ def c8_continuation(r_u):
           exact and books and counts and book,
           f"losses {exact}; books {books}; counts {counts} over {keys}; book {book} over {ekeys}")
 
+    # THE SAME PARENT RESUMED AT FAB_CONTRIB=0 (Q-FAB-19's review). The books and FAB's ledger cross
+    # the resume; FAB.manage reads a measurement at 1 only. Two children of the one checkpoint, both
+    # at 0: `off`, whose restored measurements are PLANTED at +1.0 -- load-bearing, so a pass that
+    # read them would spare every measured victim -- and `twin`, whose restored books are cleared,
+    # a lineage that never measured. They must train alike and end alike but for those books.
+    env0 = dict(C2, FAB_CONTRIB="0")
+    off = build(CKPT_RESUME=f"{TMP}/c8", **env0)
+    n_off = int(off.fabric.n_live)
+    had = [i for i in range(n_off) if int(off.fabric.contrib_n[i]) > 0]
+    carried = (off.fabric.contrib == par.fabric.contrib
+               and off.fabric.contrib_n == par.fabric.contrib_n and len(had) > 0)
+    g_restored = next(g for g in off.fabric.gates if g.name == "fab.contrib")
+    for i in had:
+        off.fabric.contrib[i] = 1.0
+    with Spy() as spy0:
+        r_off = loop.run(off, max_windows=C2_WINDOWS - 110, progress=False)
+    # THE TWIN IS BUILT AFTER `off` HAS RUN, as a second run.py process would build it: build()
+    # forgets the issued streams and empties LM's process tally, which `off` must not see mid-run.
+    twin = build(CKPT_RESUME=f"{TMP}/c8", **env0)
+    cap = int(twin.fabric.cap)
+    twin.fabric.contrib[:] = [0.0] * cap
+    twin.fabric.contrib_n[:] = [0] * cap
+    r_twin = loop.run(twin, max_windows=C2_WINDOWS - 110, progress=False)
+    excl = ("FAB.books.contrib", "FAB.books.contrib_n")
+    same_state = sd.digest(off, exclude=excl) == sd.digest(twin, exclude=excl)
+    lo, lt, lp = fab_ledger(r_off), fab_ledger(r_twin), fab_ledger(rp)
+    ckeys = sorted(k for k in lp if k.startswith("fab.contrib_"))
+    check("C-8 C-2's parent at window 110 resumed at FAB_CONTRIB=0 carries its books (%d measured "
+          "experts restored) and reads none of them: FAB.contribution is never called, and planted "
+          "load-bearing (+1.0) they leave the child exactly as a twin whose books were cleared -- "
+          "the same losses, the same state but the two books, the same FAB ledger, "
+          "fab.spared_contrib the parent's" % len(had),
+          carried and not spy0.calls and r_off.loss_curve == r_twin.loss_curve and same_state
+          and lo == lt and lo.get("fab.spared_contrib") == lp.get("fab.spared_contrib")
+          and int(r_off.cadence_ledger["fab.manage"][1]) >= 3,
+          f"carried {carried}; calls {len(spy0.calls)}; losses "
+          f"{r_off.loss_curve == r_twin.loss_curve}; state {same_state}; ledgers "
+          f"{sorted(k for k in set(lo) | set(lt) if lo.get(k) != lt.get(k))[:6]}; spared "
+          f"{lo.get('fab.spared_contrib')} against the parent's {lp.get('fab.spared_contrib')}")
+    g_run = r_off.report["FAB.counters"].get("gate:fab.contrib")
+    walked = lp.get("fab.contrib_passes")
+    check("C-8 ... and its report says what crossed: the ledger's fab.contrib_* keys are the "
+          "lineage's, unmoved (the gated-call line counts the parent's %s passes), no eval.contrib.* "
+          "key exists (the root's book restores only what it armed), and Gate fab.contrib is "
+          "UNREACHABLE naming FAB_CONTRIB=0 with the restored count, not build's line" % walked,
+          ckeys and all(lo.get(k) == lp.get(k) for k in ckeys)
+          and gated_line(r_off, "FAB.contribution").startswith(
+              f"FAB.contribution: fired {walked} time(s)")
+          and not any(k.startswith("eval.contrib.") for k in ebook(r_off))
+          and not g_restored.reachable and g_run is not None and g_run[0] == "unreachable"
+          and "-- FAB_CONTRIB=0: " in g_run[2] and "FAB.manage reads no contribution" in g_run[2]
+          and f"RESTORED from a lineage that armed it: {len(had)} of the {n_off}" in g_run[2]
+          and f"{walked} pass(es) walked before this process" in g_run[2],
+          f"{[k for k in ckeys if lo.get(k) != lp.get(k)]}; "
+          f"{gated_line(r_off, 'FAB.contribution')[:60]}; {g_run}")
+
 
 def c9_neutral():
     quiet = {"FAB_CULL_FRAC": "0", "FAB_MERGE_DIST": "0", "FAB_FAIL_TOL": "1000", "LM_DROPOUT": "0.1"}
@@ -869,6 +1084,7 @@ def main():
     try:
         units()
         c7_scripted()
+        c8_resumed_off()
         startup_refusals()
         s1, r1 = c2_run()
         c3_system(s1)

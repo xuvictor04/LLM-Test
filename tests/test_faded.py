@@ -43,7 +43,9 @@ defer and not substitute. Each check below pins one of those promises.
       a survivor whose pair was left apart (ranked by the mass the merge would have given it); the
       failure cull's walk over the slots the merge refilled (the one 'as_is' walks); a second pass
       defers the same experts again (events, not experts); and a seeded sweep of random populations
-      through every path together. The failure-cull and merge reasons name the deferrals.
+      through every path together, built at FAB_CONTRIB=1 so its load-bearing experts are spared
+      (Q-FAB-19's review: the spare reads a contribution there only). The failure-cull and merge
+      reasons name the deferrals.
   F6  A PHASED RUN (B3's shape, 314 windows over the four phases): fab.culled_faded_area,
       fab.merged_faded_area and fab.faded_unknown equal an independent recount of every expert the
       management passes removed, against the set each pass was handed, and that set is Plan.faded at
@@ -524,14 +526,17 @@ def sweep_population(mode, k):
     """A seeded random population for the sweep: clustered centroids (so merges chain), failing,
     adapting and load-bearing experts, ties in `use`, faded, live, tied and empty books, rescue on
     one pass in three, comp_glob set -- the class the invariant is stated for (Q-FAB-18's review
-    records the one it is not: comp_glob None after a merge)."""
+    records the one it is not: comp_glob None after a merge). AT FAB_CONTRIB=1 (2026-09-28,
+    Q-FAB-19's review): FAB.manage reads a measured contribution there only, so the load-bearing
+    experts planted below are spared as they were before that ruling -- at 0 the contrib > 0 spare
+    is inert and the sweep would stop reaching it. Nothing here calls FAB.contribution."""
     R = random.Random(1000 + k)
     n = R.randint(3, 20)
     c = configs(FAB_N0=n, FAB_SLOTS=n + R.randint(0, 12), FAB_GRACE=R.choice([1, 2, 3]),
                 FAB_MERGE_DIST=R.choice([0, 0.05, 0.2, 0.5, 0.9]),
                 FAB_PRESSURE=R.choice([0.05, 0.4, 0.8]),
                 FAB_CULL_FRAC=R.choice([0, 0.2, 0.5, 0.8, 1.0]), FAB_COMP_PROTECT=R.choice([0, 1]),
-                FAB_RESCUE=R.choice([0.0, 0.0, 0.3]), FAB_FADED_CULL=mode)
+                FAB_RESCUE=R.choice([0.0, 0.0, 0.3]), FAB_FADED_CULL=mode, FAB_CONTRIB=1)
     pop = population(c, seed=1234 + k)
     g = torch.Generator().manual_seed(k)
     base = torch.nn.functional.normalize(torch.randn(4, SIG_D, generator=g), dim=-1)
@@ -734,7 +739,7 @@ def f4_count_and_f5_defer():
           f"{cg}")
     # A SEEDED SWEEP through every path together: chained merges, failure culls over refilled slots,
     # budgets, gates, spares, ties and rescue, each population through one pass at both values.
-    n_ok, n_cases, paths = 0, 150, {"merge": 0, "cull": 0}
+    n_ok, n_cases, paths = 0, 150, {"merge": 0, "cull": 0, "spared_contrib": 0}
     bad = []
     for k in range(n_cases):
         res = pair_pass(lambda mode, k=k: sweep_population(mode, k),
@@ -743,15 +748,18 @@ def f4_count_and_f5_defer():
         rep = res["defer"][2]
         paths["merge"] += rep.merge_faded_deferred
         paths["cull"] += rep.cull_faded_deferred
+        paths["spared_contrib"] += res["as_is"][2].spared_contrib
         n_ok += ok
         if not ok and len(bad) < 3:
             bad.append((k, res["as_is"][0], sorted(res["as_is"][1]), res["defer"][0], want))
     check(f"F5 a seeded sweep of {n_cases} random populations (merges that chain, failure culls over "
           "refilled slots, budgets, gates, spares, ties, rescue): at each, 'defer' removes exactly "
           "'as_is''s removals less the faded ones, deferring those as events, with the same spares, "
-          "declines and rescues -- and the sweep deferred merges and culls both",
-          n_ok == n_cases and paths["merge"] > 0 and paths["cull"] > 0,
-          f"{n_ok} of {n_cases}; deferrals {paths}; first failures {bad}")
+          "declines and rescues -- and the sweep deferred merges and culls both, and spared "
+          "load-bearing experts",
+          n_ok == n_cases and paths["merge"] > 0 and paths["cull"] > 0
+          and paths["spared_contrib"] > 0,
+          f"{n_ok} of {n_cases}; deferrals and spares {paths}; first failures {bad}")
 
 
 # ==================================================================================================

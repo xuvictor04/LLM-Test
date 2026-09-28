@@ -411,8 +411,11 @@ class ContribReport:
     `degenerate` IS THE C3 ALARM TAKEN SERIOUSLY: no candidate's counterfactual logits differed from
     the baseline's, so the pass carried no information about which expert matters and WROTE
     NOTHING -- `values` is still the list of zeros it measured, so a reader can see what was not
-    written. `distinct_values` counts the distinct floats in `values`; 1 over several candidates is
-    the old tree's C3 (the walk never changed), and a single candidate reads 1 by construction.
+    written. `distinct_values` counts the distinct floats in `values`. In the old tree 1 over
+    several candidates was C3 (the walk never changed); this body tests the walk itself, so C3 is
+    `degenerate`, and 1 on a pass that is not degenerate is the float32 mean loss's resolution --
+    the walks moved and every removal read one value (Q-FAB-19's review). A single candidate reads
+    1 by construction.
 
     `eligible` is the past-grace count at the pass, so len(candidates) / eligible is the pass's
     coverage (fab.contrib_coverage). `reason` says why nothing was measured where nothing was.
@@ -1385,14 +1388,17 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
     # THE CONTRIBUTION MEASUREMENT'S LINE (2026-09-28, register §8 3.5; Q-FAB-19), a PREDICTION until
     # FAB.contribution replaces it by name on its first pass -- the cull gate's treatment, for the
     # cull gate's reason: nothing has been measured yet. UNREACHABLE at FAB_CONTRIB=0 (the shipped
-    # value: the root never calls it, Population.contrib stays 0.0, and both contrib > 0 spares in
-    # FAB.manage cannot fire) and on the two arms whose forward reads no expert.
+    # value: the root never calls it and FAB.manage reads no contribution, so both contrib > 0
+    # spares are inert -- on a lineage resumed at 0 from a measuring parent too, whose restored
+    # measurements _refresh_build_predictions names, Q-FAB-19's review) and on the two arms whose
+    # forward reads no expert. THE SENTENCE AT 0 IS TRUE OF BOTH POPULATIONS: it said
+    # "Population.contrib stays 0.0 on every expert", which a restored lineage's books contradict.
     contrib_on = bool(fab.contrib)
     _contrib_line = Gate(
         "fab.contrib", False, value=f"FAB_CONTRIB={contrib_on}", threshold="FAB_CONTRIB=True",
         reachable=False,
-        reason=("FAB_CONTRIB=0: FAB.contribution is not called, so no expert's marginal "
-                "contribution is measured, Population.contrib stays 0.0 on every expert and the "
+        reason=("FAB_CONTRIB=0: FAB.contribution is not called and FAB.manage reads no "
+                "contribution, so no expert's marginal contribution is measured and the "
                 "contrib > 0 spare in both culls is inert; FAB_FADED_CULL='contrib' is refused at "
                 "startup without it."
                 if not contrib_on else
@@ -3754,13 +3760,17 @@ def contribution(fab: Config, pop, *, h, signature, novelty, head, targets, base
           per-hop vote blend (ISSUES P1-H11) -- so a fixed offset was added to every contribution and
           contrib's SIGN, the thing both spare rules test, was set by that offset. The baseline is
           now produced by `baseline_logits_fn`, THE SAME CALLABLE that produced `baseline_loss`.
-    (In THIS tree contrib gates the two spare rules and, since 2026-09-28, FAB_FADED_CULL='contrib';
-    FAB.grow_check picks replication parents by `use`, and the old tree's contribution-weighted
-    fitness, self_organize.py:2073-2084, is not ported.)
+    (In THIS tree contrib gates the two spare rules and, since 2026-09-28, FAB_FADED_CULL='contrib',
+    all three reading it at FAB_CONTRIB=1 only (Q-FAB-19's review); FAB.grow_check picks
+    replication parents by `use`, and the old tree's contribution-weighted fitness,
+    self_organize.py:2073-2084, is not ported.)
 
     THE BODY, WRITTEN 2026-09-28 (register §8 3.5, 02-R11 and C37; docs/04_CONTRACT.md Q-FAB-19),
     AND BUILT OFF: the root calls it only at FAB_CONTRIB=1, and at the shipped 0 it returns before
-    anything, every expert's contrib stays 0.0 and no fab.contrib_* key exists.
+    anything and FAB.manage reads no contribution, so nothing a measurement wrote decides anything.
+    A lineage that never armed it then holds 0.0 on every expert and no fab.contrib_* key; a child
+    resumed at 0 from a measuring parent carries the parent's books and ledger counts, unread
+    (Q-FAB-19's review: both spares read them until then).
     WHAT IT IS HANDED, AND THE ONE RULE EVERY ARGUMENT OBEYS: the baseline and every counterfactual
     are ONE FUNCTION of the same inputs. The root (spine/loop.py, inside the fab.manage answer)
     cuts a batch from the retention probe's pinned CONTROL half -- held-out text the run never
@@ -3785,12 +3795,14 @@ def contribution(fab: Config, pop, *, h, signature, novelty, head, targets, base
 
     LEVERS READ: contrib, contrib_max, comp_ema, grace, society, on, norm_only
     WIRES READ: none
-    DID IT FIRE: fab.contrib_measured, fab.contrib_distinct_values (THE C3 ALARM: 1 distinct value
-                 across a pass means the counterfactual removed nothing -- or, on a pass that is not
-                 degenerate, that no removal moved the mean loss at its float32 resolution),
+    DID IT FIRE: fab.contrib_measured, fab.contrib_distinct_values (a gauge, NOT THE C3 ALARM
+                 since the body: this function tests the walk itself, and 1 distinct value across
+                 a pass that is not degenerate is the float32 mean loss's resolution -- the walks
+                 moved and every removal read one value -- Q-FAB-19's review),
                  fab.contrib_positive / fab.contrib_negative (a population where EVERY measured
                  expert reads load-bearing is the H11 offset, not a healthy population),
-                 fab.contrib_degenerate -- and since the body (2026-09-28): fab.contrib_passes (the
+                 fab.contrib_degenerate (THE C3 ALARM: above 0, a pass whose walks moved no logit,
+                 which wrote nothing) -- and since the body (2026-09-28): fab.contrib_passes (the
                  calls that WALKED -- a candidate to measure and a finite baseline_loss, each taking
                  one reference walk with nothing held out, an eval pass -- the gated-call report's
                  per-call count), fab.contrib_nonfinite (candidates left unmeasured for a non-finite
@@ -3798,8 +3810,9 @@ def contribution(fab: Config, pop, *, h, signature, novelty, head, targets, base
                  count) and fab.contrib_measured_live (a gauge: live experts measured at least once).
                  fab.contrib_measured, _degenerate, _passes and _nonfinite are seeded 0 by
                  fabric/api.py::build at FAB_CONTRIB=1 on a routed arm and are ABSENT at
-                 FAB_CONTRIB=0; the five gauges are written by every armed call, over the finite values
-                 it measured (none where it walked nothing).
+                 FAB_CONTRIB=0 on a lineage that never armed it (a restored ledger carries its
+                 lineage's, Q-FAB-19's review); the five gauges are written by every armed call,
+                 over the finite values it measured (none where it walked nothing).
                  fab.holdout_applied counts the counterfactuals on both arms, and Gate fab.contrib is
                  replaced by name with this pass's reading
     """
@@ -4086,7 +4099,8 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None):
          "THE POPULATION" IS comp_glob, the flush-mean loss EMA (Q-FAB-12): it was the mean over
          every live expert, never-selected zeros included, which put the bar under every selected
          expert and culled every past-grace expert on its first pass. A load-bearing expert
-         (contrib > 0) is spared here as on the utilization path, which is the old tree's rule.
+         (contrib > 0) is spared here as on the utilization path, which is the old tree's rule --
+         at FAB_CONTRIB=1, the only value that reads a contribution (Q-FAB-19's review).
       2. UTILIZATION CULL, only behind derive.cull_gate_open(n_live, slots, pressure). THAT
          FUNCTION IS CALLED, NOT RESTATED -- it is already replayed against a 216-case oracle, and
          it is TWO conditions (n_live <= 2 is a FLOOR, not a pressure test), which is why people
@@ -4102,8 +4116,9 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None):
          open gate is a legitimate reported outcome rather than something the code refuses to
          allow. The ratchet is the pattern the DomainAssembler documents as having driven a
          population down to a single member.
-      4. SPARES: contrib > 0 (load-bearing); comp better than comp_glob (comp_protect); and the
-         shift test.
+      4. SPARES: contrib > 0 (load-bearing; read at FAB_CONTRIB=1 only, so at 0 a restored
+         lineage's measurements spare nothing -- Q-FAB-19's review); comp better than comp_glob
+         (comp_protect); and the shift test.
       5. RESCUE: one heavy mutation at mut_big scale and a reset use-clock instead of a deletion,
          once per expert, inside the pressure gate.
       6. maybe_deepen(flush_loss) when the curriculum is on (0 < depth0 < hops). A stage ends
@@ -4143,7 +4158,8 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None):
          fab.cull_faded_refused_by_contrib / fab.merge_faded_refused_by_contrib. A cull's refusal is
          always an UNMEASURED expert: one measured above 0 was spared as load-bearing (step 4)
          before its area was read. A merge's can be either, since the merge reads no contribution
-         of its own.
+         of its own. The rule reads a measurement at FAB_CONTRIB=1 only, as the spares do; at 0,
+         which startup refuses beside 'contrib', it keeps every faded removal.
 
     THREE STATES, NOT TWO, FOR EVERY GATE ON THIS PASS (Q-FAB-5, RESOLVED 2026-09-02).
     `fabric.cull_eligible` reports `unreachable` -- never "armed but 0" -- when the eligible set is
@@ -4163,7 +4179,8 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None):
 
     LEVERS READ: grace, cull_frac, pressure, slots, comp_protect, err_fast, err_slow,
                  shift_tol, fail_tol, rescue, mut_big, manage_every, depth0, depth_eps,
-                 depth_patience, depth_stage_max, hops, merge_dist, on, norm_only, faded_cull
+                 depth_patience, depth_stage_max, hops, merge_dist, on, norm_only, faded_cull,
+                 contrib (whether a measured contribution is read at all, Q-FAB-19's review)
     WIRES READ: d_manage_period (recorded on the report beside manage_every, so the WINDOW cadence
                 this function is called on and the FLUSH cadence `contribution` is called on are
                 visible side by side and a cadence that never coincides reads as a zero rather than
@@ -4222,6 +4239,18 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None):
     depth_stage_max = int(fab.depth_stage_max)
     merge_dist = float(fab.merge_dist)
     faded_cull = str(fab.faded_cull)
+    # A MEASURED CONTRIBUTION IS READ WHERE THE MEASUREMENT IS ARMED AND NOWHERE ELSE (2026-09-28,
+    # Q-FAB-19's review). Population.contrib and contrib_n are lineage books -- checkpointed and
+    # restored on every resume -- so a child resumed at FAB_CONTRIB=0 from a measuring parent holds
+    # the parent's measurements. Both contrib > 0 spares read them unconditionally, so such a
+    # child went on sparing on the parent's frozen values while Gate fab.contrib said the mechanism
+    # was off (driven: one restored contrib of +0.25 spared the least-used victim of a utilization
+    # cull, and the pass removed 1-5 where the same population never measured removes 0-4). At 0
+    # nothing here reads either book: both spares are inert, and 'contrib''s rule -- which startup
+    # refuses at 0 -- keeps every faded removal as unmeasured. At the shipped 0 over a lineage that
+    # never measured every contrib is 0.0, so no decision differs from what the unconditional read
+    # decided.
+    read_contrib = bool(fab.contrib)
     rank = int(pop.B.shape[1])
     counters, where = pop.counters, "FAB.manage"
     step = U.Windows(step_windows)
@@ -4330,11 +4359,13 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None):
         Q-FAB-19) every one FAB.contribution has not MEASURED at or below 0 -- an unmeasured
         expert (Population.contrib_n 0) is kept, C37's deferral lasting until a measurement exists,
         and so is one measured above 0, load-bearing. Read off the expert's own row: a merge leaves
-        a survivor's contribution its own, so no 'as_is' value of it differs."""
+        a survivor's contribution its own, so no 'as_is' value of it differs. At FAB_CONTRIB=0
+        (Q-FAB-19's review) no measurement is read and every one is kept -- 'defer' under the rule's
+        names, the pairing startup refuses."""
         if not gated:
             return True
         i = at[e]
-        return not (int(pop.contrib_n[i]) > 0 and float(pop.contrib[i]) <= 0.0)
+        return not (read_contrib and int(pop.contrib_n[i]) > 0 and float(pop.contrib[i]) <= 0.0)
 
     def _cut(slots):
         """Remove these REAL slots from the population, highest first -- the order every step of
@@ -4497,12 +4528,13 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None):
             if ef_i > fail_base + fail_tol and es_i > fail_base + fail_tol:
                 if ef_i - es_i > shift_tol:
                     spared_shift += 1
-                elif float(pop.contrib[i]) > 0.0:
+                elif read_contrib and float(pop.contrib[i]) > 0.0:
                     # LOAD-BEARING DESPITE THE ERROR, the old tree's failure-path spare
                     # (self_organize.py:2241, `if protect and s.contrib.get(i, 0.0) > 0`). contrib
                     # is written only by FAB.contribution, which runs at FAB_CONTRIB=1 since
-                    # 2026-09-28 (Q-FAB-19); at the shipped FAB_CONTRIB=0 it stays 0.0 and this
-                    # spare cannot fire, and there both cull paths honour it the day it does.
+                    # 2026-09-28 (Q-FAB-19), and is read here only there (Q-FAB-19's review): at
+                    # the shipped FAB_CONTRIB=0 this spare is inert, a restored lineage's
+                    # measurements included, and at 1 both cull paths honour it.
                     spared_contrib += 1
                 else:
                     # 7. CHOSEN, THEN READ (Q-FAB-18): counted at 'as_is', and at 'defer' a
@@ -4595,7 +4627,9 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None):
             if len(victims) + len(held) >= budget:
                 break
             # THE THREE SPARES, EACH ITS OWN COUNTER BECAUSE EACH IS A DIFFERENT REASON TO SURVIVE.
-            if float(pop.contrib[i]) > 0.0:
+            # The first reads a measured contribution at FAB_CONTRIB=1 only (Q-FAB-19's review), as
+            # the failure cull's does.
+            if read_contrib and float(pop.contrib[i]) > 0.0:
                 spared_contrib += 1
                 continue
             # comp IS A LOSS, SO "BETTER THAN THE POPULATION" IS `<`. It read `>` until 2026-09-24,
@@ -4772,7 +4806,9 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None):
                   f"{cull_fail} culled, {spared_shift} spared as adapting, {spared_contrib} as "
                   f"load-bearing"
                   + (f", {fail_deferred} refused at FAB_FADED_CULL='contrib' (never measured by "
-                     f"FAB.contribution)" if gated else
+                     f"FAB.contribution)" if gated and read_contrib else
+                     f", {fail_deferred} refused at FAB_FADED_CULL='contrib' (FAB_CONTRIB=0: no "
+                     f"measurement is read)" if gated else
                      f", {fail_deferred} deferred at FAB_FADED_CULL='defer'" if defer else "")
                   if fail_base is not None else
                   "no failure cull: comp_glob is None, so no window has been attributed yet")
@@ -6219,11 +6255,12 @@ def load_state_dict(fab: Config, pop, sd, *, sidecar):
                  manage_every, depth0, hops, depth_patience, depth_stage_max (to re-render the two
                  build-time prediction gates from the restored population); norm_only (the arm on
                  which no pass runs and nothing is re-rendered); contrib (the third prediction,
-                 fab.contrib, re-rendered where it is armed, 2026-09-28)
+                 fab.contrib, re-rendered where it is armed, 2026-09-28, and at FAB_CONTRIB=0 over a
+                 lineage that armed it, Q-FAB-19's review)
     WIRES READ: none
     DID IT FIRE: fab.resume_widened, fab.resume_refused; gates fab.cull_gate and
                  fab.depth_advance re-rendered as RESTORED predictions, and fab.contrib at
-                 FAB_CONTRIB=1
+                 FAB_CONTRIB=1 -- and at 0 where the restored books or ledger carry a measurement
     """
     fab = fab.owned_by("FAB")
 
@@ -6348,6 +6385,10 @@ def _refresh_build_predictions(fab, pop):
     deepen past 1"). Only an ON population carries these predictions; the FAB_ON=0 lines stand,
     and so do the FAB_NORM_ONLY=1 lines (2026-09-27): no manage pass runs on that arm, so there is
     no first pass to predict and build's UNREACHABLE reading is still the true one.
+    fab.contrib IS RE-RENDERED AT BOTH VALUES (Q-FAB-19's review): at FAB_CONTRIB=1 as a prediction
+    over what the lineage measured, and at 0 wherever the restored books or ledger carry a
+    measurement, which that value reads nowhere -- build's line at 0 cannot know the lineage
+    measured. A lineage that never armed it keeps build's line.
     """
     if not pop.on or bool(fab.norm_only):
         return
@@ -6366,8 +6407,8 @@ def _refresh_build_predictions(fab, pop):
     swap = {"fab.cull_gate": cull, "fab.depth_advance": depth}
     # AND CONTRIBUTION'S, WHERE IT IS ARMED (2026-09-28, Q-FAB-19): the restored population may carry
     # contributions the lineage measured, which build's line cannot know of.
+    _had = sum(1 for i in range(n) if int(pop.contrib_n[i]) > 0)
     if bool(fab.contrib):
-        _had = sum(1 for i in range(n) if int(pop.contrib_n[i]) > 0)
         swap["fab.contrib"] = Gate(
             "fab.contrib", False, value=f"FAB_CONTRIB={bool(fab.contrib)}",
             threshold="FAB_CONTRIB=True", reachable=False,
@@ -6376,6 +6417,27 @@ def _refresh_build_predictions(fab, pop):
                     f"measured here; {_had} of the {n} restored live expert(s) carry a contribution "
                     f"the lineage measured. The first pass replaces this line with what it "
                     f"measured."))
+    else:
+        # AND WHERE IT IS NOT, OVER A LINEAGE THAT ARMED IT (Q-FAB-19's review): the books and the
+        # ledger cross a resume, so a child resumed at FAB_CONTRIB=0 from a measuring parent holds
+        # the parent's measurements -- read by nothing, FAB.manage reading a contribution at 1 only
+        # -- and its ledger the parent's fab.contrib_* counts. Build's line was written before the
+        # restore and cannot name either; a lineage that never armed it has neither and keeps it.
+        _walked = pop.counters.get("fab.contrib_passes")
+        if _had or _walked is not None:
+            _ledger = (f"the ledger's fab.contrib_* counts are its -- {int(_walked)} pass(es) "
+                       f"walked before this process"
+                       + (", the gauges its last pass's" if "fab.contrib_coverage" in pop.counters
+                          else "")
+                       if _walked is not None else "the ledger carries no fab.contrib_* count")
+            swap["fab.contrib"] = Gate(
+                "fab.contrib", False, value=f"FAB_CONTRIB={bool(fab.contrib)}",
+                threshold="FAB_CONTRIB=True", reachable=False,
+                reason=(f"FAB_CONTRIB=0: FAB.contribution is not called and FAB.manage reads no "
+                        f"contribution, so this process measures none and the contrib > 0 spare "
+                        f"in both culls is inert. RESTORED from a lineage that armed it: {_had} of "
+                        f"the {n} restored live expert(s) carry a contribution it measured, which "
+                        f"the books carry on unread, and {_ledger}."))
     pop.gates = tuple(swap.get(g.name, g) for g in pop.gates)
 
 
