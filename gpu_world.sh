@@ -1878,7 +1878,7 @@ keep_watch() {  # ckdir keepdir tag [owner-pid]
 # file's entries, the pairing build_vocabulary refuses a resume on). The run's final save duplicates
 # the ring's ckpt.pt and a repeated step duplicates a copy, so both are dropped. Kept files are made
 # read-only, and <tag>.kept.txt lists every copy. Python from inside the keep directory with src/
-# first on its path, as run.py arranges it: the repository root's memory.py shadows src/memory.
+# first on its path, as run.py arranges it: the root's memory.py shadowed src/memory until 2026-09-28.
 # A REPEATED STEP IS A DUPLICATE ONLY WITHIN ONE LAUNCH (2026-09-27, build 1.5's review). A fleet
 # launched into an OUT that still held a previous fleet's copies found that fleet's k0.s0.w21 and
 # deleted its own save at step 21 as "a duplicate step", keeping the old copy -- trained on another

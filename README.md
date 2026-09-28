@@ -222,11 +222,12 @@ mkdir -p runs && bash run_full_unfrozen.sh  # the whole old system (needs a CUDA
 python3 prompt.py CKPT=runs/<tag>           # message a checkpoint it wrote here
 ```
 
-A checkpoint the old tree wrote at the root before the move is prompted from the root, as
+A checkpoint the old tree last saved at the root, before the move, is prompted from the root, as
 `python3 archive/old-tree/prompt.py CKPT=runs/<tag>`: a checkpoint records its vocabulary's path
-relative to the directory it was trained in. `STATE.md`, `CL_TESTBED.md` and `garry/GARRY.md` moved
-under `archive/` on 2026-08-27. `archive/README.md` says what every archived record is, how to run the
-old tree against the corpora and runs kept at the root, and where every moved path went.
+relative to the directory its run was started in, so one resumed from `archive/old-tree/` since then
+is prompted from there. `STATE.md`, `CL_TESTBED.md` and `garry/GARRY.md` moved under `archive/` on
+2026-08-27. `archive/README.md` says what every archived record is, how to run the old tree against
+the corpora and runs kept at the root, and where every moved path went.
 
 ## Status, honestly
 
@@ -343,7 +344,7 @@ results/             dated evidence, one folder per workflow or GPU fleet; READM
                      indexes them
 archive/             frozen records, never current; README.md says what each was and why it is kept:
                      old-tree/ (the old system, at the root until 2026-09-28), rework/, garry/, legacy/,
-                     handoff/, docs/, agent-transcripts/
+                     handoff/, docs/, agent-transcripts/, STATE.md, CL_TESTBED.md
 ```
 
 Run output is not tracked, and lands at the root of the checkout: a fleet's `gpu_<exp>_out/`, its

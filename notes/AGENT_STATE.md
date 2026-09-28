@@ -1,6 +1,6 @@
 # Agent state — read this first after a session reset
 
-Updated 2026-09-28 (the retok fleet read and its review: `TOK_RETOK_EVERY` ships 1000) on `rm-predict-DC` (the only branch pushed to; no PRs unless asked).
+Updated 2026-09-28 (the retok fleet read and its review: `TOK_RETOK_EVERY` ships 1000; the file-structure reorganisation's Phase A, with Phase B after the Stage 3 merge) on `rm-predict-DC` (the only branch pushed to; no PRs unless asked).
 
 ## Where things stand
 - **WORLD_FEEDBACK ships False** (d97779d) on the 20k-window GPU fleet: the forecast was within
@@ -204,6 +204,14 @@ Updated 2026-09-28 (the retok fleet read and its review: `TOK_RETOK_EVERY` ships
   ETA (7.5% late, time left) and spike lateness are corrected, the spikes labelled descriptive. The
   brief's test 3 now says the pause is the pool's growth requests (about 1% of births), spawning
   carrying on.
+- 2026-09-28, THE FILE-STRUCTURE REORGANISATION, PHASE A (427ab21-e125e9c, then its review's fixes):
+  the old tree is in archive/old-tree/ and runs from there (`cd archive/old-tree`, then its old
+  commands); ARCHIVE.md is archive/README.md, which says what each frozen record is, how to run the old
+  tree and where every moved path went; .rework/QUESTIONS.md is archive/rework/QUESTIONS.md;
+  results/README.md indexes the evidence. PHASE B WAITS FOR THE STAGE 3 MERGE: the run.py sweeps move
+  to tools/, the 2026-08 notes corpus and its defaults file to archive/notes/, and the lines in Stage 3
+  files that still place the old tree at the root are rewritten. docs/REORGANISATION.md is the plan,
+  with every reference to update and the searches that re-find them after the merge.
 0. Proposal 05 §8 orders everything: Stage 0 (owner rulings O1-O20; the fleet-archive reads; the
    k0_nuis pair; phase-traversal resizing), then Stage 1's small builds (vocab `.prev` rotation, DOM
    Levels, counters, OPT_LR_CONTINUE 'as_logged', gpu_world.sh kept checkpoints) before the owner's
@@ -238,7 +246,10 @@ Updated 2026-09-28 (the retok fleet read and its review: `TOK_RETOK_EVERY` ships
 - Next hunt classes: lever isolation, efficacy vs labels, long-horizon mechanisms, SIGUSR1 saves.
 
 ## Working rules this repo has taught
-- Never run python with cwd = repo root except run.py and tests/*: the root memory.py shadows src/memory.
+- Never run python with cwd = repo root except run.py and tests/*: the root's data/ shares src/data's
+  name, and with the root first on sys.path src/data wins only because it is a regular package
+  (tests/test_census.py N5). The old tree's memory.py, which taught the rule by shadowing src/memory
+  from the root, is in archive/old-tree/ since 2026-09-28.
 - OMP_NUM_THREADS=1. Stage explicit paths, never `git add -A`. test_determinism rewrites
   tests/_noise_floor.json: `git checkout` it afterwards.
 - The runs/ folder is never overwritten.

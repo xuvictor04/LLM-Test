@@ -77,9 +77,28 @@ python3 prompt.py CKPT=runs/<tag>           # message a checkpoint it wrote here
 bash longrun.sh <command>                   # the long-run harness; bash longrun.sh --help lists the commands
 ```
 
-Three of its scripts find their own place and run from any directory: `bash archive/old-tree/preflight.sh`
-(it moves to its own directory, as it always did), `python3 archive/old-tree/notes_check.py` and
-`bash archive/old-tree/equiv.sh <ref> [ref2]` (both below).
+Four of its scripts change to their own directory before they read or write anything, as they always
+did, and so run from any directory: `preflight.sh`, `run_full_unfrozen.sh`, `run_cl_test.sh` and
+`sweep_domain_grid.sh`. What they name by a relative path then resolves under `archive/old-tree/`, not
+under the directory they were started from: `bash archive/old-tree/run_full_unfrozen.sh`, started at
+the root, saves to `archive/old-tree/runs/<RUN_NAME>` and needs that `runs/` to exist (see below), and
+`sweep_domain_grid.sh` writes `archive/old-tree/sweep_out/`. Two more run from any directory through
+their edits (listed below): `python3 archive/old-tree/notes_check.py`, which finds `self_organize.py`
+beside itself and the repository's `README.md`, `notes/` and `archive/` two directories up, and
+`bash archive/old-tree/equiv.sh <ref> [ref2]`, which works in the checkout it is in and writes the
+root's `runs/equiv_*`.
+
+The next-step commands its unedited files print name paths relative to `archive/old-tree/`, because
+they were written for the root, where all of these files sat side by side: follow them from here
+(`bash preflight.sh`, `python3 prompt.py CKPT=...`, `fetch_big.py ...`). The requirements stayed at
+the root, so where `bench_gpu.sh` prints `pip install -r requirements.txt`, run
+`pip install -r ../../requirements.txt` from here. The fresh-box block `preflight.sh` prints at its
+end is followed from here as well, or in its root form:
+`~/fetchenv/bin/python archive/old-tree/fetch_big.py --dataset fineweb-edu --gb 40 --out data_big`
+and `bash archive/old-tree/preflight.sh` (`--out` is relative to where it runs: from the root it
+fills the root's `data_big/`, reached from here as `DATA_DIR=../../data_big`, below). Its NGC
+container line mounts `$PWD` at `/w`: start that one at the root, so that the `data` link, which
+points two directories up, still resolves inside the container, and `cd archive/old-tree` there.
 
 `old-tree/data` is a tracked link to the repository's `data/`, so the corpus default the old tree reads
 relative to where it runs (`DATA_DIR=data`, and the `data/` that `rerun.sh`, `probe_signature.py`,
@@ -94,14 +113,18 @@ root: a run saves its vocabulary to `<SAVE_CKPT>.dyntok.json` (for `run_full_unf
 best-model snapshot creates it; a run that took none does not (measured on CPU with `BEST_TRACK=0`).
 
 What the old tree left at the root before the move stays there, and is reached like this:
-- **a checkpoint in the root's `runs/`**: prompt it from the root, `python3 archive/old-tree/prompt.py
-  CKPT=runs/<tag>`. A checkpoint records its vocabulary's path relative to the directory it was trained
-  in, so `CKPT=../../runs/<tag>` from here loads the weights and then misses the vocabulary.
+- **a checkpoint last saved at the root before 2026-09-28**, in the root's `runs/`: prompt it from the
+  root, `python3 archive/old-tree/prompt.py CKPT=runs/<tag>`. A checkpoint records its vocabulary's
+  path relative to the directory its run was started in, so `CKPT=../../runs/<tag>` from here loads
+  the weights and then misses the vocabulary.
 - **corpora**, from here, by pointing the variables at them: `PILOT_DIR=../../data_pilot`,
   `DATA_DIR=../../data_big`. `sweep_domain_grid.sh` looks for `data_big/` in its own directory only.
 - **a run directory**: `DATA_DIR=../../data_big OUT=../../runs/long bash longrun.sh resume` continues the
   root's long run where it is, on its corpus, and writes there, as `bash longrun.sh resume` did before the
-  move (a resume finds the vocabulary saved beside its checkpoint).
+  move (a resume finds the vocabulary saved beside its checkpoint). Its first save from here records
+  that vocabulary relative to `archive/old-tree/`, so from then on `runs/long/ck` is prompted from here,
+  `python3 prompt.py CKPT=../../runs/long/ck`, the form the run's own save line prints after
+  "prompt it:", and no longer from the root.
 
 **What changed in these files, and when.** Every file here but two is byte-identical to branch
 `rm-predict`, which D5 froze on 2026-08-28:
@@ -121,13 +144,19 @@ Checked at the move, on CPU (operation only): `selftest.sh`, quick and full, pas
 at the root; `preflight.sh` gives the same verdict line for line (its GPU checks fail on a CPU box);
 `equiv.sh 55709a8` (the old tree at the root) against the move (the old tree here) reports IDENTICAL at
 `SCALE=fast`; a run and its `prompt.py` work from here, and a checkpoint trained at the root before the
-move prompts from the root as described above.
+move prompts from the root as described above. Checked after the move, the same way: such a checkpoint
+resumed in place from here, with `longrun.sh resume`'s `RESUME` and `SAVE_CKPT` (both `$OUT/ck`; the
+harness itself insists on CUDA), finds its vocabulary beside it, records it as
+`../../runs/long/ck.dyntok.json`, prompts from here as `CKPT=../../runs/long/ck` and no longer from
+the root (FileNotFoundError on that vocabulary); and `sweep_domain_grid.sh`, started at the root by
+path, writes `archive/old-tree/sweep_out/` and nothing at the root.
 
 ## Where each moved path went
 
 Records written before a move keep the paths of their day, and are not rewritten to follow it: the notes
-corpus, the dated entries of `.rework/`'s ledgers, the survey and audit JSON, `results/`, the agent
-transcripts and the commit messages. This table resolves them.
+corpus and its `_evidence/`; `.rework/`'s records (the dated entries of its ledgers, `COMMIT_RECORD.md`,
+`reviews.json`, and the survey, audit and question files); `results/`, whose `README.md` alone is a live
+index; the agent transcripts; and the commit messages. This table resolves them.
 
 | was | is | moved |
 |---|---|---|
