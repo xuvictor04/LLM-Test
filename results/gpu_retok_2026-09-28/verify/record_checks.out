@@ -1,0 +1,28 @@
+== the between-run spread against the SE independent flushes would give (k0_nuis - k0, 8 pairs)
+  p1   : pair SD 0.1100 (rms 0.1029); independent-flush SE 0.00265: SD/SE 41.4, rms/SE 38.8
+  p2   : pair SD 0.0091 (rms 0.0087); independent-flush SE 0.00220: SD/SE 4.1, rms/SE 3.9
+  p3   : pair SD 0.0063 (rms 0.0060); independent-flush SE 0.00096: SD/SE 6.5, rms/SE 6.3
+  p4   : pair SD 0.0303 (rms 0.0284); independent-flush SE 0.00222: SD/SE 13.6, rms/SE 12.8
+  whole: pair SD 0.0334 (rms 0.0313); independent-flush SE 0.00114: SD/SE 29.2, rms/SE 27.3
+== per-run SD of num over the last 10% (j_main.out, k0_nuis - k0 per seed, / sqrt 2)
+  H100: SD 0.0168, rms 0.0181
+  H200: SD 0.0146, rms 0.0160
+== the rule on k1000 - k0 per phase: leave one seed out (H100), pooled over 8 pairs, and k0_nuis as control
+  without s0: p1 -0.0384 [-0.1648,+0.0328] p2 -0.0020 [-0.0496,+0.0248] p3 +0.0173 [+0.0052,+0.0241] p4 -0.0081 [-0.0618,+0.0222] -> PASS
+  without s1: p1 -0.0078 [-0.0261,+0.0025] p2 -0.0066 [-0.0546,+0.0205] p3 +0.0179 [+0.0080,+0.0234] p4 -0.0009 [-0.0319,+0.0166] -> PASS
+  without s2: p1 -0.0366 [-0.1653,+0.0358] p2 +0.0022 [-0.0317,+0.0213] p3 +0.0155 [+0.0026,+0.0227] p4 -0.0099 [-0.0637,+0.0204] -> PASS
+  without s3: p1 -0.0358 [-0.1652,+0.0371] p2 -0.0043 [-0.0537,+0.0235] p3 +0.0158 [+0.0025,+0.0233] p4 -0.0165 [-0.0525,+0.0037] -> PASS
+  without s4: p1 -0.0407 [-0.1629,+0.0281] p2 -0.0115 [-0.0429,+0.0062] p3 +0.0144 [+0.0049,+0.0198] p4 -0.0100 [-0.0638,+0.0204] -> PASS
+  pooled 8: p1 -0.0251 [-0.0675,+0.0031] p2 -0.0033 [-0.0200,+0.0078] p3 +0.0190 [+0.0129,+0.0230] p4 +0.0020 [-0.0220,+0.0180] -> PASS
+  H100 k1000 - k0_nuis: p1 -0.0261 [-0.1792,+0.0672] p2 -0.0002 [-0.0221,+0.0133] p3 +0.0194 [+0.0133,+0.0231] p4 +0.0088 [-0.0142,+0.0228] -> UNRESOLVED
+== H200 1000 - 3000 over the whole run and from 0.756 MB (20% of the stream) on
+  whole -0.0111, share from p1 (p1/4) 0.725; from 0.756 MB -0.0033, upper +0.0048
+== fab.grow_dev / fab.grow_slow at the end, mean over runs
+  H100: k0 0.110, k0_nuis 0.108, k1000 0.113, k1000_cd100 0.109
+  H200: k0 0.097, k0_nuis 0.109, k1000 0.102, k3000 0.140
+== the act's own regression readings (trigger true, not within 30 windows of a phase entry): the latest, in windows after its act
+  k1000: per run [34, 45, 32, 34, 51]
+  k1000_cd100: per run [34, 45, 68, 33, 48]
+== the heartbeat while all 21 trained, and the ETA by the windows actually run
+  27 heartbeats, 411.0-422.5 windows/s
+  377673 windows run; at the calibrated 416.404 that is 907 s against the 1084 s wall: 1.195x (the block: 420,000 nominal windows, 1.07x)

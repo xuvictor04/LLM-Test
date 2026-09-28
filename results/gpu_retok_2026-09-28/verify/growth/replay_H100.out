@@ -1,0 +1,22 @@
+k0.s0            acts= 0 replay aR=9 aS=14 bsR=0 bsS=0 rcR=22 rcS=0 bkW=0  MATCH  dev 0.182279 vs 0.182279
+k0.s1            acts= 0 replay aR=10 aS=15 bsR=0 bsS=0 rcR=50 rcS=0 bkW=0  MATCH  dev 0.203713 vs 0.203713
+k0.s2            acts= 0 replay aR=15 aS=11 bsR=0 bsS=0 rcR=53 rcS=0 bkW=0  MATCH  dev 0.185575 vs 0.185575
+k0.s3            acts= 0 replay aR=14 aS=12 bsR=0 bsS=0 rcR=37 rcS=0 bkW=0  MATCH  dev 0.172263 vs 0.172263
+k0.s4            acts= 0 replay aR=13 aS=13 bsR=0 bsS=0 rcR=51 rcS=0 bkW=0  MATCH  dev 0.242088 vs 0.242088
+k0_nuis.s0       acts= 0 replay aR=13 aS=12 bsR=0 bsS=0 rcR=16 rcS=0 bkW=0  MATCH  dev 0.206043 vs 0.206043
+k0_nuis.s1       acts= 0 replay aR=5 aS=15 bsR=0 bsS=0 rcR=30 rcS=0 bkW=0  MATCH  dev 0.127147 vs 0.127147
+k0_nuis.s2       acts= 0 replay aR=11 aS=14 bsR=0 bsS=0 rcR=45 rcS=0 bkW=0  MATCH  dev 0.201098 vs 0.201098
+k0_nuis.s3       acts= 0 replay aR=16 aS=12 bsR=0 bsS=0 rcR=55 rcS=0 bkW=0  MATCH  dev 0.191029 vs 0.191029
+k0_nuis.s4       acts= 0 replay aR=14 aS=12 bsR=0 bsS=0 rcR=57 rcS=0 bkW=0  MATCH  dev 0.233817 vs 0.233817
+k0_rerun.s0      acts= 0 replay aR=9 aS=14 bsR=0 bsS=0 rcR=22 rcS=0 bkW=0  MATCH  dev 0.182279 vs 0.182279
+k1000.s0         acts=16 replay aR=3 aS=10 bsR=36 bsS=1897 rcR=8 rcS=0 bkW=6170  MATCH  dev 0.293413 vs 0.293413
+k1000.s1         acts=15 replay aR=2 aS=8 bsR=37 bsS=2726 rcR=22 rcS=0 bkW=5985  MATCH  dev 0.228566 vs 0.228566
+k1000.s2         acts=16 replay aR=3 aS=9 bsR=42 bsS=2055 rcR=28 rcS=0 bkW=6120  MATCH  dev 0.345124 vs 0.345124
+k1000.s3         acts=16 replay aR=3 aS=9 bsR=50 bsS=1913 rcR=18 rcS=0 bkW=6055  MATCH  dev 0.289496 vs 0.289496
+k1000.s4         acts=16 replay aR=3 aS=8 bsR=38 bsS=2234 rcR=32 rcS=0 bkW=6190  MATCH  dev 0.214690 vs 0.21469
+k1000_cd100.s0   acts=16 replay aR=3 aS=14 bsR=24 bsS=51 rcR=17 rcS=0 bkW=1584  MATCH  dev 0.295081 vs 0.295081
+k1000_cd100.s1   acts=15 replay aR=2 aS=14 bsR=39 bsS=435 rcR=22 rcS=0 bkW=1485  MATCH  dev 0.203138 vs 0.203138
+k1000_cd100.s2   acts=16 replay aR=3 aS=14 bsR=34 bsS=276 rcR=35 rcS=0 bkW=1584  MATCH  dev 0.276188 vs 0.276188
+k1000_cd100.s3   acts=16 replay aR=3 aS=13 bsR=42 bsS=435 rcR=24 rcS=0 bkW=1555  MATCH  dev 0.320605 vs 0.320605
+k1000_cd100.s4   acts=16 replay aR=5 aS=12 bsR=23 bsS=246 rcR=44 rcS=0 bkW=1584  MATCH  dev 0.220172 vs 0.220172
+ALL MATCH

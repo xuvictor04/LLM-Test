@@ -1,0 +1,43 @@
+== first differing flush index (0-based) of the loss curves
+  H100 k0 vs k0_nuis: [1, 2, 1, 1, 2]
+  H100 k0 vs k1000: [1001, 1001, 1001, 1001, 1001]
+  H100 k1000 vs k1000_cd100: [3130, 4158, 3151, 4196, 4220]
+  H200 k0 vs k0_nuis: [2, 1, 1]
+  H200 k0 vs k1000: [1001, 1001, 1001]
+  H200 k0 vs k3000: [3001, 3001, 3001]
+  cross-card k0 (H100 vs H200) flush 0 |dL|: ['2.29e-04', '5.01e-04', '2.85e-04'] first diff [0, 0, 0]
+  cross-card bytes identical per flush (k0): [True, True, True]
+== early loss drop: flush where the 50-flush rolling bits/byte first falls below 2.5 (k0 family)
+  H100 k0       s0: crossing flush 1344 (byte 255702); p1 2.5617 whole 1.95755
+  H100 k0       s1: crossing flush 2045 (byte 386490); p1 2.8466 whole 2.00810
+  H100 k0       s2: crossing flush 1210 (byte 232198); p1 2.5085 whole 1.95042
+  H100 k0       s3: crossing flush 1325 (byte 251604); p1 2.5274 whole 1.94025
+  H100 k0       s4: crossing flush 1583 (byte 296854); p1 2.6833 whole 1.98479
+  H100 k0_nuis  s0: crossing flush 1492 (byte 284092); p1 2.6714 whole 1.97940
+  H100 k0_nuis  s1: crossing flush 1439 (byte 272003); p1 2.6004 whole 1.92928
+  H100 k0_nuis  s2: crossing flush 1212 (byte 232588); p1 2.5031 whole 1.94087
+  H100 k0_nuis  s3: crossing flush 1547 (byte 293562); p1 2.6313 whole 1.96606
+  H100 k0_nuis  s4: crossing flush 1567 (byte 293842); p1 2.6926 whole 1.98662
+  H200 k0       s0: crossing flush 1379 (byte 262371); p1 2.5998 whole 1.95921
+  H200 k0       s1: crossing flush 1259 (byte 237972); p1 2.5130 whole 1.90482
+  H200 k0       s2: crossing flush 1210 (byte 232198); p1 2.4803 whole 1.93319
+  H200 k0_nuis  s0: crossing flush 1357 (byte 258199); p1 2.5794 whole 1.95941
+  H200 k0_nuis  s1: crossing flush 1267 (byte 239496); p1 2.5293 whole 1.92298
+  H200 k0_nuis  s2: crossing flush 1235 (byte 236968); p1 2.5027 whole 1.94066
+  k0.s1 H100 crossing 2045; the other 15: 1210-1583, mean 1362 sd 135; z 5.1
+== nuisance pairs k0_nuis - k0 per phase and whole run (8 pairs: 5 H100 + 3 H200)
+  p1: pair diffs +0.1097 -0.2462 -0.0054 +0.1038 +0.0093 -0.0204 +0.0163 +0.0224 | sd 0.1100 rms 0.1029 per-run 0.0728; H100 only sd 0.1444
+  p2: pair diffs -0.0126 -0.0110 -0.0108 +0.0002 +0.0128 +0.0025 +0.0004 +0.0059 | sd 0.0091 rms 0.0087 per-run 0.0061; H100 only sd 0.0108
+  p3: pair diffs -0.0116 -0.0098 +0.0058 -0.0020 +0.0015 -0.0001 +0.0038 +0.0024 | sd 0.0063 rms 0.0060 per-run 0.0043; H100 only sd 0.0074
+  p4: pair diffs +0.0019 -0.0482 -0.0278 +0.0012 -0.0163 +0.0189 +0.0522 -0.0009 | sd 0.0303 rms 0.0284 per-run 0.0201; H100 only sd 0.0211
+  whole: pair diffs +0.0219 -0.0788 -0.0095 +0.0258 +0.0018 +0.0002 +0.0182 +0.0075 | sd 0.0334 rms 0.0313 per-run 0.0221; H100 only sd 0.0423
+  H100 s1 k0 - k0_nuis per phase +0.2462 +0.0110 +0.0098 +0.0482 whole +0.07882 phase/4 contributions +0.0615 +0.0028 +0.0025 +0.0121
+== the rule under the null for an arm diverging at window 1 (P(PASS per phase), simulated from the pooled pair sd)
+  p1 sd 0.1029 n 3: P(upper <= eps) 0.15
+  p1 sd 0.1029 n 5: P(upper <= eps) 0.23
+  p1 sd 0.1029 n 8: P(upper <= eps) 0.34
+  p1 sd 0.1029 n 10: P(upper <= eps) 0.41
+  whole sd 0.0313 n 3: P(upper <= eps) 0.57
+  whole sd 0.0313 n 5: P(upper <= eps) 0.90
+  whole sd 0.0313 n 8: P(upper <= eps) 0.99
+  whole sd 0.0313 n 10: P(upper <= eps) 1.00

@@ -1,0 +1,36 @@
+unexpected flushes (regression trigger true) by windows since the last act: bins 0-99 / 100-399 / 400-999, and those within 30 windows of a phase entry
+  k1000.s0         [26, 10, 7]  of which near a phase entry [0, 10, 6]
+  k1000.s1         [37, 0, 11]  of which near a phase entry [3, 0, 8]
+  k1000.s2         [32, 10, 14]  of which near a phase entry [0, 10, 13]
+  k1000.s3         [42, 8, 11]  of which near a phase entry [0, 8, 9]
+  k1000.s4         [27, 11, 12]  of which near a phase entry [0, 11, 10]
+  k1000            total [164, 39, 55] near phase entry [3, 39, 46]
+  k1000_cd100.s0   [24, 10, 6]  of which near a phase entry [0, 10, 5]
+  k1000_cd100.s1   [39, 0, 11]  of which near a phase entry [3, 0, 8]
+  k1000_cd100.s2   [34, 10, 11]  of which near a phase entry [0, 10, 11]
+  k1000_cd100.s3   [42, 8, 9]  of which near a phase entry [0, 8, 8]
+  k1000_cd100.s4   [23, 11, 15]  of which near a phase entry [0, 11, 13]
+  k1000_cd100      total [162, 39, 52] near phase entry [3, 39, 45]
+
+counterfactual: each run's own loss curve replayed at the other cooldown (asks by leg; R asks in [100,400) of an act, and whether at a phase entry)
+  k1000.s0         at cool 100: aR=4 aS=13 bkW=1584  R in [100,400): [(12244, 243)]  S in [100,400): 6   phase-4 entry 12245
+  k1000.s1         at cool 100: aR=2 aS=14 bkW=1485  R in [100,400): []  S in [100,400): 7   phase-4 entry 11985
+  k1000.s2         at cool 100: aR=4 aS=14 bkW=1584  R in [100,400): [(12163, 162)]  S in [100,400): 6   phase-4 entry 12164
+  k1000.s3         at cool 100: aR=4 aS=13 bkW=1555  R in [100,400): [(12136, 135)]  S in [100,400): 6   phase-4 entry 12137
+  k1000.s4         at cool 100: aR=4 aS=13 bkW=1584  R in [100,400): [(12254, 253)]  S in [100,400): 6   phase-4 entry 12249
+  k1000_cd100.s0   at cool 400: aR=2 aS=10 bkW=6170  R in [100,400): []  S in [100,400): 0   phase-4 entry 12245
+  k1000_cd100.s1   at cool 400: aR=2 aS=8 bkW=5985  R in [100,400): []  S in [100,400): 0   phase-4 entry 11985
+  k1000_cd100.s2   at cool 400: aR=2 aS=9 bkW=6120  R in [100,400): []  S in [100,400): 0   phase-4 entry 12164
+  k1000_cd100.s3   at cool 400: aR=2 aS=8 bkW=6055  R in [100,400): []  S in [100,400): 0   phase-4 entry 12137
+  k1000_cd100.s4   at cool 400: aR=4 aS=9 bkW=6190  R in [100,400): []  S in [100,400): 0   phase-4 entry 12249
+k3000.s0 acts [3001, 6001, 9001, 12001, 15001]: act readings at 100-399: [(15125, 124), (15128, 127), (15133, 132)]; replay at cool 400: aR=5 aS=11  R asks within 400 of an act: []
+k3000.s0 acts [3001, 6001, 9001, 12001, 15001]: act readings at 100-399: [(15125, 124), (15128, 127), (15133, 132)]; replay at cool 200: aR=5 aS=12  R asks within 400 of an act: []
+k3000.s0 acts [3001, 6001, 9001, 12001, 15001]: act readings at 100-399: [(15125, 124), (15128, 127), (15133, 132)]; replay at cool 100: aR=6 aS=12  R asks within 400 of an act: [(15125, 124)]
+k3000.s1 acts [3001, 6001, 9001, 12001, 15001]: act readings at 100-399: []; replay at cool 400: aR=3 aS=10  R asks within 400 of an act: []
+k3000.s1 acts [3001, 6001, 9001, 12001, 15001]: act readings at 100-399: []; replay at cool 200: aR=3 aS=12  R asks within 400 of an act: []
+k3000.s1 acts [3001, 6001, 9001, 12001, 15001]: act readings at 100-399: []; replay at cool 100: aR=3 aS=12  R asks within 400 of an act: []
+k3000.s2 acts [3001, 6001, 9001, 12001, 15001]: act readings at 100-399: []; replay at cool 400: aR=4 aS=13  R asks within 400 of an act: []
+k3000.s2 acts [3001, 6001, 9001, 12001, 15001]: act readings at 100-399: []; replay at cool 200: aR=4 aS=14  R asks within 400 of an act: []
+k3000.s2 acts [3001, 6001, 9001, 12001, 15001]: act readings at 100-399: []; replay at cool 100: aR=4 aS=14  R asks within 400 of an act: []
+k3000.s0 3001 +7.3% | k3000.s0 6001 +3.9% | k3000.s0 9001 +12.6% | k3000.s0 12001 +6.8% | k3000.s0 15001 +4.7% | 
+k1000.s0 1001 +3.8% | k1000.s0 2001 +2.4% | k1000.s0 3001 +2.1% | k1000.s0 4001 +1.4% | k1000.s0 5001 +0.6% | k1000.s0 6001 +2.8% | k1000.s0 7001 +5.2% | k1000.s0 8001 +3.6% | k1000.s0 9001 +3.4% | k1000.s0 10001 +2.5% | k1000.s0 11001 +2.5% | k1000.s0 12001 +1.5% | k1000.s0 13001 +1.2% | k1000.s0 14001 +1.9% | k1000.s0 15001 +5.1% | k1000.s0 16001 +2.6% | 

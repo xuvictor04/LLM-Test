@@ -4764,6 +4764,23 @@ knob either script reads with a default) and F26 (the 2026-09-27 archive, re-rea
 lines, its block but the KEPT line's tail, the resume line and the archive line's OUT, its KEPT.txt kept
 and repacked, "stays 1000" at the default, and the committed archive untouched).
 
+**2026-09-28 (Proposal 05 §8 2.2; `results/gpu_retok_2026-09-28/RESULTS.md`): THE COOLDOWN FLEET READ:
+TOK_RETOK_EVERY STAYS 1000 AND FAB_COOLDOWN STAYS 400.** The owner ran the fleet pre-registered above,
+`EXP=retok RETOK_ARMS=1000 COOLDOWN_ARM=100 SEEDS="0 1 2 3 4" KEEP_CKPT=0 bash tools/gpu_launch.sh
+--go`, at 5c28ca4 on one H100 PCIe (torch 2.7.0, CUDA 12.8, PAR 24, MPS on): all 21 runs rc=0, and the
+code copy's sha256 recomputes from `git archive 5c28ca4`. By the rule above k1000 PASSes against k0 at 5
+seeds (worst upper bound +0.0215, phase 3): **1000 stays**, B-provisional until E2. k1000_cd100 − k1000
+PASSes per phase and reads +0.0003 over the whole run with upper bound +0.0067, not below 0, so no
+measured cost of the cooldown is recorded and **400 stays**, as pre-registered; M = 0.0788 decides
+nothing. Three expectations above did not hold, and none bears on either reading. (1) Seeds 0-2 are new
+realizations, not repeats: the card and torch changed (flush-0 losses differ by 2.3e-4 to 5.0e-4 nats on
+identical bytes, and k0.s1 reads 2.0081 against 1.9048). (2) k1000_cd100 left k1000 at flushes
+3,131-4,221, after its first act, so the CPU run's departure before the act (the new_frac budget) did
+not occur. (3) `FILL=1` (`MAX_SEEDS` 16) adds a sixth seed at PAR 25 or more, past a pre-registered cap
+(one slot short here: 21 runs + 4 arms against PAR 24), so a capped command passes `FILL=0`. Read per
+area, which neither fleet pre-registered, num in phase 4 is +0.091 at 1000 (Bonferroni-8 lower bound
++0.065, above ε), E2's risk (register O14).
+
 **THE QUESTION AS IT STOOD.**
 
 `TOK.on_window` raises `Due.retok` on its own `retok_every` cadence, and the act it asks for is to
@@ -5859,7 +5876,10 @@ bits/byte can be split by phase. Each is now read where its owner sees it:
 - **`fab.blackout_windows`** (FAB, `fabric/api.py::grow_check`): the WINDOWS whose flush's growth
   check found the stamp's cooldown open, credited as (max(previous check, stamp), this check], so a
   flush of several windows counts all of them and a window before the stamp never counts.
-  `fab.growth_blackout_suppressed.*` still count the refused ASKS. ABSENT at `FAB_ON=0`, `FAB_GROW=0`
+  `fab.growth_blackout_suppressed.regression` counts the regression readings the blackout refused;
+  `.stall` counts every waiting check inside a blackout, before the plateau test, not refused asks
+  *(corrected 2026-09-28, the cooldown fleet read; `src/fabric/api.py`'s docstring follows after the
+  Stage 3 merge)*. ABSENT at `FAB_ON=0`, `FAB_GROW=0`
   or `FAB_COOLDOWN` ≤ 0, where no stamp can block growth, and until the first stamp arrives, where
   the `fab.growth_blackout` Gate reads UNREACHABLE; PRESENT-and-0 is a stamp no later check inside
   its cooldown reached (corrected 2026-09-27, below: it was seeded on every check and read

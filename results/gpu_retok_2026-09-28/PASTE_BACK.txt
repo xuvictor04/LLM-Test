@@ -1,0 +1,46 @@
+==== PASTE THIS BACK ====
+gpu_world.sh EXP=retok  commit 5c28ca4  launched 2026-09-28T12:52:31Z  B-provisional
+card: 1 x NVIDIA H100 PCIe 81559 MiB; torch 2.7.0, CUDA 12.8; NCPU 26; PAR 24; MPS on; device=cuda
+shape: 20000 windows/run, DATA_STREAM_BYTES=3780000, seeds 0 1 2 3 4, EXTRA=''; cap 60000; CAL 600; LM_CTX 128; kept ckpts OFF
+runs: 21 of 21 ended rc=0, every one
+bits/byte per seed         k0     k1000 k1000_cd100   k0_nuis  |k0-nuis|   k1000-k0 k1000_cd100-k0
+  s0                  1.95755   1.95222     1.95133   1.97940    0.02185   -0.00534       -0.00622
+  s1                  2.00810   1.96898     1.98100   1.92928    0.07882   -0.03912       -0.02710
+  s2                  1.95042   1.94276     1.93988   1.94087    0.00955   -0.00766       -0.01054
+  s3                  1.94025   1.94457     1.94300   1.96606    0.02580   +0.00432       +0.00275
+  s4                  1.98479   1.99606     1.99072   1.98662    0.00183   +0.01127       +0.00593
+k0_rerun: k0 seed 0 twice, |diff| 0 bits/byte (BIT-EXACT)
+RULE (O14, O2): ε 0.05 bits/byte, incumbent 1000; per phase (4), arm - k0 paired over seeds: mean [lower at t(1 - a/4), Holm a; one-sided 95% upper]
+  k1000 n=5 a=0.05: p1 -0.0319 [-0.1169,+0.0200] p2 -0.0044 [-0.0364,+0.0151] p3 +0.0162 [+0.0075,+0.0215] p4 -0.0091 [-0.0441,+0.0123] -> PASS
+  k1000_cd100 - k1000 (C13's cooldown arm, beside the rule, never a ship candidate) n=5: p1 +0.0002 [-0.0002,+0.0004] p2 +0.0028 [-0.0142,+0.0132] p3 +0.0007 [-0.0049,+0.0041] p4 -0.0026 [-0.0371,+0.0184] -> PASS; whole run mean +0.0003, one-sided 95% upper +0.0067: not below 0
+reported, decides nothing (O14): M = 0.07882 bits/byte (max over 5 seed(s) |k0 - k0_nuis|)
+  k1000 - k0 mean -0.00730 over 5 seed(s)
+  k1000_cd100 - k0 mean -0.00704 over 5 seed(s), vs k1000 +0.00027 (beside the rule)
+DECISION: TOK_RETOK_EVERY stays 1000 (the incumbent; 0 is never shipped by the rule): k1000 PASS against k0 (ε 0.05 bits/byte, n 5 seed(s))  [B-provisional]
+RATES (post-fix rate at the retok shape; mean [min-max] over seeds):
+  k0 19.22 w/s [18.73-19.85] 3695 B/s
+  k1000 19.41 w/s [18.75-19.94] 4553 B/s, act + MEM re-cut 2.41% of loop, per-byte time vs k0 -18.8%
+  k1000_cd100 19.33 w/s [18.93-19.78] 4535 B/s, act + MEM re-cut 2.41% of loop, per-byte time vs k0 -18.5%
+  k0_nuis 19.08 w/s [18.81-19.43] 3666 B/s
+  k0_rerun 18.89 w/s [18.89-18.89] 3596 B/s
+  aggregate: 377,673 windows in 1084 s of fleet wall at PAR 24 = 348.41 windows/s (calibrated 416.40 at PAR 24: measured/calibrated 0.84)
+  ETA against wall: estimated 1009 s (420,000 windows at 416.4 windows/s), took 1084 s: 1.07x
+  recorded on: NVIDIA H100 PCIe, PAR 24, MPS on, NCPU 26
+SECONDARIES (mean over seeds; beside the rule):
+  k0 acts - noop -; grown reg 10.60/stall 11.20; blackout 0.0% (<= 0.0%); act -% of loop; MEM re-cut -%/act; bpt rise/act -
+  k1000 acts 15.80 noop 0; grown reg 2.40/stall 7.20; blackout 37.9% (<= 39.2%); act 2.18% of loop; MEM re-cut 26.7%/act; bpt rise/act +3.8 +2.6 +1.8 +1.3 +1.4 +2.5 +4.6 +3.8...%
+  k1000_cd100 acts 15.80 noop 0; grown reg 3/stall 12; blackout 9.7% (<= 9.8%); act 2.18% of loop; MEM re-cut 26.8%/act; bpt rise/act +3.8 +2.6 +1.8 +1.3 +1.4 +2.5 +4.6 +3.8...%
+  k0_nuis acts - noop -; grown reg 10.60/stall 12.20; blackout 0.0% (<= 0.0%); act -% of loop; MEM re-cut -%/act; bpt rise/act -
+BLACKOUT SPLIT where n_live first reaches FAB_SLOTS (each part over its own windows; C13 reads the part before; ESTIMATED from the act windows x FAB_COOLDOWN, the counter being cumulative):
+  k0 before 0.0% / after 0.0%; full (slots 4096) in 1/5 run(s) from window 6701; n_live end 3315 [2563-3971]
+  k1000 before 37.9% / after 37.9% (est.); full (slots 4096) in 1/5 run(s) from window 8401; n_live end 3291 [2905-3886]
+  k1000_cd100 before 9.4% / after 10.7% (est.); full (slots 4096) in 1/5 run(s) from window 6901; n_live end 3274 [2759-4096]
+  k0_nuis before 0.0% / after -%; full (slots 4096) in 0/5 run(s); n_live end 3593 [3478-3749]
+  bits/byte by phase (4 equal byte ranges), k0: 2.6255 1.7756 1.5765 1.8952
+  bits/byte by phase (4 equal byte ranges), k1000: 2.5936 1.7712 1.5927 1.8861
+  bits/byte by phase (4 equal byte ranges), k1000_cd100: 2.5938 1.7740 1.5934 1.8835
+  bits/byte by phase (4 equal byte ranges), k0_nuis: 2.6198 1.7713 1.5733 1.8773
+  BLACKOUT ALARM (C13): k1000 blacks out 37.9% of its windows before the pool fills, above 20%: the cooldown arm k1000_cd100 is in this fleet: read it against k1000 beside the rule
+KEPT: none (KEEP_CKPT off)
+archive: gpu_retok_2026-09-28.tgz beside gpu_retok_out (logs, curves, SUMMARY, ANALYSIS, this block; no checkpoints) -- keep it
+==== END ====
