@@ -4,7 +4,7 @@ The one page for the owner. Everything else — how decisions were made, the evi
 rules — is in the repo for reference (`docs/proposals/05_DECISIONS.md`, `docs/04_CONTRACT.md`,
 `results/`, `notes/AGENT_STATE.md`) and is not brought up here.
 
-Updated 2026-09-28 (a1df33c).
+Updated 2026-09-28 (eade722).
 
 ## How we work
 - **Owner:** leads and monitors, keeps the goals from drifting, adds ideas, expands the project, and
@@ -52,7 +52,7 @@ Updated 2026-09-28 (a1df33c).
 |---|---|---|---|
 | 1 | Read the 2026-09-24 fleet archive | **done** (you uploaded it; `results/gpu_world_2026-09-24/ARCHIVE_READS.md`) | data source; expert pool; culls; gradients |
 | 2 | Retokenization fleet (`EXP=retok bash tools/gpu_launch.sh --go`) | **done** 2026-09-27, 13 of 13 runs. Rebuilding every 1000 windows now ships: better than every 3000, and within budget against no rebuilding phase by phase (area by area, see Major issues 2). Provisional until SR0's held-out check, which must watch older text rebuilt late in a run (`results/gpu_retok_2026-09-27/RESULTS.md`) | which re-segmentation cadence ships; post-fix GPU speed; checkpoints for the first post-training test |
-| 3 | Cooldown fleet | **done** 2026-09-28, 21 of 21 runs on an H100. Rebuilding every 1000 windows stays. The 400-window pause of the pool's growth requests stays, because cutting it to 100 changed nothing measurable. One baseline run started learning late; it decides nothing (`results/gpu_retok_2026-09-28/RESULTS.md`) | whether the 400-window pause of the pool's growth requests costs learning at the shipped cadence (a measured cost; the pause stays); 1000 against no rebuilding, re-read at 5 seeds |
+| 3 | Cooldown fleet | **done** 2026-09-28, 21 of 21 runs on an H100. Rebuilding every 1000 windows stays. The 400-window pause of the pool's growth requests stays; it stays by rule, whatever this test read. Cutting it to 100 showed no measurable cost to learning: growth requests rose, the pause covered 10% of the run instead of 38%, and bits/byte did not move. One baseline run started learning late; it decides nothing (`results/gpu_retok_2026-09-28/RESULTS.md`) | whether the 400-window pause of the pool's growth requests costs learning at the shipped cadence (a measured cost; the pause stays); 1000 against no rebuilding, re-read at 5 seeds |
 
 No GPU test is ready now: the next ones need SR0, the build under way.
 

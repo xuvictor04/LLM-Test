@@ -1,6 +1,6 @@
 # Agent state — read this first after a session reset
 
-Updated 2026-09-28 (the retok fleet read and its review: `TOK_RETOK_EVERY` ships 1000; the file-structure reorganisation's Phase A, with Phase B after the Stage 3 merge; the cooldown fleet read: 1000 and `FAB_COOLDOWN` 400 stay) on `rm-predict-DC` (the only branch pushed to; no PRs unless asked).
+Updated 2026-09-28 (the retok fleet read and its review: `TOK_RETOK_EVERY` ships 1000; the file-structure reorganisation's Phase A, with Phase B after the Stage 3 merge; the cooldown fleet read and its review: 1000 and `FAB_COOLDOWN` 400 stay) on `rm-predict-DC` (the only branch pushed to; no PRs unless asked).
 
 ## Where things stand
 - **WORLD_FEEDBACK ships False** (d97779d) on the 20k-window GPU fleet: the forecast was within
@@ -218,6 +218,14 @@ Updated 2026-09-28 (the retok fleet read and its review: `TOK_RETOK_EVERY` ships
   pre-registered: E2 decides, and O14's remedy arms are owed (a design before E2). Training-run
   endpoints decide after the loss drop; 5.1 calibrates the between-run SD (note NEW-02). No GPU test
   is ready until SR0.
+- 2026-09-28, REVIEW OF THE COOLDOWN FLEET READ (a1df33c, b3f826b; 8 findings, 6 distinct, each
+  checked against the files, fixed in eade722): FAB_COOLDOWN stays 400 by C13's rule whatever the arm
+  reads, and the arm's null reading only records no measured cost (the brief, C13 and §8 2.2 gave it
+  as the reason); M overstates an act arm's spread, but k1000 also leaves k0 before its loss drop
+  (note S0b-ship); the 2026-09-27 dev/slow correction holds for k1000 only (k3000's 0.140 is a higher
+  relative bar); the cooldown fleet kept no checkpoint and gives §8 6.1 no parent (NEW-20, O20); the
+  WORLD re-run reads its time-integrated gaps from 20% of the stream on, phase 1 reported only, its
+  seeds from the measured spread (note WORLD 4, §8 6.5).
 0. Proposal 05 §8 orders everything: Stage 0 (owner rulings O1-O20; the fleet-archive reads; the
    k0_nuis pair; phase-traversal resizing), then Stage 1's small builds (vocab `.prev` rotation, DOM
    Levels, counters, OPT_LR_CONTINUE 'as_logged', gpu_world.sh kept checkpoints) before the owner's
@@ -249,12 +257,17 @@ Updated 2026-09-28 (the retok fleet read and its review: `TOK_RETOK_EVERY` ships
   by 1.95x at CAL_WINDOWS 600, so the advice does not fit it: 13 runs at PAR 12 left k0_rerun running
   alone from +590 s to +986 s. The register's row records that the raise is not taken (2026-09-28).
   Owed: an ETA priced by waves, and a FILL that fills a partial last wave.
-- OWED after the Stage 3 merge (src/ and gpu_world.sh are left alone until then). Text:
-  grow_check's docstring on the stall counter (Q-RUN-17 is corrected); gpu_world.sh:142's "paired
-  noise floor" (M decides nothing); the C13 alarm's COOLDOWN_ARM=100 advice, read null on 2026-09-28
-  (with tests/test_gpu_world.py:484, which pins it); the block's "at PAR" when fewer runs ran, its ETA
-  on nominal windows, and "ESTIMATED" on a split the act windows give exactly. Code: a FILL guard for
-  a capped seed count (until then a capped command passes FILL=0); per-area cells in analyze_retok.
+- OWED after the Stage 3 merge (src/ and gpu_world.sh are left alone until then). Text: the two
+  places in src/fabric/api.py that Q-RUN-17's correction contradicts, grow_check's docstring on the
+  stall counter (:4327-4331 before the merge) and the "WINDOWS, NOT PASSES" comment above its windows
+  count (:4492-4494): .stall counts every waiting check inside a blackout, not refused asks, so a quiet
+  loss does not read 0 there (k1000 read 1,897-2,726 against 8-10 stall asks); gpu_world.sh:142's
+  "paired noise floor" (M decides nothing); the EXP=world_epoch printout (gpu_world.sh:2393-2397, "5
+  paired seeds" and the gap over the whole run) to note WORLD 4's endpoint, before SR0 lifts its
+  guard; the C13 alarm's COOLDOWN_ARM=100 advice, read null on 2026-09-28 (with
+  tests/test_gpu_world.py:484, which pins it); the block's "at PAR" when fewer runs ran, its ETA on
+  nominal windows, and "ESTIMATED" on a split the act windows give exactly. Code: a FILL guard for a
+  capped seed count (until then a capped command passes FILL=0); per-area cells in analyze_retok.
 - Next hunt classes: lever isolation, efficacy vs labels, long-horizon mechanisms, SIGUSR1 saves.
 
 ## Working rules this repo has taught
