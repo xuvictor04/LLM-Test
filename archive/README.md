@@ -11,8 +11,8 @@ This file says what each item was, why it is kept, how to run the old tree, and 
 went. It was the root's `ARCHIVE.md` until 2026-09-28 and moved here with `git mv`, so
 `git log --follow archive/README.md` keeps its history. `garry/`, `legacy/`, `handoff/`, `docs/`,
 `STATE.md` and `CL_TESTBED.md` moved here from the root on 2026-08-27, so that a repository-wide grep does
-not return them beside live code; the old tree followed on 2026-09-28, and `agent-transcripts/` was
-committed here directly. Nothing in `src/`, `tests/` or `tools/`, nor `run.py` or `gpu_world.sh`,
+not return them beside live code; the old tree and `.rework/QUESTIONS.md` followed on 2026-09-28, and
+`agent-transcripts/` was committed here directly. Nothing in `src/`, `tests/` or `tools/`, nor `run.py` or `gpu_world.sh`,
 imports or executes any of it; the old tree runs when someone runs it (below), and
 `.rework/capture_oracle.py`, the P0 capture of the oracle `tests/test_derive.py` replays, reads
 `old-tree/self_organize.py` if it is ever run again.
@@ -20,6 +20,7 @@ imports or executes any of it; the old tree runs when someone runs it (below), a
 | path | what it was | why it is kept | frozen since |
 |---|---|---|---|
 | `old-tree/` | the old system, at the repository root until 2026-09-28: `self_organize.py` (9,859 lines; its `_SPEC` holds 328 knobs), the modules it imports by bare name (`memory.py`, `verification.py`, `world_model.py`, `datastream.py`, `tokenizer.py`), its harness (`longrun.sh`, `selftest.sh`, `rerun.sh`, `equiv.sh`, `preflight.sh`, ...), its tests (`*_test.py`, `harness_test.sh`, `notes_check.py`), probes, fetchers, and the run registry `runs.py` + `runs.csv`: 51 files, and a `data` link | the only system that has ever trained at scale: every recorded result was measured under it, and `src/`, `docs/` and `tests/` cite it by line (`self_organize.py:NNNN`), which a move that changes no byte keeps true | 2026-08-28 (D5 froze branch `rm-predict`; every file here but `notes_check.py` and `equiv.sh` is byte-identical to it) |
+| `rework/` | `QUESTIONS.md`: the first owner questions, Q1–Q7, with their options and recommendations, and a closing environment block; `.rework/QUESTIONS.md` until 2026-09-28 | the questions `.rework/DECISIONS.md` D1–D7 answer, as they were put (D1 records a correction against the evidence Q1 offered). What is open now is in `docs/04_CONTRACT.md`'s `FOR THE OWNER` sections, `docs/proposals/05_DECISIONS.md` and `notes/OWNER_BRIEF.md`; the environment block's unknowns are `docs/02_OPERATIONS.md` §5 | 2026-08-28 |
 | `garry/` | a working snapshot of the whole system at milestone T33: a 957-line `self_organize.py`, against the old tree's 9,859 | the known-good reference its own `GARRY.md` promised; `src/memory/api.py` cites its `self_organize.py` by line | 2026-07 |
 | `legacy/` | the pre-rewrite package, a different architecture with the same vocabulary | where the vocabulary came from; its `build_continual_data.py` wrote `data/continual/`, and `docs/04_CONTRACT.md` (Q-DATA-4) cites it | 2026-07 |
 | `handoff/` | the 2026-07-21 handover folder: phase notes, decisions, open questions, design directions | what a fresh session was told on 2026-07-21; the notes corpus and `.rework/ISSUES.md` cite it | 2026-07-21 |
@@ -133,6 +134,8 @@ the commit messages. This table resolves them.
 | `garry/`, `legacy/`, `handoff/`, `docs/FILES.md` and `docs/HANDOFF.md`, `STATE.md`, `CL_TESTBED.md`, at the root | the same names under `archive/` | 2026-08-27 |
 | `ARCHIVE.md` | `archive/README.md` | 2026-09-28 |
 | the old tree at the root, all 51 files: `bench_gpu.sh` `blowup_test.py` `cap_test.py` `cl_bench.py` `compare.py` `compare_test.py` `corpus_test.py` `curve_test.py` `datastream.py` `domain_test.py` `equiv.sh` `fetch_40g.sh` `fetch_big.py` `fetch_data.sh` `fetch_local.py` `growth_test.py` `harness_test.sh` `holdout.py` `keystone_probe.py` `levers.py` `longrun.sh` `lr_test.py` `mem_evict_test.py` `memory.py` `notes_check.py` `preflight.sh` `probe_ckpt_geometry.py` `probe_signature.py` `probe_stability.py` `proj_test.py` `prompt.py` `ramp_test.py` `rerun.sh` `rescue_ckpt.py` `resume_test.py` `run_cl_test.sh` `run_full_unfrozen.sh` `run_verify_test.py` `runs.csv` `runs.py` `self_organize.py` `selftest.sh` `sweep_domain_grid.sh` `sweep_domain_report.py` `sweep_domains.sh` `tok_test.py` `tokenizer.py` `verification.py` `verify_console_test.py` `vocab.py` `world_model.py` | `archive/old-tree/<same name>` | 2026-09-28 |
+
+| `.rework/QUESTIONS.md` | `archive/rework/QUESTIONS.md` | 2026-09-28 |
 
 The root kept `README.md`, `LICENSE`, `requirements.txt`, `run.py`, `gpu_world.sh`, `sweep_gpu.sh` and
 `sweep_world.sh`: a root file a record names that is not in this table is where it was.

@@ -251,8 +251,10 @@ Two more corrections to this file's own past wording:
   **one byte** where training used 614, so every eval-path routing decision in every report was made
   on a one-byte signature and nothing failed.
 
-**What is open** is recorded in `.rework/QUESTIONS.md` and in the `FOR THE OWNER` sections of
-`docs/04_CONTRACT.md`; owner rulings are dated in `.rework/DECISIONS.md`.
+**What is open** is recorded in the `FOR THE OWNER` sections of `docs/04_CONTRACT.md`, in the decision
+register `docs/proposals/05_DECISIONS.md`, and, where the owner is asked, in `notes/OWNER_BRIEF.md`.
+Owner rulings are dated in `.rework/DECISIONS.md`. The first owner questions, Q1–Q7, were ruled there on
+2026-08-28 as D1–D7 and are archived in `archive/rework/QUESTIONS.md`.
 
 ## Defaults
 
@@ -298,7 +300,7 @@ is numerically identical, so a units defect is invisible. The full generated ref
 | `.rework/ISSUES.md` | anyone fixing anything | every defect the survey found, in four parts, each id qualified by its part (`P1-C11`, `P2-C3`, `P3-H22`) |
 | `.rework/CENSUS.md` + `census.json` | anyone adding a lever | every old knob and where it went; a new lever needs a row here |
 | `.rework/DECISIONS.md` | anyone about to re-litigate | the owner's rulings, dated |
-| `.rework/QUESTIONS.md` | the owner | what is still open |
+| `.rework/README.md` | anyone looking for a ledger | what each file and folder in `.rework/` is, and which are live |
 | `archive/README.md` | anyone reading history | what is frozen, why each record is kept, how to run the old tree, and where every moved path went |
 
 ## Repository layout
@@ -334,9 +336,10 @@ notes/               OWNER_BRIEF.md (the owner's page), AGENT_STATE.md (the agen
 data/                the tracked corpus, DATA_DIR's default: train/ (eng py num c), continual/, ood/
 results/             dated evidence, one folder per workflow or GPU fleet
 .rework/             the rework's ledgers (DECISIONS, CENSUS.md + census.json, ISSUES, PLAN), the oracle/
-                     tests/test_derive.py replays, and the records they were built from
+                     tests/test_derive.py replays, and the records they were built from; README.md
+                     indexes them
 archive/             frozen records, never current; README.md says what each was and why it is kept:
-                     old-tree/ (the old system, at the root until 2026-09-28), garry/, legacy/,
+                     old-tree/ (the old system, at the root until 2026-09-28), rework/, garry/, legacy/,
                      handoff/, docs/, agent-transcripts/
 ```
 
