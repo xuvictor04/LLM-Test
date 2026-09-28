@@ -33,6 +33,7 @@ here was never asked, and no counter in any report can say so on its own.
 | `DATA_RESAMPLE` | Redraw a fresh stream from the areas at the start of every epoch instead of replaying the same bytes. |
 | `DATA_SEG_CONTIG` | Read each area in order instead of seeking to a random offset every segment, so the only boundaries left are the text's own. |
 | `DATA_SYNTH_HOLDOUT` | Hold out a block per area on DATA_SOURCE=synthetic, under the real sources' law: min(DATA_HOLDOUT_FRAC x body, DATA_VAL_CAP) bytes, a seeded contiguous block removed from the body. Off, the synthetic source holds nothing out. |
+| `FAB_CONTRIB` | Measure past-grace experts' marginal contribution on each management pass: the held-out loss without the expert minus the loss with it, folded into Population.contrib at FAB_COMP_EMA. |
 | `FAB_GROW_ON_MEM_PRESSURE` | Let the memory-pressure signal make fabric growth eligible, instead of only being printed. |
 | `FAB_LR_OWN` | Put each expert on its own cyclical learning-rate schedule, clocked from its own use count. |
 | `FAB_NORM_ONLY` | Control arm: keep the fabric's normalization, remove nodes and routing from the forward pass. |
@@ -44,7 +45,7 @@ here was never asked, and no counter in any report can say so on its own.
 | `RUN_PROFILE` | Per-component wall-clock attribution of the training step, rendered at the end of the run and in the throughput summary. |
 | `WORLD_FEEDBACK` | Condition the base LM on the forecast (h += world_proj(forecast)) instead of leaving the world model as an unused side head. |
 
-14 levers ship False.
+15 levers ship False.
 
 **Numeric levers that ship 0.** Zero is this tree's documented OFF sentinel in most of these places
 and a legitimate value in some, so the help text is quoted rather than summarised. `spine/lever.py`
@@ -88,7 +89,7 @@ DISARMED — which the cadence audit reports as a different state from starved.
 
 ## 2. Every lever, by package
 
-294 levers across 13 packages.
+296 levers across 13 packages.
 
 
 ### CAP (7 levers)
@@ -216,7 +217,7 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `EVAL_WRONG_INJECT` | `8` | entries |  | Synthetic cross-domain wrong entries planted so precision and recall have a denominator. |
 | `EVAL_WRONGNESS` | `True` | on/off |  | Run the WRONGNESS section: self-consistency detection over the settled store, with its precision and recall. |
 
-### FAB (83 levers)
+### FAB (85 levers)
 
 | lever | default | unit | accepts | what it is |
 |---|---|---|---|---|
@@ -233,6 +234,8 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `FAB_CHAIN_K` | `8` | experts |  | How many experts are COMPUTED per hop (top-k by routing mass); per-hop cost is k, not the population size. |
 | `FAB_COMP_EMA` | `0.02` | fraction 0..1 |  | EMA rate for the per-node competence and marginal-contribution signals that gate cull-sparing. |
 | `FAB_COMP_PROTECT` | `True` | on/off |  | Spare a unit from the cull when it models its own material better than the population does, however rarely it is selected. |
+| `FAB_CONTRIB` | `False` | on/off |  | Measure past-grace experts' marginal contribution on each management pass: the held-out loss without the expert minus the loss with it, folded into Population.contrib at FAB_COMP_EMA. |
+| `FAB_CONTRIB_MAX` | `64` | experts | domain (1, ∞) | How many past-grace experts one management pass measures, taken from a cursor that rotates through the population. |
 | `FAB_COOLDOWN` | `400` | Windows |  | Minimum spacing between growth firings, and the window over which recent births are counted for the new_frac budget. |
 | `FAB_CULL_FRAC` | `0.02` | fraction 0..1 | domain (0.0, 1.0) | Fraction of the ELIGIBLE (past-grace) set removed per manage pass, floored at one. |
 | `FAB_DEPTH0` | `1` | count |  | Hop count the chain starts at before staged depth extends it; 0 means start at the full `hops` budget (no curriculum). |
@@ -252,7 +255,7 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `FAB_ERR_FAST` | `0.05` | fraction 0..1 |  | EMA rate of the per-expert FAST error signal. |
 | `FAB_ERR_SLOW` | `0.005` | fraction 0..1 |  | EMA rate of the per-expert SLOW error signal, the baseline the fast one is judged against. |
 | `FAB_EXPLORE` | `0.15` | fraction 0..1 |  | Fraction of rows whose lowest-ranked computed slot is swapped for a randomly chosen low-use expert, on training passes only. |
-| `FAB_FADED_CULL` | `'as_is'` | name | choices `'as_is'`, `'defer'` | What the management pass does with a cull or merge whose removed expert mostly served a FADED area: 'as_is' removes it and counts it; 'defer' keeps it and takes every other decision 'as_is' takes. |
+| `FAB_FADED_CULL` | `'as_is'` | name | choices `'as_is'`, `'defer'`, `'contrib'` | What the management pass does with a cull or merge whose removed expert mostly served a FADED area: 'as_is' removes it and counts it; 'defer' keeps it and takes every other decision 'as_is' takes;... |
 | `FAB_FAIL_TOL` | `0.15` | fraction 0..1 |  | How far BOTH error EMAs must sit above the population before an expert counts as in sustained failure and is cullable at any occupancy. |
 | `FAB_GRACE` | `48` | Selections |  | How many times an expert must have been SELECTED before the cull may touch it. |
 | `FAB_GROW` | `True` | on/off |  | Master switch for population growth: off freezes the population at n0 while routing, selection, replication and the cull all still run. |

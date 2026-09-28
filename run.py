@@ -37,9 +37,12 @@ WHAT IT STILL DOES NOT MEASURE, AND THE RUN PRINTS BOTH LISTS RATHER THAN CLAIMI
     than that period reaches none (the cadence ledger prints it, and the cadence audit warns
     before the first window); SIG.train_step is asked every window (296 steps in 300 windows at
     the shipped defaults).
-  * FIVE ENTRY POINTS ARE DEFERRED BY THE CONTRACT, not merely unwritten -- CAP.observe,
-    FAB.contribution, MEM.blend, MEM.judge and WORLD.manage. CAP.observe's absence is why no cap is
-    ever lifted; FAB.contribution's is why the marginal-contribution counterfactual has no producer.
+  * THREE MECHANISMS' ENTRY POINTS ARE DEFERRED BY THE CONTRACT, not merely unwritten --
+    CAP.observe, MEM.judge and WORLD.manage. CAP.observe's absence is why no cap is ever lifted.
+    (This bullet said FIVE until 2026-09-28, naming MEM.blend and FAB.contribution too: MEM.blend is
+    reached through the retention probe's memory-on closure since 2026-09-27, and FAB.contribution
+    has a body and a row since 2026-09-28, built off -- at the shipped FAB_CONTRIB=0 the
+    marginal-contribution counterfactual still never runs.)
 
 WHAT CHANGED ON 2026-09-21/22, because several sentences above used to say the opposite: DOM.observe,
 MEM.read and MEM.census have bodies and are called, so the partition assigns real ids, the store

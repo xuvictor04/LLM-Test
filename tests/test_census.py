@@ -35,13 +35,14 @@ text while every check here stayed green.
 
 WHAT A `domain=` ON A DECLARATION DOES TO THIS FILE, WHICH IS NOTHING, AND THAT IS A MEASUREMENT
 RATHER THAN AN ASSUMPTION. `domain=(lo, hi)` landed on 33 levers on 2026-09-14. A census row has
-exactly nine fields and all 363 rows carry all nine (331 until §8 1.4's five OPT amendments landed
+exactly nine fields and all 365 rows carry all nine (331 until §8 1.4's five OPT amendments landed
 on 2026-09-26, 336 until §8 1.2's DOM_LEVELS the same day, 337 until §8 3.1's DATA_SYNTH_HOLDOUT on
 2026-09-27, 338 until the retention probe's three -- EVAL_RETENTION_EVERY, EVAL_RETENTION_N and
 OPT_DAMP_SOURCE -- the same day, 341 until §8 3.1's FAB_FADED_CULL on 2026-09-28, 342 until §8
 3.3's DATA_REPLAY_SHARE, DATA_REPLAY_NEWEST and DATA_REHEARSE_PARENT the same day, 345 until §8
 3.4's DATA_TRUST and the thirteen levers of its book the same day, 359 until §8 3.7's
-DATA_TRUST_COPY and the three numbers of its model the same day) -- old_name,
+DATA_TRUST_COPY and the three numbers of its model the same day, 363 until §8 3.5's FAB_CONTRIB
+and FAB_CONTRIB_MAX the same day) -- old_name,
 old_default, verdict, new_owner,
 new_name, unit, purpose, reason, couples_with -- and not one of them is a range, a bound, an
 interval, a minimum or a maximum. The checks below read fewer than that: family, old_name, verdict,

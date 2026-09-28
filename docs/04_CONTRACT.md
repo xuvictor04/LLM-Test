@@ -19,7 +19,7 @@ WIRES READ:  <comma-separated d_ fields, or "none">
 DID IT FIRE: <the counters that prove the mechanism executed, in G4's three states>
 ```
 
-`tests/test_contract.py` parses those blocks. **All 294** of the declared levers are named by at
+`tests/test_contract.py` parses those blocks. **All 296** of the declared levers are named by at
 least one stub as read by it — **261, not 259, since 2026-09-02: there are now TWO CENSUS
 AMENDMENTS, `OPT_GRAD_CLIP` under Q-OPT-3 and `MEM_JUDGE_FRAC` under Q-MEM-8** (see
 `.rework/CENSUS.md`, section `amendments`, which holds both and states that the census's 328 is
@@ -30,11 +30,12 @@ unchanged by either; *2026-09-26: that section now holds eight — `DATA_DRAW` (
 (`FAB.hop_mode`, `FAB.merge_dist`) readers rather than dropping either, so **UNCONSUMED LEVERS**
 below is now an empty table with the two rulings under it. K4 reads that table, so a future lever
 with no reader still lands there with a reason or the check fails.
-**Naming is not calling**: which stubs the composition root actually reaches is section 3, and 118
+**Naming is not calling**: which stubs the composition root actually reaches is section 3, and 133
 of the entry points (§7 holds the count, and it is the only place that does — this sentence was one
-of five copies) are named by a row — 102 in a row's entry column and 16 by a call written
-into a row's note (2026-09-26, after 03b S0b's act rows and its MEM remap) — with the remaining
-**18 declared deferred**, each with the argument that has no
+of five copies) are named by a row — 111 in a row's entry column and 22 by a call written
+into a row's note (2026-09-28, after Q-FAB-19's `A` row; 118, 102 and 16 on 2026-09-26, after 03b
+S0b's act rows and its MEM remap, which the deferred count below had outrun) — with the remaining
+**17 declared deferred**, each with the argument that has no
 producer as the reason. That number was seven until the order tables grew a `produces` column and
 the same standard was applied to every row rather than to EVAL alone (§3.6). *(This sentence said
 "14" while `DEFERRED_ENTRY_POINTS` held 15; corrected 2026-09-02. K6 prints all three numbers, so
@@ -843,7 +844,7 @@ optimizer row; `cadence_due` → `train_step` are stage-`A` rows **before** `enc
 stage-`R` row and is the encoder cadence's **only** did-it-fire surface, because its two-arm gate
 cannot go through `Cadences.due`. Until those rows existed the run trained no encoder at all.
 
-### FAB — `src/fabric/api.py` (83 levers, all 83 read, one of them a census amendment — `FAB_FADED_CULL`)
+### FAB — `src/fabric/api.py` (85 levers, all 85 read, three of them census amendments — `FAB_FADED_CULL`, `FAB_CONTRIB` and `FAB_CONTRIB_MAX`)
 
 The expert population. D1 rules it stays. **One forward pass, both arms**: `society=True` is the soc
 loop at depth 1 with per-expert logits retained.
@@ -855,11 +856,14 @@ loop at depth 1 with per-expert logits retained.
 `d_base_lr`, `d_lr_min_frac`.
 **Receives:** `d_model` ← LM, `signature_dim` ← SIG, `h`/`head` ← LM, `signature` ← SIG,
 `targets` ← the loop, `domain_id`/`live_domains` ← DOM, `soft_cap` ← CAP, `memory_pressure` ← MEM,
-`applied_lr` ← OPT, `baseline_logits_fn` and `per_window_loss` ← the loop, and since 2026-09-28
-`area_id` and `faded` ← the loop, off DATA's labels and schedule as `spine/derive.py::area_id`
-numbers (Q-FAB-18).
+`applied_lr` ← OPT, `per_window_loss` ← the loop, and since 2026-09-28 `area_id` and `faded` ← the
+loop, off DATA's labels and schedule as `spine/derive.py::area_id` numbers (Q-FAB-18), and for
+`contribution` its `targets`, `baseline_loss` and `baseline_logits_fn` ← the root's memory-off
+closure over the retention probe's pinned control half, with the closure's own `FAB.forward` inputs
+(Q-FAB-19).
 **Two alarms the report must carry:** `fab.balance_nonzero == 0` while `balance > 0` is **C2** back;
-`fab.contrib_distinct_values == 1` is **C3** back.
+`fab.contrib_distinct_values == 1` is **C3** back (and since Q-FAB-19 a pass whose walks moved no
+logit writes nothing and counts `fab.contrib_degenerate`).
 **`observe` splits `use` from `uage`** — a behaviour change with no measurement behind it, since
 `grace=48` was set against a clock that ticked once per window. On P9's list; see **Q-FAB-5**, which
 also supplies the number the retune is set from (`fab.mass_per_selection`) and the arithmetic that
@@ -891,7 +895,20 @@ such a removal is skipped and counted and **every other decision of the pass is 
 takes**: the rest of the pass reads the population `'as_is'` would hold, so a deferred victim keeps
 its slot in the utilization cull's budget, a deferred absorbee pairs with nobody else, the pressure
 gate is sized without the deferred, and no live-area expert is merged or culled in a deferred one's
-place (Q-FAB-18's review).
+place (Q-FAB-18's review) — or, since 2026-09-28, `'contrib'` (Q-FAB-19): such a removal goes ahead
+only where `FAB.contribution` has MEASURED the expert at or below 0, and is otherwise kept by
+`'defer'`'s own machinery, an unmeasured expert included.
+**`contribution` has a body** (**Q-FAB-19**, 2026-09-28; register §8 3.5, 02-R11 and C37), BUILT
+OFF: `FAB_CONTRIB` (a census amendment, shipped False) arms it and `FAB_CONTRIB_MAX` (64, provisional)
+caps a pass. At 1 the root calls it once per `fab.manage` pass, before `FAB.manage`, on the retention
+probe's pinned control half, with the memory-off closure bound to that batch as
+`baseline_logits_fn` — one callable for the baseline and every counterfactual, which the body checks
+at every pass (ISSUES P1-H11) — and `candidates=None`, **a frozen signature moved**, meaning the next
+`FAB_CONTRIB_MAX` past-grace experts off a rotating cursor on `Population`. A leave-one-out is a
+held-out walk on the looped arm and a reweighted sum of the pass's blend (`FabricOut.blend`, new) on
+the society arm; each value folds into `Population.contrib` at `FAB_COMP_EMA`, the first setting it,
+and `Population.contrib_n` (a book, new) counts measurements, so "never measured" and "measured at
+0" read apart.
 
 ### MEM — `src/memory/api.py` (26 levers, 25 read directly, one of them a census amendment)
 
@@ -1329,9 +1346,9 @@ report live joins as missing:
 
 | one value | the spellings it is consumed under |
 |---|---|
-| `RunClock.step` | `step` (TOK ×3, `Retention.consider`, `CKPT.save`, `EVAL.holdout_probe`), `step_windows` (SIG, FAB ×3; the probe's closures pass `clock.step + 1`, Q-EVAL-12), `now` (MEM ×2, DOM ×2) |
+| `RunClock.step` | `step` (TOK ×3, `Retention.consider`, `CKPT.save`, `EVAL.holdout_probe`), `step_windows` (SIG, FAB ×4; the probe's closures pass `clock.step + 1`, Q-EVAL-12, and so does `FAB.contribution`, whose baseline is one of them, Q-FAB-19), `now` (MEM ×2, DOM ×2) |
 | `Snapshot.payload` | `state` (DATA, TOK, CAP), `saved` (LM, OPT), `sd` (SIG, FAB, WORLD), `restored` (MEM, DOM, CAP, CKPT), `resume` (OPT), `snapshot` (CKPT) |
-| `LM.lm_loss`'s two returns | `per_window_loss` (FAB.observe), `flush_loss` (FAB.manage/grow_check), `baseline_loss` (FAB.contribution), `bits` (DOM.note_competence; over ln 2, and in bits per build-time token at `DOM_LEVELS`, Q-DOM-5), and one summand of the objective |
+| `LM.lm_loss`'s two returns | `per_window_loss` (FAB.observe), `flush_loss` (FAB.manage/grow_check), `bits` (DOM.note_competence; over ln 2, and in bits per build-time token at `DOM_LEVELS`, Q-DOM-5), and one summand of the objective. `baseline_loss` (FAB.contribution) stood here until 2026-09-28 as the flush's return; it is now the `mean` of the root's OWN `LM.lm_loss` call over the memory-off closure's logits on the probe's control half (Q-FAB-19) |
 | `Assignment.did` | `did` (DOM ×2), `domain_id` (FAB ×3), `sources` (MEM.write) |
 | `Process.device` | `device`, at six constructors |
 | `streams[...]` | `rng` (MEM, DOM, WORLD, EVAL), `generator` (SIG, FAB) |
@@ -1416,8 +1433,8 @@ with a table of its own that no check can see is still an orphan.*
 | stage | when | what is in it |
 |---|---|---|
 | `E` | before the first window of an epoch, and again whenever `RunClock.advance` returns `Tick.rolled` | `DATA.draw_stream` → `TOK.tokenize` → `RunClock.begin_epoch`. The root also stamps `clock.opt_steps` here as the `shift_at` `OPT.maybe_step` consumes — a resample is a **self-inflicted** shift, and the old tree carried that fact in a closure variable (`:6518-6521`). **At the shipped default these rows never run — see below.** |
-| `A` | per WINDOW, above the accumulator | `MEM.census` (before `DOM.manage`, whose `memory_counts`/`mem_floor_entries` had **no producer**), `DOM.manage`, `DOM.census` (supplying `live_sources` and `live_domains`), `FAB.manage`, `SIG.cadence_due` → `SIG.train_step` (before `encode`), `SIG.encode`, `DOM.observe`, `DOM.rekey` (after `observe`), `TOK.on_window`, `RunClock.advance`. `MEM.judge` and `WORLD.manage` **were here and are now deferred** (§3.6). |
-| `B` | per FLUSH | the flush body, plus `TOK.judge_probation`, event-driven on the `Due.probation` `TOK.on_window` already asked at `A`. `CAP.observe` and `FAB.contribution` **were here and are now deferred**. Since 2026-09-27, per WINDOW after the flush and the act: the retention probe's `EVAL.holdout_probe` → `EVAL.blowup` → `CKPT.Retention.consider`, behind its arm test (Q-EVAL-12) — and since 2026-09-28, before them, the source-reliability book's `DATA.claims_observe`, behind its own (`DATA_TRUST != 'off'`), on its cadence and on the window that rolls the epoch (Q-DATA-11). |
+| `A` | per WINDOW, above the accumulator | `MEM.census` (before `DOM.manage`, whose `memory_counts`/`mem_floor_entries` had **no producer**), `DOM.manage`, `DOM.census` (supplying `live_sources` and `live_domains`), `FAB.contribution` (since 2026-09-28, inside the `fab.manage` answer and before `FAB.manage`, behind its arm test `FAB_CONTRIB=1` — Q-FAB-19), `FAB.manage`, `SIG.cadence_due` → `SIG.train_step` (before `encode`), `SIG.encode`, `DOM.observe`, `DOM.rekey` (after `observe`), `TOK.on_window`, `RunClock.advance`. `MEM.judge` and `WORLD.manage` **were here and are now deferred** (§3.6). |
+| `B` | per FLUSH | the flush body, plus `TOK.judge_probation`, event-driven on the `Due.probation` `TOK.on_window` already asked at `A`. `CAP.observe` **was here and is now deferred**; so was `FAB.contribution`, until it got an `A` row on 2026-09-28 (Q-FAB-19). Since 2026-09-27, per WINDOW after the flush and the act: the retention probe's `EVAL.holdout_probe` → `EVAL.blowup` → `CKPT.Retention.consider`, behind its arm test (Q-EVAL-12) — and since 2026-09-28, before them, the source-reliability book's `DATA.claims_observe`, behind its own (`DATA_TRUST != 'off'`), on its cadence and on the window that rolls the epoch (Q-DATA-11). |
 | `C` | the CHECKPOINT FAN-OUT — an **event**, entered from `B` (periodic/SIGUSR1, and a `BestAction` since 2026-09-27, followed by `Retention.note_saved`) and `R` (final) | the twelve `state_dict`/`state`/`vocab_state`/`stream_state`/`Retention.state`/`WORLD.geometry` calls that build the payload and the recorded manifest, then `TOK.save_vocabulary`, then `CKPT.save`. *(2026-09-26: the driver, `spine/loop.py::_save`, calls `CKPT.save` first and `TOK.save_vocabulary` only when it wrote, and since this date that order is load-bearing: the vocabulary's rotation with `ckpt.pt.prev` must not run for a checkpoint CKPT refused. The rows list the reverse order and are unchanged, since K6 checks reach, not order.)* |
 | `R` | once, after `Tick.finished` | the retention probe's boundary reading (`EVAL.holdout_probe`, both closures, at the head), the source-reliability book's tail pass where a stop left consumed units unread (`DATA.claims_observe`, Q-DATA-11), `DOM.prior`, both censuses, every `counters()`, `Cadences.ledger()`, `RUN.bench_summary`, the `reason="final"` save, and `EVAL.generate` after it. `MEM.read` and `MEM.blend` **were rows here until 2026-08-30**; since 2026-09-27 they are reached through the memory-on closure the R probe row's note names (Q-MEM-10, amended). |
 
@@ -1601,7 +1618,7 @@ stage (a save site). **`SIG.cadence_due` is the one periodic gate that cannot go
 did-it-fire surface the encoder's cadence has. That is stated in its row rather than left for a
 reader to discover from a missing ledger line.
 
-### 3.6 `DEFERRED_ENTRY_POINTS` — eighteen, and no longer only EVAL
+### 3.6 `DEFERRED_ENTRY_POINTS` — seventeen, and no longer only EVAL
 
 `{"PFX.entry": "the phase that will call it, and why it cannot be called now"}`. K6 reads it **both
 ways**: an entry no row names is accepted, and an entry a row **now** names is reported as *stale*
@@ -1615,9 +1632,15 @@ join in `compose.py` honestly can. **None is deferred for being late**, and none
 the whole tree was stubs. **Since 2026-09-27 the retention probe (Q-EVAL-12) has closed five** —
 `EVAL.holdout_probe` and `EVAL.generate` have rows, `CKPT.Retention.consider` has its caller, and
 `MEM.read` and `MEM.blend` are reached through the memory-on closure — and turned two more
-(`EVAL.curve_probe`, `EVAL.coherence`) into **scope** deferrals, whose producers exist. The table
-below holds the ten deferred for an argument or a scope; the eight deferred for want of a CALLER
-(accessors and RUN.Timing's two) are listed in `spine/compose.py` with their reasons.
+(`EVAL.curve_probe`, `EVAL.coherence`) into **scope** deferrals, whose producers exist. **Since
+2026-09-28 `FAB.contribution` has left too** (Q-FAB-19): its row stood here for want of `candidates`,
+`targets` and a `baseline_logits_fn` that is the callable its `baseline_loss` came from, and it now
+has an `A` row inside the `fab.manage` answer — `candidates` defaults to the next `FAB_CONTRIB_MAX`
+past-grace experts off a cursor FAB keeps (so the root reaches into no `Population`), the batch is
+the probe's pinned control half and `targets` its own shifted ids, and the memory-off closure bound
+to that batch is both the baseline and the source of `baseline_loss`. The table below holds the nine
+deferred for an argument or a scope; the eight deferred for want of a CALLER (accessors and
+RUN.Timing's two) are listed in `spine/compose.py` with their reasons.
 
 | entry | phase | why there is no row |
 |---|---|---|
@@ -1628,7 +1651,6 @@ below holds the ten deferred for an argument or a scope; the eight deferred for 
 | `EVAL.wrongness_probe` | P6 | Takes a **copy** of the store so the instrument cannot edit what it measures; MEM's surface produces no copy, and adding one is a signature change. Its `scorer` is the same missing logits callable as `MEM.judge`'s **and takes the same arity, `scorer(ctx, src) -> logits`** (Q-MEM-8/Q-MEM-10, 2026-09-02). |
 | `EVAL.verification_fit` | P6 | Same missing copy; its inner loop is genuine `units.Steps` and must never be compared against `curve_every`. **`verify_mode` landed 2026-09-04 (Q-EVAL-11) and is not part of the gap**: it is `MEM.verify`, a frozen lever the root holds, passed the way `vocab_slots=LM.vocab_slots` and `lm_kind=LM.arch` already are into `MEM.open_store`. `K12` computes "produced" from the order tables' prose and a deferred entry point has no row, so **until `compose.DEFERRED_ENTRY_POINTS` names it, K12 reads `verify_mode` as a second gap** — the residue is one clause and it is recorded below in §5. |
 | `MEM.judge` | P4/P5 | `scorer(ctx, src) -> logits` is needed by the **default** arm (`MEM.verify` defaults to `selfcon`) and must be *the same forward path training used* (M47). **Since 2026-09-27 that path exists as a closure, and its ARITY is the gap:** `_logits_fn` is `fn(x, *, prefix_bytes)` and routes on the bytes before the window (Q-EVAL-12), while a **stored** entry has no prefix bytes and carries `Store.src` — so the declared shape is two arguments (Q-MEM-8), and a scorer that routes on a stored id is a second routing rule nobody has ruled on. **Q-MEM-8 is RESOLVED and names the row to write when the scorer lands:** at the END of the `dom.manage` block, inside that block's single `Cadences.due` answer. Because `scorer` carries a default, **no check can see it**: a row calling `judge(mem, store)` passes everything and yields `n_checked = 0` forever, which `memory/api.py:350-352` itself names as the inert state. |
-| `FAB.contribution` | P4 | `candidates` is the eligible past-grace set, which lives in `Population`'s books — no entry point exports it and O10 forbids the root reaching into `pop` — and `targets` is the flush's own shifted cut, the loop's slice with no row. `baseline_logits_fn` has a candidate since 2026-09-27, the memory-off closure, and it is still not this argument: the whole C3/H11 repair is that the baseline comes from **the same callable** that produced `baseline_loss`, which is the training flush's forward, not a held-out closure over prefix bytes. |
 | `CAP.observe` | P4 | **New.** `improving` = `(slow - fast)/|slow|` off the growth controller's EMAs, which live **inside FAB** and are on no returned record; `observations` is the valve-evaluation count tied to a hardcoded 0.998 EMA rate the caller cannot see. The root must **not** maintain a second EMA pair over the same loss to manufacture them — two mechanisms deciding independently whether the run has stalled is the recorded defect where the valve fired hardest exactly when the run was degrading worst. `blackout`'s home is now half-built: **Q-FAB-6** gave `FAB.grow_check` the `shift_at` stamp and put the resulting blackout state on `GrowReport`, so CAP neither reads FAB's `cooldown` at the call site nor has to mint a blackout-window lever it has no census row for; what is still missing is the root join and the two EMAs. |
 | `WORLD.manage` | P4 | **New.** `plateau` contradicts the package's own `state_dict`, which says the plateau state `(_wl_ema, _wl_lastgrow)` **moves inside this package** and travels in the checkpoint — if the state is inside, the boolean is computed inside, and both sentences cannot hold. `add_param_group` needs OPT to name one of its two AdamW instances (**Q-OPT-7**). `latent` is real but arrives **backwards** (`loss_terms` is a `B` row, this pass was `A`). |
 
@@ -1638,8 +1660,10 @@ no producer**, which is the only kind that survives the backwards check.
 **What the deferrals cost, said plainly**, because a deferral that hides its cost is the
 shape it replaces: the run has no capacity valve (nothing lifts a cap, so `CAP.caps` returns the
 starting ceilings and every block reason reads *unreachable*), no WORLD growth, no learning-curve
-probe at `EVAL_CURVE_EVERY`, no per-expert contribution and so no informed spare rule, and no
-wrongness sweep. *(This paragraph also listed no best-model save, no restart damping and no memory
+probe at `EVAL_CURVE_EVERY`, and no wrongness sweep. *(It listed "no per-expert contribution and so
+no informed spare rule" until 2026-09-28: `FAB.contribution` has a body and a row since (Q-FAB-19),
+built OFF, so at the shipped `FAB_CONTRIB=0` `Population.contrib` still stays 0.0 and the spare rule
+is still uninformed. This paragraph also listed no best-model save, no restart damping and no memory
 retrieval until 2026-09-27: the retention probe (Q-EVAL-12) supplies the first and the reading the
 second judges on, and the memory-on closure is the report path's retrieval — built OFF, so at the
 shipped `EVAL_RETENTION_EVERY=0` `Retention.counters().inert_reason` still reports "no curve value
@@ -1893,7 +1917,7 @@ been fixed is a real outcome and acting on it writes a second wrong sentence. **
 The union of the five `levers_unconsumed` lists was **15**. Thirteen of them were EVAL's, and all
 thirteen were given a declared reader by writing the P6 instrument signatures into
 `src/eval/api.py`. **The last two were FAB's, and as of 2026-09-02 this table is EMPTY: every one of
-the 294 declared levers is named `LEVERS READ:` by a stub.** Neither of the two was dropped, and
+the 296 declared levers is named `LEVERS READ:` by a stub.** Neither of the two was dropped, and
 neither was given a fake reader; each was ruled, and the ruling is what produced the reader.
 
 | lever | env name | why it has no reader | disposition |
@@ -2863,7 +2887,11 @@ it**, because *eligible* **is** *past-grace* (rule 3 of `manage`); the honest an
 lowers `merge_dist`, which is what that lever is for); the Adam moments on `A[a], B[a]` go stale
 after an in-place write, as they already do for `rescue`; and the *better* gate — output-space
 redundancy from `FAB.contribution` — is unavailable because that entry point is deferred for want of
-`candidates` and `baseline_logits_fn`. If it is ever un-deferred, revisit this.
+`candidates` and `baseline_logits_fn`. If it is ever un-deferred, revisit this. *(Revisited
+2026-09-28, when it was — Q-FAB-19, built OFF: at `FAB_FADED_CULL='contrib'` a faded-area absorbee
+merges only on a measured contribution at or below 0. Gating EVERY merge on it is not ruled: a pass
+measures `FAB_CONTRIB_MAX` experts, so at the owner's pool most absorbees would be unmeasured, and
+the residual stays the second gate.)*
 
 **2026-09-27 (register LOW-FAB-MERGED-REPORT, Proposal 05 §8 1.6): one merge gate per scope.**
 `fabric/api.py::_three_state` renders a gate's count from the ledger key of the gate's own name, and
@@ -3698,7 +3726,9 @@ the arithmetic — one named clamp, not an argument against the option.
    the deliverable**, not an inconvenience. **`FAB.contribution`'s `baseline_logits_fn` must always
    be the memory-off closure** — `fabric/api.py` makes it load-bearing that the baseline comes from
    the same callable that produced `baseline_loss`, and a memory-on baseline there silently undoes
-   the C3/H11 repair.
+   the C3/H11 repair. *(Since 2026-09-28 it is: `_logits_fn(sysm, use_memory=False,
+   book='eval.contrib')` bound to the probe's control batch, which also produces `baseline_loss`
+   through `LM.lm_loss` — Q-FAB-19.)*
 3. **The rule is rewritten, not stretched.** ONE LOGITS PATH now reads: *one closure per scored
    system, formed in the composition root, passed in, never constructed here; the reading names which
    closure produced it.* A docstring edit in `src/eval/api.py`; **no `def` line changes**.
@@ -6538,7 +6568,8 @@ that is still failing; what it does not intend is a baseline under every selecte
 tree's own `failing(e, comp_glob)` (self_organize.py:2189-2194, fed `asm.comp_glob` at :6718); at
 window 1001 above (comp_glob 3.660) the same pass culls 3 of 13. `comp_glob` None (nothing attributed
 yet) means no failure cull. The additive `fail_tol` is unchanged. (2) the failure path also spares
-`contrib > 0`, the old tree's rule (inert while `FAB.contribution` is deferred). (3) the
+`contrib > 0`, the old tree's rule (inert while `FAB.contribution` is deferred; since 2026-09-28 it
+has a body, built OFF, and the spare can fire at `FAB_CONTRIB=1` — Q-FAB-19). (3) the
 **`comp_protect` spare compared `comp > comp_glob`**; comp is a LOSS, so it spared the worse experts
 (at window 1001 it would have spared the six at comp 3.72-8.12 and left the seven at 3.38-3.61 to the
 cull). It is `<` now, as the lever's help and the old tree's :2271 say. (4) `fabric.cull_eligible`,
@@ -7234,7 +7265,8 @@ and nothing in FAB knew which area an expert served.
   the faded removals. An empty book is not faded and is removed at either value. **The cost is stated, not
   discovered:** with the pool at `FAB_SLOTS` a deferred expert holds a slot a new area could have been
   born into (NEW-20). `'contrib'` (a removal gated on `FAB.contribution <= 0`) is §8 3.5's and joins
-  the choices with that build rather than ahead of its producer.
+  the choices with that build rather than ahead of its producer. *(It joined them on 2026-09-28 with
+  that build: Q-FAB-19.)*
 * **Rescue is not deferred.** `FAB_RESCUE`'s heavy mutation is neither a cull nor a merge and keeps
   the expert's slot and book; it is OFF at the shipped 0.0, and whether a faded-area expert may be
   rescued is the question of an arm that turns it on beside `'defer'`. At `'defer'` the pass rescues
@@ -7377,6 +7409,218 @@ shape against `'as_is'` on a copy of the population that entered it (six passes,
 cull and 10 merge deferrals over the run); F9 the declared-but-undrawn continuation (the record's
 drawn list ['eng'], every child pass handed the uninterrupted run's set, `data.drawn_assumed` [])
 and a record stripped of the list (py assumed, printed, and handed to the child's pass).
+
+### Q-FAB-19 — what each expert is worth, measured, and the faded-area cull that waits for the measurement — **RESOLVED 2026-09-28 (Proposal 05 §8 3.5; register 02-R11, C37 and NEW-10): `FAB.contribution` HAS A BODY, BUILT OFF AT `FAB_CONTRIB=0`; ITS BATCH IS THE RETENTION PROBE'S PINNED CONTROL HALF AND ITS BASELINE THE MEMORY-OFF CLOSURE BOUND TO THAT BATCH, AT THE CLOSURE'S `clock.step + 1`; `candidates=None` TAKES THE NEXT `FAB_CONTRIB_MAX` PAST-GRACE EXPERTS OFF A ROTATING CURSOR; `FAB_FADED_CULL` GAINS `'contrib'`. ⚠ TWO NEW LEVERS, BOTH CENSUS AMENDMENTS; A FROZEN SIGNATURE MOVED (`candidates` GAINED A DEFAULT); ONE `A` ROW; `FabricOut.blend`, `Population.contrib_n` AND ITS CURSOR ARE NEW. NO WIRE, AND NO NUMBER A DEFAULT RUN PRODUCES MOVES**
+**What was asked.** 02-R11 builds `FAB.contribution` "right after NEW-03", with training runs
+unchanged; C37 has the continue preset defer faded-area culls and merges "until `FAB.contribution`
+works"; NEW-10 rules that "an expert tied to a faded area may be culled only when
+`FAB.contribution <= 0`". The entry point was a frozen stub deferred for want of three things
+(§3.6): `candidates` — the eligible set, which lives in `Population`'s books and which O10 forbids
+the root to read; `targets`; and a `baseline_logits_fn` that is **the callable `baseline_loss` came
+from** — the whole C3/H11 repair — where the only loss on hand was the training flush's and the
+only closure the retention probe's. The old tree's counterfactual failed both ways the stub's
+docstring records: its baseline was scored by a different function than its counterfactuals
+(ISSUES P1-H11, an offset that set contrib's SIGN) and its walk never changed (C3, every value 0).
+
+**The ruling, as built.**
+* **The levers** (`fabric/levers.py` section 6; census amendments, the thirty-sixth and
+  thirty-seventh). `FAB_CONTRIB` (flag, shipped **False**): at False the root never calls the entry
+  point, `Population.contrib` stays 0.0 on every expert, both `contrib > 0` spares in `FAB.manage`
+  are inert and no `fab.contrib_*` or `eval.contrib.*` key exists. `FAB_CONTRIB_MAX` (64,
+  PROVISIONAL, NEW-19; `U.EXPERTS`, domain `(1, None)` — 0 would arm a measurement that measures
+  nothing): how many past-grace experts one pass measures. `FAB_FADED_CULL` gains `'contrib'`.
+* **The batch** (`spine/compose.py::_contrib_material`). The first `(EVAL_RETENTION_N + 1) // 2`
+  pinned **control** items of every area the run has reached — `EVAL.holdout_probe`'s own control
+  share, the items a cadence reading scores, in area and pin order — cut at the last-cut view
+  (`_holdout_tokenize`, booked `eval.contrib.cuts`) and cut back to one length: the shortest cut,
+  and never more than `LM.ctx + 1` ids, from the end, so each row's routing prefix still ends at its
+  first byte and `x` never exceeds the context the closure would otherwise truncate from the front.
+  `targets` are the batch's ids shifted one. The control half because it is held out, pinned once
+  per run (every pass measures the same windows) and already the half consumers act on; the report
+  half stays unread by anything that acts. An area whose phase has not begun is left out, for the
+  probe's reason. A manage pass with no arrived control window calls nothing and is booked
+  `eval.contrib.empty`.
+* **The baseline, and the one rule every argument obeys.** The root binds the memory-off closure
+  to the batch — `_logits_fn(sysm, use_memory=False, book='eval.contrib')`, handed on as
+  `baseline_logits_fn` through `_contrib_baseline`, which turns off any autocast its caller holds so
+  the closure runs as it runs standalone — calls it once with `route={}` to take the `FAB.forward`
+  inputs its pass used (`h`, `signature`, `novelty` ZEROS, `domain_id` = `DOM.nearest` of the first
+  row's signature, `live_domains`, `step_windows`), scores its logits `LM.lm_loss(lm, logits, y)`
+  for `baseline_loss`, and hands `head` = the closure's counted head (`fn.head`). **So the baseline
+  and every counterfactual are one function of the same inputs, and FAB checks it rather than
+  assuming it**: before it removes anyone it re-scores `baseline_logits_fn()`'s logits through
+  `LM.lm_loss`'s reduction, written out as `fabric/api.py::_mean_ce` because FAB may not import LM,
+  and refuses the pass by name (P1-H11) where that is not `baseline_loss` exactly; then it takes one
+  **reference walk** with nothing held out and refuses the pass where that does not reproduce the
+  baseline's logits bit for bit — the offset the H11 repair excludes cannot then enter through the
+  inputs either. On the society arm the leave-one-out is a reweighted sum, and the prediction is
+  re-formed from the pass's own blend and checked bit for bit first. `FAB_CONTRIB=1` implies the
+  memory-off closure (Q-MEM-10 (a)): a memory-on baseline would put retrieval into it.
+* **The pricing.** `step_windows` is the closure's, `clock.step + 1` (Q-EVAL-12), for the baseline,
+  the reference walk and every counterfactual alike. At stage `A` that is one past the window about
+  to train (this window's flush trains at `clock.step`), where after the flush it is the next one.
+  **At the shipped `FAB_EMB_EVERY=1` the two prices give the same walk** — `step_windows` reaches a
+  `training=False` walk only through the identity cache, and both recompute every key from the
+  current weights; at `FAB_EMB_EVERY > 1` the walks may read the cache at another age than this
+  window's flush does. Recorded, not repaired: the baseline and the counterfactuals share it, so it
+  enters no difference, and it is the closure's own pricing, which the plan asked for by name.
+* **The candidates** (`candidates=None`, the move). The next `FAB_CONTRIB_MAX` experts with `uage >=
+  FAB_GRACE`, from `Population.contrib_cursor` (new), wrapping once; the cursor is left one past the
+  last taken, so every past-grace expert is reached once per (past-grace count / `FAB_CONTRIB_MAX`)
+  passes instead of the lowest slots forever. Fewer past-grace experts than the cap are all taken and
+  the cursor stays; a cursor past the population restarts at 0; `_remove` moves the cursor with the
+  expert it points at; the cursor is checkpointed. A list is measured as given, each slot once
+  (a slot outside the population or named twice is refused), and moves no cursor. The root passes
+  none, and so reads nothing inside `Population` (O10).
+* **The walks.** Looped arm: `FAB.forward(training=False, hold_out=c)` per candidate, under
+  `no_grad`, the identity cache unwritten (a pass that cannot carry a graph writes none,
+  `_identities`). Society arm: `FabricOut.blend` (new, `(voters, vote weights, held, base logits)`,
+  None elsewhere) with the candidate's weight removed from every row it voted in and the rest
+  renormalised, the halt blend re-applied, a row it alone voted in falling back to the base
+  representation; the one expression `(1 - held) * vote + held * decode(base)` is evaluated in the
+  order it always was. `fab.holdout_applied` counts one per candidate on both arms.
+* **The write.** Each value is the counterfactual's mean loss minus `baseline_loss`, in nats per
+  token: **positive is load-bearing**, the sign both spares test. The first measurement SETS
+  `Population.contrib` and each later one folds in at `FAB_COMP_EMA` — the old tree's `d if nid not
+  in fab.contrib else EMA` (`self_organize.py:6980`) — and `Population.contrib_n` (new, one of
+  `_BOOKS`, checkpointed, cleared by `_claim_slot`) counts measurements, so "never measured" and
+  "measured at 0" read apart. **A DEGENERATE pass — no candidate's logits moved — writes nothing**
+  and counts `fab.contrib_degenerate` (the C3 alarm). A candidate whose value is not finite is left
+  unmeasured and counted `fab.contrib_nonfinite`, as is every candidate of a pass whose
+  `baseline_loss` is not finite (no walk is taken). A value's resolution is the float32 mean loss's:
+  a removal that moves the logits and not the mean at that resolution reads exactly 0.0, and is
+  written — measured, not load-bearing on this material.
+* **The row** (`LOOP_ORDER` `('A', 'FAB', 'contribution')`, before `FAB.manage`, INSIDE the one
+  `Cadences.due('fab.manage', ...)` answer — a second `due()` under that key would consume the
+  fire). The arm test first: `FAB_CONTRIB=1` on a routed arm with the retention probe armed. Under
+  `no_grad`, `spine/rng.py::frozen_rng(strict=True)` — a pass that moved a global stream raises
+  `RngError`, as the probe's reading does — every module in eval mode (`compose.py::_eval_mode`, the
+  closure's own handling lifted into one helper, because the held-out walks run outside the
+  closure and `LM.decode`'s readout dropout is a training-mode draw) and `Process.autocast`, inside
+  which the root scores `baseline_loss` and FAB its counterfactuals. Its seconds are
+  `eval.contrib.seconds`, outside the `fab.manage` span. `ROW_ARGUMENTS_ELSEWHERE` names each join
+  (34 entries); `_CALLS['A']` gains it; `DEFERRED_ENTRY_POINTS` loses it (17).
+* **`FAB_FADED_CULL='contrib'`** (NEW-10's rule). A faded-area removal goes ahead only where
+  `FAB.contribution` has MEASURED the expert (`contrib_n > 0`) at or below 0 — counted at `'as_is'`'s
+  names and `fab.cull_faded_allowed_by_contrib` / `fab.merge_faded_allowed_by_contrib` — and every
+  other one is kept by `'defer'`'s own machinery (Q-FAB-18's review: the kept victim holds its budget
+  slot, the kept absorbee pairs with nobody else, the gate and budget read `'as_is'`'s population),
+  counted `fab.cull_faded_refused_by_contrib` / `fab.merge_faded_refused_by_contrib`, beside
+  `fab.faded_deferred_experts`; the deferral pair stays ABSENT, and at `'as_is'` and `'defer'` the
+  four new keys do. **An unmeasured expert is kept — C37's deferral lasting until a measurement
+  exists.** A cull's refusal is always an unmeasured expert, since one measured above 0 was spared as
+  load-bearing before either cull read its area; a merge's can be either, since the merge reads no
+  contribution of its own. The pass's reasons say "refused at FAB_FADED_CULL='contrib'" where
+  `'defer'`'s say "deferred", whose words are unchanged.
+* **Startup** refuses `FAB_FADED_CULL='contrib'` at `FAB_CONTRIB=0` (`'defer'` under another name),
+  `FAB_CONTRIB=1` at `EVAL_RETENTION_EVERY=0` (both at the `refuse` stage), and `FAB_CONTRIB=1` over
+  an armed probe that pinned nothing (at the stop after the `valve` stage, once the `ProbeSet` exists,
+  quoting its reason). `FAB_CONTRIB_MAX=0` is refused by its domain.
+* **The counters and the Gate.** `fab.contrib_passes` (the calls that walked — a candidate and a
+  finite baseline, each one reference walk), `fab.contrib_measured` (candidates written),
+  `fab.contrib_degenerate` and `fab.contrib_nonfinite` are seeded 0 by `FAB.build` at
+  `FAB_CONTRIB=1` on a routed arm and are ABSENT otherwise; each pass writes the gauges
+  `fab.contrib_distinct_values`, `fab.contrib_positive`, `fab.contrib_negative`,
+  `fab.contrib_coverage` (a float: this pass's candidates over its past-grace count) and
+  `fab.contrib_measured_live`. **Gate `fab.contrib`** is UNREACHABLE naming `FAB_CONTRIB=0` at the
+  shipped value (and naming the arm at `FAB_ON=0` / `FAB_NORM_ONLY=1`), a prediction at 1 until the
+  first pass replaces it by name — the cull gate's treatment — re-rendered as RESTORED on a resume,
+  and its count is `fab.contrib_passes`. `RunResult.gated` gains `FAB.contribution` keyed to
+  `fab.contrib_passes`. The root's book gains `eval.contrib.calls`, `.empty`, `.windows`, `.cuts`,
+  `.forwards`, `.decodes`, `.sig_calls`, `.sig_windows` and `.domain_spawn` (PRESENT-and-0 where
+  armed, carried by `LOOP.eval` like the probe's) and `eval.contrib.seconds` (a float, never carried).
+
+**Deviations from the plan, each forced by the code.** (1) `_GATED` is keyed to
+`fab.contrib_passes`, not `fab.contrib_measured`: `_gate_report` prints "fired N time(s)" and the
+TOK rows' per-call rule (2026-09-24) forbids a count of anything else — `fab.contrib_measured`
+counts experts, so one call measuring 64 would read "fired 64 time(s)". (2) The batch takes
+`(EVAL_RETENTION_N + 1) // 2` control items, not `EVAL_RETENTION_N // 2`: the latter is the report
+share, and `EVAL.holdout_probe` gives the odd item to control. (3) `FabricOut.blend` is new: the
+society arm's prediction cannot be re-formed from `per_expert_logits` alone — the halt mass spent
+on the base and the per-row vote weights are on no other field (`weights` is the routing
+distribution, whose renormalised top-k equals the vote weights in arithmetic and not in the last
+bit on an eval pass) — so the plan's "reweighted sum" could not be exact without it. (4) `Population.contrib_n` is
+new: `contrib` alone cannot tell an unmeasured expert from one measured at 0, and `'contrib'`
+treats the two oppositely. (5) The reference walk and the loss re-score are the plan's "the baseline
+comes from `baseline_logits_fn()`" made a check at every pass (one extra forward a pass) rather than a
+convention. (6) The `eval.contrib` book is new, so Q-EVAL-12's exact accounting still holds with the
+measurement on (below). (7) The nothing-pinned refusal is taken after the `probe` stage, where it
+can be known, not at the `refuse` stage.
+
+**The exact accounting, extended.** With nothing reading `contrib` — `FAB_CULL_FRAC=0`,
+`FAB_MERGE_DIST=0`, `FAB_FAIL_TOL=1000` — at `LM_DROPOUT=0.1`, `FAB_CONTRIB=1` against 0 trains the
+same losses float for float and ends in the same state but `FAB.books.contrib`,
+`FAB.books.contrib_n`, `FAB.contrib_cursor` and `LOOP.eval`; every integer counter is equal but a
+named set, each moving by exactly a book's count: `tok.segment_remap` by `eval.contrib.cuts`;
+`fab.eval_passes` by `eval.contrib.forwards` plus `fab.contrib_passes` (one reference walk each);
+`fab.holdout_applied` by the candidates walked; `lm.embed.*`, `lm.encode.calls`,
+`world.forecast.calls` and `.inert` by `eval.contrib.forwards`; `lm.decode.calls` (and
+`lm.mask.applied` at `LM_MASK_DEAD_ROWS=1`) by `eval.contrib.decodes`; `lm.loss.calls` by
+`eval.contrib.calls`; `sig.encode_calls` by `eval.contrib.sig_calls` and `sig.encode_windows` by
+`eval.contrib.sig_windows` (a pass encodes its batch's rows in one call; the probe's are one row
+each, so its book needs no such key and has none). Where something reads `contrib`, the run
+departs from the first pass on, by design: that is what the measurement is for.
+
+**What it costs.** `FAB_CONTRIB_MAX` forwards a pass plus three (two closure passes and the reference
+walk), every `FAB_MANAGE_EVERY` windows, under `no_grad`. On CPU (operation only) C-2's shape spent
+about 26 s of a 57 s, 200-window run in 7 passes (52 candidates, then 64 each); on the owner's pool
+the pass's share of wall
+is E2's to price with `eval.contrib.seconds`. At the owner's 481-1,002 past grace 64 reaches each
+expert once per 8-16 passes — about once per 3,800-7,800 windows at `FAB_MANAGE_EVERY=500` — so
+`'contrib'` mostly meets unmeasured experts and keeps them until E2 sizes the cap.
+
+**What it does not see (recorded, not repaired).** (a) A merge's survivor keeps its own `contrib`,
+measured before the merge rewrote its weights, until it is measured again. (b) The material is the
+arrived areas' control items: an expert no control row routes to reads exactly 0 — "not
+load-bearing on this material" — and at `'contrib'` a faded-area expert measured so may be removed;
+its own area's control items are in the batch whenever that area has arrived, which a faded area
+has. (c) On the society arm only voters move a row, so a pass whose candidates cast no vote on the
+batch is degenerate: the cursor walks the past-grace population and the batch's
+rows × `FAB_ENS_K` votes reach few of them (C-3 below). (d) The stage-`A` pricing at
+`FAB_EMB_EVERY > 1`, above. (e) On a bf16 device the baseline's SIG encode and nearest-domain run
+outside autocast and its forward inside, as the probe's do; bitwise agreement there is a GPU
+reading, not a CPU one.
+
+**Bit-identity.** At the shipped `FAB_CONTRIB=0` the arm test skips the row and nothing new is
+called; `Population.contrib` stays 0.0; `'as_is'` and `'defer'` are the bodies they were (the
+`'contrib'` branches are behind `gated`, which is False at both); the society blend is the same
+expression in the same order; `FAB.build` adds Gate `fab.contrib`, a gate row and not an integer
+counter line. B1, B3, B3r, B5, B6 and B6r reproduce their fixtures.
+
+**Known answers** (`tests/test_contribution.py`, CPU, operation only). C-1 at the shipped
+`FAB_CONTRIB=0`, on a 100-window run that reads the probe (`EVAL_RETENTION_EVERY=20`, `DATA_SYNTH_HOLDOUT=1`) and reaches
+three manage passes: the entry point is never called, `contrib` is 0.0 and `contrib_n` 0 on all 512
+slots, the cursor 0, no `fab.contrib_*` or `eval.contrib.*` key exists, Gate `fab.contrib` and the
+gated-call line read UNREACHABLE naming `FAB_CONTRIB=0`; a direct call at 0 writes nothing. C-2 the
+plan's run (`FAB_CONTRIB=1`, `EVAL_RETENTION_EVERY=20`, `DATA_SYNTH_HOLDOUT=1`, `FAB_GRACE=2`,
+`FAB_MANAGE_EVERY=25`, 200 windows): seven passes (the fires at 26, 51, ..., 176) off the cursor,
+the first taking all 52 experts then past grace and the rest 64 each, distinct values per pass 3, 1,
+3, 6, 5, 6, 7 (the one at window 51 read 0.0 on all 64 while its walks moved the logits — the
+resolution above), `fab.contrib_measured` 436 = the candidates written = `fab.holdout_applied`, no
+pass degenerate, `fab.contrib_coverage` 64/93 at the last, `fab.spared_contrib` 4; the cursor rotates as hand-computed on a scripted population, `_remove`
+moves it, and a list of candidates is validated. C-3 at `clock.step` 200 `FAB.forward` handed the
+closure's own inputs (priced 201) returns its logits bit for bit on 12 rows; on the society arm the
+prediction re-forms bit for bit, a non-voter's removal returns it untouched, and a society run's
+first pass (8 candidates, none a voter) was degenerate while its second wrote 8; `h` moved by 1e-3
+is refused. C-4 a pass over unrouted experts only, and any pass on a one-expert population, is
+degenerate and writes nothing. C-5 in each of the six calls of the phased run below, `LM.lm_loss`
+over `baseline_logits_fn()`'s logits is `baseline_loss` exactly; one ulp away is refused naming
+P1-H11. C-6 on a scripted population routed by its centroids: the planted expert reads +2.853, the
+unrouted ones exactly 0.0 (written), a planted harmful one −9.488; the EMA folds a second reading;
+a non-finite `baseline_loss` measures nothing. C-7 scripted: the utilization cull at `'as_is'` keeps
+experts 5-9, at `'defer'` 0, 2 and 5-9, at `'contrib'` with 0 measured at −0.5 and 2 unmeasured 2 and
+5-9 (2 holding its slot); measured at 0.0 both go; measured at +0.4, 0 is spared as load-bearing and
+the budget walks on; the merge keeps an unmeasured absorbee apart, merges one measured at −0.2 and
+keeps one at +0.3. In B3's shape at `'contrib'` (`FAB_CONTRIB_MAX=32`, 314 windows, six passes)
+every one of the 24 faded-area removals (21 culls, 3 merges) was of an expert measured at or below 0
+when it went, 11 were refused, the allowed counts equal the faded removals and the deferral pair is
+ABSENT; the three startup refusals and the domain's hold. C-8 C-2's run saved at window 110 and
+continued by a second compose ends with its losses, contrib books, cursor, `fab.contrib_*` counts
+and `eval.contrib` book exactly; a blob without `contrib_n` and the cursor restores every expert
+unmeasured. C-9 the accounting above, on three passes: `fab.eval_passes` +9 (6 closure passes and
+3 reference walks), `fab.holdout_applied` +176, `lm.decode.calls` +370, `lm.embed.calls`,
+`lm.encode.calls` and `world.forecast.calls` +6, `lm.loss.calls` +3, `sig.encode_calls` +6,
+`sig.encode_windows` +36, `tok.segment_remap` +18.
 
 ### Q-MEM-16 — which area each stored entry came from, and the store's occupancy by area — **RESOLVED 2026-09-28 (Proposal 05 §8 3.1; register NEW-10): `MEM.write(..., areas=None)` FILLS A NEW PER-ENTRY `area` COLUMN; `MEM.census` RETURNS `by_area`; THE ROOT PRINTS `store.occupancy.<area>` BY NAME. A FROZEN SIGNATURE WIDENED WITH A DEFAULTED KEYWORD. NO LEVER, NO WIRE, AND NO NUMBER A DEFAULT RUN PRODUCES MOVES**
 NEW-10 rules that from SR0 on every training run reports "memory occupancy by area" — the reading
@@ -8154,7 +8398,7 @@ B6r reproduce their fixtures.
 | K1 | every name this document declares exists in the tree **with the signature it claims** | rename a parameter; drop a function |
 | K2 | `spine.compose` imports and `compose()` raises **only `NotImplementedError`, from a stub** | a typo in the root surfaces as `AttributeError`/`TypeError`, not as a missing body |
 | K3 | no package imports another (O10 restated at the contract boundary) | add `from fabric import api` to `src/memory/` |
-| K4 | every one of the 294 declared levers is named `LEVERS READ:` by a stub, or is in the UNCONSUMED table above **with a reason** | declare a lever and give it no reader |
+| K4 | every one of the 296 declared levers is named `LEVERS READ:` by a stub, or is in the UNCONSUMED table above **with a reason** | declare a lever and give it no reader |
 | K5 | every `d_` field the ledger declares is read by a stub in its own package, and no stub reads an undeclared one | add a wire nobody consumes |
 | K6 | every entry point is **named by a row** in `ASSEMBLY_ORDER` or `LOOP_ORDER`, or is in `compose.DEFERRED_ENTRY_POINTS` with a reason | declare a mechanism the root never calls; or leave a deferral in place after a row starts naming it — the check reads that table **backwards** and reports the stale entry |
 | K7 | the root reads only names a package **declares** off a Config | `int(lm.depth)` where LM declares `layers` — a crash at whatever stage reaches it, invisible while an earlier stub raises first |
@@ -8252,7 +8496,10 @@ moves of 2026-09-28 are that kind and were made here with the tree: §8 3.1's fa
 widened `FAB.observe` with `area_id=None` and `FAB.manage` with `faded=None` (Q-FAB-18), and
 `MEM.write` with `areas=None` (Q-MEM-16) — each a defaulted keyword at the end, so every existing
 call is the call it was, and none was added, so the count stood at 147 until the book's three, the
-same day. `DATA.stream_state`'s `focus=None` (Q-DATA-11) is the same kind of move.
+same day. `DATA.stream_state`'s `focus=None` (Q-DATA-11) is the same kind of move. So is
+`FAB.contribution`'s `candidates=None` (Q-FAB-19, the same day), with one difference: it gives a
+default to a keyword that EXISTED, required, rather than adding one — so a call that passes
+`candidates` is the call it was, and the count does not move.
 
 Ten implementation agents work against this list independently. **It does not move without an edit
 to this document and to the tree in the same commit**, which is the only thing keeping them
@@ -8315,7 +8562,7 @@ FAB: Population.n(self)
 FAB: Population.parameters(self)
 FAB: forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None, step_windows, domain_id, live_domains, training, hold_out=None)
 FAB: observe(fab: Config, pop, out, *, per_window_loss, domain_id, area_id=None)
-FAB: contribution(fab: Config, pop, *, h, signature, novelty, head, targets, baseline_loss, baseline_logits_fn, step_windows, domain_id, live_domains, candidates)
+FAB: contribution(fab: Config, pop, *, h, signature, novelty, head, targets, baseline_loss, baseline_logits_fn, step_windows, domain_id, live_domains, candidates=None)
 FAB: manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None)
 FAB: grow_check(fab: Config, pop, *, flush_loss, step_windows, soft_cap, memory_pressure, signature, shift_at=None)
 FAB: own_lr_scale(fab: Config, pop, *, applied_lr)

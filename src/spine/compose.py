@@ -71,6 +71,7 @@ registry.unread_env then has no mapping to scan and a misspelled knob is silentl
 the process environment in from the entry point.
 """
 import bisect
+import contextlib
 import hashlib
 
 # NOT `from spine.assemble import build, render`, and not a re-export of anything.
@@ -1009,6 +1010,34 @@ LOOP_ORDER = (
                                       "block since 2026-09-02 under DOM's own spellings -- "
                                       "Q-MEM-11 RESOLVED (a), and this row is where its two renames "
                                       "are recorded"),
+    ("A", "FAB",   "contribution",    "THE MARGINAL CONTRIBUTION (2026-09-28, register §8 3.5, "
+                                      "02-R11 and C37; Q-FAB-19), INSIDE THE ONE "
+                                      "Cadences.due('fab.manage', ...) ANSWER THE ROW BELOW ASKS "
+                                      "-- never a second due() under that key -- and BEFORE "
+                                      "FAB.manage, so the pass's contrib > 0 spares and "
+                                      "FAB_FADED_CULL='contrib' read what it measured. THE ARM TEST "
+                                      "COMES FIRST: FAB_CONTRIB=1 on a routed arm with the "
+                                      "retention probe armed; at the shipped FAB_CONTRIB=0 the row "
+                                      "is skipped and no fab.contrib_* key exists. The batch is "
+                                      "_contrib_material's: the first (EVAL_RETENTION_N + 1) // 2 "
+                                      "pinned CONTROL items of every arrived area, cut at the "
+                                      "last-cut view and cut back to one length; targets are its "
+                                      "ids shifted one. The root binds the memory-off closure to "
+                                      "the batch (_logits_fn(sysm, use_memory=False, "
+                                      "book='eval.contrib') through _contrib_baseline) as "
+                                      "baseline_logits_fn, calls it once with route= to take the "
+                                      "FAB.forward inputs it used -- h, signature, novelty ZEROS, "
+                                      "domain_id (DOM.nearest of the first row's signature), "
+                                      "live_domains and step_windows (clock.step + 1, the "
+                                      "closure's routing clock) -- and scores its logits "
+                                      "LM.lm_loss(lm, logits=..., y=targets) for baseline_loss; "
+                                      "head is the closure's counted head. All of it under "
+                                      "no_grad, frozen_rng(strict=True), every module in eval mode "
+                                      "and Process.autocast. candidates is left at None: the next "
+                                      "FAB_CONTRIB_MAX past-grace experts off Population's rotating "
+                                      "cursor. IT PRODUCES NOTHING ANY SIGNATURE TAKES: it writes "
+                                      "Population.contrib and contrib_n, the books the row below "
+                                      "reads, and returns a ContribReport the root files nowhere"),
     ("A", "FAB",   "manage",          "Cadences.due('fab.manage', FAB.manage_period(fab), clock) -- "
                                       "step_windows=clock.step; flush_loss is the MEAN of the "
                                       "flush losses since the previous pass, computed by the loop "
@@ -1018,7 +1047,10 @@ LOOP_ORDER = (
                                       "first byte -- Plan.faded for its phase and "
                                       "Plan.parent_faded, as spine/derive.py::area_id numbers -- "
                                       "which the pass counts its removals against, and at "
-                                      "FAB_FADED_CULL='defer' defers them by. WORLD's growth pass used to ride "
+                                      "FAB_FADED_CULL='defer' defers them by -- at 'contrib' "
+                                      "(2026-09-28, Q-FAB-19) removing one only where the row "
+                                      "above, riding this same one answer, has measured the "
+                                      "expert at or below 0. WORLD's growth pass used to ride "
                                       "this same one answer without saying so; that row is now "
                                       "deferred, and if it returns it must either be written INSIDE "
                                       "this answer, in the shape the management block above uses, "
@@ -1186,17 +1218,19 @@ LOOP_ORDER = (
                                       "FAB.observe's spelling; "
                                       "flush_loss = per_window -- the same return pooled over the "
                                       "flush, which FAB.manage and FAB.grow_check take; "
-                                      "baseline_loss = per_window -- the same return again, "
-                                      "FAB.contribution's spelling; "
                                       "bits = per_window -- the same return over ln 2, bits per "
                                       "TOKEN, and at DOM_LEVELS re-denominated by the root to bits "
                                       "per build-time token (Q-DOM-5; this read 'bits per byte' "
                                       "until 2026-09-26, which it never was), "
-                                      "DOM.note_competence's spelling. FOUR SPELLINGS OF LM.lm_loss'S TWO "
-                                      "RETURNS, which are a bare tuple with no record type to "
-                                      "anchor them (lm/api.py::lm_loss); mean, the other one, is "
-                                      "the first summand of the composed objective "
-                                      "OPT.scaled_backward takes"),
+                                      "DOM.note_competence's spelling. THREE SPELLINGS OF "
+                                      "LM.lm_loss'S TWO RETURNS, which are a bare tuple with no "
+                                      "record type to anchor them (lm/api.py::lm_loss); mean, the "
+                                      "other one, is the first summand of the composed objective "
+                                      "OPT.scaled_backward takes. (A FOURTH, baseline_loss for "
+                                      "FAB.contribution, stood here until 2026-09-28: the "
+                                      "baseline is no longer the flush's loss but the A row's "
+                                      "own LM.lm_loss mean over the probe's control half, "
+                                      "Q-FAB-19)"),
     ("B", "FAB",   "forward",         "head=LM.decode as a plain callable -- not an import, and "
                                       "bound by _head. h from the row above; signature from A; "
                                       "step_windows=clock.step; domain_id and live_domains from "
@@ -1333,13 +1367,13 @@ LOOP_ORDER = (
                                       "supplied it (Q-FAB-6, ruled 2026-09-02: A FROZEN SIGNATURE "
                                       "MOVED, grow_check gained shift_at=None). FAB.contribution "
                                       "was the third entry on "
-                                      "this row and is now deferred -- its `candidates` and "
-                                      "`targets` have no producer and its `baseline_logits_fn` a "
-                                      "candidate of the wrong shape, as DEFERRED_ENTRY_POINTS "
-                                      "says. Until Q-EVAL-12's review this note said "
-                                      "`baseline_logits_fn` had none, the same missing join that "
-                                      "deferred EVAL.holdout_probe: the retention probe formed "
-                                      "that join on 2026-09-27, as _logits_fn"),
+                                      "this row, then deferred for want of `candidates`, "
+                                      "`targets` and a `baseline_logits_fn` of the right shape; "
+                                      "since 2026-09-28 (Q-FAB-19) it has an A row of its own, in "
+                                      "the fab.manage answer, on the retention probe's control "
+                                      "half through the memory-off closure, where `candidates` "
+                                      "defaults to the next FAB_CONTRIB_MAX past-grace experts and "
+                                      "`targets` are the batch's own shifted ids"),
     ("B", "MEM",   "write/maintain",  "key_fn=LM.encode bound by _key_fn; contexts and tokens are "
                                       "the flush's x and y at _flush_bounds; positions are TRUE "
                                       "BYTE OFFSETS from Segmentation.byte_pos; areas (2026-09-28, "
@@ -1779,22 +1813,23 @@ LOOP_ORDER = (
 # close it. NONE was deferred for being late, and none because a body was missing: the whole tree
 # was stubs.
 #
-# THE TABLE HOLDS EIGHTEEN ENTRIES SINCE 2026-09-27, when the retention probe (Q-EVAL-12) closed
-# five: EVAL.holdout_probe and EVAL.generate got rows, CKPT.Retention.consider got its caller, and
-# MEM.read and MEM.blend are reached through the memory-on closure the R row's note names. The
-# eighteen divide by WHY rather than by package:
-#   TEN are deferred at the ARGUMENT or at the SCOPE. Six are EVAL's -- EVAL.null_excess,
+# THE TABLE HOLDS SEVENTEEN ENTRIES SINCE 2026-09-28, when FAB.contribution got its A row (Q-FAB-19),
+# the day after the retention probe (Q-EVAL-12) closed five: EVAL.holdout_probe and EVAL.generate got
+# rows, CKPT.Retention.consider got its caller, and MEM.read and MEM.blend are reached through the
+# memory-on closure the R row's note names. The seventeen divide by WHY rather than by package:
+#   NINE are deferred at the ARGUMENT or at the SCOPE. Six are EVAL's -- EVAL.null_excess,
 #   EVAL.verdicts, EVAL.wrongness_probe and EVAL.verification_fit wait on an argument nothing
 #   produces, and EVAL.curve_probe and EVAL.coherence, whose producers exist since the probe
-#   landed, are SCOPE deferrals: no row of the register's section 8 builds them. Four are not EVAL's
-#   -- MEM.judge (the scorer's (ctx, src) arity the closure does not have), FAB.contribution
-#   (candidates and targets), CAP.observe and WORLD.manage.
+#   landed, are SCOPE deferrals: no row of the register's section 8 builds them. Three are not
+#   EVAL's -- MEM.judge (the scorer's (ctx, src) arity the closure does not have), CAP.observe and
+#   WORLD.manage.
 #   EIGHT are deferred because the CALLER is missing while every argument is one the caller already
 #   holds: FAB.Population's two accessors, WORLD.World.parameters, three of Vocabulary's five
 #   accessors (live_size, at_cap, blen), and RUN.Timing's two.
 # (Until 2026-09-27 this paragraph counted twenty-four entries, FIFTEEN by argument and NINE by
 # caller with "four of Vocabulary's five" -- which was stale twice by then: the table held
-# twenty-three, and three Vocabulary accessors, since TOK.Vocabulary.size left it.) The count is not
+# twenty-three, and three Vocabulary accessors, since TOK.Vocabulary.size left it. It counted
+# eighteen, TEN by argument or scope, until FAB.contribution left on 2026-09-28.) The count is not
 # cosmetic -- this table's whole claim is that every orphan is enumerated, and an enumeration whose
 # own total is wrong is one no reader re-checks.
 # SOME OF THOSE NOW HAVE A CALLER THAT IS NOT A ROW, AND THEIR ENTRIES SAY SO (2026-09-24):
@@ -1804,11 +1839,12 @@ LOOP_ORDER = (
 #
 # WHAT THIS COSTS, SAID PLAINLY, because a deferral that hides its cost is the shape it replaces:
 # with these unrowed the run has no capacity valve (nothing lifts a cap), no WORLD growth, no
-# learning-curve probe at EVAL_CURVE_EVERY, no per-expert contribution and therefore no informed
-# spare rule, and no wrongness sweep. The retention probe that closed five of them is BUILT OFF
-# (EVAL_RETENTION_EVERY=0), so at the shipped defaults the best-model save and the restart damping
-# still read their inert reasons until the register's C9 flip. The deferral does not remove a
-# mechanism, it stops the tables claiming one, and it names the producer each mechanism is waiting
+# learning-curve probe at EVAL_CURVE_EVERY and no wrongness sweep. The retention probe that closed
+# five of them is BUILT OFF (EVAL_RETENTION_EVERY=0), so at the shipped defaults the best-model save
+# and the restart damping still read their inert reasons until the register's C9 flip; and the
+# per-expert contribution that left on 2026-09-28 is BUILT OFF too (FAB_CONTRIB=0), so a default run
+# still has no measured contribution and no informed contrib > 0 spare. The deferral does not remove
+# a mechanism, it stops the tables claiming one, and it names the producer each mechanism is waiting
 # on.
 DEFERRED_ENTRY_POINTS = {
     # THE TWO Population ACCESSORS AND FOUR OF Vocabulary'S FIVE. They arrived with their records in
@@ -1984,25 +2020,6 @@ DEFERRED_ENTRY_POINTS = {
         "SETTLED BY ARGUMENT IS THE SCOPE, and it is a declared lever instead: MEM.judge_frac, a "
         "CENSUS AMENDMENT shipped at 0.0 (the re-score is off), with the full-store arm at 1.0 "
         "costing about 1.7x the interval's whole training compute.",
-    "FAB.contribution":
-        "P4 (fabric). TWO arguments still have no producer, and a third has a producer of the wrong "
-        "shape. `candidates` is the eligible past-grace set, which lives in Population's use/uage "
-        "books; no entry point exports it and O10 forbids the root reaching into `pop`, so either "
-        "FAB adds an accessor or `candidates` gains a documented default of 'all past-grace'. "
-        "`targets` is the flush's shifted token cut -- the same `y` LM.lm_loss takes, which is the "
-        "loop's own slice and has no row -- a gap of a different KIND from the other two, and that "
-        "difference is why it was once missed. `baseline_logits_fn` HAS A CANDIDATE SINCE "
-        "2026-09-27 and it is still not this argument: _logits_fn(sysm, use_memory=False) is the "
-        "memory-off path the run trained, and fabric/api.py::contribution makes it load-bearing "
-        "that the baseline comes from THE SAME CALLABLE that produced `baseline_loss` -- the whole "
-        "C3/H11 repair, since a baseline from anywhere else rebuilds the offset that set contrib's "
-        "SIGN. The closure scores held-out windows through fn(x, *, prefix_bytes); the flush's "
-        "baseline_loss is the training forward's, with this flush's signatures, novelty and "
-        "routing clock, so the two are not one callable until the manage pass forms the baseline "
-        "loss through the closure as well. Under Q-MEM-10 (a) THIS ONE IS ALWAYS THE MEMORY-OFF "
-        "CLOSURE -- handing it the memory-on one would put retrieval in the baseline and undo that "
-        "repair from the other side. Until then fab.contrib_measured reads unreachable, and the "
-        "two spare rules and the replication parent choice have no signal.",
     "CAP.observe":
         "P4 (fabric + capacity). THREE arguments have no producer, not two: `elapsed_windows` was "
         "omitted from this reason until K12 counted them. It is the valve's PIN DELTA -- how many "
@@ -2310,6 +2327,26 @@ ROW_ARGUMENTS_ELSEWHERE = {
         "a value the loop holds between the EVAL.holdout_probe row and this one, finite or not "
         "forwarded at all, which no produces column can carry because it is taken and consumed in "
         "one window. step is RunClock.step, units.Windows, as consider requires.",
+    # ---- THE MARGINAL CONTRIBUTION'S JOINS (2026-09-28, register §8 3.5; Q-FAB-19). One batch of the
+    # retention probe's pinned control items, the memory-off closure bound to it, and the FAB.forward
+    # inputs that closure's own pass used: the root's work over EVAL's ProbeSet, TOK, SIG, DOM, LM and
+    # WORLD, which O10 forbids any one package to form, and none of it a row's return.
+    "FAB.contribution":
+        "targets is the batch's ids shifted one: _contrib_material(sysm, arrived)'s y, cut from the "
+        "first (EVAL_RETENTION_N + 1) // 2 pinned CONTROL items of every arrived area at the "
+        "last-cut view (_holdout_tokenize, booked eval.contrib.cuts) and cut back to one length. "
+        "baseline_logits_fn is _contrib_baseline(sysm, fn, x, prefix_bytes): the memory-off closure "
+        "_logits_fn(sysm, use_memory=False, book='eval.contrib') bound to that batch, run with any "
+        "autocast its caller holds turned off, as the closure runs standalone. baseline_loss is "
+        "the mean LM.lm_loss returns for those logits against targets -- the one callable's own "
+        "loss, which FAB.contribution re-scores and refuses to measure against where it differs "
+        "(ISSUES P1-H11). h, signature, novelty, domain_id, live_domains and step_windows are the "
+        "FAB.forward inputs that baseline pass used, taken off it through the closure's `route` "
+        "dict: LM.encode's h over the batch with WORLD.forecast's extra, SIG.encode of each row's "
+        "prefix units, novelty ZEROS, DOM.nearest of the first row's signature, System.live_domains "
+        "and clock.step + 1, the closure's routing clock. head is the closure's counted head "
+        "(fn.head), LM.decode at the live vocabulary boundary. candidates is left at None, the next "
+        "FAB_CONTRIB_MAX past-grace experts off Population's rotating cursor.",
     # ---- THE SOURCE-RELIABILITY BOOK'S JOIN (2026-09-28, Proposal 04 SR3, Q-DATA-11).
     "DATA.claims_observe":
         "focus is System.focus, the 'focus' ASSEMBLY row's Focus. units and sources are "
@@ -2716,6 +2753,27 @@ def compose(environ=None, *, restored=None):
             f"probe is off, so no Reading can ever arrive. Set EVAL_RETENTION_EVERY above 0 "
             f"(1000 is the register's 04-6.2 cadence, 160 the only measured one), or leave "
             f"OPT_DAMP_SOURCE at 'off'.")
+    # FAB.contribution'S TWO CONFIG-ONLY REFUSALS (2026-09-28, register §8 3.5; Q-FAB-19), taken here
+    # for the same reason: each is a check over two packages' frozen Configs. FAB_CONTRIB=1 measures
+    # on the retention probe's pinned control half and at EVAL_RETENTION_EVERY=0 nothing is pinned,
+    # so it would run armed and inert on every pass (FAB_CONTRIB=1 over an armed probe that pinned no
+    # window is refused at the 'probe' stage, where that can be known). FAB_FADED_CULL='contrib' removes a
+    # faded-area expert only on a MEASURED contribution, and at FAB_CONTRIB=0 nothing measures one,
+    # so it would keep every such removal -- 'defer' under another name.
+    if bool(fab.contrib) and int(ev.retention_every) <= 0:
+        sysm.refusals.append(
+            f"FAB_CONTRIB=1 with EVAL_RETENTION_EVERY={int(ev.retention_every)}: FAB.contribution "
+            f"measures each expert on the retention probe's pinned control half, and the probe is "
+            f"off, so nothing is pinned to measure on. Set EVAL_RETENTION_EVERY above 0 (any "
+            f"positive value pins the probe's windows; contribution reads them on the fab.manage "
+            f"cadence, not the probe's), or leave FAB_CONTRIB=0.")
+    if str(fab.faded_cull) == "contrib" and not bool(fab.contrib):
+        sysm.refusals.append(
+            "FAB_FADED_CULL='contrib' with FAB_CONTRIB=0: the rule removes a faded-area expert only "
+            "where FAB.contribution has measured it at or below 0, and with the measurement off "
+            "none ever is -- every such removal would be kept, which is FAB_FADED_CULL='defer' "
+            "under another name. Set FAB_CONTRIB=1 (with the retention probe armed), or choose "
+            "FAB_FADED_CULL='defer' or 'as_is'.")
     _stop_if_refused(sysm)
 
     # -- 4. geometry, then the corpus -------------------------------------------------------------
@@ -2997,12 +3055,41 @@ def compose(environ=None, *, restored=None):
             sysm.gen_rng = _rng_g.rng_for("eval.generate", int(run.seed))
             sysm.eval_books["eval.generate.samples"] = 0
             sysm.eval_books["eval.generate.tokens"] = 0
+        # FAB.contribution'S PASSES ARE BOOKED BESIDE THE PROBE'S, UNDER THEIR OWN KEYS (2026-09-28,
+        # register §8 3.5; Q-FAB-19), only where it is armed: FAB_CONTRIB=1 on a routed arm, whose
+        # every pass the root makes over this ProbeSet's control half. eval.contrib.calls the
+        # FAB.contribution calls, .empty the manage passes with no arrived control window to
+        # measure on, .windows the batch rows, .cuts the material's and the prefixes'
+        # TOK.tokenize calls, .forwards the closure passes (two a call: the root's baseline and
+        # contribution's re-check), .decodes every head call those passes and the held-out walks
+        # made, .sig_calls and .domain_spawn as the probe's, .sig_windows the rows those SIG
+        # encodes took; eval.contrib.seconds a float, never checkpointed. The exact accounting of
+        # Q-EVAL-12 then holds with both books' counts: tok.segment_remap moves by
+        # eval.holdout.cuts + eval.contrib.cuts, lm.decode.calls by the two .decodes,
+        # sig.encode_calls by the two .sig_calls and sig.encode_windows by eval.holdout.sig_calls +
+        # eval.contrib.sig_windows, every closure-pass counter by the two .forwards, and -- the
+        # pass's own -- fab.eval_passes by fab.contrib_passes more (one reference walk each),
+        # fab.holdout_applied by the candidates and lm.loss.calls by eval.contrib.calls.
+        if bool(fab.contrib) and bool(fab.on) and not bool(fab.norm_only):
+            for _k in _CONTRIB_BOOK_KEYS:
+                sysm.eval_books[_k] = 0
+            sysm.eval_books["eval.contrib.seconds"] = 0.0
         # A CONTINUED LINEAGE'S BOOK IS ITS TOTAL, as every package's restored counters are; the
         # seconds and the generation counts are this process's and are never carried.
         for _k, _v in dict((_ev_saved or {}).get("books") or {}).items():
             if _k in sysm.eval_books and not isinstance(sysm.eval_books[_k], float):
                 sysm.eval_books[_k] = int(_v)
         _probe_notices(sysm, ev)
+    # FAB_CONTRIB=1 WITH NO CONTROL WINDOW ANYWHERE IS REFUSED (2026-09-28, Q-FAB-19): the probe is
+    # armed (EVAL_RETENTION_EVERY > 0 was checked at the `refuse` stage) and pinned nothing, so
+    # FAB.contribution has no held-out material and would run armed and inert on every pass. The
+    # ProbeSet's reason says why nothing was pinned. Stops at the second stop point, with CAP's.
+    if bool(fab.contrib) and int(ev.retention_every) > 0 and not sysm.probe_set.items:
+        sysm.refusals.append(
+            f"FAB_CONTRIB=1: FAB.contribution measures on the retention probe's pinned control "
+            f"half, and nothing was pinned -- {sysm.probe_set.reason} Raise DATA_HOLDOUT_FRAC or "
+            f"the stream's length (on the synthetic source DATA_SYNTH_HOLDOUT=1 is what holds a "
+            f"block out), or leave FAB_CONTRIB=0.")
 
     sysm.stage = "fabric"
     sysm.fabric = fab_api.build(
@@ -4133,7 +4220,7 @@ def _key_fn(sysm):
 
 
 def _head(sysm):
-    """LM.decode bound to (lm, model) AND TO THE VOCABULARY: FAB.forward's and FAB.contribution's
+    """LM.decode bound to (lm, model) AND TO THE VOCABULARY: the training flush's FAB.forward
     `head`, a ONE-ARGUMENT callable.
 
     NOT a logits_fn: it decodes a hidden state that the fabric already produced. The logits_fn
@@ -4142,7 +4229,10 @@ def _head(sysm):
     it a head of their own, this same LM.decode at the same live boundary, wrapped to count its
     calls in the probe's book. (This paragraph said the whole path was "not formable today -- see
     DEFERRED_ENTRY_POINTS" until Q-EVAL-12's review; the retention probe formed it and left the
-    sentence standing.)
+    sentence standing.) FAB.contribution's `head` is the memory-off closure's, not this one
+    (2026-09-28, Q-FAB-19): the same LM.decode at the same live boundary, counted in the book its
+    baseline's passes are counted in, so the held-out walks decode exactly as the baseline did.
+    (The first line said "FAB.forward's and FAB.contribution's `head`" until then.)
 
     THE VOCABULARY IS BOUND HERE AND READ AT CALL TIME, AND THIS WAS `lambda h, **kw: decode(...)`
     UNTIL 2026-09-24. FAB calls `head(x)` with nothing else, and LM.decode's `live_vocab` and
@@ -4224,6 +4314,14 @@ _EVAL_BOOK_KEYS = (
 # THE BOOK'S TWO GAUGES: readings of the arrived set and of the alarm's series, so a record that
 # does not carry those (a probe-off run's, the 'probe' stage) does not carry these either.
 _EVAL_BOOK_GAUGES = ("eval.holdout.areas_unarrived", "eval.blowup.since_best")
+# FAB.contribution'S INTEGER KEYS IN THE SAME BOOK (2026-09-28, register §8 3.5; Q-FAB-19), seeded 0 at
+# the 'probe' stage where it is armed and ABSENT otherwise; the 'probe' stage's comment says what
+# each counts. They are the root's, as the probe's are: the passes are the root's, over five
+# packages, and FAB's own ledger counts only what FAB did (fab.contrib_*, fab.holdout_applied).
+_CONTRIB_BOOK_KEYS = ("eval.contrib.calls", "eval.contrib.empty", "eval.contrib.windows",
+                      "eval.contrib.cuts", "eval.contrib.forwards", "eval.contrib.decodes",
+                      "eval.contrib.sig_calls", "eval.contrib.sig_windows",
+                      "eval.contrib.domain_spawn")
 
 
 def _probe_armed(sysm):
@@ -4431,7 +4529,7 @@ def _last_cut_view(sysm):
     return _view_tuple(sysm.seg_log["events"][-1]["view"])
 
 
-def _holdout_tokenize(sysm, view=None):
+def _holdout_tokenize(sysm, view=None, book="eval.holdout"):
     """EVAL.holdout_probe's `tokenize_fn`: TOK.tokenize bound to the vocabulary AT A RECORDED VIEW.
 
     THE VIEW IS THE LAST CUT'S, NOT THE TABLE AS IT NOW STANDS (Q-EVAL-12). The model was trained on
@@ -4442,14 +4540,17 @@ def _holdout_tokenize(sysm, view=None):
 
     NO LABELS AND regularize=False, so it draws nothing from the dropout stream, bypasses TOK's
     one-slot cache and counts tok.segment_remap; every cut is booked as eval.holdout.cuts, so
-    MEM's remap count is tok.segment_remap minus it."""
+    MEM's remap count is tok.segment_remap minus it. `book` is the book's prefix: FAB.contribution's
+    material is cut here too and booked as eval.contrib.cuts (2026-09-28, Q-FAB-19), so the probe's
+    count stays the probe's."""
     tok = sysm.configs["TOK"]
     v = _last_cut_view(sysm) if view is None else _view_tuple(view)
     books = sysm.eval_books if sysm.eval_books is not None else {}
+    key = f"{book}.cuts"
 
     def tokenize_fn(data):
-        if "eval.holdout.cuts" in books:
-            books["eval.holdout.cuts"] += 1
+        if key in books:
+            books[key] += 1
         return tok_api.tokenize(tok, sysm.vocab, bytes(data), view=v)
     return tokenize_fn
 
@@ -4494,6 +4595,66 @@ def _gen_prompts(sysm, arrived, view=None):
     return out
 
 
+def _contrib_material(sysm, arrived):
+    """FAB.contribution's batch (2026-09-28, register §8 3.5; Q-FAB-19): (x, y, prefix_bytes, rows)
+    or None where no arrived area holds a control window that cuts to two ids.
+
+    THE PROBE'S CONTROL HALF, AND ONLY THE ITEMS A CADENCE READING SCORES: the first
+    (EVAL_RETENTION_N + 1) // 2 pinned control items of every ARRIVED area -- EVAL.holdout_probe's
+    own control share, the odd one to control -- in area order and pin order. Held-out text the
+    consumers read and the run never trained on, pinned once per run, so every pass measures the
+    same windows; the report half stays unread by any consumer. An area whose phase has not begun is
+    left out, for _holdout_units' reason: its reading would be of text the run has not met.
+    CUT AT THE LAST-CUT VIEW (_holdout_tokenize, booked eval.contrib.cuts) and TRUNCATED TO A COMMON
+    LENGTH -- the shortest cut, from the end, so each row's routing prefix still ends at its first
+    byte -- because one closure pass scores one (B, L) batch; a window cut to fewer than two ids
+    scores nothing and is left out, as the probe leaves it. THE LENGTH IS CAPPED AT LM.ctx + 1 ids as
+    well, so x never holds more than LM.ctx: the closure keeps the LAST LM.ctx of a longer x (it owns
+    generation's window), and the logits would then no longer line up with y. A window pinned at
+    LM.ctx + 1 bytes cuts to at most that many ids, so the cap binds on no pinned window today; it is
+    the rule, not a repair. x is ids[:L-1] and y the ids shifted one, on the process device, and
+    `rows` is how many windows the batch holds."""
+    import torch
+    ps = sysm.probe_set
+    take = (int(sysm.configs["EVAL"].retention_n) + 1) // 2
+    cut = _holdout_tokenize(sysm, book="eval.contrib")
+    rows = []
+    for area in sorted(arrived):
+        got = ps.items.get(area) if ps is not None else None
+        if not got:
+            continue
+        for _s, p, w in list(got["control"])[:take]:
+            ids = list(cut(w).ids)
+            if len(ids) >= 2:
+                rows.append((bytes(p), ids))
+    if not rows:
+        return None
+    n = min(min(len(ids) for _p, ids in rows), int(sysm.configs["LM"].ctx) + 1)
+    dev = sysm.process.device
+    x = torch.tensor([ids[:n - 1] for _p, ids in rows], dtype=torch.long, device=dev)
+    y = torch.tensor([ids[1:n] for _p, ids in rows], dtype=torch.long, device=dev)
+    return x, y, [p for p, _ids in rows], len(rows)
+
+
+def _contrib_baseline(sysm, fn, x, prefix_bytes):
+    """FAB.contribution's `baseline_logits_fn`: the memory-off closure bound to the batch, called
+    with any autocast the caller holds TURNED OFF (2026-09-28, Q-FAB-19). The root calls
+    FAB.contribution inside Process.autocast, because its held-out walks must run FAB.forward and
+    the head under the autocast the closure runs them under; and the closure opens that autocast
+    itself, around embed..decode only, so SIG.encode and DOM.nearest run outside it. Called under
+    the caller's autocast they would run inside it, and on a bf16 device the baseline contribution
+    re-forms would not be the one the root scored. On the shipped fp32 arms Process.autocast is a
+    null context and so is this."""
+    import torch
+
+    def baseline():
+        off = (torch.autocast(device_type="cuda", enabled=False)
+               if sysm.process.amp_state == "active" else contextlib.nullcontext())
+        with off:
+            return fn(x, prefix_bytes=prefix_bytes)
+    return baseline
+
+
 def _eval_modules(sysm):
     """Every torch module a probe pass runs through -- the LM, FAB's module dict, WORLD's parts and
     SIG's encoder -- so the closure can put each in eval mode and restore each submodule's own
@@ -4506,7 +4667,27 @@ def _eval_modules(sysm):
     return [m for m in tops if isinstance(m, torch.nn.Module)]
 
 
-def _prefix_units(sysm, prefix, view, books):
+@contextlib.contextmanager
+def _eval_mode(sysm):
+    """Every module _eval_modules names in eval mode for the body, and each SUBMODULE's own flag put
+    back after it, raise or not. The closure's own mode handling since 2026-09-27 (Q-EVAL-12),
+    lifted into one place on 2026-09-28 (Q-FAB-19) because FAB.contribution's held-out walks run
+    OUTSIDE the closure -- FAB.forward and the head, between two closure calls -- and must run in
+    the modes the closure's pass ran in: LM.decode's readout dropout is a training-mode draw, and a
+    walk that took it would score a different function from its baseline and move torch's global
+    stream (frozen_rng refuses that)."""
+    tops = _eval_modules(sysm)
+    modes = [(m, m.training) for t in tops for m in t.modules()]
+    try:
+        for t in tops:
+            t.eval()
+        yield
+    finally:
+        for m, was in modes:
+            m.training = was
+
+
+def _prefix_units(sysm, prefix, view, books, book="eval.holdout"):
     """SIG's units for one row: the width_units units ENDING at the row's first byte, the slice
     _sample_window takes at a training window's own index (Q-FAB-7), cut from the pinned prefix and
     LEFT-PADDED where the prefix is shorter, as _sample_window pads the opening windows of a stream.
@@ -4518,8 +4699,8 @@ def _prefix_units(sysm, prefix, view, books):
     if sysm.configs["SIG"].space == "tokens":
         ids = []
         if prefix:
-            if "eval.holdout.cuts" in books:
-                books["eval.holdout.cuts"] += 1
+            if f"{book}.cuts" in books:
+                books[f"{book}.cuts"] += 1
             ids = list(tok_api.tokenize(sysm.configs["TOK"], sysm.vocab, bytes(prefix),
                                         view=view).ids)
         ids = ids[len(ids) - width:] if len(ids) > width else ids
@@ -4528,7 +4709,8 @@ def _prefix_units(sysm, prefix, view, books):
     return bytes(width - len(units)) + units
 
 
-def _logits_fn(sysm, *, use_memory, view=None, live_domains=None, live_vocab=None):
+def _logits_fn(sysm, *, use_memory, view=None, live_domains=None, live_vocab=None,
+               book="eval.holdout"):
     """THE PATH THE RUN TRAINED, as a closure: fn(x, *, prefix_bytes) -> (B, L, V) logits.
 
     ONE CLOSURE PER SCORED SYSTEM (eval/api.py::<module>'s ONE LOGITS PATH; Q-MEM-10, Q-EVAL-12).
@@ -4565,7 +4747,17 @@ def _logits_fn(sysm, *, use_memory, view=None, live_domains=None, live_vocab=Non
     a never-minted row keeps some mass, and a sampled one has no bytes: driven 2026-09-27, a 30-window
     run's generation drew one and TOK.Vocabulary.decode raised IndexError after the final save,
     taking the report with it. A READING never passes it: the held-out bits/byte are scored on
-    the distribution the run trains on, dead rows and all."""
+    the distribution the run trains on, dead rows and all.
+
+    FAB.contribution'S BASELINE IS THIS CLOSURE (2026-09-28, register §8 3.5; Q-FAB-19), memory-off,
+    bound to a batch of the probe's control items, and three things serve it and change no
+    reading: `book` is the prefix the closure's passes are booked under -- 'eval.holdout' for the
+    probe, 'eval.contrib' for contribution's, so each instrument's passes stand in its own keys --
+    `fn.head` is the counted head the closure decodes with, and `fn(x, prefix_bytes=..., route={})`
+    fills the dict with the FAB.forward inputs the pass used (h, signature, novelty, domain_id,
+    live_domains, step_windows): the inputs contribution's held-out walks must be handed for its
+    baseline and its counterfactuals to be ONE FUNCTION of the same inputs. EVAL never passes
+    `route`, and a call without it is the call it always was."""
     import torch
     from spine import units as _Ul
     cfg = sysm.configs
@@ -4581,11 +4773,11 @@ def _logits_fn(sysm, *, use_memory, view=None, live_domains=None, live_vocab=Non
             books[k] += n
 
     def head(h):
-        _book("eval.holdout.decodes")
+        _book(f"{book}.decodes")
         return lm_api.decode(lm, sysm.model, h, live_vocab=int(sysm.vocab.size()),
                              retired_ids=tuple(sysm.vocab.retired))
 
-    def fn(x, *, prefix_bytes):
+    def fn(x, *, prefix_bytes, route=None):
         dev = sysm.process.device
         x = x.to(device=dev, dtype=torch.long)
         pref = [bytes(p) for p in prefix_bytes]
@@ -4595,32 +4787,36 @@ def _logits_fn(sysm, *, use_memory, view=None, live_domains=None, live_vocab=Non
             x = x[:, n_tok - ctx:]
             pref = [pref[b] + sysm.vocab.decode([int(t) for t in drop[b]]) for b in range(len(pref))]
         B = int(x.shape[0])
-        tops = _eval_modules(sysm)
-        modes = [(m, m.training) for t in tops for m in t.modules()]
-        try:
-            for t in tops:
-                t.eval()
+        with _eval_mode(sysm):
             with torch.no_grad():
-                units = [_prefix_units(sysm, p, vw, books) for p in pref]
+                units = [_prefix_units(sysm, p, vw, books, book) for p in pref]
                 sig_vec = sig_api.encode(sig, sysm.sig, units)
-                _book("eval.holdout.sig_calls")
+                _book(f"{book}.sig_calls")
+                # THE ROWS THAT ENCODE ENCODED, where the book keeps them: eval.contrib's batch is
+                # many rows a pass, so sig.encode_windows moves by this and not by the calls
+                # (Q-FAB-19). The probe's passes are one row each and its book has no such key.
+                _book(f"{book}.sig_windows", len(units))
                 if sig_vec.device != x.device:
                     sig_vec = sig_vec.to(x.device)
                 did = dom_api.nearest(dom, sysm.partition, signature=sig_vec[0])
                 if did < 0:
-                    _book("eval.holdout.domain_spawn")
+                    _book(f"{book}.domain_spawn")
                 n_live = int(live_domains if live_domains is not None else (sysm.live_domains or 1))
+                nov = torch.zeros(B, device=x.device)
+                at = _Ul.Windows(int(sysm.clock.step) + 1)
                 with sysm.process.autocast():
                     obs_emb = lm_api.embed(lm, sysm.model, x)
                     h = lm_api.encode(lm, sysm.model, x,
                                       extra=world_api.forecast(world, sysm.world, obs_emb))
                     out = fab_api.forward(
-                        fab, sysm.fabric, h=h, signature=sig_vec,
-                        novelty=torch.zeros(B, device=x.device), head=head, targets=None,
-                        step_windows=_Ul.Windows(int(sysm.clock.step) + 1), domain_id=did,
-                        live_domains=n_live, training=False)
+                        fab, sysm.fabric, h=h, signature=sig_vec, novelty=nov, head=head,
+                        targets=None, step_windows=at, domain_id=did, live_domains=n_live,
+                        training=False)
                     logits = out.logits if out.logits is not None else head(out.hidden)
-                _book("eval.holdout.forwards")
+                if route is not None:
+                    route.update(h=h, signature=sig_vec, novelty=nov, domain_id=did,
+                                 live_domains=n_live, step_windows=at)
+                _book(f"{book}.forwards")
                 if use_memory:
                     V = int(logits.shape[-1])
                     probs = torch.softmax(logits.float(), dim=-1).reshape(-1, V)
@@ -4644,12 +4840,10 @@ def _logits_fn(sysm, *, use_memory, view=None, live_domains=None, live_vocab=Non
                 if live_vocab is not None and int(live_vocab) < int(logits.shape[-1]):
                     logits = logits.clone()
                     logits[..., int(live_vocab):] = float("-inf")
-        finally:
-            for m, was in modes:
-                m.training = was
         return logits
 
     fn.name = "memory-on" if use_memory else "memory-off"
+    fn.head = head
     return fn
 
 

@@ -37,10 +37,11 @@ stand behind events (Due.mint, Due.probation) and one behind "the optimizer actu
 since 2026-09-27 and 2026-09-28 the retention probe's and the source-reliability book's stand behind
 their arm tests; at the shipped TOK_PROBATION_USES=0, EVAL_RETENTION_EVERY=0 and DATA_TRUST='off'
 none of those three is even asked, so six of the twenty-seven have a call site that CANNOT RUN (two
-of twenty-two until 2026-09-27). Reporting only the first list would say this run
-judged probation when nothing did -- the same overstatement, one layer in. `_gate_report` reads the
-three states (fired N / armed but 0 / unreachable) off the counter each owning package keeps,
-rather than re-deriving a verdict here from levers this file does not own.
+of twenty-two until 2026-09-27). One A row joined them on 2026-09-28: FAB.contribution, inside the
+fab.manage answer behind FAB_CONTRIB, which ships 0 (Q-FAB-19). Reporting only the first list would
+say this run judged probation when nothing did -- the same overstatement, one layer in.
+`_gate_report` reads the three states (fired N / armed but 0 / unreachable) off the counter each
+owning package keeps, rather than re-deriving a verdict here from levers this file does not own.
 
 WHAT A RUN ON THIS DRIVER MEASURES TODAY: goal A's core -- a language model, routed through the
 fabric, trained by the optimizer -- AND the mechanisms goal B is made of. The fabric grows, memory
@@ -103,6 +104,10 @@ from spine.compose import _area_ids as _c_area_ids
 from spine.compose import _window_areas as _c_window_areas
 from spine.compose import _faded_ids as _c_faded_ids
 from spine.compose import _trust_units as _c_trust_units
+from spine.compose import _contrib_material as _c_contrib_material
+from spine.compose import _contrib_baseline as _c_contrib_baseline
+from spine.compose import _eval_mode as _c_eval_mode
+from spine import rng as _rng
 
 
 # THE ELEVEN, READ OFF THE TREE RATHER THAN TYPED. A hand-written list would rot the first time a
@@ -143,10 +148,11 @@ _CALLS = {
     # ---- stage E, the epoch roll (reachable only at RUN_EPOCHS > 1)
     "E": frozenset({"DATA.draw_stream", "TOK.tokenize", "RUN.RunClock.begin_epoch",
                     "DOM.on_retokenize"}),
-    # ---- stage A: the cadenced maintenance block, then the per-window pair
+    # ---- stage A: the cadenced maintenance block, then the per-window pair. FAB.contribution
+    # (2026-09-28, Q-FAB-19) inside the fab.manage answer, behind its arm test
     "A": frozenset({
         "MEM.census", "DOM.manage", "DOM.census", "DOM.rekey",
-        "SIG.cadence_due", "SIG.train_step", "FAB.manage",
+        "SIG.cadence_due", "SIG.train_step", "FAB.contribution", "FAB.manage",
         "RUN.RunClock.advance", "SIG.encode", "DOM.observe", "TOK.on_window"}),
     # ---- stage B, per flush: all twenty-seven -- the last four per window after the flush, each
     # behind its arm test: the source-reliability book's (2026-09-28, Q-DATA-11) and the retention
@@ -314,6 +320,16 @@ _GATED = {
     "DATA.claims_observe": ("the book's arm test (DATA_TRUST != 'off'), then its cadence or the "
                             "window that rolls the epoch at B, and a stop's tail at R",
                             "data.trust.passes"),
+    # THE MARGINAL CONTRIBUTION (2026-09-28, Q-FAB-19), THE ONE A ROW HERE. Its count is FAB's own:
+    # fab.contrib_passes, seeded 0 by FAB.build at FAB_CONTRIB=1 on a routed arm and ABSENT
+    # otherwise, and bumped once per call that walked -- a PER-CALL count, for the TOK rows' reason
+    # above: fab.contrib_measured counts experts, so a line keyed to it would print one call that
+    # measured 64 experts as "fired 64 time(s)".
+    "FAB.contribution": ("its arm test (FAB_CONTRIB=1 on a routed arm, which startup allows only "
+                         "with the retention probe armed), inside the fab.manage answer at A; a "
+                         "manage pass with no arrived control window calls nothing and is booked "
+                         "eval.contrib.empty, and a call with no past-grace expert walks nothing",
+                         "fab.contrib_passes"),
 }
 # CKPT.save IS GATED TOO AND IS NOT IN THAT TABLE, because its count is not in a counters dict this
 # file can index -- CKPT keeps its books on the Retention record and in its own _SAVES ledger --
@@ -1181,6 +1197,64 @@ def run(sysm, *, max_windows=None, progress=True):
             and int(clock.step) == int(sysm.snapshot.step)):
         _boundary_read("resume", view=_evc.get("view"), live=_evc.get("live_domains"))
 
+    # ---- FAB.contribution (2026-09-28, register §8 3.5, 02-R11 and C37; Q-FAB-19) --------------
+    # ARMED AT FAB_CONTRIB=1 ON A ROUTED ARM, which startup makes the same test as "with the
+    # retention probe armed": compose refuses FAB_CONTRIB=1 at EVAL_RETENTION_EVERY=0 and where the
+    # probe pinned nothing. THE ARM TEST COMES FIRST, inside the one Cadences.due('fab.manage', ...)
+    # answer and before FAB.manage, so at the shipped FAB_CONTRIB=0 nothing below runs and no
+    # eval.contrib.* or fab.contrib_* key exists: a default run is this driver before the body.
+    _contrib_on = (_armed and bool(fab_cfg.contrib) and bool(fab_cfg.on)
+                   and not bool(fab_cfg.norm_only))
+
+    def _contrib_pass():
+        """One FAB.contribution call on the retention probe's control half -> its ContribReport, or
+        None where there was nothing to measure on.
+
+        THE BATCH is compose.py::_contrib_material's: the first (EVAL_RETENTION_N + 1) // 2 pinned
+        control items of every area this run has reached, cut at the last-cut view and cut back to
+        one length -- None where no arrived area holds one, booked eval.contrib.empty, and nothing
+        is called. THE BASELINE IS ONE FUNCTION OF THAT BATCH: the memory-off closure, booked under
+        eval.contrib, is called once here with `route` to take the FAB.forward inputs its pass used,
+        its logits are scored through LM.lm_loss for baseline_loss, and it is handed on bound to the
+        batch as baseline_logits_fn (compose.py::_contrib_baseline), which FAB.contribution calls
+        again and checks against that loss before it removes anyone. ALL OF IT under no_grad,
+        frozen_rng(strict=True), every module in eval mode -- the held-out walks run outside the
+        closure, and LM.decode's readout dropout is a training-mode draw -- and Process.autocast,
+        which the closure opens for itself around embed..decode. A pass that moved a global stream
+        is refused, as the probe's reading is: an instrument that draws edits the run it measures."""
+        _t0 = time.perf_counter()
+        mat = _c_contrib_material(sysm, arrived)
+        if mat is None:
+            _ebook["eval.contrib.empty"] += 1
+            _ebook["eval.contrib.seconds"] += time.perf_counter() - _t0
+            return None
+        x, y, prefix, n_rows = mat
+        fn = _c_logits_fn(sysm, use_memory=False, book="eval.contrib")
+        route = {}
+        with _rng.frozen_rng(strict=True) as fr:
+            with torch.no_grad(), _c_eval_mode(sysm):
+                logits = fn(x, prefix_bytes=prefix, route=route)
+                with sysm.process.autocast():
+                    _pw, base_loss = lm_api.lm_loss(lm_cfg, logits, y)
+                    rep = fab_api.contribution(
+                        fab_cfg, pop, h=route["h"], signature=route["signature"],
+                        novelty=route["novelty"], head=fn.head, targets=y,
+                        baseline_loss=float(base_loss),
+                        baseline_logits_fn=_c_contrib_baseline(sysm, fn, x, prefix),
+                        step_windows=route["step_windows"], domain_id=route["domain_id"],
+                        live_domains=route["live_domains"])
+        if fr.moved:
+            raise _rng.RngError(
+                "FAB.contribution moved a global random stream while measuring. Its closure passes "
+                "and held-out walks must run under no_grad in eval mode -- a dropout left on draws "
+                "from torch's global generator, and an instrument that draws edits the training run "
+                "it measures (G7). frozen_rng put the stream back; the run is stopped rather than "
+                "continued on a measurement that moved it.")
+        _ebook["eval.contrib.calls"] += 1
+        _ebook["eval.contrib.windows"] += int(n_rows)
+        _ebook["eval.contrib.seconds"] += time.perf_counter() - _t0
+        return rep
+
     # ---- THE SOURCE-RELIABILITY BOOK (2026-09-28, Proposal 04 SR3, Q-DATA-11) -------------------
     # ARMED AT DATA_TRUST != 'off' ONLY, and the arm test comes before Cadences.due('data.trust',
     # ...), so at 'off' the gate is never asked, DATA.claims_observe is never called and no
@@ -1319,7 +1393,8 @@ def run(sysm, *, max_windows=None, progress=True):
             # repair belongs in the root, which owns the slicer.
 
             # ---- ROW A, IN LOOP_ORDER'S OWN ORDER --------------------------------------------------
-            # MEM.census -> DOM.manage -> DOM.census -> FAB.manage -> SIG.cadence_due -> SIG.train_step
+            # MEM.census -> DOM.manage -> DOM.census -> FAB.contribution (at FAB_CONTRIB=1, since
+            # 2026-09-28) -> FAB.manage -> SIG.cadence_due -> SIG.train_step
             # -> SIG.encode -> DOM.observe -> DOM.rekey -> TOK.on_window. THIS WHOLE STAGE WAS UNCALLED
             # UNTIL 2026-09-21 and the ledger said so the entire time: 'dom.manage', 'dom.rekey' and
             # 'fab.manage' read checks=0 on every run ever taken, which is RUN.Cadences reporting that
@@ -1389,9 +1464,17 @@ def run(sysm, *, max_windows=None, progress=True):
             # areas the resumed lineage drew and this schedule never makes live. Through the root's
             # join compose.py::_faded_ids, because FAB may see neither the plan nor a name. At the
             # shipped FAB_FADED_CULL='as_is' the pass only COUNTS against it.
+            # FAB.contribution RIDES THE SAME ONE ANSWER, FIRST (2026-09-28, register §8 3.5;
+            # Q-FAB-19): its own A row sits above FAB.manage's, so the pass's two contrib > 0 spares
+            # and FAB_FADED_CULL='contrib' read what it has just measured, and a second due() under
+            # 'fab.manage' would consume the answer this row reads. Behind its arm test, so at the
+            # shipped FAB_CONTRIB=0 the manage pass is the one it always was. Outside the fab.manage
+            # span: its seconds are eval.contrib.seconds.
             if cadences.due("fab.manage", periods["fab.manage"], clock):
                 _ml = (sum(manage_losses) / len(manage_losses)) if manage_losses else None
                 manage_losses = []
+                if _contrib_on:
+                    _contrib_pass()
                 with _timing.span("fab.manage"):
                     fab_api.manage(fab_cfg, pop, step_windows=tick.step, flush_loss=_ml,
                                    faded=_c_faded_ids(sysm,

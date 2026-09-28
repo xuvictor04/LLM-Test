@@ -21,19 +21,19 @@ declared in spine/assemble.py, and `grep d_` finds every one of them.
 -------------------------------------------------------------------------------------------------
 WHAT WAS EMITTED, AND WHAT WAS NOT
 -------------------------------------------------------------------------------------------------
-The census (.rework/census.json) files 110 of its 328 rows under new_owner FAB. This file emits 83
+The census (.rework/census.json) files 110 of its 328 rows under new_owner FAB. This file emits 85
 levers:
 
     80  rows with verdict keep (51) or rename (29)
   +  2  rows with verdict merge whose merge TARGET has no row of its own (see UNRESOLVED MERGES)
-  +  1  AMENDMENT with no ancestor knob: FAB_FADED_CULL, minted 2026-09-28 (register §8 3.1, NEW-10
-        and C37; docs/04_CONTRACT.md Q-FAB-18), declared in section 6 with its reason
+  +  3  AMENDMENTS with no ancestor knob, all minted 2026-09-28 and declared in section 6 with their
+        reasons: FAB_FADED_CULL (§8 3.1; Q-FAB-18), FAB_CONTRIB and FAB_CONTRIB_MAX (§8 3.5; Q-FAB-19)
   -------
-    83  Lever declarations, all reachable as FAB_<FIELD>
+    85  Lever declarations, all reachable as FAB_<FIELD>
 
-The amendment does not move the 110: that figure, like every per-package total in .rework/CENSUS.md,
-counts rows about knobs the old system had, and the census's `amendments` group carries the new one.
-(This block read "emits 82" with no amendment line until 2026-09-28.)
+The amendments do not move the 110: that figure, like every per-package total in .rework/CENSUS.md,
+counts rows about knobs the old system had, and the census's `amendments` group carries the new ones.
+(This block read "emits 82" with no amendment line until 2026-09-28, and "emits 83" with one.)
 
 Not emitted, by verdict: 20 drop, 9 merge (7 of which fold into a lever this file does declare), and
 1 promote-to-wire. The promote-to-wire row is MAX_DOMAINS, which was never a lever -- it was
@@ -924,8 +924,10 @@ class FABLevers(LeverSet):
 
     faded_cull = Lever("as_is", "What the management pass does with a cull or merge whose removed "
                                 "expert mostly served a FADED area: 'as_is' removes it and counts "
-                                "it; 'defer' keeps it and takes every other decision 'as_is' takes.",
-                       U.NAME, choices=("as_is", "defer"))
+                                "it; 'defer' keeps it and takes every other decision 'as_is' takes; "
+                                "'contrib' removes it only where FAB.contribution measured it at or "
+                                "below 0, and otherwise keeps it as 'defer' does.",
+                       U.NAME, choices=("as_is", "defer", "contrib"))
     # CENSUS AMENDMENT, 2026-09-28 (register §8 3.1, NEW-10 and C37; docs/04_CONTRACT.md Q-FAB-18),
     # with NO ANCESTOR KNOB: the old tree culled and merged whatever its ranking named, and never
     # asked which area an expert served -- there was nothing to ask it with. FAB.manage now reads each
@@ -949,8 +951,50 @@ class FABLevers(LeverSet):
     #     deferral; the first build stopped only the budget's walk, and the review found the other
     #     three (Q-FAB-18's review). The cost is stated, not discovered: with the pool at FAB_SLOTS a
     #     deferred expert holds a slot a new area could have been born into (NEW-20).
-    #   'contrib' is NOT BUILT: the cull gated on FAB.contribution <= 0 is §8 3.5's, and the value
-    #     joins the choices with that build rather than being declared ahead of its producer.
+    #   'contrib' (2026-09-28, register §8 3.5, NEW-10's rule "an expert tied to a faded area may be
+    #     culled only when FAB.contribution <= 0"; docs/04_CONTRACT.md Q-FAB-19): such a cull or merge
+    #     goes ahead only where FAB.contribution has MEASURED the expert (Population.contrib_n > 0)
+    #     at or below 0 -- counted fab.cull_faded_allowed_by_contrib / fab.merge_faded_allowed_by_contrib
+    #     -- and is otherwise kept exactly as 'defer' keeps it, every other decision of the pass
+    #     'as_is''s, counted fab.cull_faded_refused_by_contrib / fab.merge_faded_refused_by_contrib.
+    #     AN UNMEASURED EXPERT IS KEPT, and that is C37's rule surviving inside NEW-10's: the
+    #     deferral lasts until a measurement exists. A cull's refusal is always an unmeasured expert,
+    #     because a measured one above 0 is spared as load-bearing before either cull reads its
+    #     area; a merge's can be either, because the merge reads no contribution of its own. It
+    #     needs FAB_CONTRIB=1 and is refused at startup without it (spine/compose.py): without a
+    #     producer every faded removal would be refused and the value would be 'defer' under
+    #     another name. The cost at the owner's pool is contrib_max's, below: a pass measures
+    #     FAB_CONTRIB_MAX experts, so each is reached once per (past-grace count / FAB_CONTRIB_MAX)
+    #     passes, and most faded removals meet an unmeasured expert and are refused until E2 sizes
+    #     the cap.
+
+    contrib = Lever(False, "Measure past-grace experts' marginal contribution on each management "
+                           "pass: the held-out loss without the expert minus the loss with it, "
+                           "folded into Population.contrib at FAB_COMP_EMA.", U.FLAG)
+    contrib_max = Lever(64, "How many past-grace experts one management pass measures, taken from "
+                            "a cursor that rotates through the population.", U.EXPERTS,
+                        domain=(1, None))
+    # CENSUS AMENDMENTS, 2026-09-28 (register §8 3.5, 02-R11 and C37; docs/04_CONTRACT.md Q-FAB-19),
+    # both WITH NO ANCESTOR KNOB: the old tree measured the counterfactual on EVERY manage pass it ran
+    # with no switch of its own (self_organize.py:6949-6994, gated only on FABRIC and MANAGE), over
+    # the experts the flush it rode had routed, capped at FAB_CHAIN_K on the chaining arm. Neither
+    # half carries over: the candidates here are PAST-GRACE experts from a rotating cursor, since
+    # the spares and 'contrib' judge exactly those, and the batch is the retention probe's pinned
+    # CONTROL half, since the flush's own batch is the text the step just trained on.
+    #   contrib (SHIPPED False): 02-R11 builds FAB.contribution "right after NEW-03" with training
+    #     runs unchanged, and at True the contrib > 0 spare in both culls starts to fire, which moves
+    #     what a run culls. At False FAB.contribution is not called, Population.contrib stays 0.0 on
+    #     every expert, and every fab.contrib_* key is ABSENT. True needs the retention probe armed
+    #     (EVAL_RETENTION_EVERY > 0 and a pinned control half), which startup refuses otherwise.
+    #   contrib_max (64, PROVISIONAL, NEW-19): each candidate is one no_grad forward on the looped arm
+    #     (a reweighted sum on the society arm), so this IS the pass's cost -- 64 forwards per
+    #     FAB_MANAGE_EVERY windows, beside the pass's fixed three (the baseline's two closure passes
+    #     and one reference walk). DOMAIN (1, None): 0 would arm the measurement and measure nothing,
+    #     the armed-but-inert state FAB_CONTRIB=0 already spells, so the low end refuses it at the
+    #     first read; there is no ceiling, because a cap above the past-grace count simply measures
+    #     every past-grace expert each pass. At the owner's 481-1,002 past grace, 64 revisits each
+    #     expert once per 8-16 passes -- about once per 3,800-7,800 windows at FAB_MANAGE_EVERY=500
+    #     -- and E2 sizes it on GPU.
 
     # ==============================================================================================
     # 7. PER-EXPERT LEARNING RATE
@@ -1014,7 +1058,7 @@ class FABLevers(LeverSet):
 
 
 # ==================================================================================================
-# ELEVEN DECLARATIONS CARRY A DOMAIN AND SEVENTY-TWO DO NOT, AND WHAT THAT COSTS WAS MEASURED
+# TWELVE DECLARATIONS CARRY A DOMAIN AND SEVENTY-THREE DO NOT, AND WHAT THAT COSTS WAS MEASURED
 # ==================================================================================================
 # WRITTEN AT THE FOOT OF THE FILE AND NOT IN THE MODULE DOCSTRING, ON PURPOSE. The census departures
 # table in tests/test_census.py cites three of the arguments in this file BY LINE SPAN -- the rows
@@ -1031,10 +1075,11 @@ class FABLevers(LeverSet):
 # declaration surface ... There is no lo/hi, so the ONLY thing a number above is checked against is
 # its TYPE." WHAT IS TRUE NOW: spine/lever.py::Lever takes `domain=(lo, hi)` as well, checked at
 # declaration by spine/lever.py::_domain_ends and again after coercion in spine/lever.py::Lever.coerce
-# -- BOTH ENDS INCLUSIVE, either end may be None for unbounded -- and ELEVEN of this package's 83
-# declarations now carry one. The paragraph is kept rather than deleted because everything the sweep
-# below measured was measured against the tree it describes, and the block after it says which
-# eleven, on what argument, and what they still do not buy. A lever-domain sweep
+# -- BOTH ENDS INCLUSIVE, either end may be None for unbounded -- and TWELVE of this package's 85
+# declarations now carry one (eleven since 2026-09-14; contrib_max, the twelfth, since 2026-09-28).
+# The paragraph is kept rather than deleted because everything the sweep below measured was
+# measured against the tree it describes, and the block after it says which eleven the sweep's
+# ruling set, on what argument, and what they still do not buy, and then the twelfth. A lever-domain sweep
 # drove every numeric lever in this package at nan, inf, -inf and 0, one fresh subprocess per cell,
 # through a real assembly and two real forward passes (.rework/audits/sweep_fabric.json). What it
 # found, and where each answer now lives, so this file and src/fabric/api.py cannot drift on it:
@@ -1316,9 +1361,9 @@ class FABLevers(LeverSet):
 # this declaration does not stand in front of, and O15 does not report it.
 # The other ten pairs duplicate no existing guard in this package.
 #
-# AND WHY ONLY ELEVEN, SO THE SILENCE OF THE OTHER SEVENTY-TWO IS NOT READ AS A VERDICT. An END was
-# written only where THAT END falls out of what the consumer does -- ten of the eleven get both, and
-# pressure gets one, because its low end falls out and its high end does not. That is the shape this
+# AND WHY ONLY TWELVE, SO THE SILENCE OF THE OTHER SEVENTY-THREE IS NOT READ AS A VERDICT. An END was
+# written only where THAT END falls out of what the consumer does -- ten of the twelve get both, and
+# pressure and contrib_max get one each, because a low end falls out and a high end does not. That is the shape this
 # sentence used to forbid by saying "a pair was written only where BOTH ends fall out", and the
 # forbidding is what produced the one regression in this block: an end that could not be derived was
 # written anyway rather than left None. None is an available answer and spine/lever.py::_domain_ends
@@ -1333,3 +1378,18 @@ class FABLevers(LeverSet):
 # emb_var, mut, spawn_floor, dom_frac, comp_protect and the error and tolerance family. Those are the
 # levers that carry the sweep's critical findings, and NOT ONE OF THEM IS IN THE TABLE ABOVE. An
 # absent pair here means the argument was not available, never that the lever was found harmless.
+#
+# THE TWELFTH, 2026-09-28: contrib_max -- (1, None), READ OFF A BODY THAT EXISTS,
+# src/fabric/api.py::contribution (register §8 3.5; docs/04_CONTRACT.md Q-FAB-19). It is the first
+# INT with a domain in this package, and the eleven's arguments above are about floats; its one end is
+# argued at its declaration and restated here because this block is where the count is kept. The LOW
+# end falls out of the reader: contribution takes at most this many past-grace experts per pass off
+# its cursor, so 0 arms a measurement that measures nothing -- the armed-but-inert state
+# FAB_CONTRIB=0 already spells -- and refusing it at the first read removes no configuration. THE
+# HIGH END DOES NOT FALL OUT and is None: above the past-grace count a cap simply measures every
+# past-grace expert each pass, the same run at every larger value, so a finite ceiling would be read
+# off nothing. It is not one of the six counts src/fabric/api.py::build floors at one by hand (n0,
+# slots, rank, dk, emb_hid, hops), and that is deliberate: those six are refused at the read site
+# because FAB_RANK=0 and its siblings were MEASURED to poison a run, and
+# tests/test_ownership.py::check_o15_domain_agrees_with_read_site forbids a second refusal beside a
+# domain, so this count carries the domain and no read site refuses it.

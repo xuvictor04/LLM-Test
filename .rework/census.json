@@ -5580,15 +5580,16 @@
     "new_owner": "FAB",
     "new_name": "FAB_FADED_CULL",
     "unit": "name",
-    "purpose": "What FAB.manage does with a cull or merge whose removed expert mostly served a FADED area -- one the schedule had live in an earlier phase and not in this one (DATA's Plan.faded), or one the resumed lineage drew and this run schedules nowhere (Plan.parent_faded). 'as_is' (the default): the pass removes what it chose and counts it in fab.culled_faded_area / fab.merged_faded_area; no decision reads an area book. 'defer': such a removal is skipped and counted as an event (fab.cull_faded_deferred, fab.merge_faded_deferred) beside a gauge of the distinct experts deferred, and every other decision of the pass is the one 'as_is' takes -- the rest of the pass reads the population 'as_is' would hold, so a deferred absorbee pairs with nobody else, the pressure gate and the utilization budget are sized without the deferred experts, a deferred utilization-cull victim keeps its budget slot, and the survivor of a pair left apart is ranked by the mass the merge would have given it -- so no live-area expert is merged or culled in a deferred one's place (docs/04_CONTRACT.md Q-FAB-18's review).",
-    "reason": "AMENDMENT, 2026-09-28, register \u00a78 3.1 (NEW-10, C37, CONTRACT-Q-FAB-5), ruled in docs/04_CONTRACT.md Q-FAB-18. There is no ancestor knob: the old tree culled and merged whatever its ranking named and never asked which area an expert served -- there was no book to ask it with. IT DOES NOT CHANGE THE 328. WHY: at the owner's shape cull and merge are reached (481-1,002 experts past grace, 203-810 cull_fail and 336-648 merges per run) while FAB.contribution, the signal that should spare a useful expert, is not built; C37 rules that the continue preset defers faded-area culls and merges until it is, with training runs unchanged and the deferral an E2 arm, so the switch must exist before E2 can run it. BUILT 'as_is', which is today's pass bit for bit; 'contrib' joins the choices with FAB.contribution (\u00a78 3.5).",
+    "purpose": "What FAB.manage does with a cull or merge whose removed expert mostly served a FADED area -- one the schedule had live in an earlier phase and not in this one (DATA's Plan.faded), or one the resumed lineage drew and this run schedules nowhere (Plan.parent_faded). 'as_is' (the default): the pass removes what it chose and counts it in fab.culled_faded_area / fab.merged_faded_area; no decision reads an area book. 'defer': such a removal is skipped and counted as an event (fab.cull_faded_deferred, fab.merge_faded_deferred) beside a gauge of the distinct experts deferred, and every other decision of the pass is the one 'as_is' takes -- the rest of the pass reads the population 'as_is' would hold, so a deferred absorbee pairs with nobody else, the pressure gate and the utilization budget are sized without the deferred experts, a deferred utilization-cull victim keeps its budget slot, and the survivor of a pair left apart is ranked by the mass the merge would have given it -- so no live-area expert is merged or culled in a deferred one's place (docs/04_CONTRACT.md Q-FAB-18's review). 'contrib' (2026-09-28, docs/04_CONTRACT.md Q-FAB-19): such a removal goes ahead only where FAB.contribution has MEASURED the expert at or below 0 (Population.contrib_n > 0 and contrib <= 0), counted at 'as_is''s names and as fab.cull_faded_allowed_by_contrib / fab.merge_faded_allowed_by_contrib; every other such removal is kept exactly as 'defer' keeps it, counted fab.cull_faded_refused_by_contrib / fab.merge_faded_refused_by_contrib -- an unmeasured expert is kept. Refused at startup without FAB_CONTRIB=1.",
+    "reason": "AMENDMENT, 2026-09-28, register \u00a78 3.1 (NEW-10, C37, CONTRACT-Q-FAB-5), ruled in docs/04_CONTRACT.md Q-FAB-18. There is no ancestor knob: the old tree culled and merged whatever its ranking named and never asked which area an expert served -- there was no book to ask it with. IT DOES NOT CHANGE THE 328. WHY: at the owner's shape cull and merge are reached (481-1,002 experts past grace, 203-810 cull_fail and 336-648 merges per run) while FAB.contribution, the signal that should spare a useful expert, is not built; C37 rules that the continue preset defers faded-area culls and merges until it is, with training runs unchanged and the deferral an E2 arm, so the switch must exist before E2 can run it. BUILT 'as_is', which is today's pass bit for bit; 'contrib' joins the choices with FAB.contribution (\u00a78 3.5). It joined them on 2026-09-28 (\u00a78 3.5, Q-FAB-19): NEW-10's rule, an expert tied to a faded area may be culled only when FAB.contribution <= 0, with C37's deferral kept for every expert no measurement has reached.",
     "couples_with": [
      "FAB_CULL_FRAC",
      "FAB_MERGE_DIST",
      "FAB_GRACE",
      "FAB_MANAGE_EVERY",
      "DATA_PHASE_SCHED",
-     "FAB_SLOTS"
+     "FAB_SLOTS",
+     "FAB_CONTRIB"
     ]
    },
    {
@@ -5905,6 +5906,42 @@
      "DATA_TRUST_COPY",
      "DATA_TRUST_COPY_PRIOR",
      "DATA_TRUST_COPY_RATE"
+    ]
+   },
+   {
+    "old_name": "(amendment: FAB_CONTRIB)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "FAB",
+    "new_name": "FAB_CONTRIB",
+    "unit": "on/off",
+    "purpose": "Whether FAB.contribution runs. On: on each fab.manage pass, before FAB.manage, the root measures up to FAB_CONTRIB_MAX past-grace experts' marginal contribution -- the held-out loss without the expert minus the loss with it, on the retention probe's pinned CONTROL half through the memory-off closure, which is also the baseline -- and FAB folds each into Population.contrib at FAB_COMP_EMA (the first measurement sets it), counting measurements in Population.contrib_n. Off (the shipped default): nothing is measured, contrib stays 0.0 on every expert, both contrib > 0 spares in FAB.manage are inert, and no fab.contrib_* or eval.contrib.* key exists. On needs the retention probe armed (EVAL_RETENTION_EVERY > 0 and a pinned control window); startup refuses it otherwise.",
+    "reason": "AMENDMENT, 2026-09-28, register \u00a78 3.5 (02-R11, C37, NEW-10's contribution-gated cull), ruled in docs/04_CONTRACT.md Q-FAB-19. There is no ancestor knob: the old tree ran the counterfactual on every manage pass it took, gated only on FABRIC and MANAGE (self_organize.py:6949-6994), so there is no (family, old_name) key a DEPARTURES entry could be written under and N2 could only be satisfied by amending the census. IT DOES NOT CHANGE THE 328. WHY: 02-R11 builds FAB.contribution right after NEW-03 with training runs unchanged, and at True the contrib > 0 spares in both culls can fire, which changes what a run culls -- so the measurement ships off and is an arm (E2, with FAB_FADED_CULL='contrib'), not a default. The old tree scored its baseline through a different function from its counterfactuals (ISSUES P1-H11) and its walk never changed (C3); the body refuses the first by construction, checked at every pass, and counts the second as fab.contrib_degenerate, writing nothing. CPU runs establish operation only; efficacy (retention across culls) is a GPU reading.",
+    "couples_with": [
+     "FAB_CONTRIB_MAX",
+     "FAB_COMP_EMA",
+     "FAB_GRACE",
+     "FAB_MANAGE_EVERY",
+     "FAB_FADED_CULL",
+     "EVAL_RETENTION_EVERY",
+     "EVAL_RETENTION_N"
+    ]
+   },
+   {
+    "old_name": "(amendment: FAB_CONTRIB_MAX)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "FAB",
+    "new_name": "FAB_CONTRIB_MAX",
+    "unit": "experts",
+    "purpose": "How many past-grace experts one contribution pass measures, taken from a cursor on Population that rotates through the live pool -- moved with its expert by a cull's swap-with-last, and checkpointed -- so every past-grace expert is reached once per (past-grace count / FAB_CONTRIB_MAX) passes. Each candidate costs one no_grad forward on the looped arm (a reweighted sum of the pass's blend on the society arm). Domain (1, None): 0 would arm a measurement that measures nothing, and is refused at the first read; above the past-grace count every past-grace expert is measured each pass.",
+    "reason": "AMENDMENT, 2026-09-28, register \u00a78 3.5, ruled in docs/04_CONTRACT.md Q-FAB-19. There is no ancestor knob: the old tree measured the experts the flush it rode had routed, capped at FAB_CHAIN_K on the chaining arm (self_organize.py:6949-6994), not a count of its own. IT DOES NOT CHANGE THE 328. WHY: the candidates here are past-grace experts off a rotating cursor -- the population the spares and FAB_FADED_CULL='contrib' judge -- and a pass over all of them would cost one forward per past-grace expert, 481-1,002 at the owner's shape, every FAB_MANAGE_EVERY windows. 64 is PROVISIONAL (NEW-19): it reaches each expert once per 8-16 passes there, about once per 3,800-7,800 windows at FAB_MANAGE_EVERY=500, so 'contrib' mostly meets unmeasured experts and keeps them; E2 sizes it on GPU.",
+    "couples_with": [
+     "FAB_CONTRIB",
+     "FAB_MANAGE_EVERY",
+     "FAB_GRACE",
+     "FAB_SLOTS",
+     "FAB_FADED_CULL"
     ]
    }
   ]
