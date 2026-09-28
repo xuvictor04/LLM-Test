@@ -88,7 +88,7 @@ DISARMED — which the cadence audit reports as a different state from starved.
 
 ## 2. Every lever, by package
 
-290 levers across 13 packages.
+294 levers across 13 packages.
 
 
 ### CAP (7 levers)
@@ -113,7 +113,7 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `CKPT_EVERY` | `0` | Windows |  | How often a mid-run checkpoint is written, in windows elapsed since the last one; 0 disables periodic saving, leaving the final save and SIGUSR1. |
 | `CKPT_RESUME` | `''` | path |  | Checkpoint to continue training from -- a run directory or a .pt file; empty starts from scratch. |
 
-### DATA (36 levers)
+### DATA (40 levers)
 
 | lever | default | unit | accepts | what it is |
 |---|---|---|---|---|
@@ -140,6 +140,10 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `DATA_SYNTH_HOLDOUT` | `False` | on/off |  | Hold out a block per area on DATA_SOURCE=synthetic, under the real sources' law: min(DATA_HOLDOUT_FRAC x body, DATA_VAL_CAP) bytes, a seeded contiguous block removed from the body. |
 | `DATA_TRUST` | `'off'` | name | choices `'off'`, `'observe'`, `'loss'`, `'loss+draw'` | The source-reliability book: 'off' keeps none; 'observe' reads every source's claims, votes, and reports each source's reliability and trust while changing nothing the run trains on; 'loss' and 'lo... |
 | `DATA_TRUST_CLAIM` | `'kv'` | name | choices `'kv'`, `'ctx'` | What counts as one claim: 'kv' a normalised (key, value) pair around a DATA_TRUST_DELIMS delimiter, 'ctx' a raw DATA_TRUST_CTX-unit context and the unit after it. |
+| `DATA_TRUST_COPY` | `'off'` | name | choices `'off'`, `'accu'` | Copy detection inside the book's vote (SR6, the ACCU-COPY family): 'off' judges no pair of sources; 'accu' judges every pair sharing DATA_TRUST_MIN_EV conflicted claims for dependence and discounts a dependent pair's later-seen source in the next round of the vote. |
+| `DATA_TRUST_COPY_P` | `0.5` | fraction 0..1 | domain (0.0, 1.0) | Posterior of dependence above which a judged pair of sources is reported dependent and its later-seen source discounted; below it the pair is certified independent. |
+| `DATA_TRUST_COPY_PRIOR` | `0.2` | fraction 0..1 | domain (0.0, 1.0) | Prior probability that two sources are dependent before their shared claims are read (the model's alpha); 0 and 1 are refused. |
+| `DATA_TRUST_COPY_RATE` | `0.8` | fraction 0..1 | domain (0.0, 1.0) | Copy rate (the model's c): the share of its values a dependent source copies; a dependent pair's later-seen source votes at 1 - c x P(dependent) on the values it shares with the earlier. |
 | `DATA_TRUST_CTX` | `5` | tokens | domain (1, ∞) | Key length in TOK units: the most units before a delimiter a 'kv' key reads, or the context length of a 'ctx' claim. |
 | `DATA_TRUST_DELIMS` | `'=\|:\| is \| are \| was \| were '` | name |  | The 'kv' delimiter class, '\|'-separated byte strings: a claim is read around each occurrence. |
 | `DATA_TRUST_EVERY` | `160` | Windows | domain (0, ∞) | Windows between passes of the book over the stream consumed since the last one (0 = epoch-end passes only). |

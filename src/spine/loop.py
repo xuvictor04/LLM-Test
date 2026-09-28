@@ -458,7 +458,9 @@ class RunResult:
     # EVERY PASS OF THE SOURCE-RELIABILITY BOOK THIS PROCESS MADE (2026-09-28, Q-DATA-11), in order:
     # one dict each -- kind (cadence, roll or tail), step, the unit index it started at, the units
     # it read, its seconds, the conflicted claims, the sources read, and each source's evidence and
-    # trust after it. Empty at DATA_TRUST='off'. run.py --trust-series writes it as JSON.
+    # trust after it; at DATA_TRUST_COPY='accu' also copy_seconds and copy_pairs, each judged pair's
+    # [earlier, later, posterior, verdict] (SR6, Q-DATA-12). Empty at DATA_TRUST='off'. run.py
+    # --trust-series writes it as JSON.
     trust_series: tuple = ()
 
 
@@ -1205,8 +1207,11 @@ def run(sysm, *, max_windows=None, progress=True):
                 _trust_lo = int(sysm.focus.cursor)
 
     def _trust_read(kind):
-        """One pass of the book over ids[_trust_lo:_trust_hi], timed; the cursor moves to hi."""
+        """One pass of the book over ids[_trust_lo:_trust_hi], timed; the cursor moves to hi. At
+        DATA_TRUST_COPY='accu' the pass's entry also carries SR6's copy step (Q-DATA-12): the seconds
+        DATA timed for it in this pass and each judged pair's posterior and verdict."""
         nonlocal _trust_lo, _trust_wall
+        _c0 = float(sysm.focus.copy_seconds)
         _t0 = time.perf_counter()
         _hi = max(_trust_hi, _trust_lo)
         _u, _s = _c_trust_units(sysm, _trust_lo, _hi)
@@ -1222,6 +1227,10 @@ def run(sysm, *, max_windows=None, progress=True):
             "sources": int(_f.counters.get("data.trust.sources", 0)),
             "evidence": {k: [float(v[0]), int(v[1])] for k, v in sorted(_f.evidence.items())},
             "trust": {k: float(v) for k, v in sorted(_f.trust.items())}})
+        if _f.copy_mode == "accu":
+            trust_series[-1]["copy_seconds"] = round(float(_f.copy_seconds) - _c0, 6)
+            trust_series[-1]["copy_pairs"] = [[str(q[0]), str(q[1]), float(q[2]), str(q[6])]
+                                              for q in _f.copy_pairs]
         _trust_lo = _hi
 
     _last_step = int(clock.counters()["step"])
@@ -2111,7 +2120,9 @@ def run(sysm, *, max_windows=None, progress=True):
     # its growth readings; a float never reads as an integer counter line (Q-RUN-17).
     # THE SOURCE-RELIABILITY BOOK'S ROW (2026-09-28, Q-DATA-11): its counters, its gates in G4's
     # three states, each source's reliability and trust, and its seconds -- data.trust.wall_s, the
-    # root's float, printed to six places and never read as an integer counter line.
+    # root's float, printed to six places and never read as an integer counter line. At
+    # DATA_TRUST_COPY='accu' also SR6's judged pairs and data.trust.copy.seconds, DATA's float for
+    # the copy steps, printed the same way (Q-DATA-12).
     report["DATA(trust)"] = _trust_row(sysm, _trust_on, _trust_wall)
     report["LOOP(flush books)"] = {k: (round(v, 6) if isinstance(v, float) else v)
                                    for k, v in books.items()} if books else (
@@ -2233,11 +2244,14 @@ def run(sysm, *, max_windows=None, progress=True):
 
 
 def _trust_row(sysm, armed, wall_s):
-    """The R report's DATA(trust) row (2026-09-28, Q-DATA-11): at DATA_TRUST='off' the book's two
-    gates alone, both UNREACHABLE with their reasons; at 'observe' also its data.trust.* counters,
+    """The R report's DATA(trust) row (2026-09-28, Q-DATA-11): at DATA_TRUST='off' the book's three
+    gates alone, all UNREACHABLE with their reasons; at 'observe' also its data.trust.* counters,
     data.trust.wall_s -- this process's seconds, a float to six places, outside the integer channel
     tests/test_baseline.py reads -- and one line per source read: its reliability and conflicted
-    claims, and its trust, or its evidence ABSENT and trust 1."""
+    claims, and its trust, or its evidence ABSENT and trust 1. At DATA_TRUST_COPY='accu' (SR6,
+    Q-DATA-12) the data.trust.copy.* counters are among the counters, data.trust.copy.seconds --
+    DATA's float for the copy steps, this process's -- sits beside wall_s, and each pair the last
+    vote judged gets a line: its posterior, its three counts and the verdict DATA gave it."""
     focus = getattr(sysm, "focus", None)
     if focus is None:
         return "no book: this System was built without the 'focus' stage"
@@ -2246,6 +2260,16 @@ def _trust_row(sysm, armed, wall_s):
         return row
     row.update({k: int(v) for k, v in focus.counters.items()})
     row["data.trust.wall_s"] = round(float(wall_s), 6)
+    if focus.copy_mode == "accu":
+        row["data.trust.copy.seconds"] = round(float(focus.copy_seconds), 6)
+        for early, later, post, k_true, k_false, k_diff, verdict in focus.copy_pairs:
+            row[f"pair:{early}|{later}"] = (
+                f"P {float(post):.6f} that {later} copies {early}, over {int(k_true)} shared true, "
+                f"{int(k_false)} shared false and {int(k_diff)} differing claim(s): " + (
+                    f"DEPENDENT -- {later}'s votes on the values it shares with {early} are "
+                    f"discounted in the book's vote" if verdict == "dependent" else
+                    "certified independent" if verdict == "independent" else
+                    "undecided (exactly at DATA_TRUST_COPY_P)"))
     min_ev = int(sysm.configs["DATA"].trust_min_ev)
     for src in sorted(focus.first_seen):
         ev = focus.evidence.get(src)

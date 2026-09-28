@@ -5844,6 +5844,68 @@
      "DATA_TRUST_HOT",
      "DATA_TRUST_SKETCH"
     ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_COPY)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_COPY",
+    "unit": "name",
+    "purpose": "Copy detection inside the source-reliability book's vote: 'off' judges no pair of sources; 'accu' judges every pair sharing DATA_TRUST_MIN_EV conflicted claims by the posterior that the later-seen copies the earlier, and discounts a dependent pair's later source in the vote's next round. Read only at DATA_TRUST=observe; observe-only, so it moves the book's truth, r and t and nothing the run trains on.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8's standing actuation rule (2) and SR6 (copy detection, the ACCU-COPY family), register \u00a78 3.7 (operation only; \u00a78 5.12 decides) and 04-Q12, C05 and O5, ruled in docs/04_CONTRACT.md Q-DATA-12. There is no ancestor knob: the old tree kept no book of which source to believe, so it judged no pair of sources. IT DOES NOT CHANGE THE 328. WHY: 04's standing rule (2) asks for copy detection before any trust actuation is proposed, because a source that copies another's values -- false ones included -- doubles that source's vote (majority-false inverted trust at 3 of 3 seeds). Built 'off'; \u00a78 5.12 reads 'accu' on GPU, and O5's lock holds meanwhile.",
+    "couples_with": [
+     "DATA_TRUST",
+     "DATA_TRUST_COPY_PRIOR",
+     "DATA_TRUST_COPY_RATE",
+     "DATA_TRUST_COPY_P",
+     "DATA_TRUST_MIN_EV"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_COPY_PRIOR)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_COPY_PRIOR",
+    "unit": "fraction 0..1",
+    "purpose": "The copy model's alpha: the prior probability that two sources are dependent, before their shared claims are read. The domain is closed and DATA.new_focus refuses 0 and 1 by name, a certainty no count moves. Read only at DATA_TRUST=observe with DATA_TRUST_COPY=accu.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8's standing actuation rule (2) and SR6 (copy detection, the ACCU-COPY family), register \u00a78 3.7 (operation only; \u00a78 5.12 decides) and 04-Q12, C05 and O5, ruled in docs/04_CONTRACT.md Q-DATA-12. There is no ancestor knob: the old tree kept no book of which source to believe, so it judged no pair of sources. IT DOES NOT CHANGE THE 328. WHY: the family's alpha, 0.2, as Proposal 04 cites it (from memory). PROVISIONAL (NEW-19): no toy, CPU or GPU reading is behind it.",
+    "couples_with": [
+     "DATA_TRUST_COPY",
+     "DATA_TRUST_COPY_RATE",
+     "DATA_TRUST_COPY_P"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_COPY_RATE)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_COPY_RATE",
+    "unit": "fraction 0..1",
+    "purpose": "The copy model's c: the share of its values a dependent source copies. It sets the likelihood of a pair's shared-true, shared-false and differing claims under dependence, and the discount -- a dependent pair's later source votes at 1 - c x P on the values it shares with the earlier. Both ends are legal. Read only at DATA_TRUST=observe with DATA_TRUST_COPY=accu.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8's standing actuation rule (2) and SR6 (copy detection, the ACCU-COPY family), register \u00a78 3.7 (operation only; \u00a78 5.12 decides) and 04-Q12, C05 and O5, ruled in docs/04_CONTRACT.md Q-DATA-12. There is no ancestor knob: the old tree kept no book of which source to believe, so it judged no pair of sources. IT DOES NOT CHANGE THE 328. WHY: the family's c, 0.8, as Proposal 04 cites it (from memory). PROVISIONAL (NEW-19): no toy, CPU or GPU reading is behind it.",
+    "couples_with": [
+     "DATA_TRUST_COPY",
+     "DATA_TRUST_COPY_PRIOR",
+     "DATA_TRUST_COPY_P"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_COPY_P)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_COPY_P",
+    "unit": "fraction 0..1",
+    "purpose": "The posterior of dependence above which a judged pair is reported dependent and its later-seen source discounted; below it the pair is certified independent and votes in full; exactly at it, judged and neither. Read only at DATA_TRUST=observe with DATA_TRUST_COPY=accu.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8's standing actuation rule (2) and SR6 (copy detection, the ACCU-COPY family), register \u00a78 3.7 (operation only; \u00a78 5.12 decides) and 04-Q12, C05 and O5, ruled in docs/04_CONTRACT.md Q-DATA-12. There is no ancestor knob: the old tree kept no book of which source to believe, so it judged no pair of sources. IT DOES NOT CHANGE THE 328. WHY: 0.5, the even-odds line. PROVISIONAL (NEW-19); it is 'SR6's threshold', the first next arm O5 names if \u00a78 5.12 fails.",
+    "couples_with": [
+     "DATA_TRUST_COPY",
+     "DATA_TRUST_COPY_PRIOR",
+     "DATA_TRUST_COPY_RATE"
+    ]
    }
   ]
  }

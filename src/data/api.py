@@ -25,9 +25,10 @@ them as arguments, which is not an import and O10 does not refuse it):
   Stream  bytes, labels, splice_starts, area_changes, phase_bounds, area_names, per_area_drawn,
           epoch, stream_id, draws, counters, gates, sources, source_names
   Focus   mode, counters, gates, held, rule, claim, ctx, val, delims, sketch_size, sketch, table,
-          evidence, trust, first_seen, cursor, stream, last_step, carry -- the source-reliability
-          book (2026-09-28, Proposal 04 SR3; docs/04_CONTRACT.md Q-DATA-11), the one record here
-          that is a book and not a statement, so the one that is not frozen
+          evidence, trust, first_seen, cursor, stream, last_step, carry, copy_mode, copy_pairs,
+          copy_held, copy_seconds -- the source-reliability book (2026-09-28, Proposal 04 SR3;
+          docs/04_CONTRACT.md Q-DATA-11), the one record here that is a book and not a statement,
+          so the one that is not frozen; the copy_* four are SR6's copy detection (Q-DATA-12)
 """
 import array
 import bisect
@@ -36,6 +37,7 @@ import dataclasses
 import hashlib
 import math
 import os
+import time
 import weakref
 import zlib
 from fractions import Fraction
@@ -2502,6 +2504,35 @@ _TRUST_COUNTERS = ("data.trust.passes", "data.trust.updates", "data.trust.units"
                    "data.trust.evidence_absent", "data.trust.table_evictions",
                    "data.trust.sketch_load")
 
+# SR6's COPY DETECTION (2026-09-28, Proposal 04 §1 item 8's standing rule (2) and SR6; register §8 3.7;
+# docs/04_CONTRACT.md Q-DATA-12), inside the vote at DATA_TRUST_COPY='accu'. The ACCU-COPY family --
+# Dong, Berti-Equille and Srivastava, VLDB 2009, as 04 cites it: from memory, not from a review -- read
+# on the book's own quantities. For a pair of sources, e seen first and l later (Focus.first_seen, the
+# book's positions: a copy is presumed to come after what it copies), the conflicted claims both make
+# are counted under the round's truth: SHARED TRUE (both hold the key's truth), SHARED FALSE (both hold
+# one value that is not it, on a key whose claimed values less its truth number n) and DIFFERING (two
+# values; a key whose truth is tied still counts here, since whether two claims differ does not depend
+# on which is true, and a value shared on a tied key is neither). Under independence each source is
+# right at its accuracy A and wrong uniformly over the key's n false values; under "l copies e's value
+# with probability c, else provides its own", the three likelihood ratios dependent/independent are
+#     shared true   1 - c + c / A        shared false   1 - c + c n / (1 - A)        differing   1 - c
+# with A the later source's r this round (r = (agree + 1)/(n + 2) lies strictly inside (0, 1), so
+# every ratio is finite and positive but a differing one at c = 1, which is 0). The posterior that l
+# depends on e is alpha L / (alpha L + 1 - alpha), L the product -- computed as a logistic of
+# ln(alpha / (1 - alpha)) + ln L, so no count overflows it. THE PLAN FLOORS n AT 1 AND THE FLOOR IS NOT
+# WRITTEN: n is counted only on a key whose truth is decided and whose pair shares a value other than
+# it, so the key holds at least those two values and n is at least 1 by construction -- a clause that
+# cannot bind is an untrippable guard, this tree's most recorded defect.
+# EVERY COPY COUNTER, seeded 0 at DATA_TRUST_COPY='accu' and ABSENT, every one, at 'off' or at
+# DATA_TRUST='off'. `passes` is the lineage's count of votes the copy detection ran in; the other four
+# are readings of the last vote's copy step. They live in Focus.counters beside the book's, and a
+# checkpoint carries them under state['focus']['copy'] with the judged pairs, so an 'off' leg can carry
+# them unchanged (Focus.copy_held).
+_TRUST_COPY_PREFIX = "data.trust.copy."
+_TRUST_COPY_COUNTERS = ("data.trust.copy.passes", "data.trust.copy.pairs_judged",
+                        "data.trust.copy.pairs_dependent", "data.trust.copy.pairs_certified",
+                        "data.trust.copy.votes_discounted")
+
 
 @dataclasses.dataclass
 class Focus:
@@ -2558,11 +2589,29 @@ class Focus:
                                stream yields do not depend on where its passes fall.
       counters                 data.trust.*: passes, updates, units, claims, claims_kv or
                                claims_ctx, conflicted_claims, sources, evidence_absent,
-                               table_evictions and sketch_load. The lineage's, like every DATA
-                               counter.
-    `gates` (data.trust and data.trust.actuation) is re-stated at every pass and is not
-    checkpointed. The seconds the passes cost (data.trust.wall_s) are the ROOT's to time and are
+                               table_evictions and sketch_load -- and, at DATA_TRUST_COPY='accu',
+                               data.trust.copy.* (below). The lineage's, like every DATA counter.
+    `gates` (data.trust, data.trust.actuation and data.trust.copy) is re-stated at every pass and is
+    not checkpointed. The seconds the passes cost (data.trust.wall_s) are the ROOT's to time and are
     not here: a float in a book the continuation compares would differ on every run.
+
+    SR6's COPY DETECTION (2026-09-28, Q-DATA-12), the vote's own part of the book:
+      copy_mode                'off' or 'accu', DATA_TRUST_COPY as new_focus read it. At 'off' the
+                               vote is the one this record was built for, no data.trust.copy.* key
+                               exists and copy_pairs stays empty.
+      copy_pairs               the last vote's judged pairs, [earlier, later, posterior, shared
+                               true, shared false, differing, verdict] each, in first-sight order:
+                               verdict 'dependent' above DATA_TRUST_COPY_P, 'independent'
+                               (certified) below it, 'undecided' exactly at it. Checkpointed, with
+                               the data.trust.copy.* counters, under state['focus']['copy'].
+      copy_held                at DATA_TRUST_COPY='off', a checkpoint's copy part -- its pairs and
+                               counters -- carried unchanged to this run's saves, so a lineage that
+                               switches the detection off for one leg and on again keeps its count
+                               (the book's ON -> OFF -> ON rule, Q-DATA-11). None otherwise.
+      copy_seconds             this process's seconds in the copy steps (data.trust.copy.seconds, a
+                               float the root prints to six places). DATA's to time, unlike
+                               wall_s, because only DATA knows where a copy step starts and ends
+                               inside a pass; never checkpointed and never compared.
     """
     mode: str
     counters: dict = dataclasses.field(default_factory=dict)
@@ -2583,6 +2632,33 @@ class Focus:
     stream: int = 0
     last_step: int = -1
     carry: list = dataclasses.field(default_factory=list)
+    copy_mode: str = "off"
+    copy_pairs: list = dataclasses.field(default_factory=list)
+    copy_held: object = None
+    copy_seconds: float = 0.0
+
+
+def _trust_copy(dat: Config):
+    """SR6's copy model as the vote reads it (2026-09-28, Q-DATA-12): None at DATA_TRUST_COPY='off',
+    else (prior, rate, p) -- DATA_TRUST_COPY_PRIOR, _RATE and _P.
+
+    REFUSES BY NAME A PRIOR OF 0 OR 1, which the lever's closed domain admits (spine/lever.py::Lever's
+    rule for an interval open at an end: the declaration under-refuses by the endpoint and the body
+    refuses it, saying why). At 0 every pair's posterior is 0, so every judged pair would be CERTIFIED
+    independent before a claim is read; at 1 every pair is dependent. A certainty no count can move is
+    not a prior, and a certificate issued by one is not evidence."""
+    dat = dat.owned_by("DATA")
+    if str(dat.trust_copy) == "off":
+        return None
+    prior = float(dat.trust_copy_prior)
+    if not 0.0 < prior < 1.0:
+        raise LeverError(
+            f"DATA_TRUST_COPY_PRIOR={prior!r}: copy detection's prior that two sources are dependent "
+            f"must lie strictly between 0 and 1. At 0 every pair's posterior is 0 and every judged "
+            f"pair would be certified independent before one of its claims was read; at 1 every "
+            f"pair is dependent whatever it claims. A certainty no count moves is not a prior. The "
+            f"model's value is 0.2 (the ACCU-COPY family's, as Proposal 04 cites it).")
+    return prior, float(dat.trust_copy_rate), float(dat.trust_copy_p)
 
 
 def _trust_delims(dat):
@@ -2614,8 +2690,10 @@ def _trust_delims(dat):
 
 
 def _trust_gates(dat, focus):
-    """The book's two gates, re-stated from what it holds. data.trust.actuation is UNREACHABLE on
-    every configuration this tree builds."""
+    """The book's three gates, re-stated from what it holds. data.trust.actuation is UNREACHABLE on
+    every configuration this tree builds; data.trust.copy (SR6, Q-DATA-12) is UNREACHABLE naming
+    whichever lever is off -- DATA_TRUST, or DATA_TRUST_COPY -- and at 'accu' FIRES when a judged pair
+    of sources is reported dependent (dependent pairs vs pairs judged)."""
     dat = dat.owned_by("DATA")
     mode = str(dat.trust)
     actuation = Gate(
@@ -2625,6 +2703,7 @@ def _trust_gates(dat, focus):
                "LM.lm_loss(token_weights=) are not in this tree -- so no trust weights a token or a "
                "draw here. Under DATA_TRUST='observe' a source's t is the weight a built actuation "
                "would apply, and it multiplies nothing")
+    copy = _trust_copy_gate(dat, focus)
     if mode == "off":
         # WHAT A LATER 'observe' LEG READS OF THIS RUN IS RULED (Q-DATA-11's review): this said the
         # held book "reads nothing this run consumes", and the next leg's first pass reads, from the
@@ -2641,7 +2720,7 @@ def _trust_gates(dat, focus):
                             "before the 'data.trust' gate is asked, so no source is read, no claim "
                             "formed and no trust set. DATA_TRUST=observe keeps the book and "
                             "changes nothing the run trains on." + held),
-                actuation]
+                actuation, copy]
     min_ev = int(dat.trust_min_ev)
     n_read, n_ev, n_trust = len(focus.first_seen), len(focus.evidence), len(focus.trust)
     if n_trust:
@@ -2652,7 +2731,46 @@ def _trust_gates(dat, focus):
         why = (f"{n_read} source(s) read and {n_ev} of them carry evidence -- at least "
                f"DATA_TRUST_MIN_EV={min_ev} conflicted claims -- and trust is set only when two or "
                f"more do, so every source's trust is 1 and its r and t are ABSENT")
-    return [Gate("data.trust", n_trust > 0, n_trust, n_read, reason=why), actuation]
+    return [Gate("data.trust", n_trust > 0, n_trust, n_read, reason=why), actuation, copy]
+
+
+def _trust_copy_gate(dat, focus):
+    """Gate data.trust.copy (2026-09-28, SR6; Q-DATA-12), re-stated from the last vote's judged
+    pairs: UNREACHABLE at DATA_TRUST='off' or DATA_TRUST_COPY='off', naming the lever that is off;
+    at 'accu' FIRED when a pair is reported dependent, the arithmetic dependent pairs vs pairs
+    judged, and armed-but-zero otherwise with the reason saying why no pair was dependent."""
+    if str(dat.trust) == "off":
+        return Gate("data.trust.copy", False, None, None, reachable=False,
+                    reason="DATA_TRUST='off': no book is kept, so no vote runs and no pair of "
+                           "sources is judged for copying. DATA_TRUST=observe with "
+                           "DATA_TRUST_COPY=accu judges them")
+    if str(dat.trust_copy) == "off":
+        held = (" A checkpoint's copy part -- its judged pairs and data.trust.copy.* counts -- is "
+                "carried unchanged to this run's saves." if focus.copy_held is not None else "")
+        return Gate("data.trust.copy", False, None, None, reachable=False,
+                    reason="DATA_TRUST_COPY='off': the book votes every source's claims in full "
+                           "and judges no pair of sources for copying (SR6, the ACCU-COPY family), "
+                           "so a source that copies another counts as a second witness. "
+                           "DATA_TRUST_COPY=accu judges every pair and discounts a dependent "
+                           "pair's copy in the book's vote, and in nothing the run trains on."
+                           + held)
+    min_ev, p_dep = int(dat.trust_min_ev), float(dat.trust_copy_p)
+    pairs = focus.copy_pairs
+    n_dep = sum(1 for q in pairs if q[6] == "dependent")
+    n_ind = sum(1 for q in pairs if q[6] == "independent")
+    n_und = len(pairs) - n_dep - n_ind
+    if not pairs:
+        why = (f"no pair of the {len(focus.first_seen)} source(s) read shares DATA_TRUST_MIN_EV="
+               f"{min_ev} conflicted claims -- shared true, shared false or differing under the "
+               f"vote's truth -- so none is judged, and the vote counts every claim in full")
+    else:
+        why = (f"{len(pairs)} pair(s) of sources judged on at least DATA_TRUST_MIN_EV={min_ev} "
+               f"shared conflicted claims: {n_dep} reported dependent, their posterior above "
+               f"DATA_TRUST_COPY_P={p_dep} -- the later-seen source of each votes at 1 - "
+               f"DATA_TRUST_COPY_RATE x P on the values it shares with the earlier, in the book's "
+               f"vote and in nothing the run trains on -- and {n_ind} certified independent"
+               + (f", {n_und} exactly at the threshold" if n_und else ""))
+    return Gate("data.trust.copy", n_dep > 0, n_dep, len(pairs), reason=why)
 
 
 def new_focus(dat: Config, areas, plan, *, restored=None):
@@ -2666,7 +2784,7 @@ def new_focus(dat: Config, areas, plan, *, restored=None):
     record it would fill in place does not exist yet, and this row puts the book back instead.
     `areas` and `plan` are SR2's -- its per-area books are keyed by them -- and SR3 reads neither.
 
-    AT DATA_TRUST='off' IT ALLOCATES NOTHING: a Focus with mode 'off', no counter and two UNREACHABLE
+    AT DATA_TRUST='off' IT ALLOCATES NOTHING: a Focus with mode 'off', no counter and three UNREACHABLE
     gates, holding a checkpoint's book unchanged where there is one (Focus.held).
     'loss' AND 'loss+draw' ARE REFUSED WITH spine/gate.py::NotBuilt, naming the value, the way
     OPT_LR_CONTINUE='regulated' is: the actuation needs DATA.token_weights and
@@ -2680,16 +2798,28 @@ def new_focus(dat: Config, areas, plan, *, restored=None):
     data.trust.table_evictions. A checkpoint with no book -- written before it, or by a run with the
     book off -- gives an empty one: 04 §5's "a new source gets trust 1 and ABSENT evidence", for
     every source at once.
+    SR6's COPY DETECTION (2026-09-28, Q-DATA-12) is read here too, at 'observe' only: at
+    DATA_TRUST_COPY='accu' the data.trust.copy.* counters are seeded at 0, or the checkpoint's copy
+    part -- its judged pairs and counts, state['focus']['copy'] -- is put back (a book without one,
+    older than the detection or from an 'off' leg, starts it at 0); DATA_TRUST_COPY_PRIOR at 0 or 1
+    is REFUSED BY NAME (_trust_copy). At DATA_TRUST_COPY='off' no copy key exists and a checkpoint's
+    copy part is held unchanged for this run's saves (Focus.copy_held). The detection changes no
+    table key, so a resume may switch it either way, and none is refused for it.
 
     RETURNS: Focus.
 
     LEVERS READ: trust, trust_rule, trust_claim, trust_ctx, trust_val, trust_delims, trust_sketch,
-                 trust_table, trust_min_ev (at 'observe', in the data.trust gate's reason)
+                 trust_table, trust_min_ev (at 'observe', in the data.trust gate's reason),
+                 trust_copy (at 'observe'), trust_copy_prior (at 'accu', refused here at 0 or
+                 1), trust_copy_rate (at 'accu', through _trust_copy), trust_copy_p (at 'accu',
+                 in the data.trust.copy gate's reason)
     WIRES READ: none
     DID IT FIRE: Gate data.trust (UNREACHABLE at 'off', naming it; armed at 'observe' until a
                  source's trust is set), Gate data.trust.actuation (UNREACHABLE on every
-                 configuration this tree builds); the data.trust.* counters, seeded at 'observe' and
-                 ABSENT at 'off'
+                 configuration this tree builds), Gate data.trust.copy (UNREACHABLE naming
+                 DATA_TRUST='off' or DATA_TRUST_COPY='off'; armed at 'accu' until a pair is
+                 reported dependent); the data.trust.* counters, seeded at 'observe' and ABSENT at
+                 'off', and the data.trust.copy.* ones, seeded at 'accu' and ABSENT otherwise
     """
     dat = dat.owned_by("DATA")
     mode = str(dat.trust)
@@ -2700,10 +2830,11 @@ def new_focus(dat: Config, areas, plan, *, restored=None):
             f"its source's trust" + (" and multiplies the draw by it" if mode == "loss+draw" else "")
             + ", through DATA.token_weights and LM.lm_loss(token_weights=), neither of which is in "
             f"this tree; and 04-6.3's standing rules forbid either value as a default before copy "
-            f"detection is built and while a truthful source in another format is floored. Refused "
-            f"rather than run as 'observe' under a label naming an actuation that never happened. "
-            f"The built values are 'off' (the default) and 'observe', which keeps the book and "
-            f"changes nothing the run trains on.")
+            f"detection -- built OFF since 2026-09-28, DATA_TRUST_COPY (Q-DATA-12) -- passes E5's "
+            f"majority-false and 50%-impersonation worlds (register §8 5.12), and while a truthful "
+            f"source in another format is floored. Refused rather than run as 'observe' under a "
+            f"label naming an actuation that never happened. The built values are 'off' (the "
+            f"default) and 'observe', which keeps the book and changes nothing the run trains on.")
     if mode == "off":
         focus = Focus(mode="off", held=restored if isinstance(restored, dict) else None)
         focus.gates = _trust_gates(dat, focus)
@@ -2714,8 +2845,11 @@ def new_focus(dat: Config, areas, plan, *, restored=None):
     ctx, val = int(dat.trust_ctx), int(dat.trust_val)
     delims = _trust_delims(dat)
     size, bound = int(dat.trust_sketch), int(dat.trust_table)
+    # SR6's COPY DETECTION (Q-DATA-12): None at DATA_TRUST_COPY='off'; a prior of 0 or 1 is refused
+    # here, at startup, before any tensor.
+    copy = _trust_copy(dat)
     focus = Focus(mode="observe", rule=rule, claim=claim, ctx=ctx, val=val, delims=delims,
-                  sketch_size=size)
+                  sketch_size=size, copy_mode="off" if copy is None else "accu")
     rec = restored if isinstance(restored, dict) and restored.get("mode") == "observe" else None
     if rec is None:
         sketch = array.array("i", bytes(4 * size))
@@ -2728,6 +2862,8 @@ def new_focus(dat: Config, areas, plan, *, restored=None):
         focus.table = collections.OrderedDict()
         focus.counters = {k: 0 for k in _TRUST_COUNTERS}
         focus.counters[f"data.trust.claims_{claim}"] = 0
+        if copy is not None:
+            focus.counters.update({k: 0 for k in _TRUST_COPY_COUNTERS})
         focus.gates = _trust_gates(dat, focus)
         return focus
 
@@ -2773,6 +2909,20 @@ def new_focus(dat: Config, areas, plan, *, restored=None):
     focus.counters = {k: int(v) for k, v in (rec.get("counters") or {}).items()}
     for k in _TRUST_COUNTERS + (f"data.trust.claims_{claim}",):
         focus.counters.setdefault(k, 0)
+    # THE COPY PART (Q-DATA-12), state['focus']['copy']: put back at DATA_TRUST_COPY='accu' -- the
+    # last vote's judged pairs, and its data.trust.copy.* counts into the book's counters -- or
+    # HELD UNCHANGED at 'off', where no copy key may exist, for this run's saves to write back. A
+    # book without one starts the detection at 0.
+    part = rec.get("copy") if isinstance(rec.get("copy"), dict) else None
+    if copy is None:
+        focus.copy_held = part
+    else:
+        if part is not None:
+            focus.copy_pairs = [[str(a), str(b), float(p), int(t), int(f), int(d), str(v)]
+                                for a, b, p, t, f, d, v in (part.get("pairs") or ())]
+            focus.counters.update({str(k): int(v) for k, v in (part.get("counters") or {}).items()})
+        for k in _TRUST_COPY_COUNTERS:
+            focus.counters.setdefault(k, 0)
     # A SMALLER BOUND EVICTS THE LEAST RECENTLY CLAIMED KEYS TO FIT, counted as any eviction is.
     while len(focus.table) > bound:
         focus.table.popitem(last=False)
@@ -2856,18 +3006,41 @@ def claims_observe(dat: Config, focus, *, units, sources, step, at):
     set and every source's is 1. Sources are visited in name order and table keys are bytes hashed
     by crc32, so the book is the same under every PYTHONHASHSEED.
 
+    THE COPY DETECTION, AT DATA_TRUST_COPY='accu' ONLY (2026-09-28, Proposal 04 SR6 and §1 item 8's
+    standing rule (2); register §8 3.7; docs/04_CONTRACT.md Q-DATA-12) -- the ACCU-COPY family inside
+    that vote. After each of its ten rounds a copy step judges every pair of sources sharing at least
+    DATA_TRUST_MIN_EV conflicted claims counted under the round's truth -- shared true, shared false,
+    differing -- by the posterior that the later-seen of the two (Focus.first_seen) copies the earlier,
+    from DATA_TRUST_COPY_PRIOR and _RATE, the later source's r standing for its accuracy (the model's
+    arithmetic is at _TRUST_COPY_COUNTERS). A pair above DATA_TRUST_COPY_P is DEPENDENT: in the next
+    round the later source's vote for each value it shares with the earlier, on any conflicted key,
+    counts at 1 - DATA_TRUST_COPY_RATE x P (one factor per dependent earlier source that holds the
+    same value). A pair below it is CERTIFIED INDEPENDENT and votes in full. Pairs are visited in
+    first-sight order and values in byte order, so this too is one book under every PYTHONHASHSEED.
+    The last round's step is the one reported (Focus.copy_pairs). It moves the book's vote -- the
+    truth, r and t it reports -- and NOTHING the run trains on: observe mode, and no actuation is
+    built (the standing rule asks copy detection to pass E5's majority-false and impersonation
+    worlds, register §8 5.12, before any is proposed). At 'off' the vote is the one above, statement
+    for statement, and no data.trust.copy.* key exists.
+
     RETURNS: None -- the book is updated in place.
 
     LEVERS READ: trust (the data.trust gate's re-statement), trust_hot, trust_self, trust_min_n,
                  trust_min_ev, trust_min, trust_table (the claim shape and the sketch size were
-                 read by new_focus and are the book's)
+                 read by new_focus and are the book's), trust_copy, trust_copy_prior (at 'accu'),
+                 trust_copy_rate (at 'accu'), trust_copy_p (at 'accu')
     WIRES READ: none
     DID IT FIRE: data.trust.passes (every call), data.trust.updates (passes whose vote had a
                  conflicted claim), data.trust.units, data.trust.claims (claims formed),
                  data.trust.claims_kv or claims_ctx (claims the table recorded),
                  data.trust.conflicted_claims, data.trust.sources and data.trust.evidence_absent
                  (readings of the last vote), data.trust.table_evictions, data.trust.sketch_load
-                 (occupied buckets); Gate data.trust re-stated
+                 (occupied buckets); Gate data.trust re-stated. At DATA_TRUST_COPY='accu':
+                 data.trust.copy.passes (votes the copy detection ran in: every pass with a
+                 conflicted claim), data.trust.copy.pairs_judged, .pairs_dependent,
+                 .pairs_certified and .votes_discounted (the (key, source) votes the reported
+                 dependent pairs discount) -- readings of the last vote's copy step -- and Gate
+                 data.trust.copy re-stated; Focus.copy_seconds, a float, never in the counters
     """
     dat = dat.owned_by("DATA")
     if focus is None or focus.mode != "observe":
@@ -2941,9 +3114,13 @@ def claims_observe(dat: Config, focus, *, units, sources, step, at):
     ctr["data.trust.units"] += len(units)
     ctr["data.trust.passes"] += 1
 
-    conflicted = _trust_vote(focus, min_n=min_n, self_share=self_share, min_ev=min_ev, floor=floor)
+    copy = _trust_copy(dat)
+    conflicted = _trust_vote(focus, min_n=min_n, self_share=self_share, min_ev=min_ev, floor=floor,
+                             copy=copy)
     if conflicted:
         ctr["data.trust.updates"] += 1
+        if copy is not None:
+            ctr["data.trust.copy.passes"] = ctr.get("data.trust.copy.passes", 0) + 1
     ctr["data.trust.conflicted_claims"] = conflicted
     ctr["data.trust.sources"] = len(focus.first_seen)
     ctr["data.trust.evidence_absent"] = sum(1 for s in focus.first_seen if s not in focus.evidence)
@@ -3048,9 +3225,15 @@ def _ctx_claims(focus, seq_u, seq_s, k0):
     return out
 
 
-def _trust_vote(focus, *, min_n, self_share, min_ev, floor):
+def _trust_vote(focus, *, min_n, self_share, min_ev, floor, copy=None):
     """The reliability-weighted vote over the whole table, recomputed from scratch; sets
-    focus.evidence and focus.trust and returns how many keys are conflicted."""
+    focus.evidence and focus.trust and returns how many keys are conflicted.
+
+    `copy` is None -- DATA_TRUST_COPY='off', the vote as it was built, every float the same -- or
+    (prior, rate, p), SR6's model (_trust_copy; Q-DATA-12): then a copy step follows each round
+    (_trust_copy_step), the next round discounts the votes it names, the last step's judged pairs go
+    to focus.copy_pairs and its readings to the data.trust.copy.* counters, and focus.copy_seconds
+    gains the steps' seconds. With no conflicted key no step runs and the readings read 0."""
     conflicted = []
     for per in focus.table.values():
         claimed = []
@@ -3067,35 +3250,183 @@ def _trust_vote(focus, *, min_n, self_share, min_ev, floor):
         if len(claimed) >= 2 and len({v for _s, v in claimed}) >= 2:
             conflicted.append(claimed)
     focus.evidence, focus.trust = {}, {}
+    if copy is not None:
+        focus.copy_pairs = []
+        focus.counters.update({k: 0 for k in _TRUST_COPY_COUNTERS[1:]})
     if not conflicted:
         return 0
     names = sorted({s for claimed in conflicted for s, _v in claimed})
     r = {s: 1.0 for s in names}
     tally = {s: [0, 0] for s in names}
+    # THE COPY STEP's STANDING MATERIAL, built once per vote: first-sight ranks, each key's value
+    # groups and every pair's differing count, none of which a round's truth moves.
+    if copy is not None:
+        _t0 = time.perf_counter()
+        shape = _trust_copy_shape(conflicted, focus.first_seen)
+        spent = time.perf_counter() - _t0
+    # `discount` is the last copy step's: {(key index, source): factor}, empty until a step names a
+    # dependent pair -- and always at 'off', where every vote below is r[s], the float it was.
+    discount, judged = {}, []
     for _ in range(_TRUST_ITERATIONS):
         tally = {s: [0, 0] for s in names}
-        for claimed in conflicted:
+        truths = []
+        for ki, claimed in enumerate(conflicted):
             vote = {}
             for s, v in claimed:
-                vote[v] = vote.get(v, 0.0) + r[s]
+                w = r[s]
+                if discount:
+                    f = discount.get((ki, s))
+                    if f is not None:
+                        w = w * f
+                vote[v] = vote.get(v, 0.0) + w
             ranked = sorted(vote.items(), key=lambda kv: (-kv[1], kv[0]))
             if len(ranked) > 1 and abs(ranked[0][1] - ranked[1][1]) < _TRUST_TIE:
+                truths.append(None)
                 continue              # a tie decides nothing
             truth = ranked[0][0]
+            truths.append(truth)
             for s, v in claimed:
                 tally[s][0] += 1 if v == truth else 0
                 tally[s][1] += 1
         r = {s: (a + 1) / (n + 2) for s, (a, n) in tally.items()}
+        if copy is not None:
+            _t0 = time.perf_counter()
+            judged, discount = _trust_copy_step(shape, truths, r, min_ev=min_ev, copy=copy)
+            spent += time.perf_counter() - _t0
     focus.evidence = {s: [r[s], tally[s][1]] for s in names if tally[s][1] >= min_ev}
     if len(focus.evidence) >= 2:
         top = max(e[0] for e in focus.evidence.values())
         focus.trust = {s: min(1.0, max(floor, e[0] / top)) for s, e in focus.evidence.items()}
+    if copy is not None:
+        focus.copy_pairs = judged
+        ctr = focus.counters
+        ctr["data.trust.copy.pairs_judged"] = len(judged)
+        ctr["data.trust.copy.pairs_dependent"] = sum(1 for q in judged if q[6] == "dependent")
+        ctr["data.trust.copy.pairs_certified"] = sum(1 for q in judged if q[6] == "independent")
+        ctr["data.trust.copy.votes_discounted"] = len(discount)
+        focus.copy_seconds += spent
     return len(conflicted)
 
 
+def _trust_copy_shape(conflicted, first_seen):
+    """What every copy step of one vote reads and no round's truth moves: (rank, keys, differ).
+
+    `rank` orders the sources by first sight -- Focus.first_seen's [stream, unit] positions, then name;
+    a source the book never saw (a table built by hand) after every seen one, by name -- so a pair is
+    always (earlier, later), the later the presumed copy. `keys` holds, per conflicted key in table
+    order, its value groups [(value, [sources in rank order])] in byte order of the value. `differ`
+    counts, per pair, the conflicted keys on which the two hold different values: whether two claims
+    differ does not depend on which of them is true, so a key whose truth a round leaves tied counts
+    here in every round."""
+    names = sorted({s for claimed in conflicted for s, _v in claimed})
+    order = sorted(names, key=lambda s: ((0, int(first_seen[s][0]), int(first_seen[s][1]), s)
+                                         if s in first_seen else (1, 0, 0, s)))
+    rank = {s: i for i, s in enumerate(order)}
+    keys, differ = [], {}
+    for claimed in conflicted:
+        by_value = {}
+        for s, v in claimed:
+            by_value.setdefault(v, []).append(s)
+        groups = [(v, sorted(by_value[v], key=rank.__getitem__)) for v in sorted(by_value)]
+        keys.append(groups)
+        for gi in range(len(groups)):
+            for gj in range(gi + 1, len(groups)):
+                for a in groups[gi][1]:
+                    for b in groups[gj][1]:
+                        pair = (a, b) if rank[a] < rank[b] else (b, a)
+                        differ[pair] = differ.get(pair, 0) + 1
+    return rank, keys, differ
+
+
+def _trust_copy_step(shape, truths, r, *, min_ev, copy):
+    """One copy step after a round of the vote: every pair judged on the round's truth, and the
+    discount the next round applies. -> (judged, discount).
+
+    A pair's counts are its shared-true and shared-false claims on the keys the round decided -- the
+    shared-false ones grouped by n, the key's claimed values less its truth -- and its differing
+    claims (shape). A pair is JUDGED when the three reach DATA_TRUST_MIN_EV; its posterior is
+    _trust_copy_posterior's, with the later source's r as its accuracy, and its verdict 'dependent'
+    above DATA_TRUST_COPY_P, 'independent' below it, 'undecided' at it. `judged` lists [earlier,
+    later, posterior, shared true, shared false, differing, verdict] in first-sight order.
+    `discount` maps (key index, source) to the product of 1 - rate x P over the dependent pairs in
+    which that source is the later and the earlier holds the same value on that key -- on every
+    conflicted key, a tied one included, since that is where a copy's second vote can decide a key
+    -- and names only a vote whose factor is below 1."""
+    rank, keys, differ = shape
+    prior, rate, p_dep = copy
+    shared_true, shared_false = {}, {}
+    for groups, truth in zip(keys, truths):
+        if truth is None:
+            continue              # a value two sources share on a tied key is neither true nor false
+        n_false = len(groups) - 1
+        for v, members in groups:
+            for i in range(len(members)):
+                for j in range(i + 1, len(members)):
+                    pair = (members[i], members[j])
+                    if v == truth:
+                        shared_true[pair] = shared_true.get(pair, 0) + 1
+                    else:
+                        per = shared_false.setdefault(pair, {})
+                        per[n_false] = per.get(n_false, 0) + 1
+    judged, dependent = [], {}
+    for pair in sorted(set(shared_true) | set(shared_false) | set(differ),
+                       key=lambda q: (rank[q[0]], rank[q[1]])):
+        k_true = shared_true.get(pair, 0)
+        k_false = shared_false.get(pair, {})
+        k_diff = differ.get(pair, 0)
+        k_false_all = sum(k_false.values())
+        if k_true + k_false_all + k_diff < min_ev:
+            continue
+        post = _trust_copy_posterior(k_true, k_false, k_diff, r[pair[1]], prior, rate)
+        verdict = "dependent" if post > p_dep else ("independent" if post < p_dep else "undecided")
+        judged.append([pair[0], pair[1], post, k_true, k_false_all, k_diff, verdict])
+        if verdict == "dependent":
+            dependent[pair] = post
+    discount = {}
+    if dependent:
+        for ki, groups in enumerate(keys):
+            for _v, members in groups:
+                for i in range(1, len(members)):
+                    f = 1.0
+                    for j in range(i):
+                        post = dependent.get((members[j], members[i]))
+                        if post is not None:
+                            f *= 1.0 - rate * post
+                    if f < 1.0:
+                        discount[(ki, members[i])] = f
+    return judged, discount
+
+
+def _trust_copy_posterior(k_true, k_false, k_diff, acc, prior, rate):
+    """P(the later source of a pair copies the earlier | their shared conflicted claims), SR6's
+    ACCU-COPY posterior (the arithmetic is written out at _TRUST_COPY_COUNTERS): `k_true` shared-true
+    claims, `k_false` the shared-false ones as {n: count} (n the key's false values), `k_diff`
+    differing ones; `acc` the later source's accuracy, its r this round, strictly inside (0, 1);
+    `prior` alpha, strictly inside (0, 1); `rate` c, in [0, 1]. The log-likelihood ratio is summed
+    in n order and the logistic taken on the side that cannot overflow."""
+    if k_diff and rate >= 1.0:
+        return 0.0                # a copier that copies every value never differs from its source
+    llr = 0.0
+    if k_true:
+        llr += k_true * math.log(1.0 - rate + rate / acc)
+    for n in sorted(k_false):
+        llr += k_false[n] * math.log(1.0 - rate + rate * n / (1.0 - acc))
+    if k_diff:
+        llr += k_diff * math.log(1.0 - rate)
+    z = math.log(prior) - math.log(1.0 - prior) + llr
+    if z >= 0.0:
+        return 1.0 / (1.0 + math.exp(-z))
+    e = math.exp(z)
+    return e / (1.0 + e)
+
+
 def _focus_state(focus):
-    """What stream_state checkpoints of a Focus: everything but its gates, as plain data."""
-    return {
+    """What stream_state checkpoints of a Focus: everything but its gates and its seconds, as plain
+    data. SR6's copy part (Q-DATA-12) goes under 'copy' -- the last vote's judged pairs and the
+    data.trust.copy.* counters, which 'counters' does not repeat -- at DATA_TRUST_COPY='accu', or
+    the held one written back unchanged at 'off'; a book that never ran the detection writes none,
+    and its record is the one written before the detection existed."""
+    out = {
         "mode": focus.mode, "rule": focus.rule, "claim": focus.claim, "ctx": int(focus.ctx),
         "val": int(focus.val),
         "delims": [bytes(d) for d in focus.delims], "sketch_size": int(focus.sketch_size),
@@ -3108,8 +3439,18 @@ def _focus_state(focus):
         "cursor": int(focus.cursor), "stream": int(focus.stream),
         "last_step": int(focus.last_step),
         "carry": [[bytes(u), s] for u, s in focus.carry],
-        "counters": {k: int(v) for k, v in focus.counters.items()},
+        "counters": {k: int(v) for k, v in focus.counters.items()
+                     if not k.startswith(_TRUST_COPY_PREFIX)},
     }
+    if focus.copy_mode == "accu":
+        out["copy"] = {
+            "pairs": [[str(a), str(b), float(p), int(t), int(f), int(d), str(v)]
+                      for a, b, p, t, f, d, v in focus.copy_pairs],
+            "counters": {k: int(v) for k, v in focus.counters.items()
+                         if k.startswith(_TRUST_COPY_PREFIX)}}
+    elif focus.copy_held is not None:
+        out["copy"] = focus.copy_held
+    return out
 
 
 def stream_state(dat: Config, areas, *, focus=None):
@@ -3128,9 +3469,11 @@ def stream_state(dat: Config, areas, *, focus=None):
     docs/04_CONTRACT.md Q-DATA-11): `focus` is the System's Focus, and at DATA_TRUST='observe' its
     book is written whole -- the claim shape, the int32 sketch, the claim table in its LRU order,
     each source's evidence, trust and first sight, the per-epoch cursor and stream ordinal, the
-    carried units and the data.trust.* counters -- for DATA.new_focus(restored=) to put back. At
-    'off' nothing is written, so an 'off' run's payload is the one this function wrote before the
-    book existed, unless the Focus holds a checkpoint's book, which is written back unchanged. The
+    carried units and the data.trust.* counters, and since 2026-09-28 SR6's copy part under
+    'copy' where the copy detection runs or a held one is carried (Q-DATA-12) -- for
+    DATA.new_focus(restored=) to put back. At 'off' nothing is written, so an 'off' run's payload
+    is the one this function wrote before the book existed, unless the Focus holds a checkpoint's
+    book, which is written back unchanged. The
     sketch is DATA's payload and never a geometry-manifest field -- CKPT.check_geometry refuses a
     field a checkpoint does not record, so a new one would refuse every checkpoint written before
     it -- and its size is refused on a resume by new_focus instead.

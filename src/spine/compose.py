@@ -1443,7 +1443,12 @@ LOOP_ORDER = (
                                       "at=lo. An epoch roll puts lo back to 0, and the next pass "
                                       "opens the new stream. It REPORTS and changes nothing the "
                                       "run trains on; its seconds are the root's float "
-                                      "data.trust.wall_s, outside every compared book"),
+                                      "data.trust.wall_s, outside every compared book. At "
+                                      "DATA_TRUST_COPY='accu' the pass's vote also judges pairs "
+                                      "of sources for copying and discounts a dependent pair's "
+                                      "copy (SR6, Q-DATA-12) -- inside the book, and DATA times "
+                                      "that step as data.trust.copy.seconds, a float outside "
+                                      "them too"),
     ("B", "EVAL",  "holdout_probe",   "THE RETENTION PROBE (Q-EVAL-12), once per window AFTER the "
                                       "flush and the X block and BEFORE the checkpoint gate. THE "
                                       "ARM TEST COMES FIRST -- EVAL_RETENTION_EVERY > 0 and a "

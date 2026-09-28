@@ -38,7 +38,7 @@ they arrive from THREE families, which is the whole argument for owning by prefi
      2 rows from the `misc` family      -- n_processes and val_cap, both mis-tagged, and the survey's
                                            so-config record says so outright for both.
 
-This file emits 36 levers:
+This file emits 40 levers:
 
     11  rows with verdict rename
   +  6  rows with verdict keep
@@ -57,8 +57,12 @@ This file emits 36 levers:
          2026-09-28 with Proposal 04's SR3 source-reliability book (register 04-6.3, Proposal 05
          §8 3.4; docs/04_CONTRACT.md Q-DATA-11). No ancestors: the old tree kept no book of which
          source to believe. Section 6 below.
+  +  4  amendments: DATA_TRUST_COPY and the three numbers of its model (DATA_TRUST_COPY_PRIOR,
+         _RATE and _P), minted 2026-09-28 with Proposal 04's SR6 copy detection (register §8 3.7;
+         docs/04_CONTRACT.md Q-DATA-12). No ancestors: the old tree judged no pair of sources.
+         Section 6b below.
   -------
-    36  Lever declarations, all reachable as DATA_<FIELD>
+    40  Lever declarations, all reachable as DATA_<FIELD>
 
 Not emitted, by verdict: 1 merge, 0 drop, 0 promote-to-wire.
   MERGED (folds into a lever this file DOES declare, so it is not an unresolved merge):
@@ -799,8 +803,10 @@ class DATALevers(LeverSet):
     # 'loss' AND 'loss+draw' ARE REFUSED AT STARTUP WITH spine/gate.py::NotBuilt (OPT_LR_CONTINUE=
     # 'regulated' is the precedent): each needs DATA.token_weights and LM.lm_loss(token_weights=),
     # which this tree does not build, and 04-6.3's standing rules forbid either as a default before
-    # copy detection (SR6) and while a truthful source in another format is floored. A run labelled
-    # with an actuation that never happened is refused rather than run as 'observe'.
+    # copy detection passes E5's majority-false and 50%-impersonation worlds -- it is BUILT since
+    # 2026-09-28, OFF (DATA_TRUST_COPY, section 6b; Q-DATA-12), and §8 5.12 is its deciding run --
+    # and while a truthful source in another format is floored. A run labelled with an actuation that
+    # never happened is refused rather than run as 'observe'.
 
     trust_rule = Lever("claims", "Which estimator fills the book: 'claims', the model-free "
                                  "reliability-weighted vote over the (key, value) claims sources "
@@ -909,3 +915,71 @@ class DATALevers(LeverSet):
     # CENSUS AMENDMENT, 2026-09-28 (Q-DATA-11). Unmeasured on real text (04 §6). An LRU bound, not a
     # geometry: data.trust.table_evictions counts what it cost, and a resume at a smaller bound
     # evicts the least recently claimed keys to fit, counted the same way.
+
+    # ----------------------------------------------------------------------------------------------
+    # 6b. WHICH SOURCES COPY EACH OTHER -- SR6's COPY DETECTION INSIDE THE BOOK'S VOTE
+    #
+    # Four CENSUS AMENDMENTS, 2026-09-28 (Proposal 04 §1 item 8's standing actuation rule (2) and
+    # SR6; register §8 3.7, 5.12, 04-Q12, C05 and O5; docs/04_CONTRACT.md Q-DATA-12). None has an
+    # ancestor: the old tree kept no book, so it judged no pair of sources. The vote above counts
+    # one vote per source per claim, and a source that copies another's values -- false ones
+    # included -- doubles that source's vote without adding a witness: the majority-false world
+    # inverted trust at 3 of 3 seeds (04 §1 item 8). The ACCU-COPY family (Dong, Berti-Equille and
+    # Srivastava, VLDB 2009, as 04 cites it -- from memory, not from a review) judges each pair of
+    # sources on the conflicted claims they share and discounts a dependent pair's copy. Built
+    # OBSERVE-ONLY: the discount moves the book's vote and the trust it reports, and nothing the run
+    # trains on. THE THREE NUMBERS ARE THE FAMILY'S PUBLISHED VALUES AS 04 RECALLS THEM AND ARE
+    # PROVISIONAL (register NEW-19): no toy, CPU or GPU reading is behind any of them, §8 3.7's
+    # known answers are operation only, and §8 5.12 is the run that decides -- stepping
+    # DATA_TRUST_COPY_P first if it fails (O5's first next arm).
+    # ----------------------------------------------------------------------------------------------
+
+    trust_copy = Lever("off", "Copy detection inside the book's vote (SR6, the ACCU-COPY family): "
+                              "'off' judges no pair of sources; 'accu' judges every pair sharing "
+                              "DATA_TRUST_MIN_EV conflicted claims for dependence and discounts a "
+                              "dependent pair's later-seen source in the next round of the vote. "
+                              "Read only at DATA_TRUST=observe; it moves the book, never the run.",
+                       U.NAME, choices=("off", "accu"))
+    # CENSUS AMENDMENT, 2026-09-28 (Proposal 04 §1 item 8's standing rule (2) and SR6; register §8
+    # 3.7; docs/04_CONTRACT.md Q-DATA-12). BUILT 'off', WHERE THE BOOK IS C5's BIT FOR BIT: the vote
+    # runs the statements it ran before this lever, no data.trust.copy.* key exists, and the
+    # data.trust.copy gate reads UNREACHABLE naming this lever (or DATA_TRUST='off', which keeps no
+    # book at all). 'accu' is the E5 arm §8 5.12 reads, in the majority-false and 50%-impersonation
+    # worlds on GPU; O5's lock holds meanwhile, and a 'loss' actuation stays refused (NotBuilt)
+    # whatever this reads -- the standing rule asks copy detection to be built AND to pass those
+    # worlds before any actuation default is proposed, and only the first is true. A RESUME MAY
+    # SWITCH IT: the claim table is the same table either way, so no shape moves; the next pass
+    # re-votes it with or without the discount, and an 'off' leg carries the book's copy part
+    # unchanged to its saves (the book's own ON -> OFF -> ON rule, Q-DATA-11).
+
+    trust_copy_prior = Lever(0.2, "Prior probability that two sources are dependent before their shared "
+                                  "claims are read (the model's alpha); 0 and 1 are refused.",
+                             U.FRACTION, domain=(0.0, 1.0))
+    # CENSUS AMENDMENT, 2026-09-28 (Q-DATA-12). The family's alpha, 0.2 as 04 recalls it;
+    # PROVISIONAL (NEW-19). THE DOMAIN IS CLOSED AND THE BODY REFUSES BOTH ENDS BY NAME at
+    # DATA.new_focus when the detection is on (spine/lever.py::Lever's rule for an open interval):
+    # at 0 every pair's posterior is 0 and every judged pair would be CERTIFIED independent before a
+    # claim is read, and at 1 every pair is dependent -- a certainty no count moves is not a prior.
+    # Read only at DATA_TRUST=observe with DATA_TRUST_COPY=accu.
+
+    trust_copy_rate = Lever(0.8, "Copy rate (the model's c): the share of its values a dependent source "
+                                 "copies; a dependent pair's later-seen source votes at 1 - c x "
+                                 "P(dependent) on the values it shares with the earlier.",
+                            U.FRACTION, domain=(0.0, 1.0))
+    # CENSUS AMENDMENT, 2026-09-28 (Q-DATA-12). The family's c, 0.8 as 04 recalls it; PROVISIONAL
+    # (NEW-19). It enters twice, and both are the model's: in the likelihood of the pair's shared
+    # and differing claims under dependence, and in the discount. BOTH ENDS ARE LEGAL. At 0 a
+    # "copier" copies nothing, so dependence is independence: every judged pair's posterior is its
+    # prior and nothing is discounted. At 1 a copier copies every value, so a single differing value
+    # proves the pair independent (its posterior is 0), and a dependent pair's copy votes at 1 - P.
+    # Read only at DATA_TRUST=observe with DATA_TRUST_COPY=accu.
+
+    trust_copy_p = Lever(0.5, "Posterior of dependence above which a judged pair of sources is reported "
+                              "dependent and its later-seen source discounted; below it the pair is "
+                              "certified independent.", U.FRACTION, domain=(0.0, 1.0))
+    # CENSUS AMENDMENT, 2026-09-28 (Q-DATA-12). 0.5, the even-odds line; PROVISIONAL (NEW-19), and
+    # it is "SR6's threshold" O5 names as the first next arm after a failed §8 5.12. ONLY A PAIR
+    # ABOVE IT IS DISCOUNTED: a pair below it is certified independent and votes in full, so two
+    # truthful sources that agree -- which the model can never tell from a copy, since agreeing on
+    # true values is what accurate sources do -- are not taxed for it. A pair exactly at it is judged
+    # and neither. Read only at DATA_TRUST=observe with DATA_TRUST_COPY=accu.

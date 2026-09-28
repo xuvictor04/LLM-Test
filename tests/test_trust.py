@@ -63,11 +63,34 @@ pass reads, and what a checkpoint carries.
       DATA_TRUST_EVERY=0 a whole run passes once, at its finishing roll, over every unit it
       consumed, and a stopped one once, at its tail.
 
+SR6's COPY DETECTION (2026-09-28, Proposal 04 SR6 and §1 item 8's standing rule (2); register §8 3.7;
+docs/04_CONTRACT.md Q-DATA-12), on model-free tables in §8 0.6's td_stress style -- who states what is
+fixed by construction, and the book reads it with no model -- and through the loop:
+  SR6-1  A PLANTED COPY OF A LIAR IS REPORTED DEPENDENT at the hand-computed posterior (Bayes' rule in
+         product form, not the tree's logistic), the pair ordered by first sight and not by name; the
+         truthful pairs and the mixed ones certified at theirs; a partial copy still dependent at its.
+  SR6-2  TWO INDEPENDENT TRUTHFUL SOURCES ARE CERTIFIED INDEPENDENT, and stay so as their agreement
+         grows: the posterior of agreement on true values is bounded below 0.3575 at these values.
+  SR6-3  A MAJORITY-FALSE TABLE: the undiscounted vote loses the keys a copy and its source outvote
+         the truth on, and the discounted vote wins them -- both outcomes by hand.
+  SR6-4  AT 'off' THE KEYS ARE ABSENT AND THE VOTE IS C5's; on 300 random tables the vote with the
+         detection equals a transcription of the plan's model, and a detection that finds nothing
+         above its threshold moves nothing.
+  SR6-5  THE PRIOR's ENDS ARE REFUSED BY NAME, and a value past them by the lever's domain.
+  SR6-6  THROUGH THE LOOP, on a planted corpus holding a copy of its liar: the copy dependent at its
+         hand posterior and the row printing it; 'accu' against 'off' moving nothing the run trains
+         on; a continuing resume ending with the uninterrupted run's book; ON -> OFF -> ON for the
+         detection, the 'off' leg carrying the copy part unchanged.
+  T1, T7 read the book's third gate; T4 digests SR6's book under three hash seeds; T8 holds
+  data.trust.copy.seconds outside the integer channel.
+
 WHAT THIS FILE CANNOT SEE: whether the trust the book reports is right about real sources. CPU runs
-establish operation only; the book's readings on real text are E3's (register §8 6.2), on GPU.
+establish operation only; the book's readings on real text are E3's (register §8 6.2), on GPU, and
+whether copy detection catches copies in E5's majority-false and impersonation worlds is §8 5.12's.
 """
 import copy
 import hashlib
+import math
 import os
 import random
 import re
@@ -113,20 +136,37 @@ KEY = re.compile(r"^[a-z_][a-z0-9_]*(?:\.[a-z0-9_:]+)+$")
 E5_BASE = {"DATA_SOURCE": "real", "DATA_AREAS": "pa,pb,pc", "DATA_STREAM_BYTES": "60000",
            "RUN_EPOCHS": "2", "DATA_RESAMPLE": "1", "DATA_TRUST": "observe", "DATA_TRUST_EVERY": "30",
            "DATA_TRUST_HOT": "2", "DATA_TRUST_SKETCH": "100003"}
-BOOK_FIELDS = ("sketch", "first_seen", "evidence", "trust", "cursor", "stream", "carry")
+BOOK_FIELDS = ("sketch", "first_seen", "evidence", "trust", "cursor", "stream", "carry",
+               "copy_pairs")
+# SR6's MODEL-FREE WORLDS (Q-DATA-12), laid out by records(): a, b and d state each key's truth 't',
+# l a false 'f', c a copy of l's values and n a second false value 'g', first seen in that order --
+# so the copy is the later of its pair although 'c' sorts before 'l' by name. The X keys carry all
+# six; on the Y keys only a, l and c speak, so there the copy and its source are the majority, and
+# false.
+SR6_ORDER = ("a", "b", "d", "l", "c", "n")
+SR6_X = [(f"x{i:02d}", {"a": "t", "b": "t", "d": "t", "l": "f", "c": "f", "n": "g"})
+         for i in range(20)]
+SR6_Y = [(f"y{i:02d}", {"a": "t", "l": "f", "c": "f"}) for i in range(10)]
+SR6_ENV = {"DATA_TRUST": "observe", "DATA_TRUST_HOT": "1", "DATA_TRUST_SKETCH": "10007"}
 
 
-def plant_corpus(root, n_ent=40, size=20000, seed=5):
+def plant_corpus(root, n_ent=40, size=20000, seed=5, copier=False):
     """A corpus whose sources DISAGREE, written under root/train: area pa holds cred.txt and cred2.txt
     and area pb corrob.txt, all stating each of `n_ent` entities' true value as '@E07=C;' records, and
     area pc holds liar.txt, stating the next letter. Four sources in three areas -- a source is a
-    file, not an area -- each file `size` bytes of records in its own seeded order. Returns root."""
+    file, not an area -- each file `size` bytes of records in its own seeded order. At `copier`
+    (SR6, Q-DATA-12) area pc also holds copy.txt, the liar's values in an order of its own, and
+    liar2.txt, a second liar stating the letter two on -- so each key carries two false values and a
+    copy of the first is a shared false value the second liar does not share. Returns root."""
     r = random.Random(seed)
     ents = [f"E{i:02d}" for i in range(n_ent)]
     truth = {e: r.choice("ABCDEFGH") for e in ents}
     lie = {e: "ABCDEFGH"[("ABCDEFGH".index(v) + 1) % 8] for e, v in truth.items()}
+    lie2 = {e: "ABCDEFGH"[("ABCDEFGH".index(v) + 2) % 8] for e, v in truth.items()}
+    extra = (("pc", "copy.txt", lie, 5), ("pc", "liar2.txt", lie2, 6)) if copier else ()
     for area, fname, vals, fseed in (("pa", "cred.txt", truth, 1), ("pa", "cred2.txt", truth, 2),
-                                     ("pb", "corrob.txt", truth, 3), ("pc", "liar.txt", lie, 4)):
+                                     ("pb", "corrob.txt", truth, 3), ("pc", "liar.txt", lie, 4))\
+            + extra:
         rr = random.Random(fseed)
         out, n = [], 0
         while n < size:
@@ -201,6 +241,37 @@ def planted(n_ent=20, reps=6, seed=0, forms=(b"=", b"=", b"=")):
     return units, srcs
 
 
+def records(rows, order, reps=3):
+    """A MODEL-FREE WORLD IN §8 0.6's td_stress STYLE (SR6, Q-DATA-12): who states what is fixed by
+    construction and the book reads it with no model. `rows` is [(key, {source: value})]; each of
+    `reps` rounds lays every key's '@KEY=VALUE;' records in `order`, byte-level units, so the sources
+    are first seen in that order. Returns (units, sources)."""
+    units, srcs = [], []
+    for _ in range(reps):
+        for key, per in rows:
+            for s in order:
+                if s in per:
+                    for b in b"@" + key.encode() + b"=" + per[s].encode() + b";":
+                        units.append(bytes([b]))
+                        srcs.append(s)
+    return units, srcs
+
+
+def hand_posterior(k_true, false_by_n, k_diff, acc, prior=0.2, rate=0.8):
+    """SR6's posterior by hand, as Bayes' rule in product form -- not the tree's log-and-logistic:
+    alpha L / (alpha L + 1 - alpha), L the product of the three likelihood ratios, with `acc` the
+    later source's r."""
+    lr = (1 - rate + rate / acc) ** k_true
+    for n, k in false_by_n.items():
+        lr *= (1 - rate + rate * n / (1 - acc)) ** k
+    lr *= (1 - rate) ** k_diff
+    return prior * lr / (prior * lr + 1 - prior)
+
+
+def close(a, b):
+    return math.isclose(a, b, rel_tol=1e-9, abs_tol=1e-15)
+
+
 def observe(dat, units, sources, *, cuts=None, focus=None):
     """A book over `units`, in one pass or in passes ending at each of `cuts`."""
     f = focus if focus is not None else D.new_focus(dat, None, None)
@@ -256,6 +327,91 @@ def prototype_vote(table, *, min_n, self_share, min_ev, t_min):
     return {s_: [r[s_], nev[s_]] for s_ in ev}, t, len(conf)
 
 
+def prototype_copy_vote(table, first_seen, *, min_n, self_share, min_ev, t_min, prior, rate, p):
+    """SR6's vote transcribed from the plan's words, for SR6-4's comparison: prototype_vote's
+    admission and rounds, and after each round every pair of sources judged on its shared
+    conflicted claims under that round's truth -- shared true, shared false (by the key's false
+    values), differing (on any key) -- a pair at MIN_EV or more judged by alpha L / (alpha L + 1 -
+    alpha) in product form, the later-seen source's r its accuracy; the next round discounts the
+    later source of each pair above p by 1 - rate x P on every key where the earlier holds its
+    value. Returns (evidence, trust, conflicted, {(earlier, later): (P, true, false, differing)})."""
+    conf = []
+    for c, d in table.items():
+        cl = []
+        for s_ in sorted(d):
+            cnts = d[s_]
+            n = sum(cnts.values())
+            if n >= min_n:
+                v, k = max(sorted(cnts.items()), key=lambda kv: kv[1])
+                if sum(1 for x in cnts.values() if x == k) == 1 and k / n >= self_share:
+                    cl.append((s_, v))
+        if len(cl) >= 2 and len({v for _s, v in cl}) >= 2:
+            conf.append(cl)
+    if not conf:
+        return {}, {}, 0, {}
+    names = sorted({s_ for cl in conf for s_, _v in cl})
+    seen = [s_ for s_ in names if s_ in first_seen]
+    order = sorted(seen, key=lambda s_: (tuple(first_seen[s_]), s_)) + \
+        sorted(s_ for s_ in names if s_ not in first_seen)
+    pos = {s_: i for i, s_ in enumerate(order)}
+    r = {s_: 1.0 for s_ in names}
+    disc, pairs, ag = {}, {}, {}
+    for _ in range(10):
+        ag = {s_: [0, 0] for s_ in names}
+        truths = []
+        for i, cl in enumerate(conf):
+            vote = {}
+            for s_, v in cl:
+                vote[v] = vote.get(v, 0.0) + r[s_] * disc.get((i, s_), 1.0)
+            best = sorted(vote.items(), key=lambda kv: (-kv[1], kv[0]))
+            if len(best) > 1 and abs(best[0][1] - best[1][1]) < 1e-9:
+                truths.append(None)
+                continue
+            truths.append(best[0][0])
+            for s_, v in cl:
+                ag[s_][0] += v == best[0][0]
+                ag[s_][1] += 1
+        r = {s_: (a + 1) / (n + 2) for s_, (a, n) in ag.items()}
+        counts = {}
+        for i, cl in enumerate(conf):
+            n_false = len({v for _s, v in cl}) - 1
+            for (s1, v1) in cl:
+                for (s2, v2) in cl:
+                    if pos[s1] >= pos[s2]:
+                        continue
+                    c = counts.setdefault((s1, s2), [0, {}, 0])
+                    if v1 != v2:
+                        c[2] += 1
+                    elif truths[i] is None:
+                        continue
+                    elif v1 == truths[i]:
+                        c[0] += 1
+                    else:
+                        c[1][n_false] = c[1].get(n_false, 0) + 1
+        pairs = {}
+        for (e, l), (kt, kf, kd) in counts.items():
+            if kt + sum(kf.values()) + kd < min_ev:
+                continue
+            pairs[(e, l)] = (hand_posterior(kt, kf, kd, r[l], prior, rate), kt,
+                             sum(kf.values()), kd)
+        disc = {}
+        for i, cl in enumerate(conf):
+            for s_, v in cl:
+                f = 1.0
+                for e, ve in sorted(cl, key=lambda x: pos[x[0]]):     # one product order
+                    q = pairs.get((e, s_))
+                    if ve == v and q is not None and q[0] > p:
+                        f *= 1.0 - rate * q[0]
+                if f < 1.0:
+                    disc[(i, s_)] = f
+    ev = {s_: [r[s_], ag[s_][1]] for s_ in names if ag[s_][1] >= min_ev}
+    t = {}
+    if len(ev) >= 2:
+        mx = max(e[0] for e in ev.values())
+        t = {s_: min(1.0, max(t_min, e[0] / mx)) for s_, e in ev.items()}
+    return ev, t, len(conf), pairs
+
+
 def book_digest(f):
     """One hex digest over a book's checkpointed state."""
     return sd.digest_payload({"DATA": {"focus": D._focus_state(f)}})["DATA"]
@@ -279,6 +435,11 @@ def _t4_child():
             i += k
     f = observe(dat, units, srcs, cuts=(97, len(units) // 3, len(units) // 2))
     print("T4DIGEST planted", book_digest(f), sorted(f.trust.items()))
+    # SR6 (Q-DATA-12): the majority-false world with copy detection on, cut into passes -- a dependent
+    # pair, its discount deciding keys, and every pair's posterior in the digest.
+    fcp = observe(dat_of(DATA_TRUST_COPY="accu", **SR6_ENV), *records(SR6_X + SR6_Y, SR6_ORDER),
+                  cuts=(211, 1111))
+    print("T4DIGEST copy", book_digest(fcp), [q[:2] + q[3:] for q in fcp.copy_pairs])
     s = build(DATA_SOURCE="real", DATA_TRUST="observe", DATA_TRUST_EVERY=10, DATA_TRUST_HOT=2)
     res = loop.run(s, max_windows=40, progress=False)
     rows = [{k: v for k, v in row.items() if k != "seconds"} for row in res.trust_series]
@@ -423,12 +584,14 @@ def _main(tmp):
         check(f"T7 DATA_TRUST={mode!r} is refused with NotBuilt naming it, by DATA.new_focus and "
               f"through compose", ok and ok2, why)
     off = D.new_focus(dat_of(), None, None)
-    check("T7 at 'off' new_focus allocates nothing: no sketch, no table, no counter, both gates "
-          "UNREACHABLE, data.trust naming DATA_TRUST='off'",
+    check("T7 at 'off' new_focus allocates nothing: no sketch, no table, no counter, all three gates "
+          "UNREACHABLE (data.trust.copy since SR6, Q-DATA-12), data.trust and data.trust.copy naming "
+          "DATA_TRUST='off'",
           off.mode == "off" and off.sketch is None and off.table is None and off.counters == {}
           and [(g.name, g.reachable) for g in off.gates]
-          == [("data.trust", False), ("data.trust.actuation", False)]
-          and "DATA_TRUST='off'" in off.gates[0].reason)
+          == [("data.trust", False), ("data.trust.actuation", False), ("data.trust.copy", False)]
+          and "DATA_TRUST='off'" in off.gates[0].reason
+          and off.gates[2].reason.startswith("DATA_TRUST='off'"))
 
     # ---- T2: surface forms ---------------------------------------------------------------------------
     dkv = dat_of(DATA_TRUST="observe", DATA_TRUST_HOT=1, DATA_TRUST_SKETCH=1009)
@@ -514,8 +677,9 @@ def _main(tmp):
         outs.append([ln for ln in p.stdout.splitlines() if ln.startswith("T4DIGEST")]
                     if p.returncode == 0 else [f"exit {p.returncode}: {p.stderr[-300:]}"])
     check("T4 the book is identical across PYTHONHASHSEED 0, 1 and 12345: the planted book cut into "
-          "passes, and a 40-window real-source run's book and pass series, each in its own process",
-          len(outs[0]) == 2 and outs[0] == outs[1] == outs[2], str([o[:1] for o in outs]))
+          "passes, SR6's majority-false book with copy detection on (Q-DATA-12), and a 40-window "
+          "real-source run's book and pass series, each in its own process",
+          len(outs[0]) == 3 and outs[0] == outs[1] == outs[2], str([o[:1] for o in outs]))
 
     # ---- T1: SR3's bit-identity ------------------------------------------------------------------------
     for tag, src_env, on_env in (
@@ -569,12 +733,13 @@ def _main(tmp):
                   and f1.gates[0].fired, f"{f1.trust} {c1['data.trust.conflicted_claims']}")
         check(f"T1 [{tag}] the OFF run kept no book: no data.trust.* key in any row, the 'data.trust' "
               f"gate asked 0 times at period 0, no pass in the series, no 'focus' in DATA's payload, "
-              f"and the DATA(trust) row is the two UNREACHABLE gates",
+              f"and the DATA(trust) row is the three UNREACHABLE gates",
               not any(k[1].startswith("data.trust.") for k in i0)
               and r0.cadence_ledger["data.trust"][:2] == (0, 0)
               and int(r0.cadence_ledger["data.trust"][3]) == 0 and r0.trust_series == ()
               and "focus" not in loop._payload(s0)["DATA"]
-              and sorted(r0.report["DATA(trust)"]) == ["gate:data.trust", "gate:data.trust.actuation"]
+              and sorted(r0.report["DATA(trust)"])
+              == ["gate:data.trust", "gate:data.trust.actuation", "gate:data.trust.copy"]
               and all(v[0] == "unreachable" for v in r0.report["DATA(trust)"].values()))
 
     # ---- T5: the continuation, across the roll ---------------------------------------------------------
@@ -735,23 +900,34 @@ def _main(tmp):
           f"{fu.counters['data.trust.units']} - {lost}, book {book_diff(on2.focus, fu)}")
 
     # ---- T8: wall_s outside the integer channel ----------------------------------------------------------
+    # WITH SR6's COPY DETECTION ON (Q-DATA-12), so data.trust.copy.seconds -- DATA's float for the copy
+    # steps -- is held to the same rule as the root's wall_s in the same run.
     env = dict(os.environ, OMP_NUM_THREADS="1", MKL_NUM_THREADS="1", DATA_TRUST="observe",
-               DATA_TRUST_EVERY="10", **{k: v for k, v in BASE.items() if k != "DATA_DIR"})
+               DATA_TRUST_EVERY="10", DATA_TRUST_COPY="accu",
+               **{k: v for k, v in BASE.items() if k != "DATA_DIR"})
     out = os.path.join(tmp, "series.json")
     p = subprocess.run([sys.executable, "run.py", "--max-windows", "30", "--quiet", "--trust-series",
                         out], cwd=os.path.abspath(_ROOT), env=env, capture_output=True, text=True)
     lines = p.stdout.splitlines()
     wall = [ln for ln in lines if ln.strip().startswith("data.trust.wall_s")]
+    cwall = [ln for ln in lines if ln.strip().startswith("data.trust.copy.seconds")]
     parsed = {m.group(1) for m in (BASELINE_COUNTER.match(ln) for ln in lines) if m}
     import json
     series = json.load(open(out)) if os.path.isfile(out) else None
-    check("T8 run.py prints data.trust.wall_s with decimals, test_baseline's COUNTER never parses it, "
-          "and it does parse the integer data.trust.* lines; --trust-series writes one dict per pass",
+    check("T8 run.py prints data.trust.wall_s and, with copy detection on, data.trust.copy.seconds "
+          "with decimals, test_baseline's COUNTER parses neither, and it does parse the integer "
+          "data.trust.* and data.trust.copy.* lines; --trust-series writes one dict per pass, each "
+          "carrying its copy seconds as a float",
           p.returncode == 0 and len(wall) == 1 and re.search(r"\d\.\d", wall[0]) is not None
-          and "data.trust.wall_s" not in parsed and "data.trust.passes" in parsed
+          and len(cwall) == 1 and re.search(r"\d\.\d", cwall[0]) is not None
+          and "data.trust.wall_s" not in parsed and "data.trust.copy.seconds" not in parsed
+          and "data.trust.passes" in parsed and "data.trust.copy.passes" in parsed
+          and "data.trust.copy.pairs_judged" in parsed
           and "data.trust.units" in parsed and isinstance(series, list)
-          and [r["kind"] for r in series] == ["cadence", "cadence", "tail"],
-          f"rc {p.returncode}; {wall}; series {None if series is None else len(series)}")
+          and [r["kind"] for r in series] == ["cadence", "cadence", "tail"]
+          and all(type(r.get("copy_seconds")) is float and isinstance(r.get("copy_pairs"), list)
+                  for r in series),
+          f"rc {p.returncode}; {wall} {cwall}; series {None if series is None else len(series)}")
 
     # ---- T9: the cadence audit's line for the book is the root's ---------------------------------------
     # RUN's two sentences are a cadence's, and the book is armed by DATA_TRUST and passes beside its
@@ -819,6 +995,320 @@ def _main(tmp):
           and r_all.cadence_ledger["data.trust"][:2] == (rw, 0)
           and stop_ser == [("tail", 0, 30 * 128 + 1)]
           and r_30.cadence_ledger["data.trust"][:2] == (30, 0), f"{all_ser} {stop_ser}")
+
+    _sr6(tmp)
+
+
+def _sr6(tmp):
+    """SR6's COPY DETECTION (2026-09-28, Proposal 04 SR6 and §1 item 8's standing rule (2); register
+    §8 3.7; docs/04_CONTRACT.md Q-DATA-12), on model-free tables in §8 0.6's td_stress style and
+    through the loop. Operation only: whether it catches copies in E5's worlds is §8 5.12's, on GPU."""
+    dcp = dat_of(DATA_TRUST_COPY="accu", **SR6_ENV)
+    doff = dat_of(**SR6_ENV)
+    t_ok, f_ok = 21 / 22, 1 / 22                    # r of a source right / wrong on all 20 keys
+
+    # ---- SR6-1: a planted copy of a liar is reported dependent, at the hand-computed posterior ------
+    units, srcs = records(SR6_X, SR6_ORDER)
+    f = observe(dcp, units, srcs)
+    fo = observe(doff, units, srcs)
+    got = {(q[0], q[1]): q for q in f.copy_pairs}
+    want = {}
+    for i, e in enumerate(SR6_ORDER):
+        for later in SR6_ORDER[i + 1:]:
+            both = {e, later}
+            if both <= {"a", "b", "d"}:
+                want[(e, later)] = (hand_posterior(20, {}, 0, t_ok), 20, 0, 0, "independent")
+            elif both == {"l", "c"}:
+                want[(e, later)] = (hand_posterior(0, {2: 20}, 0, f_ok), 0, 20, 0, "dependent")
+            else:
+                want[(e, later)] = (hand_posterior(0, {}, 20, f_ok), 0, 0, 20, "independent")
+    bad = [k for k in want if k not in got or not close(got[k][2], want[k][0])
+           or tuple(got[k][3:]) != want[k][1:]]
+    c = f.counters
+    g = f.gates[2]
+    check(f"SR6-1 a planted copy of a liar (c, first seen after l) is reported DEPENDENT at the "
+          f"hand-computed posterior {want[('l', 'c')][0]:.10f} -- 1 - c + c n/(1 - A) per shared false "
+          f"value, n = 2, A = 1/22 -- over 20 shared false claims; the three truthful pairs certified "
+          f"at {want[('a', 'b')][0]:.6f} (20 shared true), the other eleven at "
+          f"{want[('a', 'l')][0]:.3g} (20 differing); the pair is (l, c) by first sight, not by name",
+          not bad and list(got) == list(want) and ("c", "l") not in got
+          and c["data.trust.copy.pairs_judged"] == 15 and c["data.trust.copy.pairs_dependent"] == 1
+          and c["data.trust.copy.pairs_certified"] == 14 and c["data.trust.copy.votes_discounted"] == 20
+          and c["data.trust.copy.passes"] == 1
+          and g.name == "data.trust.copy" and g.fired and (g.value, g.threshold) == (1, 15),
+          f"wrong {[(k, got.get(k), want[k]) for k in bad[:2]]}; {c}")
+    check("SR6-1 on this table the discount decides no key -- the truthful three outvote the copy and "
+          "its source either way -- so the book's evidence and trust are the undiscounted vote's",
+          f.evidence == fo.evidence and f.trust == fo.trust
+          and f.trust == {"a": 1.0, "b": 1.0, "d": 1.0, "l": 0.3, "c": 0.3, "n": 0.3})
+    # A PARTIAL COPY: on 4 of the 20 keys c states the truth, so it differs from l there.
+    rows = [(k, dict(per, c="t") if i < 4 else per) for i, (k, per) in enumerate(SR6_X)]
+    fp = observe(dcp, *records(rows, SR6_ORDER))
+    q = next((x for x in fp.copy_pairs if x[:2] == ["l", "c"]), None)
+    w = hand_posterior(0, {2: 16}, 4, 5 / 22)
+    check(f"SR6-1 a partial copy (c copies l on 16 keys and states the truth on 4) is still dependent, "
+          f"at the hand-computed {w:.10f}: 16 shared false (n = 2) and 4 differing, each x (1 - c), "
+          f"with c's r 5/22; its 16 shared votes are discounted",
+          q is not None and close(q[2], w) and q[3:] == [0, 16, 4, "dependent"]
+          and fp.counters["data.trust.copy.votes_discounted"] == 16, str(q))
+
+    # ---- SR6-2: two independent truthful sources are certified independent ----------------------------
+    rows2 = [(f"x{i:02d}", {"a": "t", "b": "t", "l": "f"}) for i in range(20)]
+    f2 = observe(dcp, *records(rows2, ("a", "b", "l")))
+    f2o = observe(doff, *records(rows2, ("a", "b", "l")))
+    got2 = {(x[0], x[1]): x for x in f2.copy_pairs}
+    w_ab = hand_posterior(20, {}, 0, t_ok)
+    g2 = f2.gates[2]
+    check(f"SR6-2 two truthful sources that agree on 20 conflicted claims are CERTIFIED independent at "
+          f"the hand-computed {w_ab:.10f} (below DATA_TRUST_COPY_P=0.5), both against the liar at "
+          f"{hand_posterior(0, {}, 20, f_ok):.3g}; nothing is discounted, the gate is armed but did "
+          f"not fire (0 vs 3), and the vote is the undiscounted one",
+          set(got2) == {("a", "b"), ("a", "l"), ("b", "l")} and close(got2[("a", "b")][2], w_ab)
+          and all(x[6] == "independent" for x in f2.copy_pairs)
+          and f2.counters["data.trust.copy.pairs_certified"] == 3
+          and f2.counters["data.trust.copy.pairs_dependent"] == 0
+          and f2.counters["data.trust.copy.votes_discounted"] == 0
+          and g2.reachable and not g2.fired and (g2.value, g2.threshold) == (0, 3)
+          and (f2.evidence, f2.trust) == (f2o.evidence, f2o.trust), str(f2.copy_pairs))
+    # AGREEMENT ON TRUE VALUES IS WHAT ACCURATE SOURCES DO, and the model cannot call it a copy at these
+    # values: with r = (n + 1)/(n + 2) the likelihood ratio (1 + 0.8/(n + 1))^n rises to e^0.8, so the
+    # posterior rises to 0.2 e^0.8 / (0.2 e^0.8 + 0.8) = 0.3575 and never reaches 0.5.
+    lim = 0.2 * math.exp(0.8) / (0.2 * math.exp(0.8) + 0.8)
+    seq = []
+    for n in (20, 60, 200):
+        tab = {f"k{i}".encode(): {"a": {b"t": 3}, "b": {b"t": 3}, "l": {b"f": 3}} for i in range(n)}
+        fz = D.Focus(mode="observe", table=tab, first_seen={"a": [0, 0], "b": [0, 1], "l": [0, 2]})
+        D._trust_vote(fz, min_n=3, self_share=0.8, min_ev=10, floor=0.3, copy=(0.2, 0.8, 0.5))
+        x = next(y for y in fz.copy_pairs if y[:2] == ["a", "b"])
+        seq.append((n, x[2], hand_posterior(n, {}, 0, (n + 1) / (n + 2)), x[6]))
+    check(f"SR6-2 the certificate holds as the agreement grows: at 20, 60 and 200 shared true claims "
+          f"the pair's posterior rises toward {lim:.4f} and stays below 0.5, each the hand value",
+          all(close(p, h) and v == "independent" and p < lim for _n, p, h, v in seq)
+          and seq[0][1] < seq[1][1] < seq[2][1], str(seq))
+
+    # ---- SR6-3: majority-false -- the discounted vote wins where the undiscounted one loses ----------
+    units, srcs = records(SR6_X + SR6_Y, SR6_ORDER)
+    f3 = observe(dcp, units, srcs)
+    f3o = observe(doff, units, srcs)
+    ev_off = {"a": [21 / 32, 30], "b": [t_ok, 20], "d": [t_ok, 20], "l": [11 / 32, 30],
+              "c": [11 / 32, 30], "n": [f_ok, 20]}
+    tr_off = {"a": (21 / 32) / t_ok, "b": 1.0, "d": 1.0, "l": (11 / 32) / t_ok,
+              "c": (11 / 32) / t_ok, "n": 0.3}
+    ev_on = {"a": [31 / 32, 30], "b": [t_ok, 20], "d": [t_ok, 20], "l": [1 / 32, 30],
+             "c": [1 / 32, 30], "n": [f_ok, 20]}
+    tr_on = {"a": 1.0, "b": t_ok / (31 / 32), "d": t_ok / (31 / 32), "l": 0.3, "c": 0.3, "n": 0.3}
+    q3 = next((x for x in f3.copy_pairs if x[:2] == ["l", "c"]), None)
+    w3 = hand_posterior(0, {2: 20, 1: 10}, 0, 1 / 32)
+    check("SR6-3 undiscounted (DATA_TRUST_COPY=off), the copy and its source outvote a on the 10 Y "
+          "keys, so the vote LOSES them: a agrees on 20 of 30 (r 21/32, t 0.6875), l and c on 10 "
+          "(r 11/32, t 0.360), exactly as by hand",
+          f3o.evidence == ev_off and f3o.trust == tr_off, f"{f3o.evidence} {f3o.trust}")
+    check(f"SR6-3 with copy detection the pair (l, c) is dependent at the hand-computed {w3:.10f} -- "
+          f"20 shared false at n = 2 and 10 at n = 1 once the Y keys go to a, c's r 1/32 -- c's 30 "
+          f"shared votes are discounted, and the Y keys go to the truth: a agrees on all 30 (r 31/32, "
+          f"t 1), l and c on none (floored at 0.3), b and d at t (21/22)/(31/32)",
+          f3.evidence == ev_on and f3.trust == tr_on and q3 is not None and close(q3[2], w3)
+          and q3[3:] == [0, 30, 0, "dependent"]
+          and f3.counters["data.trust.copy.votes_discounted"] == 30,
+          f"{f3.evidence} {f3.trust} {q3}")
+
+    # ---- SR6-4: at 'off' the keys are ABSENT and the vote is C5's -------------------------------------
+    g_off = f3o.gates[2]
+    ev_p, t_p, n_p = prototype_vote({k: {s: dict(v) for s, v in per.items()}
+                                     for k, per in f3o.table.items()},
+                                    min_n=3, self_share=0.8, min_ev=10, t_min=0.3)
+    moff = D.new_focus(dat_of(), None, None)
+    check("SR6-4 at DATA_TRUST_COPY=off no data.trust.copy.* key exists, no pair is judged, the gate is "
+          "UNREACHABLE naming DATA_TRUST_COPY='off', and the vote is C5's (the prototype's update() on "
+          "the same table); at DATA_TRUST=off the gate names DATA_TRUST='off' and no key exists",
+          not any(k.startswith("data.trust.copy.") for k in f3o.counters) and f3o.copy_pairs == []
+          and not g_off.reachable and g_off.reason.startswith("DATA_TRUST_COPY='off'")
+          and (f3o.evidence, f3o.trust, f3o.counters["data.trust.conflicted_claims"])
+          == (ev_p, t_p, n_p)
+          and moff.counters == {} and moff.gates[2].reason.startswith("DATA_TRUST='off'"))
+    rnd = random.Random(23)
+    vbad, nbad, n_dep = [], [], 0
+    for trial in range(300):
+        srcs_ = [f"s{i}" for i in range(rnd.randint(2, 7))]
+        tab = {}
+        for key in range(rnd.randint(1, 40)):
+            per = {}
+            for src in rnd.sample(srcs_, rnd.randint(1, len(srcs_))):
+                per[src] = {bytes([97 + v]): rnd.randint(1, 6)
+                            for v in rnd.sample(range(4), rnd.randint(1, 2))}
+            tab[str(key).encode()] = per
+        seen = {s: [rnd.randint(0, 1), rnd.randint(0, 999)] for s in srcs_ if rnd.random() < 0.9}
+        kw = dict(min_n=rnd.randint(1, 4), self_share=rnd.choice((0.5, 0.6, 0.8, 1.0)),
+                  min_ev=rnd.randint(1, 8))
+        model = (rnd.choice((0.05, 0.2, 0.5, 0.9)), rnd.choice((0.0, 0.3, 0.8, 1.0)),
+                 rnd.choice((0.0, 0.3, 0.5, 0.9, 1.0)))
+        fz = D.Focus(mode="observe", table=dict(tab), first_seen=dict(seen))
+        n_conf = D._trust_vote(fz, floor=0.3, copy=model, **kw)
+        ev, t, n, pairs = prototype_copy_vote(tab, seen, t_min=0.3, prior=model[0], rate=model[1],
+                                              p=model[2], **kw)
+        mine = {(x[0], x[1]): x for x in fz.copy_pairs}
+        n_dep += sum(1 for x in fz.copy_pairs if x[6] == "dependent")
+        if ((fz.evidence, fz.trust, n_conf) != (ev, t, n) or set(mine) != set(pairs)
+                or any(not close(mine[k][2], pairs[k][0]) or tuple(mine[k][3:6]) != pairs[k][1:]
+                       for k in pairs)):
+            vbad.append((trial, model, kw))
+        # NOTHING DEPENDENT, NOTHING MOVED: at DATA_TRUST_COPY_P = 1.0 no posterior is above it.
+        fz1 = D.Focus(mode="observe", table=dict(tab), first_seen=dict(seen))
+        fz0 = D.Focus(mode="observe", table=dict(tab), first_seen=dict(seen))
+        D._trust_vote(fz1, floor=0.3, copy=(model[0], model[1], 1.0), **kw)
+        D._trust_vote(fz0, floor=0.3, **kw)
+        if (fz1.evidence, fz1.trust) != (fz0.evidence, fz0.trust) or \
+                fz1.counters.get("data.trust.copy.votes_discounted") not in (0, None):
+            nbad.append(trial)
+    check(f"SR6-4 on 300 random tables (random first sights, priors 0.05-0.9, rates 0-1, thresholds "
+          f"0-1; {n_dep} dependent pairs among them) the vote with copy detection equals a "
+          f"transcription of the plan's model -- evidence, trust and the conflicted count exactly, "
+          f"every judged pair's counts exactly and its posterior (by Bayes' rule in product form) to "
+          f"1e-9 -- and a detection that finds no pair above its threshold moves nothing",
+          not vbad and not nbad and n_dep > 0, f"model {vbad[:2]}; moved {nbad[:3]}")
+
+    # ---- SR6-5: the prior's endpoints are refused by name; the lever's domain refuses beyond them -----
+    msgs = []
+    for v in ("0.0", "1.0"):
+        try:
+            D.new_focus(dat_of(DATA_TRUST_COPY="accu", DATA_TRUST_COPY_PRIOR=v, **SR6_ENV), None, None)
+            msgs.append(None)
+        except _lever.LeverError as e:
+            msgs.append(str(e))
+        try:
+            build(DATA_TRUST="observe", DATA_TRUST_COPY="accu", DATA_TRUST_COPY_PRIOR=v)
+            msgs.append(None)
+        except _lever.LeverError as e:
+            msgs.append(str(e))
+    held = D.new_focus(dat_of(DATA_TRUST_COPY="off", DATA_TRUST_COPY_PRIOR="0.0", **SR6_ENV), None, None)
+    try:
+        dat_of(DATA_TRUST_COPY_PRIOR="1.5")
+        dom = None
+    except _lever.LeverError as e:
+        dom = str(e)
+    check("SR6-5 DATA_TRUST_COPY_PRIOR at 0 or 1 is refused by name when the detection is on -- at "
+          "DATA.new_focus and through compose -- as a certainty no count moves; at DATA_TRUST_COPY=off "
+          "it is not read; 1.5 is refused by the lever's declared domain at the first read",
+          all(m is not None and m.startswith(f"DATA_TRUST_COPY_PRIOR={v}")
+              for m, v in zip(msgs, ("0.0", "0.0", "1.0", "1.0")))
+          and held.copy_mode == "off" and dom is not None
+          and dom.startswith("DATA_TRUST_COPY_PRIOR=1.5") and "domain" in dom, f"{msgs} {dom}")
+
+    # ---- SR6-6: through the loop -- nothing trained on moves, the continuation is exact ---------------
+    cop_dir = plant_corpus(os.path.join(tmp, "copier"), copier=True)
+    E6 = dict(E5_BASE, DATA_DIR=cop_dir, DATA_TRUST_COPY="accu")
+    ua = build(**E6)
+    rua = loop.run(ua, progress=False)
+    uo = build(**dict(E6, DATA_TRUST_COPY="off"))
+    ruo = loop.run(uo, progress=False)
+    fa, fo = ua.focus, uo.focus
+    pq = next((x for x in fa.copy_pairs
+               if {x[0], x[1]} == {"train/pc/liar.txt", "train/pc/copy.txt"}), None)
+    w6 = hand_posterior(0, {2: 40}, 0, 1 / 42)
+    row = rua.report["DATA(trust)"]
+    check(f"SR6-6 on the planted corpus with a copy of the liar and a second liar (six files, 40 keys "
+          f"each carrying three values), a whole two-epoch run reports the liar's copy DEPENDENT at "
+          f"the hand-computed {w6:.10f} (40 shared false at n = 2, the later file's r 1/42), every "
+          f"other pair certified; the DATA(trust) row carries the fired gate, the pair's line and "
+          f"data.trust.copy.seconds as a float; the truthful files keep trust 1 and the three liars "
+          f"are floored",
+          pq is not None and close(pq[2], w6) and pq[3:] == [0, 40, 0, "dependent"]
+          and fa.counters["data.trust.copy.pairs_dependent"] == 1
+          and fa.counters["data.trust.copy.pairs_judged"] == 15
+          and row.get("gate:data.trust.copy", ("",))[0] == "fired"
+          and "DEPENDENT" in row.get(f"pair:{pq[0]}|{pq[1]}", "")
+          and type(row.get("data.trust.copy.seconds")) is float
+          and fa.trust == {"train/pa/cred.txt": 1.0, "train/pa/cred2.txt": 1.0,
+                           "train/pb/corrob.txt": 1.0, "train/pc/copy.txt": 0.3,
+                           "train/pc/liar.txt": 0.3, "train/pc/liar2.txt": 0.3}
+          and all("copy_pairs" in x for x in rua.trust_series),
+          f"{pq} {fa.trust} {row.get('gate:data.trust.copy')}")
+    da, do_ = sd.digest(ua, exclude=EXCL, detail=True), sd.digest(uo, exclude=EXCL, detail=True)
+    ia, io_ = flat_ints(rua.report), flat_ints(ruo.report)
+    check("SR6-6 copy detection moves nothing the run trains on: 'accu' against 'off' on that run -- "
+          "float-exact losses, state digests equal but DATA.focus, the same claim table, sketch, first "
+          "sights, cursor and carry, every integer counter equal but data.trust.copy.*, and no copy "
+          "key at 'off'",
+          list(rua.loss_curve) == list(ruo.loss_curve) and da == do_
+          and list(fa.table.items()) == list(fo.table.items())
+          and all(getattr(fa, k) == getattr(fo, k)
+                  for k in ("sketch", "first_seen", "cursor", "stream", "carry"))
+          and {k: v for k, v in ia.items() if not k[1].startswith("data.trust.copy.")} == io_
+          and not any(k.startswith("data.trust.copy.") for k in fo.counters),
+          f"digest differs at {sd.differing(da, do_)}")
+    d = os.path.join(tmp, "sr6")
+    p = build(CKPT_DIR=d + "/p", **E6)
+    rp = loop.run(p, max_windows=70, progress=False)
+    tails = [x for x in rp.trust_series if x["kind"] == "tail"]
+    rec = torch.load(os.path.join(d, "p", "ckpt.pt"), map_location="cpu",
+                     weights_only=False)["payload"]["DATA"]["focus"]
+    c = build(CKPT_RESUME=os.path.join(d, "p", "ckpt.pt"), CKPT_DIR=d + "/c", **E6)
+    rc = loop.run(c, progress=False)
+    want_ctr = {}
+    if tails:
+        _t = 1 if tails[0]["conflicted_claims"] else 0
+        for k, extra in (("data.trust.passes", 1), ("data.trust.updates", _t),
+                         ("data.trust.copy.passes", _t)):
+            if extra:
+                want_ctr[k] = (fa.counters[k], fa.counters[k] + extra)
+    check("SR6-6 the continuation is exact with copy detection on: a continuing resume from window 70 "
+          "ends with the uninterrupted run's book -- its judged pairs, posteriors and verdicts "
+          "included -- every counter equal but the parent's tail pass, the losses continuing exactly",
+          not book_diff(c.focus, fa) and counter_diff(fa, c.focus) == want_ctr and len(tails) == 1
+          and list(rc.loss_curve) == list(rua.loss_curve[70:])
+          and "copy" in rec and rec["copy"]["counters"]["data.trust.copy.passes"] >= 1,
+          f"book {book_diff(c.focus, fa)}, counters {counter_diff(fa, c.focus)}")
+    # THE RECORD's THREE READINGS, on that parent's own record: put back whole at 'accu' (its pairs,
+    # and its copy counts into the book's counters, which the record's 'counters' does not repeat);
+    # started at 0 from a record without a copy part (a book older than the detection); held
+    # unchanged at 'off', with no copy key in the book's counters.
+    d6 = dat_of(**E6)
+    back = D.new_focus(d6, None, None, restored=copy.deepcopy(rec))
+    bare = copy.deepcopy(rec)
+    bare.pop("copy")
+    fresh = D.new_focus(d6, None, None, restored=bare)
+    heldf = D.new_focus(dat_of(**dict(E6, DATA_TRUST_COPY="off")), None, None,
+                        restored=copy.deepcopy(rec))
+    ck = [k for k in back.counters if k.startswith("data.trust.copy.")]
+    check("SR6-6 the checkpoint's copy part: 'counters' holds no copy key; at 'accu' the part is put "
+          "back whole -- the judged pairs and the counts -- and round-trips through stream_state; a "
+          "record without one starts the detection at 0; at 'off' it is held unchanged and no copy "
+          "key is in the book's counters",
+          not any(k.startswith("data.trust.copy.") for k in rec["counters"])
+          and back.copy_pairs == rec["copy"]["pairs"] and len(ck) == 5
+          and {k: back.counters[k] for k in ck} == rec["copy"]["counters"]
+          and sd.digest_payload({"f": D._focus_state(back)}) == sd.digest_payload({"f": rec})
+          and fresh.copy_pairs == [] and all(fresh.counters[k] == 0 for k in ck)
+          and heldf.copy_mode == "off" and heldf.copy_held == rec["copy"]
+          and not any(k.startswith("data.trust.copy.") for k in heldf.counters)
+          and D._focus_state(heldf)["copy"] == rec["copy"],
+          f"{ck} {back.copy_pairs[:1]} {rec['copy']['pairs'][:1]}")
+    off = build(CKPT_RESUME=d + "/p", CKPT_DIR=d + "/off", **dict(E6, DATA_TRUST_COPY="off"))
+    roff = loop.run(off, max_windows=20, progress=False)
+    held_rec = torch.load(os.path.join(d, "off", "ckpt.pt"), map_location="cpu",
+                          weights_only=False)["payload"]["DATA"]["focus"]
+    on = build(CKPT_RESUME=d + "/off", CKPT_DIR=d + "/on", **E6)
+    ron = loop.run(on, progress=False)
+    own = sum(1 for x in ron.trust_series if x["conflicted_claims"])
+    g_mid = off.focus.gates[2]
+    check("SR6-6 ON -> OFF -> ON for the detection: the 'off' leg's book reads on, prints no "
+          "data.trust.copy.* key, its gate UNREACHABLE naming DATA_TRUST_COPY='off' and the held "
+          "part, and its checkpoint carries the parent's copy part unchanged; the grandchild ends "
+          "with the uninterrupted run's book, its data.trust.copy.passes the parent's plus its own "
+          "passes that voted over a conflict, the losses continuing exactly",
+          not any(k.startswith("data.trust.copy.") for k in off.focus.counters)
+          and not any(k.startswith("data.trust.copy.")
+                      for k in roff.report["DATA(trust)"] if isinstance(k, str))
+          and not g_mid.reachable and g_mid.reason.startswith("DATA_TRUST_COPY='off'")
+          and "carried unchanged" in g_mid.reason
+          and sd.digest_payload({"c": held_rec.get("copy")}) == sd.digest_payload({"c": rec["copy"]})
+          and not book_diff(on.focus, fa)
+          and on.focus.counters["data.trust.copy.passes"]
+          == rec["copy"]["counters"]["data.trust.copy.passes"] + own
+          and list(ron.loss_curve) == list(rua.loss_curve[90:]),
+          f"book {book_diff(on.focus, fa)}, copy.passes "
+          f"{on.focus.counters.get('data.trust.copy.passes')} vs "
+          f"{rec['copy']['counters']['data.trust.copy.passes']} + {own}")
 
 
 if __name__ == "__main__":
