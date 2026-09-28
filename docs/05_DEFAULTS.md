@@ -229,7 +229,7 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `FAB_ERR_FAST` | `0.05` | fraction 0..1 |  | EMA rate of the per-expert FAST error signal. |
 | `FAB_ERR_SLOW` | `0.005` | fraction 0..1 |  | EMA rate of the per-expert SLOW error signal, the baseline the fast one is judged against. |
 | `FAB_EXPLORE` | `0.15` | fraction 0..1 |  | Fraction of rows whose lowest-ranked computed slot is swapped for a randomly chosen low-use expert, on training passes only. |
-| `FAB_FADED_CULL` | `'as_is'` | name | choices `'as_is'`, `'defer'` | What the management pass does with a cull or merge whose removed expert mostly served a FADED area: 'as_is' removes it and counts it; 'defer' keeps it, and it keeps its cull-budget slot. |
+| `FAB_FADED_CULL` | `'as_is'` | name | choices `'as_is'`, `'defer'` | What the management pass does with a cull or merge whose removed expert mostly served a FADED area: 'as_is' removes it and counts it; 'defer' keeps it and takes every other decision 'as_is' takes. |
 | `FAB_FAIL_TOL` | `0.15` | fraction 0..1 |  | How far BOTH error EMAs must sit above the population before an expert counts as in sustained failure and is cullable at any occupancy. |
 | `FAB_GRACE` | `48` | Selections |  | How many times an expert must have been SELECTED before the cull may touch it. |
 | `FAB_GROW` | `True` | on/off |  | Master switch for population growth: off freezes the population at n0 while routing, selection, replication and the cull all still run. |

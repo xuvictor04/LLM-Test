@@ -1303,7 +1303,7 @@ def run(sysm, *, max_windows=None, progress=True):
             # `faded` IS THE AREA IDS FADED AT THIS WINDOW'S PHASE (2026-09-28, register §8 3.1,
             # NEW-10 and C37; Q-FAB-18): DATA's Plan.faded for the phase this window's first byte
             # falls in -- the byte the probe's phase-start test reads -- plus Plan.parent_faded, the
-            # areas a resumed parent trained and this schedule never makes live. Through the root's
+            # areas the resumed lineage drew and this schedule never makes live. Through the root's
             # join compose.py::_faded_ids, because FAB may see neither the plan nor a name. At the
             # shipped FAB_FADED_CULL='as_is' the pass only COUNTS against it.
             if cadences.due("fab.manage", periods["fab.manage"], clock):

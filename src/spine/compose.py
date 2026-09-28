@@ -357,7 +357,8 @@ ASSEMBLY_ORDER = (
                                               "record of key None, size 0 against a block now: "
                                               "Q-DATA-9, which the root warns of), and it yields "
                                               "nothing a later row takes: the record's area names "
-                                              "land on Areas.parent_names in place"),
+                                              "land on Areas.parent_names, and the areas its "
+                                              "lineage drew on Areas.drawn, in place"),
     ("vocab",     "TOK",   "build_vocabulary","(area_heads=Areas.bodies, seed=RUN.seed, soft_cap=CAP's "
                                               "`vocab_start` lever, readable off the frozen Config "
                                               "at any point -- NOT CAP's "
@@ -4181,8 +4182,9 @@ def _window_areas(sysm, pairs, ctx):
 
 def _faded_ids(sysm, byte):
     """FAB.manage's `faded`: the area ids faded in the phase `byte` falls in -- DATA's
-    Plan.faded[k], the schedule's -- together with Plan.parent_faded, the areas a resumed parent
-    trained and this run schedules nowhere (2026-09-28, register §8 3.1, NEW-10 and C37; Q-FAB-18).
+    Plan.faded[k], the schedule's -- together with Plan.parent_faded, the areas the resumed
+    lineage's streams drew and this run schedules nowhere (2026-09-28, register §8 3.1, NEW-10 and
+    C37; Q-FAB-18).
     Plan's indices index Areas.names. A frozenset: FAB asks it membership and nothing iterates it."""
     plan = sysm.plan
     k = _phase_of(sysm.stream.phase_bounds, byte)

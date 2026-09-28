@@ -2019,6 +2019,25 @@ def _remove(pop, slot):
     return moved
 
 
+def _drop(lay, slot):
+    """_remove's renumbering, on a list of expert names indexed by slot: the name in the last place
+    moves into place `slot`, or -- `slot` the last place, or a dead row past it, which _remove fills
+    from the last live row -- the last name leaves (2026-09-28, Q-FAB-18's review).
+
+    FAB.manage keeps two such lists through a pass, the population's own and the one
+    FAB_FADED_CULL='as_is' would hold, so that 'defer' can take every decision on the second while
+    it removes from the first. One mirror of _remove's arithmetic, beside it, so the two cannot
+    drift. An EMPTY list stays empty: _remove on an empty population writes row -1 into a dead one
+    and takes n_live below zero, which no name follows (Q-FAB-18's review records the one path that
+    reaches it)."""
+    if not lay:
+        return
+    last = len(lay) - 1
+    if slot < last:
+        lay[slot] = lay[last]
+    lay.pop()
+
+
 def _merge_pairs(sim, merge_dist):
     """Every pair i < j with 1 - sim[i, j] <= merge_dist, as (sim, i, j), DESCENDING.
 
@@ -2084,27 +2103,36 @@ def _merge_into(pop, a, b, rank):
     pop.uage[a] = int(pop.uage[a]) + int(pop.uage[b])
     pop.dom_of[a] = set(pop.dom_of[a]) | set(pop.dom_of[b])
     # THE AREA BOOKS SUM, as `use` does one line up (2026-09-28, Q-FAB-18): the survivor now carries
-    # the mass both experts served, so its most-served area is read off the merged history. A NEW
-    # dict, built in ascending area-id order, so the survivor's book does not depend on which of the
-    # two was touched first.
-    _both = dict(pop.area_use[a])
-    for _k, _v in pop.area_use[b].items():
-        _both[_k] = float(_both.get(_k, 0.0)) + float(_v)
-    pop.area_use[a] = {k: _both[k] for k in sorted(_both)}
+    # the mass both experts served, so its most-served area is read off the merged history.
+    pop.area_use[a] = _sum_books(pop.area_use[a], pop.area_use[b])
     return resid
 
 
-def _faded_kind(pop, i, faded):
-    """Is expert `i`'s most-served area in `faded`? -> "faded", "live" or "unknown" (Q-FAB-18).
+def _sum_books(book_a, book_b):
+    """Two area books summed area by area: a NEW dict, built in ascending area-id order, so the
+    survivor's book does not depend on which of the two was touched first (Q-FAB-18).
+
+    _merge_into gives a merge's survivor this, and FAB.manage's 'defer' arm credits a survivor with
+    it when it keeps the pair apart, so the rest of the pass reads that expert as 'as_is' would
+    (Q-FAB-18's review). One function, so the two sums are one arithmetic."""
+    both = dict(book_a)
+    for k, v in book_b.items():
+        both[k] = float(both.get(k, 0.0)) + float(v)
+    return {k: both[k] for k in sorted(both)}
+
+
+def _faded_kind(book, faded):
+    """Is the most-served area of an expert with area book `book` in `faded`? -> "faded", "live" or
+    "unknown" (Q-FAB-18).
 
     MOST-SERVED IS THE ARGMAX OF ITS AREA BOOK, the routing mass FAB.observe credited per area, and a
     tie goes to the SMALLEST area id -- a rule on the numbers, never on a dict's insertion order,
     which a checkpoint round trip does not promise to keep. "unknown" is an EMPTY book: no window
     with a known area ever routed to this expert, which is what a population restored from a
     checkpoint written before the book existed holds, and it is counted as its own outcome rather
-    than filed as live or as faded.
+    than filed as live or as faded. It takes the BOOK and not a slot (2026-09-28, Q-FAB-18's
+    review): FAB.manage's 'defer' arm reads some experts by the book 'as_is' would have given them.
     """
-    book = pop.area_use[i]
     if not book:
         return "unknown"
     top = min(book, key=lambda k: (-float(book[k]), int(k)))
@@ -3692,20 +3720,25 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None):
          report prints the unit it was compared in.
       7. FADED AREAS (2026-09-28, register §8 3.1, NEW-10 and C37; Q-FAB-18), on every pass the
          root hands `faded` -- the area ids DATA's schedule has faded at this window's phase, plus
-         the areas a resumed parent trained and this run schedules nowhere. Every expert the merge
+         the areas the resumed lineage drew and this run schedules nowhere. Every expert the merge
          absorbs and every expert either cull removes is read against its area book
          (Population.area_use) AFTER the pass has chosen it: fab.merged_faded_area and
          fab.culled_faded_area count the removals whose most-served area is faded, and
          fab.faded_unknown the removals whose book is empty, so a count of 0 over empty books is
          not read as 0 over read ones. At FAB_FADED_CULL='as_is' (shipped) no decision reads a
-         book, so the pass removes what it removed before the books existed. At 'defer' a removal
-         the book names faded is SKIPPED -- the pair is not merged, the expert is not culled -- and
-         counted as an event (fab.merge_faded_deferred, fab.cull_faded_deferred), and THE DEFERRED
-         EXPERT KEEPS ITS SLOT IN THE UTILIZATION CULL'S BUDGET: the ranked walk stops at `budget`
-         victims-or-deferrals, so it never culls a live-area expert in a deferred one's place. The
-         failure cull has no budget, and a deferral there removes one expert fewer. An empty book is
-         not faded and is removed at either value. `faded=None` (a caller that hands no set) reads
-         nothing and leaves every key of this step ABSENT.
+         book, so the pass removes what it removed before the books existed. At 'defer' the pass
+         TAKES EVERY DECISION 'as_is' TAKES AND DROPS ONLY THE FADED REMOVALS (Q-FAB-18's review):
+         a removal the book names faded is SKIPPED -- the pair is not merged, the expert is not
+         culled -- and counted as an event (fab.merge_faded_deferred, fab.cull_faded_deferred), and
+         every later step of the pass reads the population 'as_is' would hold, not the one the
+         deferral kept. So a deferred absorbee pairs with nobody else, the failure cull walks, and
+         the pressure gate and the utilization budget count, the population without the deferred
+         experts, a deferred expert holds its place in the utilization cull's budget, and the
+         survivor of a pair left apart is ranked, paired and read by the use, uage and book the
+         merge would have given it: no live-area expert is merged or culled in a deferred one's
+         place. An empty book is not faded and is removed at
+         either value. `faded=None` (a caller that hands no set) reads nothing and leaves every key
+         of this step ABSENT.
 
     THREE STATES, NOT TWO, FOR EVERY GATE ON THIS PASS (Q-FAB-5, RESOLVED 2026-09-02).
     `fabric.cull_eligible` reports `unreachable` -- never "armed but 0" -- when the eligible set is
@@ -3754,11 +3787,16 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None):
                  fab.merged and fab.merge_armed_passes),
                  step 7 (2026-09-28, Q-FAB-18) -- fab.culled_faded_area, fab.merged_faded_area
                  and fab.faded_unknown (CUMULATIVE; PRESENT-and-0 from the first pass handed a
-                 faded set, ABSENT while none was), fab.faded_areas_last_pass (a gauge: how many
-                 areas this pass's set held, 0 in a first phase), and at FAB_FADED_CULL='defer'
-                 only fab.cull_faded_deferred and fab.merge_faded_deferred (EVENTS: an expert
-                 deferred again on a later pass counts again) beside fab.faded_deferred_experts (a
-                 gauge: the distinct experts this pass deferred), all three ABSENT at 'as_is'
+                 faded set, ABSENT while none was), their per-pass gauges
+                 fab.culled_faded_area_last_pass, fab.merged_faded_area_last_pass and
+                 fab.faded_unknown_last_pass (this pass's counts, CONTRACT-Q-FAB-5's "per manage
+                 pass", Q-FAB-18's review), fab.faded_areas_last_pass (a gauge: how many areas this
+                 pass's set held, 0 in a first phase) -- the four gauges written on every pass
+                 handed a set and ABSENT on one handed none -- and at FAB_FADED_CULL='defer' only
+                 fab.cull_faded_deferred and fab.merge_faded_deferred (EVENTS: an expert deferred
+                 again on a later pass counts again) beside fab.faded_deferred_experts (a gauge: the
+                 distinct experts this pass deferred, which is this pass's events, since a deferred
+                 expert leaves the pass's remaining decisions), all three ABSENT at 'as_is'
     """
     fab = fab.owned_by("FAB")
     period = fab.d_manage_period     # WIRE READ HERE -- both cadences reported side by side
@@ -3815,12 +3853,12 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None):
     # reads a book and no key of this step exists. `defer` is the one arm on which a book DECIDES.
     # SEEDED HERE, BEFORE THE STEPS, for the rule seeded above: a pass handed a set that removes
     # nothing faded reads 0, not ABSENT. The deferral pair only at 'defer'; at 'as_is' it cannot
-    # move and stays ABSENT. `deferred` holds this pass's deferred experts by CURRENT slot and is
-    # renumbered as the removals below move experts, so the gauge counts experts, not events.
+    # move and stays ABSENT. THE PER-PASS GAUGES ARE THIS PASS'S OR NOTHING: a pass handed no set
+    # drops them, so an earlier pass's numbers never read as this one's.
     fset = None if faded is None else frozenset(int(a) for a in faded)
     defer = fset is not None and faded_cull == "defer"
-    culled_faded = merged_faded = faded_unknown = cull_deferred = merge_deferred = 0
-    deferred, deferred_gone = set(), [0]
+    culled_faded = merged_faded = faded_unknown = merge_deferred = 0
+    fail_deferred = util_deferred = 0
     if fset is not None:
         for _k in ("fab.culled_faded_area", "fab.merged_faded_area", "fab.faded_unknown"):
             counters.setdefault(_k, 0)
@@ -3828,23 +3866,56 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None):
         if defer:
             for _k in ("fab.cull_faded_deferred", "fab.merge_faded_deferred"):
                 counters.setdefault(_k, 0)
-
-    def _follow(slot, moved):
-        """Keep `deferred` on the same experts across one _remove(slot) that moved `moved` into it.
-
-        A deferred expert can itself be removed later on the same pass, once its book has changed:
-        deferred as a merge's absorbee, it can survive a later pair, take that pair's mass and stop
-        reading faded, and then be absorbed by the scan or culled like any live-area expert. Books
-        change nowhere else in a pass. It was deferred, so it stays in the gauge's count
-        (`deferred_gone`), and it leaves the set, whose slot now holds whoever moved in."""
-        if slot in deferred:
-            deferred.discard(slot)
-            deferred_gone[0] += 1
-        if moved is not None and moved in deferred:
-            deferred.discard(moved)
-            deferred.add(slot)
+    else:
+        for _k in ("fab.faded_areas_last_pass", "fab.culled_faded_area_last_pass",
+                   "fab.merged_faded_area_last_pass", "fab.faded_unknown_last_pass",
+                   "fab.faded_deferred_experts"):
+            counters.pop(_k, None)
 
     n_live = int(pop.n_live)
+    # 'defer' TAKES THE DECISIONS 'as_is' TAKES AND DROPS ONLY THE FADED REMOVALS (2026-09-28,
+    # Q-FAB-18's review). A deferred expert stays in the population, and no later step of the pass
+    # may read it there: the first build let a merge's deferred absorbee pair again and absorb a
+    # live-area expert 'as_is' never pairs it with, sized the pressure gate and the utilization
+    # budget on a population its deferrals had kept large -- a failure-cull deferral took one more
+    # live-area expert through the budget, and a merge deferral opened a gate 'as_is' shut and
+    # culled live-area experts 'as_is' kept -- and ranked the survivor of a pair it had left apart
+    # without the mass the merge would have given it. So every step below reads the population
+    # 'as_is' would hold at that point of the pass. EXPERTS ARE NAMED BY THEIR SLOT AT ENTRY.
+    # `view` is 'as_is''s layout, view[s] the expert it would hold at slot s, renumbered by _drop as
+    # _remove renumbers the population; `real` is the population's own layout and `at` each
+    # expert's slot in it. `asis` holds, for an expert whose 'as_is' use, uage or area book differs
+    # from its row -- the survivor of a pair 'defer' left apart, and whoever absorbs it -- the three
+    # values 'as_is' would give it, and _use/_uage/_book read them first. `deferred` is this pass's
+    # deferred experts: each leaves the pass's remaining decisions, so each is deferred once.
+    # AT 'as_is' THE TWO LAYOUTS ARE ONE LIST, `asis` STAYS EMPTY, and every read below is the read
+    # it was, of the same row, in the same order, so the pass is the one it was before either
+    # existed.
+    view, real = list(range(n_live)), list(range(n_live))
+    at = {e: e for e in range(n_live)}
+    asis, deferred = {}, set()
+
+    def _use(e):
+        return asis[e][0] if e in asis else float(pop.use[at[e]])
+
+    def _uage(e):
+        return asis[e][1] if e in asis else int(pop.uage[at[e]])
+
+    def _book(e):
+        return asis[e][2] if e in asis else pop.area_use[at[e]]
+
+    def _cut(slots):
+        """Remove these REAL slots from the population, highest first -- the order every step of
+        this pass removes in, because _remove renumbers by swap-with-last -- keeping `real` and `at`
+        on the experts."""
+        for s in sorted(slots, reverse=True):
+            leaving = real[s] if s < len(real) else (real[-1] if real else None)
+            _remove(pop, s)
+            _drop(real, s)
+            at.pop(leaving, None)
+            if s < len(real):
+                at[real[s]] = s
+
     # ELIGIBLE IS PAST-GRACE, AND EVERY RANKING AND BUDGET ON THIS PASS IS SIZED ON IT. The old
     # budget was a fraction of n_live and removed ten where one was due (523 live / 84 eligible).
     # `grace` is units.Selections and `uage` is the SELECTION count -- the H12/H13 split -- so this
@@ -3879,29 +3950,42 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None):
         with torch.no_grad():
             cn = torch.nn.functional.normalize(pop.cent[:n_live].float(), dim=-1)
             sim = cn @ cn.t()
-        absorbed = set()
+        # `kept` is the absorbees 'defer' did not merge: consumed for the rest of the scan exactly
+        # as `absorbed` is, because 'as_is' merged them away here (Q-FAB-18's review).
+        absorbed, kept = set(), set()
         # DESCENDING SIMILARITY so the closest pair merges first; a pair already consumed is
         # skipped rather than re-merged into a survivor whose centroid has since moved.
         pairs = _merge_pairs(sim, merge_dist)
         for _sv, i, j in pairs:
-            if i in absorbed or j in absorbed:
+            if i in absorbed or j in absorbed or i in kept or j in kept:
                 continue
-            # `b` IS THE ONE THAT DISAPPEARS AND IT IS THE ONE GRACE TESTS.
-            a, b = (i, j) if int(pop.uage[j]) >= int(pop.uage[i]) else (j, i)
-            a, b = (b, a) if int(pop.uage[b]) < grace and int(pop.uage[a]) >= grace else (a, b)
-            if int(pop.uage[b]) < grace:
+            # `b` IS THE ONE THAT DISAPPEARS AND IT IS THE ONE GRACE TESTS -- on the uage 'as_is'
+            # would have, which is the row's except for the survivor of a pair 'defer' left apart.
+            a, b = (i, j) if _uage(j) >= _uage(i) else (j, i)
+            a, b = (b, a) if _uage(b) < grace and _uage(a) >= grace else (a, b)
+            if _uage(b) < grace:
                 declined_grace += 1
                 continue
             # 7. THE PASS HAS CHOSEN `b`; ITS BOOK IS READ NOW, before _merge_into and before any
             # removal, so it is the absorbed expert's own history (Q-FAB-18). At 'as_is' the read
             # decides nothing and is only counted, after the merge; at 'defer' a faded `b` is not
             # merged, and the pair's other expert stays free for the rest of the scan.
-            kind = None if fset is None else _faded_kind(pop, b, fset)
+            kind = None if fset is None else _faded_kind(_book(b), fset)
+            # WHAT 'as_is' GIVES `a` HERE, where that is not what its row will say: `b` is kept
+            # apart, or either side already carries values the row does not. Taken before
+            # _merge_into writes `a`'s row, in _merge_into's own order (a's, then b's).
+            joint = None
+            if a in asis or b in asis or (defer and kind == "faded"):
+                joint = (_use(a) + _use(b), _uage(a) + _uage(b), _sum_books(_book(a), _book(b)))
             if defer and kind == "faded":
                 merge_deferred += 1
                 deferred.add(b)
+                kept.add(b)
+                asis[a] = joint
                 continue
             resid = _merge_into(pop, a, b, rank)
+            if joint is not None:
+                asis[a] = joint
             residuals.append(resid)
             absorbed.add(b)
             merged += 1
@@ -3911,9 +3995,12 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None):
                 faded_unknown += 1
         # THE REMOVALS HAPPEN AFTER THE WHOLE SCAN AND IN DESCENDING SLOT ORDER, because _remove
         # renumbers by swap-with-last: removing a low slot first would move a later victim's id out
-        # from under the list this loop is walking.
-        for b in sorted(absorbed, reverse=True):
-            _follow(b, _remove(pop, b))
+        # from under the list this loop is walking. 'as_is' removes every absorbee, the kept ones
+        # included, and that is the layout the steps below decide on; the population loses only the
+        # ones merged. No slot has moved yet, so an expert's name is its slot here.
+        for b in sorted(absorbed | kept, reverse=True):
+            _drop(view, b)
+        _cut(absorbed)
         n_live = int(pop.n_live)
     if merged:
         _bump(counters, "fab.merged", merged)
@@ -3956,11 +4043,21 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None):
     # None BEFORE THE FIRST ATTRIBUTED WINDOW, and then nothing can be judged against it.
     cull_fail = spared_shift = spared_contrib = 0
     fail_base = None if pop.comp_glob is None else float(pop.comp_glob)
+    # WHETHER THE ELIGIBLE LIST BELOW IS RECOUNTED: only after this cull runs. Where it does not --
+    # comp_glob None, no window attributed yet -- the utilization cull ranks the ENTRY list, which a
+    # merge's removals have renumbered (Q-FAB-18's review records it beside this cull's walk).
+    recounted = False
     if n_elig and fail_base is not None:
-        failing = []
-        for i in list(eligible):
-            if i >= n_live:
+        # THE WALK IS OVER THE ENTRY LIST'S SLOTS, READ IN THE LAYOUT 'as_is' HOLDS AFTER THE MERGE
+        # -- Q-FAB-18 records that a slot the merge refilled is judged under its entry's grace, and
+        # at 'defer' it is the expert 'as_is' would have there that is judged, so both values judge
+        # one set. `failing` and `kept_fail` are those layout slots.
+        failing, kept_fail = [], []
+        for s in list(eligible):
+            if s >= len(view):
                 continue          # renumbered away by the merge above
+            e = view[s]
+            i = at[e]
             ef_i, es_i = float(pop.ef[i]), float(pop.es[i])
             if ef_i > fail_base + fail_tol and es_i > fail_base + fail_tol:
                 if ef_i - es_i > shift_tol:
@@ -3973,24 +4070,31 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None):
                     spared_contrib += 1
                 else:
                     # 7. CHOSEN, THEN READ (Q-FAB-18): counted at 'as_is', and at 'defer' a
-                    # faded-area expert stays. This cull has no budget, so a deferral here is one
-                    # removal fewer and nobody else's.
-                    kind = None if fset is None else _faded_kind(pop, i, fset)
+                    # faded-area expert stays -- and leaves the population the rest of the pass
+                    # sizes and ranks, as 'as_is''s removal would take it out of it: this cull has
+                    # no budget, but the utilization cull's budget and the pressure gate are sized
+                    # on what it leaves (Q-FAB-18's review).
+                    kind = None if fset is None else _faded_kind(_book(e), fset)
                     if defer and kind == "faded":
-                        cull_deferred += 1
-                        deferred.add(i)
+                        fail_deferred += 1
+                        deferred.add(e)
+                        kept_fail.append(s)
                         continue
                     if kind == "faded":
                         culled_faded += 1
                     elif kind == "unknown":
                         faded_unknown += 1
-                    failing.append(i)
-        for i in sorted(failing, reverse=True):
-            _follow(i, _remove(pop, i))
-            cull_fail += 1
+                    failing.append(s)
+        gone = [at[view[s]] for s in failing]
+        for s in sorted(failing + kept_fail, reverse=True):
+            _drop(view, s)
+        _cut(gone)
+        cull_fail += len(gone)
         n_live = int(pop.n_live)
-        eligible = [i for i in range(n_live) if int(pop.uage[i]) >= grace]
+        # RECOUNTED OVER THE LAYOUT 'as_is' HOLDS, IN ITS SLOT ORDER, as experts.
+        eligible = [e for e in view if _uage(e) >= grace]
         n_elig = len(eligible)
+        recounted = True
 
     # ---- 2. UTILIZATION CULL, behind derive.cull_gate_open ---------------------------------------
     # THAT FUNCTION IS CALLED, NOT RESTATED. It is already replayed against a 216-case oracle, and
@@ -3998,16 +4102,23 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None):
     # read it as one. THE ARITHMETIC IS RECORDED EVERY PASS whether it opened or not, so a run that
     # was above pressure for most of its length and below it at the end does not print
     # "unreachable".
-    gate_open = _derive.cull_gate_open(n_live, slots, pressure)
+    # ON THE POPULATION 'as_is' WOULD HOLD HERE (Q-FAB-18's review): at 'defer' the experts this pass
+    # kept are not counted toward the pressure, as 'as_is' has removed them, and the reason says how
+    # many stand beside the count. At 'as_is' `n_view` is n_live.
+    n_view = len(view)
+    gate_open = _derive.cull_gate_open(n_view, slots, pressure)
     # THE UNROUNDED RATIO IS PRINTED WHEN THE THREE-PLACE ONE WOULD SIT ON THE OTHER SIDE OF THE
     # SETPOINT, which is build's rounding caveat carried to the gate that now reports the verdict
     # (measured there: FAB_N0=4499 FAB_SLOTS=10000 at FAB_PRESSURE=0.45 prints 0.450 and is shut).
-    _occ = n_live / max(1, slots)
+    _occ = n_view / max(1, slots)
     _flip = (_occ >= pressure) != (float(f"{_occ:.3f}") >= pressure)
-    gate_str = (f"n_live={n_live} / slots={slots} = {_occ:.3f}"
+    gate_str = (f"n_live={n_view} / slots={slots} = {_occ:.3f}"
                 f"{f' (unrounded {_occ!r})' if _flip else ''} against "
                 f"FAB_PRESSURE={pressure} with the n_live<=2 floor: "
-                f"{'OPEN' if gate_open else 'SHUT'}")
+                f"{'OPEN' if gate_open else 'SHUT'}"
+                + (f", over the population FAB_FADED_CULL='as_is' would hold here: the "
+                   f"{n_live - n_view} expert(s) this pass deferred stand beside it, uncounted"
+                   if n_live != n_view else ""))
     # THE GATE'S ARITHMETIC GOES ON A Gate AND NOT INTO THE COUNTER LEDGER, and the first driven
     # run of this body is why. `fab.cull_gate` is a DECLARED GATE NAME, and fabric/api.py::counters
     # renders every gate by looking its name up in the ledger and calling int() on what it finds --
@@ -4021,15 +4132,28 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None):
         # rather than something the code refuses to allow -- the ratchet is the pattern the
         # DomainAssembler documents as having driven a population down to a single member.
         budget = int(cull_frac * n_elig)
-        ranked = sorted(eligible, key=lambda i: float(pop.use[i]))
+        # THE RANKED LIST IS OF REAL SLOTS, in the order 'as_is' would rank them: its recounted
+        # eligible experts, by the use it would give them. Where the failure cull did not run it is
+        # the ENTRY list, as it always was -- read in the population's own layout while that is
+        # 'as_is''s, and otherwise (comp_glob None and a merge deferral: no loop run reaches it,
+        # since the first window to feed an area book sets comp_glob) through 'as_is''s layout,
+        # without the slots past it, which hold no expert (Q-FAB-18's review).
+        if recounted:
+            ranked_from = [at[e] for e in eligible]
+        elif view == real:
+            ranked_from = list(eligible)
+        else:
+            ranked_from = [at[view[s]] for s in eligible if s < len(view)]
+        ranked = sorted(ranked_from,
+                        key=lambda i: _use(real[i]) if i < len(real) else float(pop.use[i]))
         victims = []
-        # A DEFERRED VICTIM HOLDS ITS BUDGET SLOT (2026-09-28, Q-FAB-18): `held` counts them against
+        # A DEFERRED VICTIM HOLDS ITS BUDGET SLOT (2026-09-28, Q-FAB-18): `held` holds them against
         # the budget beside `victims`, so at 'defer' the walk stops where 'as_is' would have and
         # never goes on to cull the next-least-used live-area expert in a deferred one's place.
-        # At 'as_is' it stays 0 and the walk is the one it was.
-        held = 0
+        # At 'as_is' it stays empty and the walk is the one it was.
+        held = []
         for i in ranked:
-            if len(victims) + held >= budget:
+            if len(victims) + len(held) >= budget:
                 break
             # THE THREE SPARES, EACH ITS OWN COUNTER BECAUSE EACH IS A DIFFERENT REASON TO SURVIVE.
             if float(pop.contrib[i]) > 0.0:
@@ -4051,32 +4175,45 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None):
                 spared_shift += 1
                 continue
             # 7. CHOSEN, THEN READ (Q-FAB-18) -- after the three spares, so a spared expert is
-            # never counted as deferred and a deferral is only ever a victim the walk had named.
-            kind = None if fset is None else _faded_kind(pop, i, fset)
+            # never counted as deferred and a deferral is only ever a victim the walk had named. A
+            # slot past the population is a dead row (the entry list's, above): its book was
+            # cleared, so it reads "unknown" and is never deferred.
+            e = real[i] if i < len(real) else None
+            kind = None if fset is None else _faded_kind(
+                _book(e) if e is not None else pop.area_use[i], fset)
             if defer and kind == "faded":
-                held += 1
-                cull_deferred += 1
-                deferred.add(i)
+                held.append(i)
+                util_deferred += 1
+                deferred.add(e)
                 continue
             if kind == "faded":
                 culled_faded += 1
             elif kind == "unknown":
                 faded_unknown += 1
             victims.append(i)
-        for i in sorted(victims, reverse=True):
-            _follow(i, _remove(pop, i))
-            cull_util += 1
+        # 'as_is' REMOVES THE VICTIMS AND THE HELD ALIKE, from where its layout holds them -- a dead
+        # row only while the two layouts are one, at the same slot -- and the population loses the
+        # victims.
+        _vslot = {e: s for s, e in enumerate(view)}
+        for s in sorted((_vslot[real[i]] if i < len(real) else i for i in victims + held),
+                        reverse=True):
+            _drop(view, s)
+        _cut(victims)
+        cull_util += len(victims)
         n_live = int(pop.n_live)
 
     # ---- 5. RESCUE: a heavy mutation instead of a deletion, inside the pressure gate -------------
     # ONCE PER EXPERT. `mutscale` carries whether this expert has already been rescued, so a slot
     # cannot be rescued repeatedly into noise -- and the Adam moments on A[i], B[i] are STALE after
     # an in-place write, which this does not fix and must not pretend to.
+    # THE EXPERTS 'as_is' WOULD RESCUE, AT EITHER VALUE (Q-FAB-18's review): its past-grace experts
+    # in its layout, by the use it would give them, so a deferred expert is not rescued -- 'as_is'
+    # removed it -- and a live one 'as_is' rescues is not passed over for it.
     rescued = 0
     if gate_open and rescue_frac > 0.0 and n_elig:
-        worst = sorted([i for i in range(n_live) if int(pop.uage[i]) >= grace],
-                       key=lambda i: float(pop.use[i]))
-        for i in worst[:int(rescue_frac * max(1, n_elig))]:
+        worst = sorted([e for e in view if _uage(e) >= grace], key=_use)
+        for e in worst[:int(rescue_frac * max(1, n_elig))]:
+            i = at[e]
             if float(pop.mutscale[i]) != 1.0:
                 continue
             with torch.no_grad():
@@ -4084,6 +4221,8 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None):
                     t[i] += torch.randn(t[i].shape, generator=pop.rng.torch_generator(),
                                         device=t.device, dtype=t.dtype) * mut_big * t[i].std()
             pop.use[i], pop.uage[i] = 0.0, 0
+            if e in asis:
+                asis[e] = (0.0, 0, asis[e][2])
             pop.mutscale[i] = float(mut_big)
             rescued += 1
         pop.rescued = int(pop.rescued) + rescued
@@ -4141,17 +4280,25 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None):
             _bump(counters, k, v)
     # 7's LEDGER (2026-09-28, Q-FAB-18): the pass's faded-area removals, empty-book removals and, at
     # 'defer', its deferral events and the distinct experts they fell on (a gauge, this pass's).
+    # THE THREE COUNTS ARE ALSO WRITTEN AS THIS PASS'S GAUGES (Q-FAB-18's review), as
+    # fab.merged_last_pass is beside fab.merged: CONTRACT-Q-FAB-5 asks for the count per manage
+    # pass, and the cumulative keys alone cannot say which pass removed what -- the ManageReport
+    # carrying them goes back to a root that files it nowhere.
+    cull_deferred = fail_deferred + util_deferred
     if fset is not None:
         for k, v in (("fab.culled_faded_area", culled_faded),
                      ("fab.merged_faded_area", merged_faded), ("fab.faded_unknown", faded_unknown)):
             if v:
                 _bump(counters, k, v)
+        counters["fab.culled_faded_area_last_pass"] = culled_faded
+        counters["fab.merged_faded_area_last_pass"] = merged_faded
+        counters["fab.faded_unknown_last_pass"] = faded_unknown
         if defer:
             for k, v in (("fab.cull_faded_deferred", cull_deferred),
                          ("fab.merge_faded_deferred", merge_deferred)):
                 if v:
                     _bump(counters, k, v)
-            counters["fab.faded_deferred_experts"] = len(deferred) + deferred_gone[0]
+            counters["fab.faded_deferred_experts"] = len(deferred)
 
     # ---- THREE STATES, NOT TWO, FOR EVERY GATE ON THIS PASS (Q-FAB-5) ---------------------------
     # `fabric.cull_eligible` and `fab.merged` report UNREACHABLE -- never "armed but 0" -- when the
@@ -4163,11 +4310,20 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None):
     _mean_uage = sum(int(pop.uage[i]) for i in range(n_live)) / max(1, n_live)
     _reach = (f"mean uage {_mean_uage:.1f} at n_live={n_live} after {step_n} window(s); "
               f"grace={grace} selection(s)")
+    # A DEFERRAL IS ITS OWN OUTCOME IN EVERY REASON IT CAN REACH (Q-FAB-18's review): an expert the
+    # failure cull judged failing and 'defer' kept is neither culled nor spared, and a close pair
+    # 'defer' left apart is neither merged nor "not close enough". Each clause is printed where the
+    # deferral is armed -- at 'defer' on this pass, and for the run-scope gate wherever the ledger
+    # holds fab.merge_faded_deferred -- and nowhere else, so an 'as_is' reason reads as it did.
     _fail_note = (f"failure cull against comp_glob={fail_base:.4f} + FAB_FAIL_TOL={fail_tol}: "
                   f"{cull_fail} culled, {spared_shift} spared as adapting, {spared_contrib} as "
                   f"load-bearing"
+                  + (f", {fail_deferred} deferred at FAB_FADED_CULL='defer'" if defer else "")
                   if fail_base is not None else
                   "no failure cull: comp_glob is None, so no window has been attributed yet")
+    _kept_note = (f", beside the {len(deferred)} expert(s) FAB_FADED_CULL='defer' kept "
+                  f"({merge_deferred} merge(s), {fail_deferred} failure cull(s) and "
+                  f"{util_deferred} utilization cull(s) deferred)" if defer else "")
     # THE MERGE'S RUN-SCOPE READING, off the ledger alone (2026-09-27, register
     # LOW-FAB-MERGED-REPORT); see the two Gates at the end of this tuple.
     _run_merged = int(counters.get("fab.merged", 0))
@@ -4175,6 +4331,13 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None):
     _passes = int(counters.get("fab.manage_passes", 0))
     _declined_run = int(counters.get("fab.merge_declined_grace", 0))
     _run_merge_reach = _run_merged > 0 or (merge_dist > 0.0 and _armed_passes > 0)
+    _run_deferred = counters.get("fab.merge_faded_deferred")
+    _run_def_note = ("" if _run_deferred is None else
+                     f"; {int(_run_deferred)} close pair(s) deferred over the ledger at "
+                     f"FAB_FADED_CULL='defer'")
+    _pass_def_note = (f"; {merge_deferred} close pair(s) deferred at FAB_FADED_CULL='defer'"
+                      if defer else "")
+    _gate_n = n_live if view == real else len(view)
     _gates = tuple(g for g in pop.gates
                    if g.name not in ("fabric.cull_eligible", "fab.merged", "fab.merged_last_pass",
                                      "fab.cull_gate", "fab.depth_advance"))
@@ -4186,7 +4349,8 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None):
              reason=(f"{n_elig_entry} of the live expert(s) were past grace and rankable at the "
                      f"start of this pass; {merged} merged away, {cull_fail} removed by the "
                      f"failure cull and {cull_util} by the utilization cull, leaving "
-                     f"{n_elig - cull_util} eligible; {_fail_note}; {_reach}"
+                     f"{n_elig - cull_util - util_deferred} eligible{_kept_note}; {_fail_note}; "
+                     f"{_reach}"
                      if n_elig_entry else
                      f"unreachable ({_reach}): NO expert has been SELECTED grace times, so the "
                      f"eligible set is empty and every ranking, budget and spare on this pass is "
@@ -4199,8 +4363,11 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None):
         # `pressure` -- 2114 vs 0.6 beside 'armed, did not fire' -- a count against a ratio, so a
         # SHUT pass always read as a value far over its threshold. It now renders the ratio the
         # verdict compares, as build's prediction does, and the reason carries the floor.
+        # AT 'defer' THE PAIR IS 'as_is''s POPULATION, the one the verdict was taken on (Q-FAB-18's
+        # review): the population's own count would put the kept experts back into a ratio the gate
+        # never compared. Where the layouts are one -- always at 'as_is' -- it is n_live as it was.
         Gate("fab.cull_gate", gate_open,
-             f"{n_live}/{max(1, slots)}={n_live / max(1, slots):.3f}", pressure, reason=gate_str),
+             f"{_gate_n}/{max(1, slots)}={_gate_n / max(1, slots):.3f}", pressure, reason=gate_str),
         # ONE GATE PER SCOPE, AND EACH GATE'S NAME IS ITS COUNTER'S (2026-09-27, register
         # LOW-FAB-MERGED-REPORT). fabric/api.py::_three_state renders a build or manage gate's count
         # by looking ITS NAME up in the ledger, so a gate that shares a ledger counter's name prints
@@ -4215,17 +4382,25 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None):
              reason=(f"{merged} pair(s) consolidated on this pass within FAB_MERGE_DIST="
                      f"{merge_dist} cosine; residual p50/p99 "
                      f"{counters.get('fab.merge_residual_p50', 0.0):.4f}/"
-                     f"{counters.get('fab.merge_residual_p99', 0.0):.4f}"
+                     f"{counters.get('fab.merge_residual_p99', 0.0):.4f}{_pass_def_note}"
                      if merged else
                      f"FAB_MERGE_DIST={merge_dist} is 0: merging is off by configuration"
                      if merge_dist <= 0.0 else
+                     # A PASS WHOSE EVERY CLOSE PAIR WAS DEFERRED MERGED NOTHING, AND NOT FOR WANT OF
+                     # A PAIR (Q-FAB-18's review): the sentence below would say none sat within
+                     # FAB_MERGE_DIST.
+                     f"{n_elig_entry} expert(s) were past grace at entry and no pair merged on "
+                     f"this pass: {merge_deferred} close pair(s) with a past-grace absorbee were "
+                     f"deferred at FAB_FADED_CULL='defer', its most-served area faded, and "
+                     f"{declined_grace} declined because the absorbed one was inside grace"
+                     if merge_deferred else
                      # ARMED AND DID NOT FIRE IS ITS OWN SENTENCE. With past-grace experts at entry
                      # the reason used to fall through to the 'unreachable' text below, so the
                      # report printed ('armed-but-zero', ..., 'unreachable ...') on one line.
                      f"{n_elig_entry} expert(s) were past grace at entry and no pair with a "
                      f"past-grace member sat within FAB_MERGE_DIST={merge_dist} cosine on this "
                      f"pass; {declined_grace} close pair(s) declined because the absorbed one was "
-                     f"inside grace"
+                     f"inside grace{_pass_def_note}"
                      if n_elig_entry else
                      f"unreachable ({_reach}): the absorbed expert must be past grace and no "
                      f"expert is. {declined_grace} pair(s) were close enough and declined for it")),
@@ -4241,15 +4416,22 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None):
                      f"{counters.get('fab.merge_residual_p50', 0.0):.4f}/"
                      f"{counters.get('fab.merge_residual_p99', 0.0):.4f} on the last pass that "
                      f"merged; {_declined_run} close pair(s) declined over the ledger because the "
-                     f"absorbed one was inside grace"
+                     f"absorbed one was inside grace{_run_def_note}"
                      if _run_merged else
                      f"FAB_MERGE_DIST={merge_dist} is 0: merging is off by configuration, and "
                      f"nothing merged earlier in the ledger"
                      if merge_dist <= 0.0 else
                      f"{_armed_passes} of the ledger's {_passes} manage pass(es) had a past-grace "
+                     f"expert at entry and none merged: {int(_run_deferred)} close pair(s) with a "
+                     f"past-grace absorbee were deferred over the ledger at FAB_FADED_CULL='defer', "
+                     f"its most-served area faded, and {_declined_run} declined because the "
+                     f"absorbed one was inside grace"
+                     if _run_merge_reach and _run_deferred else
+                     f"{_armed_passes} of the ledger's {_passes} manage pass(es) had a past-grace "
                      f"expert at entry and on none of them did a pair with a past-grace member sit "
                      f"within FAB_MERGE_DIST={merge_dist} cosine; {_declined_run} close pair(s) "
                      f"declined over the ledger because the absorbed one was inside grace"
+                     f"{_run_def_note}"
                      if _run_merge_reach else
                      f"unreachable: on none of the ledger's {_passes} manage pass(es) was an "
                      f"expert past grace at entry, and the absorbed expert must be (now: "

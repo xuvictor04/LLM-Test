@@ -502,26 +502,34 @@ offsets and sizes and, since 2026-09-27, each block's digest (Q-DATA-9's review)
 `bytes_present`/`bytes_taken`, the counter vector — all checkpointed. The cached
 `Stream` at `resample=False` is **not**: it is rebuilt from `(seed, epoch)`. Nor is
 `Areas.parent_names`, the area list the resumed checkpoint recorded, which `restore_stream_state`
-fills in place from the record on every resume (empty on a fresh run; Q-DATA-9).
+fills in place from the record on every resume (empty on a fresh run; Q-DATA-9). **`Areas.drawn`
+is** (2026-09-28, Q-FAB-18's review): every area the lineage's streams have drawn a byte from, in
+the order first drawn — filled in place from the record by `restore_stream_state`, extended by
+`draw_stream`, recorded by `stream_state`. A record written before it carries none, and every area
+it declares is then assumed drawn and named in `data.drawn_assumed` ([] where the record carried
+its list; ABSENT on a fresh run).
 **Counters:** `data.area_open`, `corpus_cap_trip`, `holdout_block`, `val_cap_trip`, `area_refused`,
 `stream_draw`, `segment`, `contig_wrap`, `resample`, `phase_entered`, `phase_resolved`,
 `state_written/restored/refused` (with `state_written_here`, the process twin of the lineage
 `state_written`, Q-CKPT-4), `holdout_admitted` with `holdout_admitted_names` (Q-DATA-9; seeded
-only on a resume at `source="synthetic"`, `synth_holdout=True`, and ABSENT elsewhere), and three
-Gates (`exposure_max`, `exposure_skew`, `splice_window`). **Printed at R since 2026-09-27**, in the
-root's `DATA(areas.counters)`, `DATA(areas.gates)`, `DATA(plan.counters)` and `DATA(stream.counters)`
+only on a resume at `source="synthetic"`, `synth_holdout=True`, and ABSENT elsewhere),
+`drawn_assumed` (Q-FAB-18's review), and three Gates (`exposure_max`, `exposure_skew`,
+`splice_window`). **Printed at R since 2026-09-27**, in the root's `DATA(areas.counters)`,
+`DATA(areas.gates)`, `DATA(plan.counters)` and `DATA(stream.counters)`
 rows beside the older `DATA(stream.gates)` (Q-DATA-9); before that no row printed them.
 
 **The schedule's faded sets (2026-09-28, Q-FAB-18; register §8 3.1, NEW-10 and C37).** `Plan`
 gains `faded` — per phase, every area live in an earlier phase and not in this one (index tuples in
 Plan order; `[(), (0,), (0,), (0, 1)]` on the generated four-area schedule) — and `parent_faded`,
-the areas the resumed record names (`Areas.parent_names`) that no phase of this schedule makes live.
+the areas the resumed lineage drew (`Areas.drawn`; `Areas.parent_names`, every area the record
+declares, until Q-FAB-18's review) that no phase of this schedule makes live.
 Both are computed by `data_plan` at startup, move no byte of the stream and are not checkpointed;
 they are printed as the readings `data.phase_faded` (every run) and `data.parent_faded` (only where
 a parent record was restored). The root hands their union to `FAB.manage` as area ids. **An area's
 id** is `spine/derive.py::area_id` of its label (crc32, 31 bits), the key FAB's area books and MEM's
 area column share, and `open_areas` refuses two labels on one id beside the label and key
-collisions (`data.area_id_collision`).
+collisions, naming both and `data.area_id_collision`, whose Gate reads 0 beside
+`data.area_label_collision`'s in every `Areas` that exists (Q-FAB-18's review).
 
 **The synthetic source's held-out law is a lever (2026-09-27, Q-DATA-9).** At `synth_holdout=True`
 `open_areas` runs the real sources' carve on each generated body **verbatim** — size, per-area child
@@ -761,11 +769,14 @@ C37). `observe(..., area_id=None)` credits each computed expert's new area book
 (`Population.area_use`, routing mass per area, one of `_BOOKS`, checkpointed) under its window's
 area, and `manage(..., faded=None)` reads every expert it removes against the root's faded set --
 DATA's `Plan.faded` for the window's phase plus `Plan.parent_faded` — counting
-`fab.culled_faded_area`, `fab.merged_faded_area` and `fab.faded_unknown`. **`FAB_FADED_CULL`** (a
-census amendment) is `'as_is'`, shipped, where no decision reads a book, or `'defer'`, an E2 arm and
-C37's preset value until `FAB.contribution` works, where such a removal is skipped and counted and a
-deferred victim **keeps its slot in the utilization cull's budget**, so no live-area expert is culled
-in its place.
+`fab.culled_faded_area`, `fab.merged_faded_area` and `fab.faded_unknown`, each with a per-pass gauge
+(`..._last_pass`). **`FAB_FADED_CULL`** (a census amendment) is `'as_is'`, shipped, where no decision
+reads a book, or `'defer'`, an E2 arm and C37's preset value until `FAB.contribution` works, where
+such a removal is skipped and counted and **every other decision of the pass is the one `'as_is'`
+takes**: the rest of the pass reads the population `'as_is'` would hold, so a deferred victim keeps
+its slot in the utilization cull's budget, a deferred absorbee pairs with nobody else, the pressure
+gate is sized without the deferred, and no live-area expert is merged or culled in a deferred one's
+place (Q-FAB-18's review).
 
 ### MEM — `src/memory/api.py` (26 levers, 25 read directly, one of them a census amendment)
 
@@ -7029,11 +7040,14 @@ and nothing in FAB knew which area an expert served.
   to 31 bits. A function of the label alone, so a checkpointed book means the same area in a child
   whose `DATA_AREAS` inserted, appended or reordered areas (a position in `Areas.names` would not,
   and Python's `hash` is salted per process); 31 bits, so MEM's int32 column keeps -1 for "none".
-  `DATA.open_areas` refuses two labels on one id beside its label and key collisions
-  (`data.area_id_collision`), naming both.
+  `DATA.open_areas` refuses two labels on one id beside its label and key collisions, naming both
+  and `data.area_id_collision`, a Gate that reads 0 in every `Areas` that exists (a Gate since
+  the review below; the name was declared and written nowhere).
 * **The faded set.** DATA's `Plan.faded[k]` — every area live in a phase before k and not in k — and
-  `Plan.parent_faded` — the recorded parent areas (`Areas.parent_names`) no phase of this schedule
-  makes live (the DATA section). At each `fab.manage` pass the root hands `faded` = the ids of
+  `Plan.parent_faded` — the areas the resumed lineage's streams drew (`Areas.drawn`, which
+  `stream_state` records; every area the record declared, `Areas.parent_names`, until the review
+  below) that no phase of this schedule makes live (the DATA section). At each `fab.manage` pass
+  the root hands `faded` = the ids of
   `Plan.faded` at the phase this window's first byte falls in (the byte the probe's phase-start test
   reads) together with `Plan.parent_faded`, through the join `compose.py::_faded_ids`. **The parent's
   half is what makes the count, and the deferral, mean anything in the continue preset C37 is about**:
@@ -7057,9 +7071,14 @@ and nothing in FAB knew which area an expert served.
   book (no area ever booked: a founder no window reached, or every expert restored from a checkpoint
   older than the book) counts `fab.faded_unknown` instead, so a 0 over empty books is not read as a 0
   over read ones. The three are cumulative, PRESENT-and-0 from the first pass handed a set (an empty
-  set included: phase 0 hands one) and ABSENT while none was; `fab.faded_areas_last_pass` is the
-  pass's set size. `ManageReport` carries the pass's own counts (`culled_faded_area`,
-  `merged_faded_area`, `faded_unknown`, `cull_faded_deferred`, `merge_faded_deferred`).
+  set included: phase 0 hands one) and ABSENT while none was. **Per pass** — CONTRACT-Q-FAB-5's
+  "per manage pass" — each has a gauge, `fab.culled_faded_area_last_pass`,
+  `fab.merged_faded_area_last_pass` and `fab.faded_unknown_last_pass`, as `fab.merged_last_pass` is
+  `fab.merged`'s (since the review below: the pass's counts lived only on the `ManageReport`, which
+  the root files nowhere); `fab.faded_areas_last_pass` is the pass's set size. The four gauges are
+  written on every pass handed a set and dropped on one handed none. `ManageReport` carries the
+  pass's own counts (`culled_faded_area`, `merged_faded_area`, `faded_unknown`,
+  `cull_faded_deferred`, `merge_faded_deferred`).
 * **`FAB_FADED_CULL`** (`'as_is'` | `'defer'`, U.NAME; a census amendment, the fourteenth;
   `fabric/levers.py` section 6). **`'as_is'`** (shipped): no decision reads a book, and the pass
   removes exactly what it removed before the book existed. **`'defer'`** (NEW-10's and C37's E2 arm,
@@ -7067,19 +7086,25 @@ and nothing in FAB knew which area an expert served.
   area is faded is SKIPPED — the pair is not merged (its other expert stays free for the rest of the
   scan), the expert is not culled — and counted as an EVENT, `fab.merge_faded_deferred` /
   `fab.cull_faded_deferred` (an expert deferred on a later pass counts again), beside
-  `fab.faded_deferred_experts`, the distinct experts this pass deferred (a gauge; the pass follows
-  their slots through its own renumbering, and one a later merge of the same pass removes still
-  counts); all three are ABSENT at `'as_is'`. **A deferred utilization-cull victim keeps its budget
-  slot**: the ranked walk stops at `budget` victims plus deferrals, so it never culls the
-  next-least-used live-area expert in a deferred one's place — deferral, not substitution (the
-  critic's finding on the draft). The failure cull has no budget, so a deferral there is one removal
-  fewer. An empty book is not faded and is removed at either value. **The cost is stated, not
+  `fab.faded_deferred_experts`, the distinct experts this pass deferred (a gauge; a deferred expert
+  leaves the pass's remaining decisions, so each is deferred once and the gauge is the pass's
+  events); all three are ABSENT at `'as_is'`. **Every other decision of the pass is the one
+  `'as_is'` takes** (the review below): the rest of the pass reads the population `'as_is'` would
+  hold, so a deferred absorbee pairs with nobody else, the failure cull walks, and the pressure
+  gate and the utilization budget count, the population without the deferred, **a deferred
+  utilization-cull victim keeps its budget slot** (the ranked walk stops at `budget` victims plus
+  deferrals — deferral, not substitution, the critic's finding on the draft), and the survivor of a
+  pair left apart is ranked, paired and read by the use, uage and book the merge would have given
+  it. So a `'defer'` pass removes exactly what `'as_is'` would remove from the same population, less
+  the faded removals. An empty book is not faded and is removed at either value. **The cost is stated, not
   discovered:** with the pool at `FAB_SLOTS` a deferred expert holds a slot a new area could have been
   born into (NEW-20). `'contrib'` (a removal gated on `FAB.contribution <= 0`) is §8 3.5's and joins
   the choices with that build rather than ahead of its producer.
 * **Rescue is not deferred.** `FAB_RESCUE`'s heavy mutation is neither a cull nor a merge and keeps
   the expert's slot and book; it is OFF at the shipped 0.0, and whether a faded-area expert may be
-  rescued is the question of an arm that turns it on beside `'defer'`.
+  rescued is the question of an arm that turns it on beside `'defer'`. At `'defer'` the pass rescues
+  the experts `'as_is'` would rescue (the review below) — never a deferred one, which `'as_is'` had
+  removed.
 
 **What the rule does not see (recorded, not repaired).** (a) The faded set is the schedule's within
 one epoch: at an epoch roll the schedule restarts, so an area only the previous epoch's later phases
@@ -7121,7 +7146,102 @@ workload removes no faded-area expert after the fade (55 cull and 15 merge defer
 child of an eng-only parent hands every pass `{eng}` from its first. F9 continuing resumes at both
 values are exact and end with the uninterrupted run's books, counts and deferrals; a checkpoint
 stripped of the book resumes exactly, and the removals of experts whose books were not refilled
-count as `fab.faded_unknown`.
+count as `fab.faded_unknown`. (F5, F6, F7 and F9 as the review below left them are in its last
+paragraph.)
+
+**CORRECTED 2026-09-28 (Q-FAB-18's review) — `'defer'` takes every decision `'as_is'` takes and
+drops only the faded removals; `Plan.parent_faded` is read off the areas the lineage drew; the count
+is reported per pass; the reasons name the deferrals; `data.area_id_collision` has its row.** (i)
+*The deferral leaked on three paths the budget rule did not reach, and a fourth found while
+repairing them.* The ruling promised that no live-area expert is culled in a deferred one's place,
+and the build kept the promise only inside the utilization cull's walk. Driven on scripted passes at
+the build: a failure-cull deferral stayed in the recounted eligible set, so the budget
+`int(cull_frac * n_elig)` grew — four eligible experts at `FAB_CULL_FRAC` 0.5, expert 0 failing and
+faded: `'as_is'` removed 0 and 1, `'defer'` 1 and 2, live expert 2 in 0's place; a merge deferral
+left `n_live` one larger, so `derive.cull_gate_open` read 6/12 = 0.500, OPEN, at `FAB_PRESSURE` 0.5
+where `'as_is'` read 5/12, SHUT, and `'defer'` culled live experts `'as_is'` kept; a deferred
+absorbee stayed pairable, so with (0, 1) and (0, 2) close and 0 faded `'defer'` merged live expert 2
+into 0 where `'as_is'` merged 0 into 1 and paired 0 with nobody else; and the survivor of a pair
+left apart was ranked by its own `use`, without the absorbee's mass the merge gives it — 0 (use 50)
+and 1 (use 1) close, 0 faded: `'as_is'` ranked 1 at 51 and culled 2 and 3, `'defer'` ranked 1 first
+and culled it. On B3's shape, each `'defer'` pass against `'as_is'` run on a copy of the population
+that entered it: at the pass of window 201 one live-area expert was removed that `'as_is'` kept, and
+five of the six passes counted more deferral events than `'as_is'` made faded removals from the same
+populations (55 cull and 15 merge events over the run, against 48 and 10). **Ruling:** a `'defer'`
+pass removes exactly what `'as_is'` would remove from the same population, each the same way, less
+the faded removals, and defers exactly those. `FAB.manage` names each expert by its slot at entry
+and keeps two layouts through the pass, the population's own and the one `'as_is'` would hold
+(`fabric/api.py::_drop`, `_remove`'s renumbering on a list), and every step after a deferral reads
+the second: a deferred absorbee is consumed for the scan as an absorbed one is; the failure cull
+walks the entry list over `'as_is'`'s layout, so a slot the merge refilled holds the expert
+`'as_is'` would judge there (the defect recorded above is inherited, so the two values judge one set
+until its ruling moves both); the recount, the pressure gate, the budget, the ranking and the rescue
+list are `'as_is'`'s; and the survivor of a pair left apart, and whoever later absorbs it, is
+ranked, paired and read by the use, uage and book the merge would have given it
+(`fabric/api.py::_sum_books`, the one book sum `_merge_into` also makes). A deferred expert
+therefore leaves the pass's remaining decisions and is deferred once per pass, so
+`fab.faded_deferred_experts` is the pass's events. `fab.cull_gate` prints `'as_is'`'s population at
+`'defer'` (the pair its verdict was taken on) and its reason says how many deferred experts stand
+beside it. At `'as_is'` the two layouts are one list and no value is overridden, so every read is
+the read it was: 400 seeded scripted passes (merges that chain, failure culls over refilled slots,
+budgets, gates, spares, ties, rescue on a third) leave books, banks, ledger, gate reasons,
+`ManageReport` and row events bit-identical to the build at `'as_is'` and at `faded=None`, bar the
+three per-pass gauges of (iii); over 2,000 such passes `'defer'` removed exactly `'as_is'`'s
+removals less the faded ones in every one whose `comp_glob` is set (1,057 of the 2,000 deferred
+something). **Found while repairing it, and not repaired (a ruling is owed):** where the failure
+cull does not run — `comp_glob` None, no window attributed yet — the utilization cull ranks the
+`eligible` list taken at entry, which a merge's removals have renumbered: it reads slots past the
+population, dead rows `_remove` leaves holding a moved expert's `use`, and "culling" one moves the
+last live expert into it. Driven at the build on scripted passes: four of 400 took `n_live` below
+zero (−8 at `FAB_N0=22`, `FAB_MERGE_DIST=0.9`, `FAB_CULL_FRAC=0.8`). The path is ae70638's
+(2026-09-24), and no loop run reaches it — the first routed `observe` sets `comp_glob`, and a
+population restored from a checkpoint carries it — but a scripted population with an area book and
+no `comp_glob` can, and there `'defer'` ranks the same entry list in `'as_is'`'s layout without the
+dead slots, which is the one place the two values' decisions can part. (ii) *A declared area is not
+a trained one.* `Plan.parent_faded` was read off `Areas.parent_names`, every area the parent's
+record declares. Driven at the build (`DATA_AREAS=eng,py`, `DATA_PHASE_SCHED=eng|eng|eng|eng`,
+`DATA_STREAM_BYTES` 20000, `FAB_MANAGE_EVERY` 25, `FAB_GRACE` 2): the uninterrupted 85-window run
+handed its passes at 26, 51 and 76 the empty set; a parent stopped at window 60 and its continuing
+child continued exactly, but the child's `Plan.parent_faded` was (1,), `data.parent_faded` ['py'],
+its pass at 76 was handed py's id and `fab.faded_areas_last_pass` read 1 against 0 — py, which
+nothing in the lineage ever drew. **Ruling:** `Areas.drawn`, every area the lineage's streams have
+drawn a byte from, in the order first drawn — filled in place by `restore_stream_state` from the
+record, extended by `draw_stream`, recorded by `stream_state` — and `Plan.parent_faded` is read off
+it. A continuing resume draws its parent's schedule, so its set is the uninterrupted run's; an
+epoch- boundary child's lineage drew every area its epochs held. A record written before the list
+carries none, and then every area it declares is assumed drawn and named in `data.drawn_assumed` ([]
+where the record carried the list; ABSENT on a fresh run). (iii) *CONTRACT-Q-FAB-5 asks for the
+count per manage pass,* and the pass's counts lived only on the `ManageReport`, which the root files
+nowhere; the report carried lineage totals. Each of the three counts now has a gauge written on
+every pass handed a set, `fab.culled_faded_area_last_pass`, `fab.merged_faded_area_last_pass` and
+`fab.faded_unknown_last_pass`, as `fab.merged_last_pass` is `fab.merged`'s; the four per-pass gauges
+of step 7 (with `fab.faded_areas_last_pass`) are dropped on a pass handed no set, so an earlier
+pass's numbers never read as this one's. On B3's shape the six passes read (culled, merged, unknown)
+(0, 0, 0), (2, 2, 0), (10, 0, 0), (6, 0, 0), (5, 0, 0), (0, 0, 0), each its own recount. (iv) *The
+reasons had no word for a deferral.* A pass whose every close pair was deferred printed "no pair
+with a past-grace member sat within `FAB_MERGE_DIST`" in both merge gates, and
+`fabric.cull_eligible` printed "0 culled, 0 spared" of an expert that failed and was kept. Each
+reason now names the deferrals where they are armed — this pass's at `'defer'`, and the ledger's
+`fab.merge_faded_deferred` in the run-scope gate — and an `'as_is'` reason reads as it did. (v)
+*`data.area_id_collision` was declared and written nowhere:* no Gate, no counter, and neither the
+refusal nor `data.area_refused`'s reason named it. It is a Gate beside
+`data.area_label_collision`'s, reading 0 against the entries compared; the refusal names it, and
+`data.area_refused`'s reason lists the area-id collision. **Bit-identity:** at the shipped `'as_is'`
+nothing a run trains on moves; B1, B3, B3r, B5, B6 and B6r reproduce their fixtures and list as new,
+beside the build's, the three per-pass gauges on the three legs that reach a manage pass
+(`data.drawn_assumed` and the new Gate are not integer counter lines). **Known answers**
+(`tests/test_faded.py`, CPU, operation only; 52 checks): F1 adds a parent that declared c, eng and
+py and drew eng alone — `parent_faded` (0,), not (0, 3); F2 the refusal's name, the Gate and
+`data.area_refused`'s reason; F4 the per-pass gauges and their drop on a pass handed none; F5
+`'defer'` against `'as_is'` down each path — the utilization cull, the failure cull then the budget,
+a merge then the gate, the merge scan, the survivor's mass, the failure cull's walk over a refilled
+slot — and a seeded sweep of 150 random populations, all exactly `'as_is'` less the faded removals
+(the build matched 74 of the 150), with the deferral clauses in both merge gates and in
+`fabric.cull_eligible`; F6 each pass's gauges are its own recount; F7 every `'defer'` pass of B3's
+shape against `'as_is'` on a copy of the population that entered it (six passes, five deferring; 47
+cull and 10 merge deferrals over the run); F9 the declared-but-undrawn continuation (the record's
+drawn list ['eng'], every child pass handed the uninterrupted run's set, `data.drawn_assumed` [])
+and a record stripped of the list (py assumed, printed, and handed to the child's pass).
 
 ### Q-MEM-16 — which area each stored entry came from, and the store's occupancy by area — **RESOLVED 2026-09-28 (Proposal 05 §8 3.1; register NEW-10): `MEM.write(..., areas=None)` FILLS A NEW PER-ENTRY `area` COLUMN; `MEM.census` RETURNS `by_area`; THE ROOT PRINTS `store.occupancy.<area>` BY NAME. A FROZEN SIGNATURE WIDENED WITH A DEFAULTED KEYWORD. NO LEVER, NO WIRE, AND NO NUMBER A DEFAULT RUN PRODUCES MOVES**
 NEW-10 rules that from SR0 on every training run reports "memory occupancy by area" — the reading

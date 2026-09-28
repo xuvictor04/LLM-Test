@@ -924,7 +924,7 @@ class FABLevers(LeverSet):
 
     faded_cull = Lever("as_is", "What the management pass does with a cull or merge whose removed "
                                 "expert mostly served a FADED area: 'as_is' removes it and counts "
-                                "it; 'defer' keeps it, and it keeps its cull-budget slot.",
+                                "it; 'defer' keeps it and takes every other decision 'as_is' takes.",
                        U.NAME, choices=("as_is", "defer"))
     # CENSUS AMENDMENT, 2026-09-28 (register §8 3.1, NEW-10 and C37; docs/04_CONTRACT.md Q-FAB-18),
     # with NO ANCESTOR KNOB: the old tree culled and merged whatever its ranking named, and never
@@ -940,12 +940,15 @@ class FABLevers(LeverSet):
     #     to the owner first, because it would alter the owner's D3 reservoir quota).
     #   'defer' (an E2 arm, and C37's preset value until FAB.contribution works, §8 3.5): such a cull
     #     or merge is skipped and counted as an event (fab.cull_faded_deferred,
-    #     fab.merge_faded_deferred), with this pass's distinct deferred experts as a gauge. THE
-    #     DEFERRED VICTIM KEEPS ITS SLOT IN THE UTILIZATION CULL'S BUDGET, so the ranking never walks
-    #     on to cull a live-area expert in its place -- a deferral that freed a slot for a
-    #     substitute would be a cull of the NEXT-least-used expert, which is substitution, not
-    #     deferral. The cost is stated, not discovered: with the pool at FAB_SLOTS a deferred expert
-    #     holds a slot a new area could have been born into (NEW-20).
+    #     fab.merge_faded_deferred), with this pass's distinct deferred experts as a gauge, and the
+    #     pass takes EVERY OTHER DECISION 'as_is' TAKES: the rest of it reads the population 'as_is'
+    #     would hold, so a deferred absorbee pairs with nobody else, the pressure gate and the
+    #     utilization budget are sized without the deferred, the deferred victim holds its budget
+    #     slot, and a survivor of a pair left apart is ranked by the mass the merge would have given
+    #     it. A deferral that let the pass walk on to a live-area expert would be substitution, not
+    #     deferral; the first build stopped only the budget's walk, and the review found the other
+    #     three (Q-FAB-18's review). The cost is stated, not discovered: with the pool at FAB_SLOTS a
+    #     deferred expert holds a slot a new area could have been born into (NEW-20).
     #   'contrib' is NOT BUILT: the cull gated on FAB.contribution <= 0 is §8 3.5's, and the value
     #     joins the choices with that build rather than being declared ahead of its producer.
 

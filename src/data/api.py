@@ -19,7 +19,7 @@ implementation agents share; nothing else about the layout is load-bearing.
 RECORD TYPES RETURNED (P4 defines them; they are DATA's objects and other packages receive
 them as arguments, which is not an import and O10 does not refuse it):
   Areas   names, bodies, holdout, holdout_bytes, bytes_present, bytes_taken, cursors, rng_holdout,
-          counters, gates, parent_names
+          counters, gates, parent_names, drawn
   Plan    protocol, schedule, phase_bounds, per_area_draw, exposure, gates, counters, faded,
           parent_faded
   Stream  bytes, labels, splice_starts, area_changes, phase_bounds, area_names, per_area_drawn,
@@ -76,9 +76,16 @@ class Areas:
     which is the one distinction spine/gate.py::Gate exists to preserve.
 
     `parent_names` IS THE AREA LIST THE RESUMED CHECKPOINT RECORDED, in its order, FILLED IN PLACE by
-    restore_stream_state (2026-09-27, Q-DATA-9) -- the one record of which areas the parent trained
-    on, beside `names`, which is this run's. Empty on a fresh run. A list and not a tuple for the
-    reason `cursors` is a dict: the record is frozen and its restore mutates the value, not the field.
+    restore_stream_state (2026-09-27, Q-DATA-9) -- every area the parent DECLARED, beside `names`,
+    which is this run's. Empty on a fresh run. A list and not a tuple for the reason `cursors` is a
+    dict: the record is frozen and its restore mutates the value, not the field.
+
+    `drawn` IS EVERY AREA THIS LINEAGE'S STREAMS HAVE DRAWN A BYTE FROM, in the order first drawn
+    (2026-09-28, Q-FAB-18's review): restore_stream_state fills it in place from the record, and
+    draw_stream appends each area its draw took a byte from and the list does not hold yet;
+    stream_state records it. A declared area is not a trained one -- a run over "eng,py" that
+    schedules eng alone never draws py -- and Plan.parent_faded is read off this list, not
+    parent_names. Empty on a fresh run until its first draw.
     """
     names: tuple
     bodies: dict
@@ -91,6 +98,7 @@ class Areas:
     counters: dict = dataclasses.field(default_factory=dict)
     gates: tuple = ()
     parent_names: list = dataclasses.field(default_factory=list)
+    drawn: list = dataclasses.field(default_factory=list)
 
 
 def _holdout_key(label):
@@ -358,8 +366,8 @@ def open_areas(dat: Config, *, seed: int):
             raise CorpusError(
                 f"labels {by_id[aid][0]!r} and {label!r} both hash to the area id {aid} "
                 f"(spine/derive.py::area_id, crc32 of the label masked to 31 bits), so FAB's area "
-                f"books and MEM's area column would book them as ONE area. Rename one DATA_AREAS "
-                f"entry.")
+                f"books and MEM's area column would book them as ONE area "
+                f"(data.area_id_collision). Rename one DATA_AREAS entry.")
         by_label[label] = entry
         by_key[key] = (label, entry)
         by_id[aid] = (label, entry)
@@ -646,13 +654,24 @@ def open_areas(dat: Config, *, seed: int):
         reason="the label and rng-key collision checks run for BOTH sources, before the source "
                "branch; a collision raises CorpusError and exits, so this row reads zero in every "
                "Areas that exists and its threshold is the number of entries it compared"))
+    # THE AREA-ID REFUSAL'S OWN ROW (2026-09-28, Q-FAB-18's review). The refusal landed with the id
+    # and its name was declared above and nowhere written: no Gate, no counter, and neither the
+    # message nor data.area_refused's reason named it, so the declared mechanism had no row in any
+    # report. Its sibling's shape, for its sibling's reason.
+    gates.append(Gate(
+        "data.area_id_collision", False, 0, n_entries,
+        reason="the area-id collision check (two labels on one spine/derive.py::area_id, the key "
+               "FAB's area books and MEM's area column share) runs for BOTH sources, in the same "
+               "loop as the label and rng-key checks; a collision raises CorpusError and exits, so "
+               "this row reads zero in every Areas that exists and its threshold is the number of "
+               "entries it compared"))
     gates.append(Gate(
         "data.area_refused", False, 0, n_entries,
         reason="every refusal in this function raises CorpusError and exits at startup -- an empty "
-               "DATA_AREAS, a label or rng-key collision, an entry that escapes DATA_DIR, an area "
-               "with no usable bytes, a body under the derived floor, an area whose held-out block "
-               "rounded to zero (a real one, or a synthetic one at DATA_SYNTH_HOLDOUT=1), or "
-               "DATA_N_PROCESSES out of range -- so this row reads zero "
+               "DATA_AREAS, a label, rng-key or area-id collision, an entry that escapes DATA_DIR, "
+               "an area with no usable bytes, a body under the derived floor, an area whose "
+               "held-out block rounded to zero (a real one, or a synthetic one at "
+               "DATA_SYNTH_HOLDOUT=1), or DATA_N_PROCESSES out of range -- so this row reads zero "
                "in every Areas that exists. It is declared so a refusal is a named mechanism and "
                "not an assertion nobody counts"))
 
@@ -882,14 +901,18 @@ class Plan:
     register §8 3.1, NEW-10 and C37; docs/04_CONTRACT.md Q-FAB-18), in the same index space as
     `schedule`. `faded[k]` is every area live in some phase before k and not live in phase k -- at
     derive.phase_schedule(4) over four areas, [(), (0,), (0,), (0, 1)] -- sorted by index, which is
-    Plan order. `parent_faded` is every area this run declares that the resumed checkpoint's record
-    names (Areas.parent_names) and that is live in NO phase of this run's schedule: the areas a
-    child inherits and never trains, faded from its first window -- () on a fresh run and whenever
-    the child schedules every parent area. Both are known at startup because the schedule is, and
-    both are READINGS OF THE SCHEDULE WITHIN ONE EPOCH: an area only a previous epoch's later phases
-    trained is not in phase 0's set when the schedule restarts, and a parent area the child
-    schedules later is not faded before its phase -- Q-FAB-18 records both as what the rule does not
-    see. FAB.manage is handed the union at each pass, as area ids.
+    Plan order. `parent_faded` is every area this run declares that the resumed lineage's streams
+    DREW from (Areas.drawn, as the record carried it) and that is live in NO phase of this run's
+    schedule: the areas a child inherits the training of and never trains, faded from its first
+    window -- () on a fresh run, whenever the child schedules every area the lineage drew, and on a
+    continuing resume, whose schedule is its parent's. An area the parent declared and never drew
+    is not in it (Q-FAB-18's review: it was read off Areas.parent_names, every DECLARED area, so a
+    run over "eng,py" that scheduled eng alone handed its continuing child's passes py as faded
+    where the uninterrupted run handed them nothing). Both are known at startup because the
+    schedule is, and both are READINGS OF THE SCHEDULE WITHIN ONE EPOCH: an area only a previous
+    epoch's later phases trained is not in phase 0's set when the schedule restarts, and a parent
+    area the child schedules later is not faded before its phase -- Q-FAB-18 records both as what
+    the rule does not see. FAB.manage is handed the union at each pass, as area ids.
     """
     protocol: str
     schedule: tuple
@@ -1030,8 +1053,9 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
 
     THE FADED SETS (2026-09-28, register §8 3.1, NEW-10 and C37; docs/04_CONTRACT.md Q-FAB-18).
     Plan.faded[k] is every area live in a phase before k and not live in phase k; Plan.parent_faded
-    is every area the resumed checkpoint recorded (Areas.parent_names, filled by
-    restore_stream_state before this call) that no phase of this schedule makes live. Both are
+    is every area the resumed lineage's streams drew from (Areas.drawn, filled by
+    restore_stream_state before this call; since Q-FAB-18's review, and not Areas.parent_names,
+    every area the parent merely declared) that no phase of this schedule makes live. Both are
     index tuples in Plan order, computed here because the schedule is; the root hands their union to
     FAB.manage at each pass as area ids. Neither moves a byte of the stream.
 
@@ -1049,8 +1073,8 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
                  shipped spelling and a statement rather than silence), data.phase_faded (a
                  READING: per phase, the names of the areas faded in it -- [[], ['eng'], ['eng'],
                  ['eng', 'py']] at the shipped four areas), data.parent_faded (a READING, present
-                 only where a parent record was restored and ABSENT on a fresh run: the recorded
-                 areas no phase of this run makes live),
+                 only where a parent record was restored and ABSENT on a fresh run: the areas the
+                 lineage drew that no phase of this run makes live),
                  Gate data.exposure_max, Gate data.exposure_skew -- EXACT under the shipped
                  DATA_DRAW="planned" and a PREDICTION under "uniform", where the run trains on a
                  random draw from the scheduled split that deviated by up to 47.9% per area over
@@ -1338,12 +1362,16 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
         _faded.append(tuple(sorted(_seen - set(live))))
         _seen |= set(live)
     faded = tuple(_faded)
-    # AND THE PARENT'S: an area this run declares, which the resumed checkpoint's record names
-    # (Areas.parent_names, filled by restore_stream_state one row above this one), and which NO
-    # phase of this schedule makes live -- a pure-add child's parent areas, faded from its first
-    # window. A recorded area this run does not declare cannot reach here: restore_stream_state
-    # refuses it.
-    _parent = {str(n) for n in (getattr(areas, "parent_names", None) or ())}
+    # AND THE LINEAGE'S: an area this run declares, which the resumed lineage's streams DREW from
+    # (Areas.drawn, filled by restore_stream_state one row above this one), and which NO phase of
+    # this schedule makes live -- a pure-add child's parent areas, faded from its first window. A
+    # DECLARED AREA IS NOT A DRAWN ONE (Q-FAB-18's review): this read Areas.parent_names, every area
+    # the record declares, so a parent over "eng,py" that scheduled eng alone left py faded in its
+    # continuing child -- whose schedule is the parent's -- and that child's passes were handed a
+    # set the uninterrupted run's never were. This run's own draws come after this call, and each is
+    # of an area some phase of this schedule makes live, so they could not enter it either way. A
+    # recorded area this run does not declare cannot reach here: restore_stream_state refuses it.
+    _parent = {str(n) for n in (getattr(areas, "drawn", None) or ())}
     parent_faded = tuple(i for i, n in enumerate(names) if n in _parent and i not in _seen)
     # BOTH ARE PRINTED BY NAME, as READINGS. data.phase_faded on every run (phase 0's is always
     # empty, and a stationary or pure-add schedule's are all empty, which is a statement about the
@@ -1351,7 +1379,7 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
     # a fresh run leaves it ABSENT rather than printing an empty list that would read "a parent was
     # checked and nothing it trained was left out".
     counters["data.phase_faded"] = [[names[i] for i in f] for f in faded]
-    if _parent:
+    if getattr(areas, "parent_names", None):
         counters["data.parent_faded"] = [names[i] for i in parent_faded]
 
     return Plan(protocol=protocol, schedule=schedule, phase_bounds=bounds,
@@ -1400,6 +1428,10 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
 
     Stream carries an `epoch` and a `stream_id` so MEM can invalidate or re-base provenance rather
     than silently carrying byte offsets into a stream that no longer exists (ISSUES P1-M83).
+
+    EVERY AREA A DRAW TAKES A BYTE FROM IS APPENDED TO Areas.drawn, in place, where the list does not
+    hold it yet (2026-09-28, Q-FAB-18's review): the lineage's record of what it drew, which
+    stream_state carries and a child's Plan.parent_faded is read off.
 
     RETURNS: Stream.
 
@@ -1628,6 +1660,15 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
             if law == "planned":
                 budget[idx] -= len(chunk)
 
+    # THE LINEAGE'S DRAWN AREAS, IN PLACE (2026-09-28, Q-FAB-18's review): every area this draw took
+    # a byte from, appended in Plan order where Areas.drawn does not hold it yet. stream_state
+    # records the list, and a child's Plan.parent_faded is read off it -- the areas the lineage
+    # actually drew, which a declared area this schedule never makes live is not. The replay arm
+    # above draws nothing and appends nothing: its bytes are the first draw's, already here.
+    for label in names:
+        if per_area[label] > 0 and label not in areas.drawn:
+            areas.drawn.append(label)
+
     # ---- THE DID IT FIRE SURFACE THIS FUNCTION DECLARES ------------------------------------------
     # Built here, at the end, from tallies taken at the decision points above -- so a name whose
     # branch never ran reads as a MEASURED 0 and a name whose mechanism CANNOT run on this
@@ -1798,7 +1839,8 @@ _REPLAY = {}
 def stream_state(dat: Config, areas):
     """The mutable state that must survive into a checkpoint: the per-area read cursors, the epoch
     index of the last draw, the holdout block offsets and sizes (and, since 2026-09-27, a digest of
-    each block's bytes: Q-DATA-9's review), and the counter vector.
+    each block's bytes: Q-DATA-9's review), the areas the lineage has drawn from (Areas.drawn, since
+    2026-09-28: Q-FAB-18's review), and the counter vector.
 
     The cursors are LOAD-BEARING: without them a resume re-reads the head of every area under
     seg_contig and silently trains a second time on material the parent already used. The counter
@@ -1848,6 +1890,11 @@ def stream_state(dat: Config, areas):
                     for k in areas.names},
         "bytes_present": {k: int(v) for k, v in areas.bytes_present.items()},
         "bytes_taken": {k: int(v) for k, v in areas.bytes_taken.items()},
+        # THE AREAS THIS LINEAGE HAS DRAWN FROM, in the order first drawn (2026-09-28, Q-FAB-18's
+        # review): Areas.drawn, the record's list plus this run's draws. A child reads its
+        # Plan.parent_faded off this, and not off the `holdout` keys above, which are every area the
+        # parent DECLARED -- drawn or not.
+        "drawn": [str(n) for n in areas.drawn],
         # THE COUNTER VECTOR, because a DID-IT-FIRE count that resets on resume counts the wrong
         # thing -- it counts "since the last checkpoint" while being read as "this run".
         "counters": dict(areas.counters),
@@ -1934,16 +1981,25 @@ def restore_stream_state(dat: Config, areas, state):
     refusal above, unchanged.
 
     `Areas.parent_names` IS FILLED HERE: the record's area names, in its order -- the areas the
-    parent trained on, whatever this run's list says (Q-DATA-9).
+    parent declared, whatever this run's list says (Q-DATA-9). It said "the areas the parent trained
+    on" until 2026-09-28 (Q-FAB-18's review), and a declared area need not have been drawn: a run
+    over "eng,py" that schedules eng alone records py and never trains it.
+
+    `Areas.drawn` IS FILLED HERE TOO (2026-09-28, Q-FAB-18's review): the record's list of the areas
+    the lineage's streams drew from, which Plan.parent_faded is read off. A record written before
+    stream_state carried it has none, and then every area it declares is ASSUMED drawn and named
+    in data.drawn_assumed -- over-counting only a declared area no phase ever drew, which a record
+    cannot tell apart.
 
     THE COUNTERS THE RECORD DOES NOT OVERWRITE are this resume's own statements and this run's own
     readings: the restore and refusal tallies, data.area_added and its names, the process twin
-    data.state_written_here, the admission pair, and data.holdout_overlap -- a reading of THIS
-    run's blocks, which open_areas computed a moment ago. Copying the parent's over it would read
-    "no block to measure" beside an admitted block, and it dropped a newly added area's reading from
-    the add-an-area run: driven at ae70638, the tree before this ruling, a real-source child over
-    eng,py resumed from a parent over eng read {'eng': 0.0741} where its own was {'eng': 0.0741,
-    'py': 0.1142} (DATA_CORPUS_CAP=200000).
+    data.state_written_here, the admission pair, data.drawn_assumed (this resume's assumption, not
+    the parent's), and data.holdout_overlap -- a reading of THIS run's blocks, which open_areas
+    computed a moment ago. Copying the parent's over it would read "no block to measure" beside an
+    admitted block, and it dropped a newly added area's reading from the add-an-area run: driven at
+    ae70638, the tree before this ruling, a real-source child over eng,py resumed from a parent over
+    eng read {'eng': 0.0741} where its own was {'eng': 0.0741, 'py': 0.1142}
+    (DATA_CORPUS_CAP=200000).
 
     LEVERS READ: source (the admission and the synthetic refusals are the synthetic source's,
                  Q-DATA-9), synth_holdout (arms the admission, and is named in the reverse
@@ -1962,7 +2018,10 @@ def restore_stream_state(dat: Config, areas, state):
                  admission can fire on; ABSENT on a fresh run and on every other arm, which is
                  UNREACHABLE and not "armed, none admitted": at 0 no synthetic block exists to
                  admit, and a real one is never admitted -- Q-DATA-9's review, where they read 0 on
-                 every resume)
+                 every resume), data.drawn_assumed (a READING, 2026-09-28, Q-FAB-18's review: the
+                 areas this resume ASSUMED the lineage drew because the record carries no list of
+                 them -- every area it declares -- and [] on a resume whose record carries one;
+                 ABSENT on a fresh run)
     """
     dat = dat.owned_by("DATA")
     if not state:
@@ -1979,9 +2038,20 @@ def restore_stream_state(dat: Config, areas, state):
     # synthetic refusals below compare it with this run's and print both (Q-DATA-9's review).
     lengths = dict(state.get("bytes_taken") or {})
     live = set(areas.names)
-    # THE PARENT'S AREA LIST, IN ITS ORDER, ON THE RECORD (Q-DATA-9): the one place a later
-    # consumer can ask which areas the parent trained on.
+    # THE PARENT'S AREA LIST, IN ITS ORDER, ON THE RECORD (Q-DATA-9): every area the parent
+    # declared.
     areas.parent_names[:] = list(recorded)
+    # AND THE AREAS THE LINEAGE DREW FROM (2026-09-28, Q-FAB-18's review), which a declared area
+    # need not be: the list Plan.parent_faded is read off. A record written before it carries none,
+    # and then every area it declared is ASSUMED drawn -- the reading the faded sets took of every
+    # record until this date -- and data.drawn_assumed names them; [] where the record carried its
+    # list. This run's draws are appended by draw_stream.
+    if state.get("drawn") is not None:
+        areas.drawn[:] = [str(n) for n in state["drawn"]]
+        areas.counters["data.drawn_assumed"] = []
+    else:
+        areas.drawn[:] = list(recorded)
+        areas.counters["data.drawn_assumed"] = list(recorded)
     # THE ONE ARM THE ADMISSION CAN FIRE ON: the synthetic source at DATA_SYNTH_HOLDOUT=1. At 0 every
     # live synthetic block has size 0, so there is nothing to admit, and a real block is never
     # admitted (a change of source, below).
@@ -2175,7 +2245,8 @@ def restore_stream_state(dat: Config, areas, state):
             if k not in ("data.state_restored", "data.state_refused", "data.area_added",
                          "data.area_vanished", "data.areas_added_names",
                          "data.state_written_here", "data.holdout_admitted",
-                         "data.holdout_admitted_names", "data.holdout_overlap"):
+                         "data.holdout_admitted_names", "data.holdout_overlap",
+                         "data.drawn_assumed"):
                 areas.counters[k] = v
     areas.counters["data.state_restored"] = areas.counters.get("data.state_restored", 0) + 1
     return areas
