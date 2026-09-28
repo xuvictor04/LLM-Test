@@ -1,0 +1,12 @@
+seed 0: stream 3780000 bytes, areas ('eng', 'py', 'num', 'c'), phase bounds ((0, 945000), (945000, 1890000), (1890000, 2835000), (2835000, 3780000)), schedule ((0, 1), (1, 2), (1, 2), (2, 3)), per-area drawn {'eng': 472500, 'py': 1417500, 'num': 1417500, 'c': 472500}  (7.3s)
+  shift 0: 19853 windows vs k0 19853 flushes; equal per-window bytes 10020/19853; first mismatch 0
+  shift 1: 19853 windows vs k0 19853 flushes; equal per-window bytes 19853/19853; first mismatch None
+  ids 2541294, bytes/token 1.4874; total 8.6s
+seed 1: stream 3780000 bytes, areas ('eng', 'py', 'num', 'c'), phase bounds ((0, 945000), (945000, 1890000), (1890000, 2835000), (2835000, 3780000)), schedule ((0, 1), (1, 2), (1, 2), (2, 3)), per-area drawn {'eng': 472500, 'py': 1417500, 'num': 1417500, 'c': 472500}  (7.3s)
+  shift 0: 19344 windows vs k0 19344 flushes; equal per-window bytes 9826/19344; first mismatch 0
+  shift 1: 19344 windows vs k0 19344 flushes; equal per-window bytes 19344/19344; first mismatch None
+  ids 2476128, bytes/token 1.5266; total 8.5s
+seed 2: stream 3780000 bytes, areas ('eng', 'py', 'num', 'c'), phase bounds ((0, 945000), (945000, 1890000), (1890000, 2835000), (2835000, 3780000)), schedule ((0, 1), (1, 2), (1, 2), (2, 3)), per-area drawn {'eng': 472500, 'py': 1417500, 'num': 1417500, 'c': 472500}  (7.4s)
+  shift 0: 19629 windows vs k0 19629 flushes; equal per-window bytes 9813/19629; first mismatch 1
+  shift 1: 19629 windows vs k0 19629 flushes; equal per-window bytes 19629/19629; first mismatch None
+  ids 2512605, bytes/token 1.5044; total 8.7s

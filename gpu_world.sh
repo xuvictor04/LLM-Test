@@ -136,8 +136,9 @@
 # tested on a machine without a card, and its numbers mean nothing about the GPU.
 #
 # EXP=retok RUNS 03b S0b's SHIP-RULE MEASUREMENT INSTEAD (2026-09-26): which TOK_RETOK_EVERY ships,
-# now that the mid-epoch act performs a retok. Arms k0 (0, the control: no act), k3000 (the shipped
-# value), k1000, and k0_nuis (0 again, with SIG_WARMUP=801 -- a small real perturbation neither the act
+# now that the mid-epoch act performs a retok. Arms k0 (0, the control: no act), k3000 (the interim
+# value the 2026-09-27 fleet replaced), k1000 (the shipped value since that fleet's DECISION), and
+# k0_nuis (0 again, with SIG_WARMUP=801 -- a small real perturbation neither the act
 # nor TOK reads, so |k0 - k0_nuis| per seed is the paired noise floor). Metric: PREQUENTIAL bits per
 # byte, sum(per-flush loss x LM_CTX) / ln 2 / bytes -- every window at RUN_EPOCHS=1 is scored before
 # its update, and bits per byte does not move with the segmentation, which is exactly what the arms
@@ -150,16 +151,24 @@
 # the t taken at 1 - a/N (Bonferroni over the phases) with Holm across the cadence arms (the arm with
 # the strongest evidence of harm at a = 0.05/2, the other at 0.05); c PASSES if every phase's one-sided
 # 95% UPPER bound is at most EPS; otherwise, and always at n < 2 seeds, it is UNRESOLVED. THE CHOICE:
-# 3000 is the incumbent (RETOK_INCUMBENT, the interim default). 1000 replaces it only if 1000 does not
-# FAIL and (3000 FAILs, or the one-sided 95% upper bound of the whole-run paired 1000 - 3000 is below
-# 0); otherwise 3000 stays, UNRESOLVED readings included. 0 is never shipped by the rule: if every
-# cadence FAILs, the DECISION is ESCALATE (the act stays ON at 3000 until the owner answers; the
-# remedy arms run next). M = max over seeds |k0 - k0_nuis| and the per-arm means are printed beside the
-# rule and decide nothing. RETOK_INCUMBENT exists for operation checks at a shorter shape (a CPU fleet
-# whose cadences are 40 and 20); the fleet's rule is O14's, at 3000.
-# RETOK_ARMS names the act cadences (arm k<c> each; default "3000 1000", today's arms in today's
-# order), and COOLDOWN_ARM=<v> adds k<fastest>_cd<v> at FAB_COOLDOWN=<v>, reported beside the rule and
-# never a ship candidate. CALIBRATION RUNS 600 WINDOWS HERE (CAL_WINDOWS; 150 at EXP=world), past FAB's
+# the incumbent is RETOK_INCUMBENT, the shipped default -- 1000 since the 2026-09-27 fleet's DECISION,
+# the interim 3000 before it. A challenger replaces it only if the challenger does not FAIL and (the
+# incumbent FAILs, or the one-sided 95% upper bound of the whole-run paired challenger - incumbent is
+# below 0); otherwise the incumbent stays, UNRESOLVED readings included. 0 is never shipped by the rule:
+# if every cadence FAILs, the DECISION is ESCALATE (the act stays ON at the incumbent until the owner
+# answers; the remedy arms run next). M = max over seeds |k0 - k0_nuis| and the per-arm means are
+# printed beside the rule and decide nothing. RETOK_INCUMBENT is read when the analysis runs, like EPS:
+# --analyze of the 2026-09-27 archive reads its DECISION again at RETOK_INCUMBENT=3000, and an operation
+# check at a shorter shape (a CPU fleet whose cadences are 40 and 20) names its own.
+# RETOK_ARMS names the act cadences (arm k<c> each; default "3000 1000", the 2026-09-27 fleet's arms in
+# its order), and COOLDOWN_ARM=<v> adds k<fastest>_cd<v> at FAB_COOLDOWN=<v>, beside the rule and never a
+# ship candidate: C13's reading of whether FAB's cooldown costs. It is read against its own cadence's
+# arm, k<fastest>_cd<v> - k<fastest> paired over the seeds, per phase by the eps rule and over the whole
+# run by the one-sided 95% upper bound (below 0: the shorter cooldown is significantly better), and
+# enters no Holm with the cadences. FAB_COOLDOWN is the blackout after each act AND the spacing between
+# growth firings and the new_frac budget's window, so the arm prices the cooldown as a whole, not the
+# blackout alone (a k0 cooldown control, not built, would separate them). CALIBRATION RUNS 600 WINDOWS HERE
+# (CAL_WINDOWS; 150 at EXP=world), past FAB's
 # first manage pass at window 501: the 2026-09-24 fleet ran about 15x slower than its 150-window
 # calibration said, because the per-pass cost starts after it (LOW-GPU-WORLD-ETA). Beside the rule,
 # never in it, the analysis reports RATES (windows/s and bytes/s per arm, the act's per-byte cost
@@ -188,6 +197,8 @@
 #     EXP=retok bash gpu_world.sh                         # 20,000 windows, seeds 0-2, auto-filled
 #     EXP=retok RETOK_ARMS="3000 1000 500" bash gpu_world.sh   # another cadence set
 #     EXP=retok COOLDOWN_ARM=100 bash gpu_world.sh        # + k1000_cd100 (the blackout alarm's arm)
+#     EXP=retok RETOK_ARMS=1000 COOLDOWN_ARM=100 SEEDS="0 1 2 3 4" KEEP_CKPT=0 bash gpu_world.sh
+#                                                         # C13's cooldown fleet at the shipped cadence
 #     EXP=retok KEEP_CKPT=0 bash gpu_world.sh             # no checkpoints: the spike test loses its control
 #     EXP=retok bash gpu_world.sh --analyze
 #     EXP=retok EPS=0.02 bash gpu_world.sh --analyze      # the same runs read against another eps
@@ -196,8 +207,9 @@
 # §8 6.5). The 2026-09-24 fleet read phase 1 of a 20 MB stream and never saw an area arrive or fade.
 # This shape reads ONE WHOLE EPOCH of a WINDOWS x 189-byte stream (EPOCH_BYTES), as EXP=retok does, with
 # the window cap out of reach and "RAN OUT OF STREAM" replaced by a window-cap flag, so every arm
-# crosses all four phases. It pins TOK_RETOK_EVERY (PIN_RETOK, 3000; S0b-ship: every dependent
-# experiment pins and labels it) and DATA_DRAW=planned (note WORLD 3). Its pre-registered rule reads
+# crosses all four phases. It pins TOK_RETOK_EVERY (PIN_RETOK, 1000, the shipped cadence since the
+# 2026-09-27 retok fleet; S0b-ship: every dependent experiment pins and labels it) and
+# DATA_DRAW=planned (note WORLD 3). Its pre-registered rule reads
 # SR0's retention probe with DATA_SYNTH_HOLDOUT ON, which this tree does not declare, so it prints its
 # sizing and the pre-registration and exits 2 having written nothing, until GO_WORLD_EPOCH=1 (SR0's
 # build adds those settings to its pins and lifts the guard; before that, only an operation check).
@@ -270,13 +282,13 @@ RETOK_ARMS=${RETOK_ARMS:-"3000 1000"}      # EXP=retok: the act cadences, one ar
 COOLDOWN_ARM=${COOLDOWN_ARM:-}             # EXP=retok: FAB_COOLDOWN of an extra arm at the fastest cadence
 KEEP_CKPT=${KEEP_CKPT:-$([[ "$EXP" == retok ]] && echo 1 || echo 0)}
 KEEP_POLL=${KEEP_POLL:-1}                  # seconds between the kept-checkpoint watcher's looks
-PIN_RETOK=${PIN_RETOK:-3000}               # EXP=world_epoch: the TOK_RETOK_EVERY every run pins
+PIN_RETOK=${PIN_RETOK:-1000}               # EXP=world_epoch: the TOK_RETOK_EVERY every run pins (the shipped one)
 GO_WORLD_EPOCH=${GO_WORLD_EPOCH:-0}
 # THE eps RULE'S TWO READING-TIME SETTINGS (EXP=retok's analysis; O2, O14). They are read when the
 # analysis runs, not recorded at launch, so --analyze can read the same runs against another eps; the
 # analysis prints both.
 EPS=${EPS:-0.05}                           # eps, bits/byte: a cadence FAILs past it, PASSes within it
-RETOK_INCUMBENT=${RETOK_INCUMBENT:-3000}   # the incumbent cadence (O14's interim default)
+RETOK_INCUMBENT=${RETOK_INCUMBENT:-1000}   # the incumbent cadence: the shipped default (O14; 3000 until 2026-09-27)
 [[ "$EPS" =~ ^([0-9]+\.?[0-9]*|\.[0-9]+)$ ]] && awk -v e="$EPS" 'BEGIN { exit !(e > 0) }' \
   || { echo "!! EPS='$EPS' is not a positive number of bits/byte (the eps rule's budget). Nothing was started."; exit 2; }
 [[ "$RETOK_INCUMBENT" =~ ^[1-9][0-9]*$ ]] \
@@ -912,7 +924,8 @@ def better_than(diffs, alpha=0.05):
 def choose(cadences, verdicts, better, inc):
     """O14's choice. cadences: every cadence arm of the fleet (k<c>); verdicts: eps_rule's reading of the
     ones that acted; better: better_than's reading of the acted challengers against the incumbent arm
-    `inc` (k3000). Returns (kind, arm, why), kind one of 'undecided' (no cadence acted), 'escalate' (every
+    `inc` (k1000 since the 2026-09-27 fleet's DECISION, k3000 before it). Returns (kind, arm, why), kind
+    one of 'undecided' (no cadence acted), 'escalate' (every
     cadence FAILs), 'replace' (arm replaces the incumbent) or 'stays' (the incumbent stays). A challenger
     replaces the incumbent only if it does not FAIL and (the incumbent FAILs, or it is significantly
     better); among several that qualify, the lowest upper bound against the incumbent. 0 is never an
@@ -1094,6 +1107,31 @@ def retok(ctx_arg, archive, eps, inc_cadence):
           for c in R if c != INC} if INC in R else {}
     B = better_than({c: d for c, d in WD.items() if d})
     kind, pick, why = choose(ACT, R, B, INC)
+    # C13's COOLDOWN ARM, READ AGAINST ITS OWN CADENCE'S ARM (2026-09-27: the retok fleet's blackout alarm
+    # ordered it, and a mean beside the rule decides nothing). d = k<c>_cd<v> - k<c>, paired over the seeds
+    # with both runs, on the rule's endpoint: per phase by the eps rule (does the shorter cooldown harm?),
+    # and over the whole run by O2's "significantly better", the one-sided 95% upper bound below 0 (the
+    # shorter cooldown learns better, so the longer one costs). FAB_COOLDOWN also spaces growth firings
+    # and sets the new_frac budget's window, so this prices the cooldown, not the blackout alone: on CPU
+    # k1000_cd100 left k1000 at a growth birth the budget declined, 200-500 windows before the only act.
+    # Each arm is read alone -- beside the rule, in no Holm with the cadences, never a ship candidate --
+    # and not at all when its cadence never acted.
+    CDR = {}
+    for arm in CD:
+        par_ = arm.split("_cd")[0]
+        if par_ not in ACTED:
+            CDR[arm] = (par_, None, None)
+            continue
+        per = [[] for _ in range(rnph)]
+        for s in allseeds_:
+            ea, ep = endpoint((arm, s)), endpoint((par_, s))
+            if ea is None or ep is None:
+                continue
+            for p in range(rnph):
+                if ea[p] is not None and ep[p] is not None:
+                    per[p].append(ea[p] - ep[p])
+        whole = [wr(arm, s) - wr(par_, s) for s in allseeds_ if wr(arm, s) is not None and wr(par_, s) is not None]
+        CDR[arm] = (par_, eps_rule({arm: per}, eps)[arm], better_than({arm: whole})[arm] if whole else None)
     ns = sorted({max([len(xs) for xs in rule_in[a]] or [0]) for a in R})
     ntxt = (f"{ns[0]}" if len(ns) == 1 else f"{ns[0]}-{ns[-1]}") if ns else "0"
 
@@ -1115,8 +1153,8 @@ def retok(ctx_arg, archive, eps, inc_cadence):
                    "absent for " + ", ".join(no_ph[:6]) + (f" and {len(no_ph) - 6} more" if len(no_ph) > 6 else ""))
     else:
         ph_head = f"a single phase ({nph_src} gives 1)"
-    print(f"=== THE ε RULE (Proposal 05 O14, O2): ε = {eps:g} bits/byte; incumbent {INC[1:]} (the interim "
-          f"default); endpoint prequential bits/byte per phase: {ph_head} ===")
+    print(f"=== THE ε RULE (Proposal 05 O14, O2): ε = {eps:g} bits/byte; incumbent {INC[1:]} (RETOK_INCUMBENT); "
+          f"endpoint prequential bits/byte per phase: {ph_head} ===")
     print(f"  d = arm - k0 per phase, paired over seeds: mean [lower bound at t(1 - a/{rnph}) with Holm's a across "
           f"the cadences, one-sided 95% upper bound]; FAIL if a lower bound > ε, PASS if every upper bound <= "
           f"ε, else UNRESOLVED (always at n < 2)")
@@ -1139,6 +1177,19 @@ def retok(ctx_arg, archive, eps, inc_cadence):
         line = (f"  {c} - {INC} whole run: mean {m:+.4f}, one-sided {100 * (1 - level):.3g}% upper "
                 + (f"{up:+.4f}" if up is not None else "- (n < 2)") + f" (n={n}): "
                 + ("below 0, significantly better" if b else "not below 0"))
+        print(line)
+        rule_rows.append(line)
+    for arm, (par_, rc, bc) in sorted(CDR.items()):
+        if rc is None:
+            line = f"  {arm} - {par_} (C13's cooldown arm, beside the rule): {par_} never acted, so nothing is read"
+        else:
+            n_arm = max([n for n, _, _, _ in rc["phases"]] or [0])
+            body = " ".join(cell(p, row, n_arm) for p, row in enumerate(rc["phases"]))
+            line = (f"  {arm} - {par_} (C13's cooldown arm, beside the rule, never a ship candidate) n={n_arm}: {body} "
+                    f"-> {rc['verdict']}; whole run " + (
+                        "-" if bc is None else
+                        f"mean {bc[1]:+.4f}, one-sided 95% upper " + ("- (n < 2)" if bc[2] is None else f"{bc[2]:+.4f}")
+                        + (": below 0, significantly better (the longer cooldown costs)" if bc[3] else ": not below 0")))
         print(line)
         rule_rows.append(line)
     if fb_off:
@@ -1479,7 +1530,8 @@ def retok(ctx_arg, archive, eps, inc_cadence):
             s_ = bwb if bwb is not None else ubb
             if s_ is not None and s_ > 0.20:
                 fastest = min(ACT, key=lambda x: int(x[1:]))
-                follow = (f"the cooldown arm {' '.join(CD)} is in this fleet: read its rows" if CD else
+                follow = (f"the cooldown arm {' '.join(CD)} is in this fleet: read it against {fastest} beside the "
+                          f"rule" if CD else
                           f"re-run with COOLDOWN_ARM=100 (adds {fastest}_cd100, FAB_COOLDOWN=100 at the fastest "
                           f"cadence)")
                 alarms.append(f"  BLACKOUT ALARM (C13): {arm} blacks out {100 * s_:.1f}% of its windows before the "

@@ -4379,8 +4379,9 @@ the archive's 2.189 b/B case had 22 of 23 retoks adding zero tokens. `tok.retok_
 `tok.retok_satisfied_by_roll` are gone: nothing is deferred. **The measurement below is superseded by
 the ship-rule measurement 03b §13 S0b names** (prequential bits/byte, `TOK_RETOK_EVERY` {0, 3000, 1000},
 3 paired seeds, non-inferiority against a nuisance-seed control; that rule is now O14's choice read by
-the ε rule per phase, 2026-09-27, below); until it runs, `TOK_RETOK_EVERY`
-keeps its shipped 3000 and runs past window 3000 change. Driven: `tests/test_continuation.py` S4.
+the ε rule per phase, 2026-09-27, below); it ran on 2026-09-27, and `TOK_RETOK_EVERY` has shipped 1000
+since (3000 until then; the last note below), so runs past window 1000 change. Driven:
+`tests/test_continuation.py` S4.
 
 **2026-09-27 (register PENDING-GPU-RETOK-FLEET, note retok fleet (1); Proposal 05 §8 1.5): THE
 SHIP-RULE FLEET KEEPS ITS CHECKPOINTS, AND A PERIODIC SAVE CHANGES NO NUMBER.** `EXP=retok bash
@@ -4504,7 +4505,8 @@ incumbent that never acted is not read, so it stays. 0 is never shipped by the r
 FAILs the DECISION is ESCALATE (the act stays ON at 3000 until the owner answers; the remedy arms run
 next, register O14). M and the per-arm means are printed as "reported, decides nothing (O14)", and the
 run-to-run line stays. The block carries each cadence's per-phase means and bounds, its verdict, ε, n,
-and the choice with its reason. `RETOK_INCUMBENT` (default 3000) names the incumbent for operation checks
+and the choice with its reason. `RETOK_INCUMBENT` (default 3000; 1000 since the fleet's DECISION, the last
+note below) names the incumbent for operation checks
 at a shorter shape; `EPS` and `RETOK_INCUMBENT` are the script's own knobs, clear of every package
 prefix. **The blackout split (O14, "Holds meanwhile").** The 2026-09-24 archive's pool reached
 `FAB_SLOTS` in 20 of 21 runs (median window 6,501), and past that growth is held by the ceiling whatever
@@ -4631,6 +4633,59 @@ at window 101, and k0_nuis peaked there at 2093, inside the band (2058 and up). 
 Each row reads one drop, and the pooled line reads a median of 309 (299-363, 4 drops). Both dips
 together stay within each run's merged + culled (k0: 363 + 259 = 622 of 710), so the bound held. With
 the band dropped the same archive reads 8 drops, median 301 (166-391).
+**2026-09-27 (Proposal 05 O14, §8 2.1; `results/gpu_retok_2026-09-27/RESULTS.md`): THE RETOK FLEET READ,
+AND `TOK_RETOK_EVERY` SHIPS 1000, PROVISIONAL UNTIL E2's HELD-OUT RE-READ.** The owner ran `EXP=retok bash
+tools/gpu_launch.sh --go` at 319f313 on one H200 (PAR 12, MPS on): k0, k3000, k1000 and k0_nuis at seeds
+0-2 and k0_rerun, one whole 3.78 MB epoch each, all 13 runs rc=0. By the rule above, per phase, k1000
+PASSes against k0 (its worst upper bound +0.0426, phase 4) and k3000 is UNRESOLVED (+0.0579, phase 3), and
+the whole-run 1000 − 3000 reads −0.0111 with its one-sided 95% upper bound −0.0035: **1000 replaces
+3000.** M = 0.0182 is reported and decides nothing, and k0_rerun is bit-exact. Every number in the block
+was recomputed from the archive's per-flush losses and bytes and matched (two analysts, and the record's
+own scripts). **The choice reads the whole run,** as the rule above has said since 1bd51c5, before the
+fleet ran; the register's O14, whose text had said only that harm and choice are read "on the worst
+phase", now says so too. Read on every phase, 3000 would have stayed (phases 2 and 4 of 1000 − 3000 have
+upper bounds +0.0072 and +0.0414); read on the phase worst against k0, or on each run's worst-phase harm,
+1000 ships as it does here. Read per area, which the fleet did not pre-register, num in phase 4 is +0.103
+at 1000 (UNRESOLVED at 3 seeds, Bonferroni over the 8 area×phase cells), the risk E2's re-read is for.
+**The default moves:** `TOK.retok_every` is 1000 (`src/tok/levers.py`; its help says it is provisional
+until E2's held-out re-read), and `gpu_world.sh`'s `RETOK_INCUMBENT` and `PIN_RETOK` are 1000. Every fleet
+arm sets `TOK_RETOK_EVERY` itself, so no arm's run changes, and the 80-window baseline fixture reproduces
+(`tests/test_baseline.py`; no act can fire before window 1001). `RETOK_INCUMBENT` is read when the
+analysis runs, so `--analyze` of the 2026-09-27 archive reproduces its ANALYSIS.txt at
+`RETOK_INCUMBENT=3000` (every line from RUNS to KEPT but the ε rule header's wording, and the block but
+its KEPT lines, the archive holding no checkpoints; checked on a copy) and reads "stays 1000" at the
+default, and `tests/test_gpu_world.py` names `RETOK_INCUMBENT=3000` on F1-F17's fleets, which are shaped
+like that fleet. **C13's cooldown arm is now read, not only reported.** The fleet's alarm (k1000 blacks
+out 37.9% of its windows before the pool fills) orders it, and a mean beside the rule decided nothing:
+`k<c>_cd<v> − k<c>` is paired over the seeds and read per phase by the ε rule and over the whole run by
+the one-sided 95% upper bound (below 0: the shorter cooldown is significantly better). It sits beside the
+rule, in no Holm with the cadences, never a ship candidate, and is not read when its cadence never acted.
+It prices `FAB_COOLDOWN` as a whole, not the blackout alone: the lever is also the spacing between growth
+firings and the window of the new_frac birth budget (in the fleet the spacing refused 8-26 regression asks
+per k1000 run, beside the 35-46 its blackout suppressed, and 18-62 per k0 run), so separating the blackout
+needs a k0 cooldown control, which is not built. `FAB_COOLDOWN` stays 400 whatever it reads (C13, the CAP
+runaway precedent); a cooldown arm significantly better that does not FAIL is recorded as a measured cost
+of the cooldown. **Driven:** `tests/test_gpu_world.py` F25, the next fleet's shape at the default
+incumbent: 1000 stays while it does not FAIL and is ESCALATE, the act ON at 1000, when it does; the
+cooldown arm's known bounds at 5 seeds, PASS and not below 0, then below 0; and a stand-in launch of
+`EXP=retok RETOK_ARMS=1000 COOLDOWN_ARM=100 SEEDS="0 1 2 3 4" KEEP_CKPT=0` that runs the 21 runs it names,
+k1000_cd100 at `TOK_RETOK_EVERY=1000 FAB_COOLDOWN=100`, with no `CKPT_` setting. F9 holds the pin at 1000.
+**The next fleet, pre-registered here** (`notes/OWNER_BRIEF.md` test 3): `EXP=retok RETOK_ARMS=1000
+COOLDOWN_ARM=100 SEEDS="0 1 2 3 4" KEEP_CKPT=0 bash tools/gpu_launch.sh --go`, k0, k1000, k0_nuis and
+k1000_cd100 at seeds 0-4 and k0_rerun, 21 runs. Five seeds are also its cap (O2: an UNRESOLVED reading is
+then reported as unresolved), and at PAR 12 they take the same two waves as three would. It reads k1000
+against k0 by the rule above at the default incumbent (1000 stays unless it FAILs, which reads ESCALATE
+with the remedy arms next, O14) and k1000_cd100 against k1000 as above. No arm reads the lever's default,
+so seeds 0-2 of k0, k1000 and k0_nuis repeat the 2026-09-27 runs, and on the same card and torch they
+should read its bits/byte to the last digit. **On CPU (operation only),** from a scratch clone of this
+tree, the launcher with the command's knobs and `DEVICE=cpu FETCH=0` read 9 PASS, 2 WARN (no fetch; the
+clone's uncommitted edits), 0 FAIL, and `--go` at `WINDOWS=1050`, where the 1000 cadence acts once (window
+1001), calibrated PAR 2 and ran the 21 runs, all rc=0: every k1000 and k1000_cd100 run acted at window
+1001, each k1000_cd100 gate read `cooldown=100 windows`, and k0_rerun was bit-exact. The block (45 lines)
+read k1000 PASS against k0 at n = 5, "stays 1000", and the cooldown row PASS with the whole run at
+−0.0098, upper bound +0.0101, not below 0. At seeds 1-4 k1000_cd100 left k1000 at windows 505-783, before
+the act: a growth birth the new_frac budget declined over 400 windows and granted over 100, the confound
+above.
 
 **THE QUESTION AS IT STOOD.**
 
@@ -5768,13 +5823,13 @@ where they cannot fire, and a continuing resume's double count is recorded.** (i
 `spine/loop.py::run` seeded `loop.acts`, `loop.acts_noop`, `loop.act_seconds` and
 `loop.act_remap_seconds` on `TOK_RETOK_EVERY` > 0 alone. `TOK.on_window` raises a retok Due only at
 `TOK_MODE=online` (`retok = bool(online and _due(...))`) and seeds `tok.due_retok` on that arm alone,
-so at `TOK_MODE=fixed` or `bytes`, with the shipped `TOK_RETOK_EVERY=3000`, all four read
+so at `TOK_MODE=fixed` or `bytes`, with the then-shipped `TOK_RETOK_EVERY=3000`, all four read
 PRESENT-and-0 ("armed, did not fire") beside `tok.due_retok` ABSENT. Driven: 60 windows at
 `tests/test_continuation.py`'s base, on both modes. They are now seeded on TOK's own predicate,
 `TOK_MODE=online` and `TOK_RETOK_EVERY` > 0, which is the mode test the mint wait already made. The
-shipped arm is online at 3000, so a default run seeds the same keys, and none of them is in the
-baseline fixture. (ii) *The blackout count.* `fab.blackout_windows` was seeded on every check at
-`FAB_GROW` on and `FAB_COOLDOWN` > 0. A run that no stamp reached (the retok fleet's k0 control, and
+shipped arm is online at 3000 (1000 since the retok fleet), so a default run seeds the same keys, and
+none of them is in the baseline fixture. (ii) *The blackout count.* `fab.blackout_windows` was seeded
+on every check at `FAB_GROW` on and `FAB_COOLDOWN` > 0. A run that no stamp reached (the retok fleet's k0 control, and
 `TOK_MODE=fixed` or `bytes`, at `RUN_EPOCHS=1`) therefore read it PRESENT-and-0, while the
 `fab.growth_blackout` Gate beside it printed UNREACHABLE ("0 notifications means the blackout cannot
 open at all"). The ruling above answered that with `fab.shift_notifications`; DID IT FIRE puts the

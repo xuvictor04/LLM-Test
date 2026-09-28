@@ -1,0 +1,47 @@
+==== PASTE THIS BACK ====
+gpu_world.sh EXP=retok  commit 319f313  launched 2026-09-27T20:41:05Z  B-provisional
+card: 1 x NVIDIA H200 143771 MiB; torch 2.8.0+cu128, CUDA 12.8; NCPU 13; PAR 12; MPS on; device=cuda
+shape: 20000 windows/run, DATA_STREAM_BYTES=3780000, seeds 0 1 2, EXTRA=''; cap 60000; CAL 600; LM_CTX 128; kept ckpts ON
+runs: 13 of 13 ended rc=0, every one
+bits/byte per seed         k0     k3000     k1000   k0_nuis  |k0-nuis|   k3000-k0   k1000-k0
+  s0                  1.95921   1.98008   1.96456   1.95941    0.00020   +0.02087   +0.00535
+  s1                  1.90482   1.92804   1.91660   1.92298    0.01817   +0.02322   +0.01179
+  s2                  1.93319   1.94408   1.93764   1.94066    0.00747   +0.01090   +0.00445
+k0_rerun: k0 seed 0 twice, |diff| 0 bits/byte (BIT-EXACT)
+RULE (O14, O2): ε 0.05 bits/byte, incumbent 3000; per phase (4), arm - k0 paired over seeds: mean [lower at t(1 - a/4), Holm a; one-sided 95% upper]
+  k3000 n=3 a=0.025: p1 +0.0184 [+0.0101,+0.0211] p2 +0.0015 [-0.0290,+0.0116] p3 +0.0485 [+0.0199,+0.0579] p4 +0.0049 [-0.0886,+0.0358] -> UNRESOLVED
+  k1000 n=3 a=0.05: p1 -0.0139 [-0.0247,-0.0088] p2 -0.0014 [-0.0404,+0.0169] p3 +0.0237 [+0.0112,+0.0296] p4 +0.0204 [-0.0268,+0.0426] -> PASS
+  k1000 - k3000 whole run: mean -0.0111, one-sided 95% upper -0.0035 (n=3): below 0, significantly better
+reported, decides nothing (O14): M = 0.01817 bits/byte (max over 3 seed(s) |k0 - k0_nuis|)
+  k3000 - k0 mean +0.01833 over 3 seed(s)
+  k1000 - k0 mean +0.00720 over 3 seed(s)
+DECISION: TOK_RETOK_EVERY ships 1000, replacing the incumbent 3000: k1000 PASS against k0, and the whole-run 1000 - 3000 upper bound -0.0035 is below 0 (ε 0.05 bits/byte, n 3 seed(s))  [B-provisional]
+RATES (post-fix rate at the retok shape; mean [min-max] over seeds; the k0 family's loop time includes its periodic saves):
+  k0 35.77 w/s [34.98-36.38] 6897 B/s (with saves)
+  k3000 39.18 w/s [38.94-39.52] 8878 B/s, act + MEM re-cut 0.95% of loop, per-byte time vs k0 -22.3% (k0 saves)
+  k1000 38.46 w/s [37.85-38.90] 9034 B/s, act + MEM re-cut 3.11% of loop, per-byte time vs k0 -23.6% (k0 saves)
+  k0_nuis 36.21 w/s [35.36-37.85] 6982 B/s (with saves)
+  k0_rerun 37.07 w/s [37.07-37.07] 7059 B/s (with saves)
+  aggregate: 235,825 windows in 986 s of fleet wall at PAR 12 = 239.17 windows/s (calibrated 514.61 at PAR 12: measured/calibrated 0.46)
+  ETA against wall: estimated 505 s (260,000 windows at 514.6 windows/s), took 986 s: 1.95x
+  LOW-GPU-WORLD-ETA: the ETA missed the wall by 1.95x (> 1.5x) calibrated on 600 windows: raise EXP=world's default CAL_WINDOWS to >= 520 (FAB_MANAGE_EVERY + 20)
+  recorded on: NVIDIA H200, PAR 12, MPS on, NCPU 13
+SECONDARIES (mean over seeds; beside the rule):
+  k0 acts - noop -; grown reg 10.67/stall 13.33; blackout 0.0% (<= 0.0%); act -% of loop; MEM re-cut -%/act; bpt rise/act -
+  k3000 acts 5 noop 0; grown reg 3.33/stall 11; blackout 12.0% (<= 12.0%); act 0.85% of loop; MEM re-cut 55.1%/act; bpt rise/act +7.3 +4.2 +11.3 +5.8 +6.5%
+  k1000 acts 15.67 noop 0; grown reg 2.67/stall 8.67; blackout 37.9% (<= 38.9%); act 2.69% of loop; MEM re-cut 26.3%/act; bpt rise/act +3.9 +2.6 +1.8 +1.3 +1.2 +2.7 +4.4 +3.7...%
+  k0_nuis acts - noop -; grown reg 10.33/stall 13.33; blackout 0.0% (<= 0.0%); act -% of loop; MEM re-cut -%/act; bpt rise/act -
+BLACKOUT SPLIT where n_live first reaches FAB_SLOTS (each part over its own windows; C13 reads the part before):
+  k0 before 0.0% / after 0.0%; full (slots 4096) in 1/3 run(s) from window 13401; n_live end 3738 [3413-3949]
+  k3000 before 12.0% / after -%; full (slots 4096) in 0/3 run(s); n_live end 3459 [3002-3733]
+  k1000 before 37.9% / after -%; full (slots 4096) in 0/3 run(s); n_live end 3616 [3376-3974]
+  k0_nuis before 0.0% / after -%; full (slots 4096) in 0/3 run(s); n_live end 3238 [2469-3831]
+  bits/byte by phase (4 equal byte ranges), k0: 2.5311 1.7577 1.5711 1.8697
+  bits/byte by phase (4 equal byte ranges), k3000: 2.5494 1.7593 1.6196 1.8746
+  bits/byte by phase (4 equal byte ranges), k1000: 2.5171 1.7563 1.5948 1.8901
+  bits/byte by phase (4 equal byte ranges), k0_nuis: 2.5371 1.7607 1.5731 1.8931
+  BLACKOUT ALARM (C13): k1000 blacks out 37.9% of its windows before the pool fills, above 20%: re-run with COOLDOWN_ARM=100 (adds k1000_cd100, FAB_COOLDOWN=100 at the fastest cadence)
+KEPT: 57 copies of 3 k0 run(s), all coherent, act windows covered k3000 15/15, k1000 47/47; ckpt/ 9.93 GB
+  resume one: CKPT_RESUME=gpu_retok_out/ckpt/keep/k0.s0.w1001 CKPT_DIR=<NEW dir> OMP_NUM_THREADS=1 RUN_SEED=0 RUN_DEVICE=cuda DATA_STREAM_BYTES=3780000 TOK_RETOK_EVERY=0 python3 run.py
+archive: gpu_retok_2026-09-27.tgz beside gpu_retok_out (logs, curves, SUMMARY, ANALYSIS, this block; no checkpoints) -- keep it
+==== END ====

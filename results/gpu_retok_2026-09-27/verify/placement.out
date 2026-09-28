@@ -1,0 +1,4 @@
+last     k3000: +0.0190 +0.0009 +0.0484 +0.0050  max |change vs first byte| 0.0006
+last     k1000: -0.0134 -0.0019 +0.0236 +0.0205  max |change vs first byte| 0.0005
+prorata  k3000: +0.0191 +0.0008 +0.0480 +0.0054  max |change vs first byte| 0.0007
+prorata  k1000: -0.0134 -0.0020 +0.0234 +0.0207  max |change vs first byte| 0.0006

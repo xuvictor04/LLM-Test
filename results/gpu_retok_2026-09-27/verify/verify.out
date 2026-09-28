@@ -1,0 +1,55 @@
+RUNS (n flushes, sum(bytes) == bytes_scored, whole-run bits/byte, phase gate, torch_seed)
+  k0        s0 n= 19853 win= 19853 bytes 3779835 == 3779835 preq 1.95921 phases 2.5998 1.7857 1.5964 1.8547 gate ('4', '4') acts None
+  k0        s1 n= 19344 win= 19344 bytes 3779861 == 3779861 preq 1.90482 phases 2.5130 1.7133 1.5393 1.8536 gate ('4', '4') acts None
+  k0        s2 n= 19629 win= 19629 bytes 3779841 == 3779841 preq 1.93319 phases 2.4803 1.7742 1.5775 1.9006 gate ('4', '4') acts None
+  k0_nuis   s0 n= 19853 win= 19853 bytes 3779835 == 3779835 preq 1.95941 phases 2.5794 1.7882 1.5963 1.8736 gate ('4', '4') acts None
+  k0_nuis   s1 n= 19344 win= 19344 bytes 3779861 == 3779861 preq 1.92298 phases 2.5293 1.7137 1.5431 1.9058 gate ('4', '4') acts None
+  k0_nuis   s2 n= 19629 win= 19629 bytes 3779841 == 3779841 preq 1.94066 phases 2.5027 1.7801 1.5799 1.8997 gate ('4', '4') acts None
+  k0_rerun  s0 n= 19853 win= 19853 bytes 3779835 == 3779835 preq 1.95921 phases 2.5998 1.7857 1.5964 1.8547 gate ('4', '4') acts None
+  k1000     s0 n= 16186 win= 16186 bytes 3779884 == 3779884 preq 1.96456 phases 2.5826 1.7924 1.6177 1.8653 gate ('4', '4') acts 16
+  k1000     s1 n= 15957 win= 15957 bytes 3779889 == 3779889 preq 1.91660 phases 2.4998 1.7162 1.5614 1.8890 gate ('4', '4') acts 15
+  k1000     s2 n= 16136 win= 16136 bytes 3779769 == 3779769 preq 1.93764 phases 2.4690 1.7604 1.6052 1.9158 gate ('4', '4') acts 16
+  k3000     s0 n= 16786 win= 16786 bytes 3779795 == 3779795 preq 1.98008 phases 2.6168 1.7935 1.6447 1.8653 gate ('4', '4') acts 5
+  k3000     s1 n= 16566 win= 16566 bytes 3779946 == 3779946 preq 1.92804 phases 2.5310 1.7142 1.5935 1.8734 gate ('4', '4') acts 5
+  k3000     s2 n= 16689 win= 16689 bytes 3779766 == 3779766 preq 1.94408 phases 2.5005 1.7701 1.6206 1.8851 gate ('4', '4') acts 5
+rerun bit-exact: True
+torch_seed equal per seed across arms: True
+  k3000: first flush index differing from k0 per seed (0-based): [3001, 3001, 3001] (cadence 3000)
+  k1000: first flush index differing from k0 per seed (0-based): [1001, 1001, 1001] (cadence 1000)
+
+WHOLE RUN, per seed, and differences
+  k0       1.95921 1.90482 1.93319
+  k3000    1.98008 1.92804 1.94408
+  k1000    1.96456 1.91660 1.93764
+  k0_nuis  1.95941 1.92298 1.94066
+  k3000-k0 +0.02087 +0.02322 +0.01090 mean +0.01833
+  k1000-k0 +0.00535 +0.01179 +0.00445 mean +0.00720
+  M 0.01817; k0_nuis-k0 per seed +0.00020 +0.01817 +0.00747
+
+PER PHASE, arm means and eps rule
+  k0       2.5311 1.7577 1.5711 1.8697
+  k3000    2.5494 1.7593 1.6196 1.8746
+  k1000    2.5171 1.7563 1.5948 1.8901
+  k0_nuis  2.5371 1.7607 1.5731 1.8931
+  Holm order ['k3000', 'k1000'] {'k3000': np.float64(2.625), 'k1000': np.float64(3.88)}
+  k3000 a=0.025: p1 +0.0184 [+0.0101,+0.0211] p2 +0.0015 [-0.0290,+0.0116] p3 +0.0485 [+0.0199,+0.0579] p4 +0.0049 [-0.0886,+0.0358] -> UNRESOLVED
+  k1000 a=0.05: p1 -0.0139 [-0.0247,-0.0088] p2 -0.0014 [-0.0404,+0.0169] p3 +0.0237 [+0.0112,+0.0296] p4 +0.0204 [-0.0268,+0.0426] -> PASS
+
+CHOICE whole-run k1000-k3000 per seed -0.01551 -0.01143 -0.00644; mean -0.01113 sd 0.00454 upper -0.00347 p 0.0256
+  p1 k1000-k3000 mean -0.0323 upper -0.0295  per seed -0.03416 -0.03122 -0.03145
+  p2 k1000-k3000 mean -0.0029 upper +0.0072  per seed -0.00107 +0.00194 -0.00965
+  p3 k1000-k3000 mean -0.0248 upper -0.0103  per seed -0.02695 -0.03210 -0.01536
+  p4 k1000-k3000 mean +0.0155 upper +0.0414  per seed +0.00003 +0.01565 +0.03076
+  (c) each run's worst-phase harm, k1000 - k3000: -0.0269 -0.0188 -0.0154 upper -0.0104
+
+RATES
+  k0       35.77 [34.98-36.38] w/s  6897 B/s  windows [19853, 19344, 19629]
+  k3000    39.18 [38.94-39.52] w/s  8878 B/s  windows [16786, 16566, 16689]
+  k1000    38.46 [37.85-38.90] w/s  9034 B/s  windows [16186, 15957, 16136]
+  k0_nuis  36.21 [35.36-37.85] w/s  6982 B/s  windows [19853, 19344, 19629]
+  k0_rerun 37.07 [37.07-37.07] w/s  7059 B/s  windows [19853]
+  aggregate 235825 windows / 986 s = 239.17 w/s; ETA 260000/514.608 = 505 s; ratio 1.95
+
+BLACKOUT
+  k3000: blackout windows [1995, 1995, 1995] of [16786, 16566, 16689] = 12.0%; acts [5, 5, 5]
+  k1000: blackout windows [6170, 5985, 6120] of [16186, 15957, 16136] = 37.9%; acts [16, 15, 16]

@@ -16,10 +16,12 @@ below are how any copy is verified.
 - The kept copies are the offline control for the retok spike test (register note retok fleet
   (4)): k0 models at the maturity of each act window.
 
-**Resume one.** Unpack a file so that `ckpt/` sits under a directory `<d>`, then run:
+**Resume one.** Unpack a file so that `ckpt/` sits under a directory `<d>`, then run, on the GPU box:
 
-    CKPT_RESUME=<d>/ckpt/k1000.s0 CKPT_DIR=<new dir> RUN_SEED=0 DATA_STREAM_BYTES=3780000 \
-        TOK_RETOK_EVERY=1000 python3 run.py
+    CKPT_RESUME=<d>/ckpt/k1000.s0 CKPT_DIR=<new dir> OMP_NUM_THREADS=1 RUN_SEED=0 RUN_DEVICE=cuda \
+        DATA_STREAM_BYTES=3780000 TOK_RETOK_EVERY=1000 python3 run.py
 
 The fleet's `PASTE_BACK.txt` has the kept-copy form of the same command. Every run in the fleet
-was at commit 319f313.
+was at commit 319f313. *(Corrected 2026-09-27: the line first written here left out `RUN_DEVICE=cuda`
+and `OMP_NUM_THREADS=1`. `RUN_DEVICE` defaults to `cpu` and a checkpoint loads onto the CPU, so it
+would have continued a CUDA parent on the CPU, which is another experiment.)*

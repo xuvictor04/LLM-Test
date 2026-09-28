@@ -874,7 +874,7 @@ def run(sysm, *, max_windows=None, progress=True):
     # "armed, no act ran"; ABSENT where no act can be asked for -- at TOK_RETOK_EVERY=0, and off
     # TOK_MODE=online, where TOK.on_window raises no retok Due at any cadence and seeds no
     # tok.due_retok. THE MODE TEST IS A CORRECTION (2026-09-27, build 1.3's review, Q-RUN-17): this
-    # read the cadence alone, so TOK_MODE=fixed or bytes at the shipped TOK_RETOK_EVERY=3000 printed
+    # read the cadence alone, so TOK_MODE=fixed or bytes at the then-shipped TOK_RETOK_EVERY=3000 printed
     # all four keys below PRESENT-and-0, "armed, did not fire", on arms no act can reach. The
     # predicate is now TOK's own for tok.due_retok, the mode test the mint wait below also makes.
     # AND ITS COST, ON THE SAME PREDICATE (2026-09-26, Q-RUN-17): loop.act_seconds is the wall time

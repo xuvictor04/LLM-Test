@@ -1,0 +1,56 @@
+END OF RUN: the last 5% and 10% of the stream's bytes, arm - k0 (mean [one-sided 95% lower], per seed)
+  last 5% k3000    +0.062 [+0.043]  +0.054 +0.075 +0.057
+  last 5% k1000    +0.097 [+0.028]  +0.071 +0.075 +0.144
+  last 5% k0_nuis  +0.031 [-0.020]  +0.013 +0.066 +0.014
+  last 10% k3000    +0.118 [+0.037]  +0.068 +0.163 +0.123
+  last 10% k1000    +0.092 [+0.030]  +0.064 +0.078 +0.134
+  last 10% k0_nuis  +0.030 [-0.034]  +0.003 +0.074 +0.014
+AREA ENTRIES: first 10 KB after num's (945,000) and c's (2,835,000) nominal entry, arm - k0
+  num k3000  +0.117  -0.255 -0.035 +0.642
+  num k1000  -0.412  -0.154 -0.689 -0.394
+  c k3000  -1.158  -1.411 -0.733 -1.331
+  c k1000  -1.095  -1.303 -0.451 -1.532
+ACT SPIKES: peak (10 KB bins, mean over seeds of arm - k0) within 200 KB after each act's byte offset
+  k3000: acts at [3001, 6001, 9001, 12001, 15001] (seed 0); peaks +1.09 +0.42 +0.93 +0.68 +0.62
+  k1000: acts at [1001, 2001, 3001, 4001, 5001, 6001, 7001, 8001, 9001, 10001, 11001, 12001, 13001, 14001, 15001, 16001] (seed 0); peaks +0.15 +0.30 +0.27 +0.24 +0.12 +0.22 +0.29 +0.26 +0.24 +0.25 +0.20 +0.08 +0.26 +0.15 +0.24 +0.32
+N_LIVE at the end, per run (the last progress line / fab.n_live)
+  k0       [3949, 3413, 3853]
+  k3000    [3643, 3002, 3733]
+  k1000    [3974, 3498, 3376]
+  k0_nuis  [3415, 2469, 3831]
+LAST ACT WINDOW and windows (blackout arithmetic: acts x 399 + the last act's remainder)
+  k3000.s0: 5 acts, last at 15001, 16786 windows; blackout 1995; sum min(399, left) 1995
+  k3000.s1: 5 acts, last at 15001, 16566 windows; blackout 1995; sum min(399, left) 1995
+  k3000.s2: 5 acts, last at 15001, 16689 windows; blackout 1995; sum min(399, left) 1995
+  k1000.s0: 16 acts, last at 16001, 16186 windows; blackout 6170; sum min(399, left) 6170
+  k1000.s1: 15 acts, last at 15001, 15957 windows; blackout 5985; sum min(399, left) 5985
+  k1000.s2: 16 acts, last at 16001, 16136 windows; blackout 6120; sum min(399, left) 6120
+THE FIRST ACTS' BINS: arm - k0 over a byte range (flushes split pro rata), per seed
+  k1000 0.190-0.3800 MB, after k1000's first act (window 1001, about 0.19 MB): -0.0664  -0.0791 -0.0626 -0.0573
+  k3000 0.567-0.6615 MB, k3000's first act (window 3001, about 0.57 MB): +0.2033  +0.2141 +0.2003 +0.1955; its share of p1's mean difference +0.0203
+FAB GROWTH per run: fab.grow_dev, regression asks outside the blackout, grown regression / stall, births, spawned;
+  regression asks refused by FAB_COOLDOWN's spacing and suppressed by the blackout, births the new_frac budget declined
+  k0.s0: dev 0.18759 asked_reg 11 grown 10/14 births 2588 spawned 2564; refused by spacing 18, suppressed by the blackout 0, declined_newfrac 1
+  k0.s1: dev 0.125402 asked_reg 10 grown 10/13 births 2056 spawned 2033; refused by spacing 42, suppressed by the blackout 0, declined_newfrac 1
+  k0.s2: dev 0.198033 asked_reg 12 grown 12/13 births 2421 spawned 2396; refused by spacing 62, suppressed by the blackout 0, declined_newfrac 0
+  k3000.s0: dev 0.320675 asked_reg 5 grown 4/11 births 2218 spawned 2203; refused by spacing 18, suppressed by the blackout 69, declined_newfrac 1
+  k3000.s1: dev 0.327345 asked_reg 3 grown 3/10 births 1683 spawned 1670; refused by spacing 33, suppressed by the blackout 59, declined_newfrac 0
+  k3000.s2: dev 0.314774 asked_reg 4 grown 3/12 births 2405 spawned 2390; refused by spacing 38, suppressed by the blackout 65, declined_newfrac 2
+  k1000.s0: dev 0.279525 asked_reg 3 grown 3/10 births 2729 spawned 2716; refused by spacing 8, suppressed by the blackout 37, declined_newfrac 0
+  k1000.s1: dev 0.21102 asked_reg 4 grown 3/7 births 2078 spawned 2068; refused by spacing 20, suppressed by the blackout 35, declined_newfrac 2
+  k1000.s2: dev 0.251096 asked_reg 3 grown 2/9 births 1851 spawned 1840; refused by spacing 26, suppressed by the blackout 46, declined_newfrac 1
+  k0_nuis.s0: dev 0.203955 asked_reg 9 grown 7/15 births 2124 spawned 2102; refused by spacing 25, suppressed by the blackout 0, declined_newfrac 4
+  k0_nuis.s1: dev 0.174256 asked_reg 8 grown 8/14 births 1105 spawned 1083; refused by spacing 46, suppressed by the blackout 0, declined_newfrac 0
+  k0_nuis.s2: dev 0.203716 asked_reg 17 grown 16/11 births 2518 spawned 2491; refused by spacing 56, suppressed by the blackout 0, declined_newfrac 1
+k0'S PERIODIC SAVES INSIDE ITS LOOP (the kept copies, KEPT.txt)
+  k0.s0: 19 kept saves
+  k0.s1: 19 kept saves
+  k0.s2: 19 kept saves
+GPU BUSY from the heartbeat: the 12-run wave (12 training) and k0_rerun alone (1 training)
+  12 training: GPU 98-99% busy over 14 heartbeat line(s)
+  1 training: GPU 17-24% busy over 14 heartbeat line(s)
+THE ETA MISS: each run's start (logs/_started.txt t0) and wall (logs/_done.txt secs), the fleet wall, the ETAs
+  12 runs started together; the last of them ended at +590 s
+  k0_rerun.s0 started at +433 s and took 553 s, alone from +590 s, ending at +986 s; fleet wall 986 s
+  the ETA: 505 s (260,000 windows at 514.6 windows/s), wall/ETA 1.95; priced by waves: 2 x (20,000 / 42.88 + 12.6 s) = 958 s (-2.8% of the wall)
+  the heartbeat's first fleet ETA: 1040 s (2 waves), +5.5% of the wall

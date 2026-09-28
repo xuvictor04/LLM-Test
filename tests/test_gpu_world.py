@@ -16,6 +16,8 @@ is pinned here, on a fleet whose every number is chosen.
       per-flush bytes the eps rule reads the whole run as one phase and says so; M, the largest
       |k0 - k0_nuis|, is reported and decides nothing; two harmless cadences PASS, and 3000 stays
       because 1000 is not significantly better (O14, 2026-09-27: it was 03b's per-seed margin rule).
+      F1-F17's fleets are shaped like the 2026-09-27 fleet and are read at its incumbent,
+      RETOK_INCUMBENT=3000 (the default is 1000 since that fleet's DECISION; F25 reads it).
   F2  THE BLOCK: stdout carries it between the two delimiters, it equals $OUT/PASTE_BACK.txt, it holds
       the commit, the dirty flag, the card, NCPU, PAR, MPS, every arm's bits/byte at every seed, the
       rule's rows, M, the DECISION with its B-provisional label and a failed run with its last log
@@ -136,6 +138,11 @@ is pinned here, on a fleet whose every number is chosen.
       a fleet in its own session that runs to its end and its block, and prints commands by absolute path;
       a second --go FAILs on it; an exported OMP_NUM_THREADS is said, not a WARN; an ended fleet whose run
       still runs is a FAIL whose fix is --stop.
+  F25 THE COOLDOWN FLEET AT THE SHIPPED CADENCE (C13's alarm, after the 2026-09-27 DECISION): RETOK_ARMS=1000
+      with COOLDOWN_ARM=100 is read at the default incumbent, 1000 -- it stays while k1000 does not FAIL,
+      and every cadence FAILing is ESCALATE with the act ON at 1000 -- and k1000_cd100 is read against
+      k1000, paired: per phase by the eps rule and over the whole run by its one-sided 95% upper bound
+      (below 0: the longer cooldown costs), beside the rule and never shipped, in ANALYSIS and in the block.
 """
 import glob
 import json
@@ -154,6 +161,11 @@ ARCHIVE_0924 = os.path.join(ROOT, "results", "gpu_world_2026-09-24", "gpu_world_
 LN2 = math.log(2)
 CTX = 128
 FAILS = []
+# THE 2026-09-27 FLEET'S INCUMBENT, NAMED WHERE IT IS READ. RETOK_INCUMBENT is read when the analysis runs,
+# and its default is 1000 since that fleet's DECISION (Proposal 05 O14). The synthetic retok fleets of
+# F1-F17 are shaped like that fleet -- arms k3000 and k1000, 3000 the incumbent -- so every analysis of
+# them names 3000, and they hold O14's choice exactly as that fleet read it. F25 reads the default.
+INC0927 = {"RETOK_INCUMBENT": "3000"}
 
 
 def check(name, ok, detail=""):
@@ -306,7 +318,7 @@ try:
     # ---- F1: the ship rule, to the known answer -------------------------------------------------
     o1 = os.path.join(TMP, "f1", "gpu_retok_out")
     retok_fleet(o1, k1000={0: 1.00005, 1: 1.0003})
-    p = gw("--analyze", EXP="retok", OUT=o1)
+    p = gw("--analyze", EXP="retok", **INC0927, OUT=o1)
     a1 = open(os.path.join(o1, "ANALYSIS.txt")).read() if os.path.exists(os.path.join(o1, "ANALYSIS.txt")) else ""
     k0c = json.load(open(os.path.join(o1, "curves", "k0.s0.json")))
     want = round(preq(k0c, 18900), 5)
@@ -345,7 +357,7 @@ try:
     retok_fleet(o2, seeds=seeds16, cd=True, dirty=True)
     os.remove(os.path.join(o2, "curves", "k0_rerun.s0.json"))
     run(o2, "k0_rerun", 0, None, rc=1, last="RuntimeError: boom at window 1234", curve=False)
-    p2 = gw("--analyze", EXP="retok", OUT=o2)
+    p2 = gw("--analyze", EXP="retok", **INC0927, OUT=o2)
     b2 = block_of(p2.stdout) or []
     t2 = "\n".join(b2)
     rows = {int(m.group(1)): m.group(0) for m in re.finditer(r"^  s(\d+) .*$", t2, re.M)}
@@ -374,7 +386,7 @@ try:
     for nseeds in (60, 72):
         o2b = os.path.join(TMP, f"f2b_{nseeds}", "gpu_retok_out")
         retok_fleet(o2b, seeds=tuple(range(nseeds)), cd=True, nuisv={7: 1.0003}, k1000={11: 1.0005})
-        p2b = gw("--analyze", EXP="retok", OUT=o2b)
+        p2b = gw("--analyze", EXP="retok", **INC0927, OUT=o2b)
         b2b = block_of(p2b.stdout) or []
         t2b = "\n".join(b2b)
         check(f"F2 at {nseeds} seeds the block is cut to at most 80 lines, says what it cut, and still ends in "
@@ -413,7 +425,7 @@ try:
           "LOW-GPU-WORLD-ETA: the ETA missed the wall by" in a1 and "CAL_WINDOWS to >= 520" in a1)
     o3 = os.path.join(TMP, "f3", "gpu_retok_out")
     retok_fleet(o3, fin_s=1200)
-    a3 = (gw("--analyze", EXP="retok", OUT=o3), open(os.path.join(o3, "ANALYSIS.txt")).read())[1]
+    a3 = (gw("--analyze", EXP="retok", **INC0927, OUT=o3), open(os.path.join(o3, "ANALYSIS.txt")).read())[1]
     check("F3 within 1.5x there is no LOW-GPU-WORLD-ETA line", f"took 1200 s: {1200 / est:.2f}x" in a3
           and "LOW-GPU-WORLD-ETA" not in a3)
 
@@ -447,7 +459,7 @@ try:
         fbytes=[18900] * 10, counters=dict(new13, **{"fab.blackout_windows": 450}))
     run(o4, "k3000", 0, 0.9999, n=10, win=1000, nbytes=189000, secs=100.0, acts=1, at=(3001,),
         fbytes=[18900] * 10, counters=dict(new13, **{"fab.blackout_windows": 100}))
-    p4 = gw("--analyze", EXP="retok", OUT=o4)
+    p4 = gw("--analyze", EXP="retok", **INC0927, OUT=o4)
     a4 = open(os.path.join(o4, "ANALYSIS.txt")).read()
     b4 = "\n".join(block_of(p4.stdout) or [])
     check("F4 with fab.blackout_windows at 45% of k1000's windows the BLACKOUT ALARM sounds with the "
@@ -499,7 +511,7 @@ try:
         counters={"fab.shift_notifications": 0})
     for a in ("k3000", "k1000"):
         run(o4b, a, 0, 1.0, n=10, win=1000, nbytes=189000, acts=0, fbytes=[18900] * 10, counters=_quiet)
-    gw("--analyze", EXP="retok", OUT=o4b)
+    gw("--analyze", EXP="retok", **INC0927, OUT=o4b)
     a4b = open(os.path.join(o4b, "ANALYSIS.txt")).read()
     b4b = open(os.path.join(o4b, "PASTE_BACK.txt")).read()
     _un = ("unreachable in these runs (ABSENT from every log; the tree has them): fab.blackout_windows (no run "
@@ -515,7 +527,7 @@ try:
     o4c = os.path.join(TMP, "f4c", "gpu_retok_out")
     shutil.copytree(o4b, o4c)
     summary(o4c, seeds="0", windows=1000, stream=189000, tree13=None)
-    gw("--analyze", EXP="retok", OUT=o4c)
+    gw("--analyze", EXP="retok", **INC0927, OUT=o4c)
     a4c = open(os.path.join(o4c, "ANALYSIS.txt")).read()
     check("F4 a SUMMARY.txt from before the tree record names the absent keys without claiming the tree lacks "
           "them", "absent from every log (not in this tree, or unreachable here: SUMMARY.txt predates the tree "
@@ -526,7 +538,7 @@ try:
     for f in ("ckpt/k0.s0/ckpt.pt", "ckpt/k0.s0/ckpt.pt.prev", "ckpt/k0.s0.dyntok.json", "smoke/ckpt/x/ckpt.pt",
               "stray.pt", "curves/stray.pt.tmp"):
         write(os.path.join(o1, f), "not a checkpoint")
-    p5 = gw("--analyze", EXP="retok", OUT=o1)
+    p5 = gw("--analyze", EXP="retok", **INC0927, OUT=o1)
     tgz = os.path.join(os.path.dirname(o1), "gpu_retok_2026-10-01.tgz")
     names = tarfile.open(tgz).getnames() if os.path.exists(tgz) else []
     check("F5 the archive is <name minus _out>_<launch date>.tgz beside OUT, and the run says so",
@@ -618,7 +630,7 @@ try:
         run(o6, "k0_nuis", s, 1.0001)
         run(o6, "k3000", s, 0.9, acts=0)
         run(o6, "k1000", s, 0.9998, acts=4, at=(1001,))
-    p6 = gw("--analyze", EXP="retok", OUT=o6)
+    p6 = gw("--analyze", EXP="retok", **INC0927, OUT=o6)
     a6 = open(os.path.join(o6, "ANALYSIS.txt")).read()
     check("F6 an act arm with no act at any seed is NO ACT FIRED and never ships (a lower reading does not "
           "make it a candidate); the incumbent 3000 did not act, so it is not read and stays",
@@ -628,7 +640,7 @@ try:
           str([l for l in a6.splitlines() if "DECISION" in l]))
     o6b = os.path.join(TMP, "f6b", "gpu_retok_out")
     retok_fleet(o6b, nuis=False)
-    p6b = gw("--analyze", EXP="retok", OUT=o6b)
+    p6b = gw("--analyze", EXP="retok", **INC0927, OUT=o6b)
     a6b = open(os.path.join(o6b, "ANALYSIS.txt")).read()
     check("F6 with no k0_nuis M is not formed and still decides nothing: the DECISION reads, the later sections "
           "print, and the block is written",
@@ -655,7 +667,7 @@ try:
                    os.path.join(d, "ckpt.pt"))
         write(d + ".dyntok.json", json.dumps({"entries": [[0, 1]] * ent}))
     write(os.path.join(kd, ".fleet"), "2026-10-01T12:00:00Z\n")        # this fleet's launch (summary())
-    p7 = gw("--analyze", EXP="retok", OUT=o7)
+    p7 = gw("--analyze", EXP="retok", **INC0927, OUT=o7)
     kept = open(os.path.join(kd, "k0.s0.kept.txt")).read() if os.path.exists(os.path.join(kd, "k0.s0.kept.txt")) else ""
     check("F7 a copy is named for the step it holds and is coherent when merges equal the vocabulary's entries",
           os.path.isfile(os.path.join(kd, "k0.s0.w1001", "ckpt.pt"))
@@ -693,7 +705,7 @@ try:
     torch.save({"step": 1001, "epoch": 0, "reason": "periodic", "payload": {"TOK": {"merge_count": 3}}},
                os.path.join(d, "ckpt.pt"))
     write(d + ".dyntok.json", json.dumps({"entries": [[0, 1]] * 3}))
-    p7b = gw("--analyze", EXP="retok", OUT=o7b)
+    p7b = gw("--analyze", EXP="retok", **INC0927, OUT=o7b)
     ilog = open(os.path.join(kdb, "k0.s0.index.log")).read() if os.path.exists(os.path.join(kdb, "k0.s0.index.log")) else ""
     check("F7 a keep directory stamped by another launch is refused: the save is left as save001, the other "
           "launch's w1001 is untouched, and the index says why",
@@ -733,10 +745,12 @@ try:
     p9 = gw(EXP="world_epoch", OUT=o9, WINDOWS=20000)
     check("F9 EXP=world_epoch without GO_WORLD_EPOCH=1 exits 2 and writes nothing (OUT is not created)",
           p9.returncode == 2 and not os.path.exists(o9), f"rc {p9.returncode}")
+    # THE PIN IS THE SHIPPED CADENCE (S0b-ship: every dependent experiment pins and labels it): 1000 since
+    # the 2026-09-27 retok fleet's DECISION (register O14), 3000 before it.
     check("F9 ... having printed its sizing: one whole WINDOWS x 189-byte epoch, the cap at 3 x WINDOWS, "
-          "CAL_WINDOWS 600, and the TOK_RETOK_EVERY pin",
+          "CAL_WINDOWS 600, and the TOK_RETOK_EVERY pin at the shipped 1000",
           "DATA_STREAM_BYTES=3780000" in p9.stdout and "window cap 60000" in p9.stdout
-          and "CAL_WINDOWS 600" in p9.stdout and "TOK_RETOK_EVERY=3000 pinned" in p9.stdout
+          and "CAL_WINDOWS 600" in p9.stdout and "TOK_RETOK_EVERY=1000 pinned" in p9.stdout
           and "DATA_DRAW=planned pinned" in p9.stdout)
     p9b = gw(EXP="wrold", OUT=os.path.join(TMP, "f9b"))
     check("F9 an unknown EXP is refused by name, before anything is written",
@@ -779,7 +793,8 @@ tag = os.path.basename(curve)[:-5]
 if os.environ.get("STUB_BOOK"):
     with open(os.environ["STUB_BOOK"], "a") as fh:
         fh.write(json.dumps({"tag": tag, "argv": a, "ckpt": {k: v for k, v in os.environ.items() if k.startswith("CKPT_")},
-                             "retok": os.environ.get("TOK_RETOK_EVERY"), "runpy": os.environ.get("STUB_RUNPY", ""),
+                             "retok": os.environ.get("TOK_RETOK_EVERY"), "cooldown": os.environ.get("FAB_COOLDOWN"),
+                             "runpy": os.environ.get("STUB_RUNPY", ""),
                              "unbuffered": os.environ.get("PYTHONUNBUFFERED", "")}) + "\n")
 time.sleep(float(os.environ.get("STUB_STARTUP", "0")))
 print(f"=== device={os.environ.get('RUN_DEVICE', 'cpu')} amp=off")
@@ -1164,7 +1179,7 @@ esac
             for a, d in arms.items():
                 dd = d[s] if isinstance(d[s], list) else [d[s]] * 4
                 run_ph(out, a, s, [b + x for b, x in zip(base, dd)], acts=(3 if acted else 0), at=(3001,))
-        return gw("--analyze", EXP="retok", OUT=out)
+        return gw("--analyze", EXP="retok", **INC0927, OUT=out)
 
     def per_seed(xs):
         return dict(enumerate(xs))
@@ -1228,7 +1243,7 @@ esac
         run(o15d, "k1000", s, None, n=len(FB_ACT), win=20000, nbytes=sum(FB_ACT), fbytes=FB_ACT, acts=1, at=(5001,),
             losses=[v15[k] * LN2 * nb / CTX for k, nb in zip(PH_ACT, FB_ACT)],
             lines=["       gate:data.phase_entered                      ('fired', '4 vs 4')"])
-    p15d = gw("--analyze", EXP="retok", OUT=o15d)
+    p15d = gw("--analyze", EXP="retok", **INC0927, OUT=o15d)
     a15d, b15d = ana(o15d)
     ALL["f15d"] = a15d + b15d
     check("F15 each flush is placed by its run's cumulative bytes: k1000's flushes grow after its act (15 of 63,000 "
@@ -1337,7 +1352,7 @@ esac
     run(o17, "k1000_cd100", 0, 1.0, n=20, win=2000, nbytes=378000, acts=4, at=(101, 601, 1201, 1801), cooldown=100,
         counters=dict(OLD13, **{"fab.shift_notifications": 4, "fab.blackout_windows": 350, "fab.n_live": 4000}),
         lines=prog(None, 4000))
-    p17 = gw("--analyze", EXP="retok", OUT=o17)
+    p17 = gw("--analyze", EXP="retok", **INC0927, OUT=o17)
     a17, b17 = ana(o17)
     # EACH ARM'S SPLIT ROW, the third of its SECONDARIES rows.
     sp = {a: re.search(rf"^  {a} +acts [^\n]*\n[^\n]*\n +(blackout [^\n]*)$", a17, re.M)
@@ -1385,7 +1400,7 @@ esac
         run(o17b, a, 0, 1.0, n=20, win=2000, nbytes=378000, acts=(len(at) if at else None), at=at,
             counters=(dict(OLD13, **{"fab.shift_notifications": len(at)}) if at else {"fab.shift_notifications": 0}),
             lines=prog(101, 4096))
-    p17b = gw("--analyze", EXP="retok", OUT=o17b)
+    p17b = gw("--analyze", EXP="retok", **INC0927, OUT=o17b)
     a17b, b17b = ana(o17b)
     sp17b = {a: re.search(rf"^  {a} +acts [^\n]*\n[^\n]*\n +(blackout [^\n]*)$", a17b, re.M) for a in ("k3000", "k1000")}
     sp17b = {a: (m.group(1) if m else "") for a, m in sp17b.items()}
@@ -1416,7 +1431,7 @@ esac
         counters=dict(OLD13, **{"fab.shift_notifications": 2}), lines=prog(1001, 4096))
     run(o17c, "k1000_cd100", 0, 1.0, n=20, win=2000, nbytes=378000, acts=3, cooldown=100,
         counters=dict(OLD13, **{"fab.shift_notifications": 3}), lines=prog(1001, 4096))
-    p17c = gw("--analyze", EXP="retok", OUT=o17c)
+    p17c = gw("--analyze", EXP="retok", **INC0927, OUT=o17c)
     a17c, b17c = ana(o17c)
     sp17c = {a: re.search(rf"^  {a} +acts [^\n]*\n[^\n]*\n +(blackout [^\n]*)$", a17c, re.M)
              for a in ("k1000", "k3000", "k1000_cd100")}
@@ -1438,6 +1453,114 @@ esac
               "(upper bound by the act windows x cooldown)" in a17c and len(_al) == 2
           and f"  k1000 before -% (<= {100 * 800 / 1001:.1f}%) / after -%" in b17c,
           str(sp17c) + str(_al) + p17c.stderr[-300:])
+
+    # ---- F25: the cooldown fleet at the shipped cadence (C13's alarm, after the 2026-09-27 DECISION) --------
+    # The next test's shape, RETOK_ARMS=1000 COOLDOWN_ARM=100 SEEDS="0 1 2 3 4": arms k0, k1000, k0_nuis and
+    # k1000_cd100, read at the DEFAULT incumbent (no RETOK_INCUMBENT: 1000). Every phase of k1000 sits D25[s]
+    # above k0's, and every phase of k1000_cd100 sits cd[s] above k1000's, so the cooldown arm's paired
+    # difference is cd[s] in every phase and over the whole run (the phases hold equal bytes): its bounds are
+    # known answers. The mean is read to its printed 4 decimals, each bound to within one unit of them.
+    K25 = {0: 0.0, 1: 0.01, 2: -0.01, 3: 0.005, 4: -0.005}
+    D25 = [0.001, -0.002, 0.0005, 0.0015, -0.001]
+
+    def cd_fleet(out, d1, cd):
+        summary(out, seeds="0 1 2 3 4")
+        for s in range(5):
+            base = [2.0 + 0.1 * k + K25[s] for k in range(4)]
+            run_ph(out, "k0", s, base)
+            run_ph(out, "k0_nuis", s, [b + 0.001 * (s + 1) for b in base])
+            run_ph(out, "k1000", s, [b + d1[s] for b in base], acts=15, at=(1001,))
+            run_ph(out, "k1000_cd100", s, [b + d1[s] + cd[s] for b in base], acts=15, at=(1001,), cooldown=100)
+        run_ph(out, "k0_rerun", 0, [2.0 + 0.1 * k for k in range(4)])
+        return gw("--analyze", EXP="retok", OUT=out)
+
+    def cd_line(text):
+        m_ = re.search(r"^  k1000_cd100 - k1000 \(C13's cooldown arm, beside the rule, never a ship candidate\) "
+                       r"n=(\d+): (p1 .*) -> (\w+); whole run mean (\S+), one-sided 95% upper (\S+): (.*)$", text, re.M)
+        if not m_:
+            return None
+        cells_ = re.findall(r"p\d ([+-]\d\.\d{4}) \[([+-]\d\.\d{4}),([+-]\d\.\d{4})\]", m_.group(2))
+        return (int(m_.group(1)), [tuple(map(float, c_)) for c_ in cells_], m_.group(3), float(m_.group(4)),
+                float(m_.group(5)), m_.group(6))
+
+    def cd_known(cd):
+        n_ = len(cd); m_ = sum(cd) / n_
+        se_ = math.sqrt(sum((x - m_) ** 2 for x in cd) / (n_ - 1) / n_)
+        return m_, m_ - tq(1 - 0.05 / 4, n_ - 1) * se_, m_ + tq(0.95, n_ - 1) * se_
+
+    def close(got_, want_):
+        return abs(got_ - want_) <= 0.00006
+
+    CD_SAME = [0.002, -0.001, 0.0005, 0.001, -0.0015]
+    CD_BETTER = [-0.010, -0.012, -0.011, -0.009, -0.013]
+    o25 = os.path.join(TMP, "f25", "gpu_retok_out")
+    p25 = cd_fleet(o25, D25, CD_SAME)
+    a25, b25 = ana(o25)
+    ALL["f25"] = a25 + b25
+    c25, cb25 = cd_line(a25), cd_line(b25)
+    m25, lo25, up25 = cd_known(CD_SAME)
+    check("F25 RETOK_ARMS=1000 with COOLDOWN_ARM=100 is read at the default incumbent, 1000, which stays while "
+          "k1000 does not FAIL (it is the only cadence: no challenger to compare), in ANALYSIS and in the block",
+          p25.returncode == 0
+          and "incumbent 1000 (RETOK_INCUMBENT); endpoint" in a25
+          and "RULE (O14, O2): ε 0.05 bits/byte, incumbent 1000; per phase (4)" in b25
+          and re.search(r"^  k1000 n=5 a=0\.05: p1 .* -> PASS$", a25, re.M) is not None
+          and "=== DECISION: TOK_RETOK_EVERY stays 1000 (the incumbent; 0 is never shipped by the rule): k1000 PASS "
+              "against k0 (ε 0.05 bits/byte, n 5 seed(s)) ===" in a25
+          and re.search(r"^DECISION: TOK_RETOK_EVERY stays 1000 .*\[B-provisional\]$", b25, re.M) is not None,
+          str([l for l in a25.splitlines() if "DECISION" in l or "-> " in l]) + p25.stderr[-300:])
+    check("F25 k1000_cd100 is read against k1000, paired over the 5 seeds: each phase's mean and eps-rule bounds "
+          f"(lower at t(1 - 0.05/4), upper at t(0.95)) are the known {m25:+.4f} [{lo25:+.4f},{up25:+.4f}], PASS, and the "
+          "whole run's one-sided 95% upper bound is not below 0 -- in ANALYSIS and, the same line, in the block",
+          c25 is not None and c25 == cb25 and c25[0] == 5 and len(c25[1]) == 4
+          and all(close(mm, m25) and close(ll, lo25) and close(uu, up25) for mm, ll, uu in c25[1])
+          and c25[2] == "PASS" and close(c25[3], m25) and close(c25[4], up25) and c25[5] == "not below 0",
+          str(c25))
+    o25b = os.path.join(TMP, "f25b", "gpu_retok_out")
+    cd_fleet(o25b, D25, CD_BETTER)
+    a25b, b25b = ana(o25b)
+    ALL["f25b"] = a25b + b25b
+    c25b = cd_line(a25b)
+    m25b, _, up25b = cd_known(CD_BETTER)
+    check("F25 a cooldown arm better at every seed reads 'below 0, significantly better (the longer cooldown costs)' on "
+          f"the whole run (known upper {up25b:+.4f}) and still never ships: the DECISION is O14's, 1000 stays",
+          c25b is not None and c25b[2] == "PASS" and close(c25b[3], m25b) and close(c25b[4], up25b)
+          and c25b[5] == "below 0, significantly better (the longer cooldown costs)"
+          and "=== DECISION: TOK_RETOK_EVERY stays 1000" in a25b and "ships 1000_cd100" not in a25b + b25b
+          and "(beside the rule)" in b25b, str(c25b))
+    o25c = os.path.join(TMP, "f25c", "gpu_retok_out")
+    cd_fleet(o25c, [0.30, 0.31, 0.29, 0.30, 0.31], CD_SAME)
+    a25c, b25c = ana(o25c)
+    ALL["f25c"] = a25c + b25c
+    check("F25 when the shipped 1000 FAILs against k0 -- the only cadence -- the DECISION is ESCALATE, the act ON "
+          "at 1000 until the owner answers (never 0), and the cooldown arm is still read beside it",
+          "=== DECISION: ESCALATE: every cadence FAILs against k0 by the ε rule; the act stays ON at 1000 until the "
+          "owner answers; the remedy arms run next (register O14) (ε 0.05 bits/byte, n 5 seed(s)) ===" in a25c
+          and cd_line(a25c) is not None and cd_line(a25c)[2] == "PASS",
+          str([l for l in a25c.splitlines() if "DECISION" in l or "-> " in l]))
+    # THE LAUNCH BUILDS WHAT THE COMMAND NAMES, with run.py stood in (F10's stand-in, which books each run's
+    # TOK_RETOK_EVERY, FAB_COOLDOWN and CKPT_ settings): 5 seeds x 4 arms plus k0_rerun, k1000_cd100 at
+    # TOK_RETOK_EVERY=1000 and FAB_COOLDOWN=100, no checkpoint setting at KEEP_CKPT=0, and a block.
+    o25d = os.path.join(TMP, "f25d", "gpu_retok_out")
+    book25 = os.path.join(TMP, "f25d_book.jsonl")
+    p25d = subprocess.run(["bash", SCRIPT], cwd=ROOT, capture_output=True, text=True, timeout=300,
+                          env=clean_env(PATH=env10["PATH"], STUB_BOOK=book25, EXP="retok", RETOK_ARMS="1000",
+                                        COOLDOWN_ARM="100", SEEDS="0 1 2 3 4", KEEP_CKPT="0", DEVICE="cpu",
+                                        WINDOWS=20, PAR=12, SMOKE_WINDOWS=5, OUT=o25d))
+    rec25 = [json.loads(l) for l in open(book25)] if os.path.exists(book25) else []
+    fleet25 = {r["tag"]: r for r in rec25 if "/smoke/" not in r["argv"][r["argv"].index("--loss-curve") + 1]}
+    want25 = {f"{a}.s{s}" for a in ("k0", "k1000", "k0_nuis", "k1000_cd100") for s in range(5)} | {"k0_rerun.s0"}
+    check("F25 the launch (EXP=retok RETOK_ARMS=1000 COOLDOWN_ARM=100 SEEDS='0 1 2 3 4' KEEP_CKPT=0) runs the 21 "
+          "runs it names: k1000_cd100 at TOK_RETOK_EVERY=1000 and FAB_COOLDOWN=100, k1000 at the default cooldown, "
+          "k0 and k0_nuis at 0, no CKPT_ setting, no k3000; and it ends in its block",
+          p25d.returncode == 0 and set(fleet25) == want25
+          and all(fleet25[f"k1000_cd100.s{s}"]["retok"] == "1000" and fleet25[f"k1000_cd100.s{s}"]["cooldown"] == "100"
+                  and fleet25[f"k1000.s{s}"]["retok"] == "1000" and fleet25[f"k1000.s{s}"]["cooldown"] is None
+                  and fleet25[f"k0.s{s}"]["retok"] == "0" for s in range(5))
+          and not any(r["ckpt"] for r in rec25)
+          and "=== plan: EXP=retok; arms k0 k1000 k0_nuis k1000_cd100, plus k0_rerun at seed 0" in p25d.stdout
+          and 0 < len(block_of(p25d.stdout) or []) <= 80,
+          f"rc {p25d.returncode}; {sorted(set(fleet25) ^ want25)}; {p25d.stderr[-400:]}")
 
     # ---- F18-F24: a fleet that says it is alive, and only one per OUT (2026-09-27) --------------------
     # Live fleets of the stand-in above, slowed down (STUB_STARTUP seconds before its banner, STUB_WSLEEP a

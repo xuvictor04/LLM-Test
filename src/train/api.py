@@ -1306,6 +1306,9 @@ def cadence_audit(run: Config, *, run_windows, periods):
         OPT.lr_warmup          1000   the run ends INSIDE warm-up
         SIG.warmup              800   the encoder warm-up never completes
 
+    (The table is the tree as it stood on 2026-08-30. TOK.retok_every ships 1000 since the 2026-09-27
+    retok fleet, register O14, which is still past the 937.)
+
     Every cadence carries the OLD system's value, tuned against STREAM_LEN=94000000 and 60k-step
     runs; stream_bytes carries a smoke-test value. Neither is wrong alone; together they describe a
     run in which almost nothing happens. PLAN's P3 exit criterion is "empty environment, 200 steps,

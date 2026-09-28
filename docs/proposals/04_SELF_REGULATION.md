@@ -522,7 +522,7 @@ The d3 controller, revised by R-1, R-4 and R-7.
     1.536 / 1.452 / 1.495 / 1.485 at every re-plan (seeds 0, 1, 3, 4; reproduced, claim 9).
   - Every act re-segments the whole tail, so fewer acts are cheaper.
   - At the owner's ~20,000 windows that is at most about 21 focus acts plus phase entries (fewer
-    where the TV gate withholds), besides TOK's retok acts (`TOK_RETOK_EVERY` 3000, about 6).
+    where the TV gate withholds), besides TOK's retok acts (`TOK_RETOK_EVERY` 3000, about 6; about 19 at 1000, the default since 2026-09-27).
 - *Alternatives.*
   - An act at every probe (about 125 per run): rejected on cost.
   - A bounded look-ahead draw: DATA materialises only the next K windows. It breaks "whole epoch up
@@ -612,7 +612,7 @@ The d3 controller, revised by R-1, R-4 and R-7.
     - record `data.focus.rebase_step[area]`, the first post-act reading minus the last pre-act one.
   - Redraw-only acts do not move the view and do not rebase.
   - The step per act is measured at SR2 on real text. `TOK_GROW_EVERY` 200 mints and
-    `TOK_RETOK_EVERY` 3000 acts, so a 20,000-window run rebases about 6 times.
+    `TOK_RETOK_EVERY` 3000 acts, so a 20,000-window run rebases about 6 times (about 19 at 1000, the default since 2026-09-27).
   - *Alternative:* a fixed-view probe, cut with `TOK.tokenize(view=)` at a recorded view. It avoids
     steps but reads text in a spelling the run no longer trains on.
 - *Why ON.*
