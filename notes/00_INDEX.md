@@ -128,3 +128,7 @@ code and prose describe an older system — `garry/self_organize.py` still reads
 - The one continual-learning run's log was lost. `holdout.py` reproduces such figures exactly from
   a checkpoint, so it is recoverable **if the GPU box still has one** — see
   `06_CONTINUAL_LEARNING.md`.
+
+**CORRECTION 2026-09-28.** `../ARCHIVE.md`, named above as the list of frozen directories, is now
+`../archive/README.md`: it moved into the folder it describes, with `git mv`. Its table says what each
+archived record is, and resolves every path that has moved since this corpus was written.
