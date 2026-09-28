@@ -38,7 +38,7 @@ they arrive from THREE families, which is the whole argument for owning by prefi
      2 rows from the `misc` family      -- n_processes and val_cap, both mis-tagged, and the survey's
                                            so-config record says so outright for both.
 
-This file emits 22 levers:
+This file emits 36 levers:
 
     11  rows with verdict rename
   +  6  rows with verdict keep
@@ -52,8 +52,13 @@ This file emits 22 levers:
          2026-09-28 with DATA_DRAW's 'replay' law (Proposal 04 §1 item 2; register 04-Q1, 04-Q4, O9
          and O16, Proposal 05 §8 3.3; docs/04_CONTRACT.md Q-DATA-10). No ancestors: the old tree had
          no rehearsal law and no parent record to rehearse from.
+  + 14  amendments: DATA_TRUST and the thirteen levers of its book (DATA_TRUST_RULE, _CLAIM, _CTX,
+         _VAL, _DELIMS, _HOT, _SELF, _MIN_N, _MIN_EV, _MIN, _EVERY, _SKETCH and _TABLE), minted
+         2026-09-28 with Proposal 04's SR3 source-reliability book (register 04-6.3, Proposal 05
+         §8 3.4; docs/04_CONTRACT.md Q-DATA-11). No ancestors: the old tree kept no book of which
+         source to believe. Section 6 below.
   -------
-    22  Lever declarations, all reachable as DATA_<FIELD>
+    36  Lever declarations, all reachable as DATA_<FIELD>
 
 Not emitted, by verdict: 1 merge, 0 drop, 0 promote-to-wire.
   MERGED (folds into a lever this file DOES declare, so it is not an unresolved merge):
@@ -95,14 +100,18 @@ THE THREE CENSUS DEFECTS, CHECKED HERE
    sections rather than a decision anywhere.
 
 2. CLOCK KINDS -- 0 rows corrected, because 0 of the 18 DATA rows carry a clock unit, and that is a
-   fact about this package rather than an oversight. The census types these rows bytes, count, fraction,
-   on/off, NAME and PATH. DATA measures its material in BYTES and its schedule in AREAS; it counts no
-   running counter of its own, so nothing here is a threshold compared against one. The one clock this
-   package's material genuinely touches -- the epoch -- is not owned here: EPOCHS is filed under the
-   `data` family in _SPEC and the census moves it to RUN.RUN_EPOCHS, typed Epochs, which is right,
-   because units.py rules that an epoch is never a schedule horizon and that ruling has to be enforced
-   where the horizon is declared. Nothing to correct. TWO ADJACENT FAULTS ARE NAMED RATHER THAN FIXED,
-   both of which a clock kind would not have caught anyway because neither is a clock:
+   fact about this package rather than an oversight. (ONE AMENDMENT DOES, since 2026-09-28:
+   DATA_TRUST_EVERY is U.Windows, the source-reliability book's cadence, compared against RUN's
+   window clock through DATA.trust_period -- a threshold on the loop's counter and not on this
+   package's material, so no census row, and nothing below, moves by it.) The census types these
+   rows bytes, count, fraction, on/off, NAME and PATH. DATA measures its material in BYTES and its
+   schedule in AREAS; it counts no running counter of its own, so nothing here is a threshold
+   compared against one. The one clock this package's material genuinely touches -- the epoch -- is
+   not owned here: EPOCHS is filed under the `data` family in _SPEC and the census moves it to
+   RUN.RUN_EPOCHS, typed Epochs, which is right, because units.py rules that an epoch is never a
+   schedule horizon and that ruling has to be enforced where the horizon is declared. Nothing to
+   correct. TWO ADJACENT FAULTS ARE NAMED RATHER THAN FIXED, both of which a clock kind would not
+   have caught anyway because neither is a clock:
      * `steps = STREAM_LEN // WIN` (:4317, :4719) divides a BYTE budget by a TOKEN window. That is the
        byte/token confusion this family keeps producing, and it is why `stream_bytes` carries the unit
        in its NAME as well as its metadata. It cannot be typed away: U.BYTES and U.TOKENS are metadata
@@ -190,7 +199,8 @@ from spine import units as U
 
 
 class DATALevers(LeverSet):
-    """The stream's declared knobs: source, shape, schedule, held-out split.
+    """The stream's declared knobs: source, shape, schedule, held-out split -- and, since 2026-09-28,
+    the source-reliability book that reads the stream's text (section 6).
 
     Grouped by mechanism, because that is how they fail together -- and because a flat list is what let
     the old tree file the splice lengths under `domains`, the held-out cap under `misc`, and the phase
@@ -760,3 +770,140 @@ class DATALevers(LeverSet):
     # mean "read nothing"), and open_corpus must report bytes present beside bytes taken so the audit can
     # compare them. Changing the number here before that read site exists would replace a loud, warned
     # trap with a silent one. Recorded as the open item it is.
+
+    # ==============================================================================================
+    # 6. WHICH SOURCES THE STREAM CAN BELIEVE -- THE SOURCE-RELIABILITY BOOK (Proposal 04 §1 item 8)
+    #
+    # Fourteen CENSUS AMENDMENTS, 2026-09-28 (Proposal 04 SR3; register 04-6.3 and §8 3.4;
+    # docs/04_CONTRACT.md Q-DATA-11). None has an ancestor: the old tree kept no book of which source
+    # to believe. The book reads the TEXT the stream trains on -- the claims its sources make about
+    # one key, and who disagrees with whom -- and never a model output or a loss, so no fluency can
+    # game it and nothing the model computes can move it (04 §1 item 8's "reason for the book").
+    # EVERY VALUE BELOW BUT `trust` IS 04 §6's AND PROVISIONAL (register NEW-19): the testbed tuned
+    # them, and nothing has measured them on real text -- E3 (register §8 6.2) is that measurement.
+    # ==============================================================================================
+
+    trust = Lever("off", "The source-reliability book: 'off' keeps none; 'observe' reads every source's "
+                         "claims, votes, and reports each source's reliability and trust while "
+                         "changing nothing the run trains on; 'loss' and 'loss+draw' would weight the "
+                         "loss (and the draw) by that trust and are declared, NOT BUILT.",
+                  U.NAME, choices=("off", "observe", "loss", "loss+draw"))
+    # CENSUS AMENDMENT, 2026-09-28 (Proposal 04 §1 item 8 and SR3; register 04-6.3, §8 3.4;
+    # docs/04_CONTRACT.md Q-DATA-11). BUILT 'off', AND 'off' IS THE WHOLE BOOK ABSENT: DATA.new_focus
+    # allocates nothing, the loop's arm test withholds every DATA.claims_observe call before the
+    # 'data.trust' gate is asked, and no data.trust.* key exists -- so a default run is this tree
+    # before the book, bit for bit (SR3's bit-identity, tests/test_trust.py). 04-6.3 rules 'observe'
+    # ON after that bit-identity, and the flip lands last and alone.
+    # 'loss' AND 'loss+draw' ARE REFUSED AT STARTUP WITH spine/gate.py::NotBuilt (OPT_LR_CONTINUE=
+    # 'regulated' is the precedent): each needs DATA.token_weights and LM.lm_loss(token_weights=),
+    # which this tree does not build, and 04-6.3's standing rules forbid either as a default before
+    # copy detection (SR6) and while a truthful source in another format is floored. A run labelled
+    # with an actuation that never happened is refused rather than run as 'observe'.
+
+    trust_rule = Lever("claims", "Which estimator fills the book: 'claims', the model-free "
+                                 "reliability-weighted vote over the (key, value) claims sources "
+                                 "make; the only one built.", U.NAME, choices=("claims",))
+    # CENSUS AMENDMENT, 2026-09-28 (Q-DATA-11). One choice today. 04 §1 item 8 names three more as
+    # ablation rule values -- 'peer' (d1's gradient-consistency trust), 'residual' (d3's calibration
+    # residual, measured harmful) and 'fluency' (trust by low loss, the gaming demonstration) -- and
+    # each is SR5's to build; a name that is not built is not a choice, as 'retention' is not yet a
+    # DATA_DRAW value. Read only at DATA_TRUST != 'off'.
+
+    trust_claim = Lever("kv", "What counts as one claim: 'kv' a normalised (key, value) pair around a "
+                              "DATA_TRUST_DELIMS delimiter, 'ctx' a raw DATA_TRUST_CTX-unit context "
+                              "and the unit after it.", U.NAME, choices=("kv", "ctx"))
+    # CENSUS AMENDMENT, 2026-09-28 (Proposal 04 §1 item 8, R-5; Q-DATA-11). 'kv' IS THE BUILD TARGET
+    # AND IS UNPROTOTYPED: the key is up to DATA_TRUST_CTX TOK units before a delimiter, case-folded,
+    # punctuation stripped and whitespace collapsed, so `@EEE=V;` and `@EEE:V;` are ONE claim and a
+    # surface form no longer decides agreement. E5's format-variant world is its acceptance test.
+    # 'ctx' IS d3's PROTOTYPE, KEPT AS AN ARM, AND IT MEASURES CONFORMITY TO THE MAJORITY'S SURFACE
+    # FORM, NOT TRUTH: on the testbed K = 5 is len('@EEE='), the known answer was tuned to the record
+    # format, and a truthful source writing `@EEE:V;` was floored (r 0.001, t 0.3) at 2 of 2 seeds.
+    # Changing it on a resume is refused by name: the table's keys are the rule's.
+
+    trust_ctx = Lever(5, "Key length in TOK units: the most units before a delimiter a 'kv' key "
+                         "reads, or the context length of a 'ctx' claim.", U.TOKENS, domain=(1, None))
+    # CENSUS AMENDMENT, 2026-09-28 (Q-DATA-11). IN TOK UNITS, NOT BYTES (04 §6): after minting five
+    # units span more than five bytes, so the testbed's known answer (K = 5 = len('@EEE=')) does not
+    # port to the tree, and the critic's K sweep -- K 3 floors a harmless area, K 8 finds 0
+    # conflicted claims through step 500 -- was measured in bytes on byte-level text.
+    # DOMAIN (1, None): a key of no unit is no key. Changing it on a resume is refused by name.
+
+    trust_val = Lever(1, "Value length in TOK units: how many units after a 'kv' delimiter the "
+                         "value reads, cut at the first punctuation or delimiter.", U.TOKENS,
+                      domain=(1, None))
+    # CENSUS AMENDMENT, 2026-09-28 (Q-DATA-11). 'kv' only; a 'ctx' claim's value is always the one
+    # unit after its context. At one BYTE-level unit a spaced form -- `x = 5` -- reads the space as
+    # its value, which normalises to nothing and makes no claim; after minting, ` 5` is likelier one
+    # unit. Stated, not tuned: 04 §6's value is 1. DOMAIN (1, None). Changing it on a resume is
+    # refused by name.
+
+    trust_delims = Lever("=|:| is | are | was | were ",
+                         "The 'kv' delimiter class, '|'-separated byte strings: a claim is read "
+                         "around each occurrence.", U.NAME)
+    # CENSUS AMENDMENT, 2026-09-28 (Q-DATA-11; 04 §6: "the delimiter class for 'kv' keys
+    # (unmeasured)"). The bytes `=` and `:` and the space-bounded copulas ` is `, ` are `, ` was `,
+    # ` were `, in one string because a Lever holds one value: split on '|', each entry used as its
+    # bytes. Refused by name at DATA.new_focus when an entry is empty, repeats another, or is a
+    # prefix of another -- the last because a claim must be decidable from the bytes it spans, and
+    # with one delimiter a prefix of another, whether a position holds the short one depends on
+    # bytes a later pass has not read. Changing it on a resume is refused by name.
+
+    trust_hot = Lever(20, "Count-sketch pre-filter: a claim enters the table once its sketch bucket "
+                          "has counted this many claims.", U.COUNT, domain=(1, None))
+    # CENSUS AMENDMENT, 2026-09-28 (Q-DATA-11). d3's HOT. The sketch counts every claim; only a claim
+    # whose bucket reached this count is recorded, so a key seen a handful of times across the whole
+    # stream costs no table entry. DOMAIN (1, None): at 1 every claim is recorded.
+
+    trust_self = Lever(0.8, "Admission: a source's claim on a key counts only when its most frequent "
+                            "value holds at least this share of its readings of that key.",
+                       U.FRACTION, domain=(0.0, 1.0))
+    # CENSUS AMENDMENT, 2026-09-28 (Q-DATA-11). d3's SELF: a source that contradicts itself about a
+    # key makes no claim about it. The top value must also be the ONLY top value -- a tie at the top
+    # is no claim at any share, the same "a tie decides nothing" the vote applies.
+
+    trust_min_n = Lever(3, "Admission: a source's claim on a key counts only after this many readings "
+                           "of that key from that source.", U.COUNT, domain=(1, None))
+    # CENSUS AMENDMENT, 2026-09-28 (Q-DATA-11). d3's MIN_N.
+
+    trust_min_ev = Lever(10, "Conflicted claims a source must take part in before its reliability is "
+                             "reported and its trust set; below it both are ABSENT and trust is 1.",
+                         U.COUNT, domain=(1, None))
+    # CENSUS AMENDMENT, 2026-09-28 (Q-DATA-11). d3's MIN_EV. ONLY CONFLICTED CLAIMS ARE EVIDENCE -- a
+    # key at least two sources claim with at least two values between them -- because agreement
+    # alone says nothing about which source is the more reliable. A source below this count is not
+    # judged: its r and t are ABSENT in the report and its trust stays 1, and a new source joins
+    # that way (04 §5's geometry rule).
+
+    trust_min = Lever(0.3, "Trust floor: the least trust a source is given, however unreliable its "
+                           "claims.", U.FRACTION, domain=(0.0, 1.0))
+    # CENSUS AMENDMENT, 2026-09-28 (Q-DATA-11). t = clip(r / max r, this, 1). Under 'observe' it
+    # multiplies nothing: t is reported as the weight a built actuation would apply.
+
+    trust_every = Lever(160, "Windows between passes of the book over the stream consumed since the "
+                             "last one (0 = epoch-end passes only).", U.Windows, domain=(0, None))
+    # CENSUS AMENDMENT, 2026-09-28 (Q-DATA-11). 04 §6's 160 is the testbed's 10 steps x 16 windows,
+    # to be lengthened if E3 measures more than 2% of wall. UNIT IS Windows, THE CLOCK THE GATE IS
+    # ASKED ON: Cadences.due('data.trust', DATA.trust_period(dat), clock), once per window after the
+    # flush, behind the arm test. The epoch's last window also passes, due or not, so the book reads
+    # every unit of an epoch before the roll rebuilds the segmentation -- which is what 0 leaves.
+    # DOMAIN (0, None) and NOT A READ-SITE REFUSAL (the register's critic, finding 23): a negative
+    # would DISARM the gate as an undeclared second spelling of 0, and the six other period
+    # accessors refuse it under their packages' REFUSE_NEGATIVE_PERIOD; this one is refused at the
+    # first read, which O15 then forbids repeating at DATA.trust_period.
+
+    trust_sketch = Lever(4194301, "Count-sketch size, in int32 buckets; fixed for a lineage.", U.SLOTS,
+                         domain=(1, None))
+    # CENSUS AMENDMENT, 2026-09-28 (Q-DATA-11). d3's NB, a prime. 16.8 MB of int32 at the default,
+    # held only at DATA_TRUST != 'off' and checkpointed there with the book -- as DATA's payload,
+    # NOT as a geometry-manifest field: ckpt/api.py::check_geometry refuses a field this run's
+    # manifest names and a checkpoint does not record, so a new field would refuse every checkpoint
+    # written before it. A resume at another size is refused by name at DATA.new_focus instead,
+    # because a bucket index is the crc32 of a key modulo this number and every count would land in
+    # another bucket.
+
+    trust_table = Lever(200000, "Most keys the claim table holds; the least recently claimed is "
+                                "evicted beyond it.", U.ENTRIES, domain=(1, None))
+    # CENSUS AMENDMENT, 2026-09-28 (Q-DATA-11). Unmeasured on real text (04 §6). An LRU bound, not a
+    # geometry: data.trust.table_evictions counts what it cost, and a resume at a smaller bound
+    # evicts the least recently claimed keys to fit, counted the same way.

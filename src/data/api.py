@@ -19,22 +19,31 @@ implementation agents share; nothing else about the layout is load-bearing.
 RECORD TYPES RETURNED (P4 defines them; they are DATA's objects and other packages receive
 them as arguments, which is not an import and O10 does not refuse it):
   Areas   names, bodies, holdout, holdout_bytes, bytes_present, bytes_taken, cursors, rng_holdout,
-          counters, gates, parent_names, drawn, drawn_assumed
+          counters, gates, parent_names, drawn, drawn_assumed, sources
   Plan    protocol, schedule, phase_bounds, per_area_draw, exposure, gates, counters, faded,
           parent_faded, shares, replay_faded
   Stream  bytes, labels, splice_starts, area_changes, phase_bounds, area_names, per_area_drawn,
-          epoch, stream_id, draws, counters, gates
+          epoch, stream_id, draws, counters, gates, sources, source_names
+  Focus   mode, counters, gates, held, rule, claim, ctx, val, delims, sketch_size, sketch, table,
+          evidence, trust, first_seen, cursor, stream, last_step, carry -- the source-reliability
+          book (2026-09-28, Proposal 04 SR3; docs/04_CONTRACT.md Q-DATA-11), the one record here
+          that is a book and not a statement, so the one that is not frozen
 """
+import array
+import bisect
+import collections
 import dataclasses
 import hashlib
 import math
 import os
 import weakref
+import zlib
 from fractions import Fraction
 
 from spine.lever import Config, LeverError
 from spine import rng as _rng
-from spine.gate import Gate
+from spine import units as U
+from spine.gate import Gate, NotBuilt
 
 
 class CorpusError(ValueError):
@@ -99,6 +108,17 @@ class Areas:
     an area nothing in the lineage ever drew. Nothing reads it to move a byte: FAB's faded sets read
     `drawn`, and data_plan reads this only to name the assumption in data.rehearse_parent's reason.
     Empty on a fresh run, and wherever no record of the lineage predates `drawn`.
+
+    `sources` IS WHERE EACH AREA'S BODY CAME FROM, BY FILE (2026-09-28, Proposal 04 SR3; register
+    §8 3.4, docs/04_CONTRACT.md Q-DATA-11): per area, [(body offset, source name)] in offset order,
+    one entry per file that contributes at least one byte, each naming the file whose bytes begin at
+    that offset of the CARVED body. A real area's source is its file, named "<the entry's path under
+    DATA_DIR>/<file name>" ("train/eng/alice.txt"); a synthetic area is one source,
+    "synthetic:order2:<label>". The per-file boundaries are the manifest _read_area already walks,
+    kept rather than dropped: the bytes are unchanged, and a file boundary inside the held-out block
+    moves to the block's offset, where the body resumes in the file that holds the block's first
+    following byte. draw_stream carries it into Stream.sources, and the source-reliability book votes
+    by it. Not checkpointed: open_areas recomputes it from the same files.
     """
     names: tuple
     bodies: dict
@@ -113,6 +133,7 @@ class Areas:
     parent_names: list = dataclasses.field(default_factory=list)
     drawn: list = dataclasses.field(default_factory=list)
     drawn_assumed: list = dataclasses.field(default_factory=list)
+    sources: dict = dataclasses.field(default_factory=dict)
 
 
 def _holdout_key(label):
@@ -427,14 +448,18 @@ def open_areas(dat: Config, *, seed: int):
             else:
                 rel = os.path.join("train", entry)
             path = os.path.join(str(dat.dir), rel)
-            body, n_present = _read_area(path, int(dat.corpus_cap))
+            # THE PER-FILE BOUNDARIES, KEPT (2026-09-28, Q-DATA-11): the manifest this read walks,
+            # as (offset in the raw body, file name), so Areas.sources can name each file.
+            files = []
+            body, n_present = _read_area(path, int(dat.corpus_cap), files=files)
             if not body:
                 raise CorpusError(
                     f"area {label!r} at {path!r} holds no usable bytes. Refused rather than "
                     f"dropped: dropping an area desynchronises the label list from the corpus list "
                     f"and the next run reports one corpus's loss under another's name "
                     f"(ISSUES P3-C19).")
-            raw[label], present[label], taken[label], sources[label] = body, n_present, len(body), path
+            raw[label], present[label], taken[label] = body, n_present, len(body)
+            sources[label] = [(off, (rel + "/" + fname).replace(os.sep, "/")) for off, fname in files]
             n_open += 1
             if len(body) < n_present:
                 # data.corpus_cap_trip: the cap BIT for this area. `_read_area` counts `present`
@@ -443,6 +468,7 @@ def open_areas(dat: Config, *, seed: int):
 
     names = tuple(raw)
     bodies, holdout, holdout_bytes, rng_holdout, cursors = {}, {}, {}, {}, {}
+    carved_sources = {}
     # THE ONE ARM THAT HOLDS NOTHING OUT (2026-09-27, Q-DATA-9): the synthetic source at
     # DATA_SYNTH_HOLDOUT=0. Everywhere else -- a real source, or the synthetic one at 1 -- the loop
     # below runs the real sources' law VERBATIM, because one held-out law for both sources is what
@@ -487,6 +513,11 @@ def open_areas(dat: Config, *, seed: int):
             # REMOVED, NOT MASKED. One manufactured seam per area is the cost, and it is a good
             # trade against the thousands seg_from manufactures -- but it is stated, not hidden.
             bodies[label] = blob[:start] + blob[start + n_hold:]
+            # AND THE FILE BOUNDARIES FOLLOW THE BYTES (2026-09-28, Q-DATA-11): the carve moves
+            # every offset past the block down by its size, and a file that begins inside it
+            # begins, in the body, at the block's offset.
+            carved_sources[label] = _carved_sources(sources.get(label) or (), start, n_hold,
+                                                    len(bodies[label]))
             # SEAM_AT IS THE MANUFACTURED-DISCONTINUITY POSITION, NOT THE BLOCK OFFSET (audit
             # finding, confirmed live). Removing a MIDDLE block leaves one seam; removing a PREFIX
             # (start == 0) or a SUFFIX (start + n_hold == len(blob)) leaves none, because there is no
@@ -542,6 +573,7 @@ def open_areas(dat: Config, *, seed: int):
                        else ""))
             holdout[label] = b""
             bodies[label] = blob
+            carved_sources[label] = _carved_sources(sources.get(label) or (), 0, 0, len(blob))
             # THE OFF RECORD NAMES THE LEVER THAT MADE IT (2026-09-27, Q-DATA-9): since the synthetic
             # source can hold a block out, "source=synthetic holds nothing out" is no longer a
             # property of the source but of DATA_SYNTH_HOLDOUT=0 on it. The key, offset, size and
@@ -716,16 +748,22 @@ def open_areas(dat: Config, *, seed: int):
 
     return Areas(names=names, bodies=bodies, holdout=holdout, holdout_bytes=holdout_bytes,
                  bytes_present=present, bytes_taken=taken, cursors=cursors,
-                 rng_holdout=rng_holdout, counters=counters, gates=tuple(gates))
+                 rng_holdout=rng_holdout, counters=counters, gates=tuple(gates),
+                 sources=carved_sources)
 
 
-def _read_area(path, cap):
+def _read_area(path, cap, files=None):
     """Every usable file under `path`, concatenated, up to `cap` bytes. Returns (bytes, present).
 
     SKIPS basenames starting with "_" and anything ending .json: fetch manifests were being spliced
     into the corpus and trained on as if they were English. `present` is the total the directory
     HOLDS, counted even past the cap, because the cap's bite has to be a printed number rather than
     a warning about a default.
+
+    `files`, WHEN A LIST IS GIVEN, RECEIVES THE MANIFEST THIS WALK ALREADY HAS (2026-09-28,
+    Q-DATA-11): one (offset in the returned bytes, file name) per file that contributed at least one
+    byte, in read order -- Areas.sources' per-file boundaries. The bytes are the same with or
+    without it.
     """
     if not os.path.isdir(path):
         return b"", 0
@@ -739,9 +777,37 @@ def _read_area(path, cap):
         n = os.path.getsize(f)
         present += n
         if len(out) < cap:
+            at = len(out)
             with open(f, "rb") as fh:
                 out += fh.read(cap - len(out))
+            if files is not None and len(out) > at:
+                files.append((at, name))
     return bytes(out), present
+
+
+def _carved_sources(entries, start, n_hold, body_len):
+    """Areas.sources for one area: its raw [(offset, name)] file boundaries, mapped onto the body
+    open_areas leaves after carving [start, start + n_hold) out (2026-09-28, Q-DATA-11).
+
+    An offset before the block stays; one at or past its end moves down by n_hold; one inside it
+    moves to `start`, where the body resumes. Of entries that land on one offset the LAST is kept --
+    the file holding the body's byte there -- and an entry at or past the body's end is dropped,
+    since no byte of the body is its. UNIT: bytes. Pure arithmetic; it reads no lever.
+    """
+    out = []
+    for off, name in entries:
+        off = int(off)
+        if off >= start + n_hold:
+            off -= n_hold
+        elif off > start:
+            off = start
+        if off >= body_len:
+            continue
+        if out and out[-1][0] == off:
+            out[-1] = (off, name)
+        else:
+            out.append((off, name))
+    return out
 
 
 def _holdout_overlap(holdout_bytes, body_bytes, n=50):
@@ -891,7 +957,9 @@ def _synthetic_areas(dat, seed, entries, labels):
         raw[label] = bytes(out)
         present[label] = len(out)
         taken[label] = len(out)
-        sources[label] = f"synthetic:order2:{i}"
+        # ONE SOURCE PER GENERATED AREA, NAMED BY ITS LABEL (2026-09-28, Q-DATA-11): Areas.sources'
+        # shape. This read f"synthetic:order2:{i}", by position, and nothing read it.
+        sources[label] = [(0, f"synthetic:order2:{label}")]
     return raw, present, taken, sources
 
 
@@ -995,6 +1063,16 @@ class Stream:
     both fields. The bytes are the first draw's and so is every reading about them; but "did THIS
     epoch draw" is a question about this call, and its answer is UNREACHABLE -- not the FIRED the
     first draw earned and not a measured zero either. See data/api.py::_replay_gates.
+
+    `sources` AND `source_names` SAY WHICH SOURCE EVERY BYTE CAME FROM (2026-09-28, Proposal 04
+    SR3; register §8 3.4, docs/04_CONTRACT.md Q-DATA-11), run-length: `sources` is ((stream offset,
+    index into source_names), ...) in offset order, one entry where the source changes, and
+    `source_names` the names -- Areas.sources' spelling -- in the order these bytes first reach
+    them. draw_stream fills both from each chunk's body offsets as it lays it, the wrap's second
+    piece included, and TAKES NO DRAW to do it: the bytes, labels, segment table, draw count and
+    every counter and gate are what they were, so the stream digest the segmentation log carries
+    (spine/compose.py::_stream_digest) does not move. A replay carries them with the bytes. An area
+    Areas.sources names nothing for is one source under its own label.
     """
     bytes: bytes
     labels: list
@@ -1008,6 +1086,8 @@ class Stream:
     draws: int = 0
     counters: dict = dataclasses.field(default_factory=dict)
     gates: tuple = ()
+    sources: tuple = ()
+    source_names: tuple = ()
 
 
 def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_token: float):
@@ -1849,6 +1929,12 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
     Areas.drawn_assumed, the part of the list an older record held only by assumption (2026-09-28,
     Q-DATA-10's review): a draw is what confirms one.
 
+    EVERY BYTE'S SOURCE IS KEPT (2026-09-28, Proposal 04 SR3; docs/04_CONTRACT.md Q-DATA-11):
+    Stream.sources and Stream.source_names, run-length, read off each chunk's body offsets against
+    Areas.sources as it is laid -- the wrap's second piece as its own piece. It takes no draw and
+    moves no byte, so every other field of the Stream, and the digest the segmentation log carries,
+    is what it was without it.
+
     RETURNS: Stream.
 
     LEVERS READ: stream_bytes, seg_min, seg_max, seg_contig, resample, draw
@@ -1976,6 +2062,10 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
     cursors = areas.cursors
     last_area = None
     contig = bool(dat.seg_contig)
+    # WHICH SOURCE EACH BYTE CAME FROM (2026-09-28, Q-DATA-11), run-length over the stream: filled
+    # from each chunk's body offsets as it is laid below. Bookkeeping only -- no draw is taken and no
+    # byte moves.
+    src_runs, src_names, src_index = [], [], {}
     # THE DID IT FIRE TALLIES, TAKEN AT THE DECISION POINT THAT OWNS EACH ONE rather than
     # reconstructed from the returned Stream afterwards -- the same rule open_areas' surface follows
     # and for the same reason: `n_phase_entered` counts phases this loop actually entered, which is
@@ -2109,7 +2199,9 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
                 # above `cursors = areas.cursors` -- rather than a value nothing ever reads back.)
                 start = cursors[label] % len(body)
                 chunk = body[start:start + want]
+                pieces = ((start, len(chunk)),)
                 if len(chunk) < want:
+                    pieces = pieces + ((0, want - len(chunk)),)
                     chunk = chunk + body[:want - len(chunk)]
                     # data.contig_wrap, COUNTED HERE BECAUSE THIS LINE IS THE WRAP. The read ran off
                     # the end of the body and was completed from its head; there is no other line in
@@ -2126,6 +2218,15 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
             else:
                 start = stream.randint(0, max(0, len(body) - want))
                 chunk = body[start:start + want]
+                pieces = ((start, len(chunk)),)
+            # THE CHUNK'S SOURCES, piece by piece (the wrap's head is the second piece), before its
+            # bytes are appended: the stream offset each run starts at is len(out) plus its place in
+            # the chunk.
+            _at = len(out)
+            for _p0, _pn in pieces:
+                _source_runs(areas.sources.get(label), label, _p0, _pn, _at, src_runs, src_names,
+                             src_index)
+                _at += _pn
             splice.append(len(out))
             if last_area is not None and label != last_area:
                 # THE SUBSET WHERE THE AREA ACTUALLY CHANGED. Scoring boundary precision against
@@ -2258,7 +2359,8 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
                 stream_id=f"s{seed}.e{int(epoch)}.{len(out)}",
                 # THE DRAW COUNT, CARRIED OUT because rng.issued() cannot answer it (see Stream's
                 # docstring) -- read off the local Rng before it goes out of scope.
-                draws=stream.draws, counters=counters, gates=tuple(gates))
+                draws=stream.draws, counters=counters, gates=tuple(gates),
+                sources=tuple(src_runs), source_names=tuple(src_names))
     if not bool(dat.resample):
         # THE WEAKREF'S CALLBACK IS THE EVICTION, not a periodic sweep: when this Areas is collected,
         # the callback fires and pops exactly this id() entry, which is what lets the cached Stream
@@ -2269,6 +2371,35 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
         key = id(areas)
         _REPLAY[key] = (weakref.ref(areas, lambda _ref, key=key: _REPLAY.pop(key, None)), st)
     return st
+
+
+def _source_runs(entries, label, start, n, at, runs, names, index):
+    """Append body[start:start + n]'s sources to a stream's run-length source table, in place
+    (2026-09-28, Q-DATA-11). `entries` is the area's Areas.sources list; `at` is the stream offset
+    the piece is laid at. A run is appended only where the source changes, so two chunks of one file
+    laid back to back are one run. An area with no entries is one source under its own label.
+
+    UNIT: bytes. It takes no draw and reads no lever.
+    """
+    if n <= 0:
+        return
+    entries = entries or ((0, str(label)),)
+    offs = [int(o) for o, _ in entries]
+    i = max(0, bisect.bisect_right(offs, start) - 1)
+    first = i
+    while True:
+        name = entries[i][1]
+        # THE PIECE'S FIRST RUN STARTS WHERE THE PIECE DOES; every later one where its file does.
+        pos = at if i == first else at + (offs[i] - start)
+        idx = index.get(name)
+        if idx is None:
+            idx = index[name] = len(names)
+            names.append(name)
+        if not runs or runs[-1][1] != idx:
+            runs.append((pos, idx))
+        i += 1
+        if i >= len(offs) or offs[i] >= start + n:
+            return
 
 
 def _permille(part, whole):
@@ -2343,7 +2474,628 @@ def _replay_gates(dat, plan, cached, epoch):
 _REPLAY = {}
 
 
-def stream_state(dat: Config, areas):
+# ==================================================================================================
+# THE SOURCE-RELIABILITY BOOK (2026-09-28, Proposal 04 §1 item 8 and SR3; register 04-6.3, §8 3.4;
+# docs/04_CONTRACT.md Q-DATA-11)
+# ==================================================================================================
+# A book of which source the stream's text can believe, kept by reading the text itself: the claims
+# its sources make about one key, where two sources disagree, and a reliability-weighted vote over
+# those disagreements (d3's ClaimTD, results/self_regulation_design_2026-09-26/prototypes/d3/run.py).
+# It reads no model output and no loss. Built in OBSERVE mode only: it logs r, t, the conflicted
+# claims and the weight a built actuation would apply, and it changes nothing the run trains on.
+
+# THE BYTES THAT BOUND A 'kv' KEY AND VALUE on the side away from the delimiter: ASCII punctuation, and
+# the line breaks. A key is cut after the last of them before its delimiter, a value at the first after
+# it -- 04 §1 item 8's "up to the next delimiter or punctuation", applied to both sides, so a key never
+# reaches back across the previous clause (`x=1; y=2` claims "y", not "1 y").
+_TRUST_BOUND = frozenset(b"!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~\n\r")
+# THE VOTE's ITERATIONS AND TIE, d3's: r_s = (agree + 1) / (n + 2), re-voted ten times, and a claim
+# whose top two weighted values are within 1e-9 decides nothing.
+_TRUST_ITERATIONS = 10
+_TRUST_TIE = 1e-9
+# THE SKETCH's COUNTS ARE int32 (04 §6: "buckets (int32)") AND SATURATE rather than wrap.
+_TRUST_SKETCH_MAX = 2 ** 31 - 1
+# EVERY COUNTER THE BOOK SEEDS AT 'observe', the rule's claims key added per DATA_TRUST_CLAIM. ABSENT,
+# every one, at 'off' -- the tree's word for "this mechanism cannot run on this configuration".
+_TRUST_COUNTERS = ("data.trust.passes", "data.trust.updates", "data.trust.units",
+                   "data.trust.claims", "data.trust.conflicted_claims", "data.trust.sources",
+                   "data.trust.evidence_absent", "data.trust.table_evictions",
+                   "data.trust.sketch_load")
+
+
+@dataclasses.dataclass
+class Focus:
+    """The source-reliability book (2026-09-28, Proposal 04 SR3; docs/04_CONTRACT.md Q-DATA-11): the
+    record DATA.new_focus produces, DATA.claims_observe fills and DATA.stream_state checkpoints.
+
+    NOT FROZEN, and it is the one DATA record that is not: it is a BOOK, written by every pass, like
+    DOM's partition or MEM's store, where Areas, Plan and Stream are statements about the run's
+    material fixed when they are made.
+
+    AT DATA_TRUST='off' IT HOLDS NOTHING: `mode` 'off', no sketch, no table, no counter -- the
+    data.trust.* keys are ABSENT -- and two UNREACHABLE gates saying why. `held` is the one
+    exception: a checkpoint's book, carried through an 'off' run's saves unchanged, so a lineage
+    that switches the book off for one leg and on again resumes it (the retention probe's ON -> OFF
+    -> ON rule, Q-EVAL-12). The book reads nothing of what that leg consumes.
+
+    AT 'observe' (the fields a checkpoint carries, `state['focus']`):
+      rule, claim, ctx, val,   the estimator and the claim shape -- DATA_TRUST_RULE, _CLAIM, _CTX,
+      delims                   _VAL and _DELIMS as the book was built; a resume that changes one is
+                               refused by name, because the table's keys are this shape's.
+      sketch_size, sketch      the count sketch: array('i') of sketch_size int32 buckets, each the
+                               count of claims whose key hashes there (zlib.crc32 of the key modulo
+                               sketch_size). A resume at another DATA_TRUST_SKETCH is refused by
+                               name.
+      table                    the claim table: an OrderedDict, key -> {source name -> {value ->
+                               count}}, least recently claimed first, holding the keys the sketch
+                               found hot, bounded by DATA_TRUST_TABLE.
+      evidence                 per source name, [r, n]: its reliability and the conflicted claims
+                               it took part in -- ONLY for a source with n >= DATA_TRUST_MIN_EV. A
+                               source below it has no entry: its evidence is ABSENT.
+      trust                    per source name, t = clip(r / max r, DATA_TRUST_MIN, 1) -- set only
+                               when two or more sources carry evidence. A source with no entry has
+                               trust 1.
+      first_seen               per source name, [stream, unit]: the stream ordinal and unit index
+                               at which the book first read a unit of it -- a POSITION, so a
+                               continuation records what an uninterrupted run records.
+      cursor                   units of the current stream the book has read: the index the next
+                               pass starts at. PER EPOCH -- a new stream (a pass at 0) resets it.
+      stream                   how many streams the book has opened since it was built, less one:
+                               0 on its first epoch's stream.
+      last_step                RunClock.step at the last pass (-1 before the first): with `cursor`,
+                               what the root reads to place its first pass of a process (a cursor
+                               from a pass before this epoch began is not this epoch's).
+      carry                    the last units of the current stream, [bytes, source] each: what the
+                               next pass needs to finish a claim this one could not -- a key's
+                               context, or a value whose units had not arrived. So the claims a
+                               stream yields do not depend on where its passes fall.
+      counters                 data.trust.*: passes, updates, units, claims, claims_kv or
+                               claims_ctx, conflicted_claims, sources, evidence_absent,
+                               table_evictions and sketch_load. The lineage's, like every DATA
+                               counter.
+    `gates` (data.trust and data.trust.actuation) is re-stated at every pass and is not
+    checkpointed. The seconds the passes cost (data.trust.wall_s) are the ROOT's to time and are
+    not here: a float in a book the continuation compares would differ on every run.
+    """
+    mode: str
+    counters: dict = dataclasses.field(default_factory=dict)
+    gates: list = dataclasses.field(default_factory=list)
+    held: object = None
+    rule: str = ""
+    claim: str = ""
+    ctx: int = 0
+    val: int = 0
+    delims: tuple = ()
+    sketch_size: int = 0
+    sketch: object = None
+    table: object = None
+    evidence: dict = dataclasses.field(default_factory=dict)
+    trust: dict = dataclasses.field(default_factory=dict)
+    first_seen: dict = dataclasses.field(default_factory=dict)
+    cursor: int = 0
+    stream: int = 0
+    last_step: int = -1
+    carry: list = dataclasses.field(default_factory=list)
+
+
+def _trust_delims(dat):
+    """DATA_TRUST_DELIMS as a tuple of byte strings, or a refusal naming the lever. Split on '|';
+    each entry is its UTF-8 bytes. REFUSED: an empty entry, a repeated one, and one that is a
+    prefix of another -- whether a position holds the shorter one would then depend on bytes a later
+    pass has not read, and a claim must be decidable from the bytes it spans."""
+    raw = str(dat.trust_delims)
+    parts = raw.split("|")
+    out = []
+    for p in parts:
+        b = p.encode("utf-8")
+        if not b:
+            raise LeverError(
+                f"DATA_TRUST_DELIMS={raw!r} holds an empty entry: the class is '|'-separated byte "
+                f"strings, and an empty delimiter would stand at every byte of the stream.")
+        if b in out:
+            raise LeverError(f"DATA_TRUST_DELIMS={raw!r} names {p!r} twice.")
+        out.append(b)
+    for a in out:
+        for b in out:
+            if a != b and b.startswith(a):
+                raise LeverError(
+                    f"DATA_TRUST_DELIMS={raw!r}: {a.decode('utf-8')!r} is a prefix of "
+                    f"{b.decode('utf-8')!r}. Refused, because a claim must be decidable from the "
+                    f"bytes it spans: where the shorter stands at the end of what one pass has read, "
+                    f"whether the longer stands there too is in bytes the next pass reads.")
+    return tuple(out)
+
+
+def _trust_gates(dat, focus):
+    """The book's two gates, re-stated from what it holds. data.trust.actuation is UNREACHABLE on
+    every configuration this tree builds."""
+    dat = dat.owned_by("DATA")
+    mode = str(dat.trust)
+    actuation = Gate(
+        "data.trust.actuation", False, None, None, reachable=False,
+        reason="DATA_TRUST='loss' and 'loss+draw' are declared and NOT BUILT -- DATA.new_focus "
+               "refuses both at startup with NotBuilt, because DATA.token_weights and "
+               "LM.lm_loss(token_weights=) are not in this tree -- so no trust weights a token or a "
+               "draw here. Under DATA_TRUST='observe' a source's t is the weight a built actuation "
+               "would apply, and it multiplies nothing")
+    if mode == "off":
+        held = (" A checkpoint's book is carried unchanged to this run's saves, and it reads "
+                "nothing this run consumes." if focus.held is not None else "")
+        return [Gate("data.trust", False, None, None, reachable=False,
+                     reason="DATA_TRUST='off': no book is kept -- DATA.new_focus allocates nothing "
+                            "and the loop's arm test withholds every DATA.claims_observe call "
+                            "before the 'data.trust' gate is asked, so no source is read, no claim "
+                            "formed and no trust set. DATA_TRUST=observe keeps the book and "
+                            "changes nothing the run trains on." + held),
+                actuation]
+    min_ev = int(dat.trust_min_ev)
+    n_read, n_ev, n_trust = len(focus.first_seen), len(focus.evidence), len(focus.trust)
+    if n_trust:
+        why = (f"trust is set for {n_trust} of the {n_read} source(s) read: every source with at "
+               f"least DATA_TRUST_MIN_EV={min_ev} conflicted claims, and two or more of them "
+               f"carry evidence")
+    else:
+        why = (f"{n_read} source(s) read and {n_ev} of them carry evidence -- at least "
+               f"DATA_TRUST_MIN_EV={min_ev} conflicted claims -- and trust is set only when two or "
+               f"more do, so every source's trust is 1 and its r and t are ABSENT")
+    return [Gate("data.trust", n_trust > 0, n_trust, n_read, reason=why), actuation]
+
+
+def new_focus(dat: Config, areas, plan, *, restored=None):
+    """The source-reliability book: an empty one, or the checkpoint's put back. -> Focus.
+
+    THE PRODUCER (K10) OF `focus`, the record both DATA.claims_observe rows take and DATA.stream_state
+    checkpoints (2026-09-28, Proposal 04 §5 entry point 8 and SR3; register 04-6.3, §8 3.4;
+    docs/04_CONTRACT.md Q-DATA-11). An ASSEMBLY row after data_plan. `restored` is the checkpoint's
+    `state['focus']` -- Snapshot.payload['DATA'].get('focus') -- or None. DATA.restore_stream_state
+    does not take it, although 04 §5 moved both calls: the restore row runs before data_plan, so the
+    record it would fill in place does not exist yet, and this row puts the book back instead.
+    `areas` and `plan` are SR2's -- its per-area books are keyed by them -- and SR3 reads neither.
+
+    AT DATA_TRUST='off' IT ALLOCATES NOTHING: a Focus with mode 'off', no counter and two UNREACHABLE
+    gates, holding a checkpoint's book unchanged where there is one (Focus.held).
+    'loss' AND 'loss+draw' ARE REFUSED WITH spine/gate.py::NotBuilt, naming the value, the way
+    OPT_LR_CONTINUE='regulated' is: the actuation needs DATA.token_weights and
+    LM.lm_loss(token_weights=), which this tree does not build.
+    AT 'observe' it allocates the int32 sketch (DATA_TRUST_SKETCH buckets, zeros) and an empty
+    claim table and seeds every data.trust.* counter at 0; given a checkpoint's book it puts that
+    back instead -- and REFUSES BY NAME a sketch of another size (DATA_TRUST_SKETCH) or another
+    estimator or claim shape (DATA_TRUST_RULE, _CLAIM, _CTX, _VAL, _DELIMS), since every bucket and
+    table key is theirs.
+    A table larger than DATA_TRUST_TABLE loses its least recently claimed keys to fit, counted in
+    data.trust.table_evictions. A checkpoint with no book -- written before it, or by a run with the
+    book off -- gives an empty one: 04 §5's "a new source gets trust 1 and ABSENT evidence", for
+    every source at once.
+
+    RETURNS: Focus.
+
+    LEVERS READ: trust, trust_rule, trust_claim, trust_ctx, trust_val, trust_delims, trust_sketch,
+                 trust_table, trust_min_ev (at 'observe', in the data.trust gate's reason)
+    WIRES READ: none
+    DID IT FIRE: Gate data.trust (UNREACHABLE at 'off', naming it; armed at 'observe' until a
+                 source's trust is set), Gate data.trust.actuation (UNREACHABLE on every
+                 configuration this tree builds); the data.trust.* counters, seeded at 'observe' and
+                 ABSENT at 'off'
+    """
+    dat = dat.owned_by("DATA")
+    mode = str(dat.trust)
+    if mode in ("loss", "loss+draw"):
+        raise NotBuilt(
+            f"DATA_TRUST={mode!r} is declared and NOT BUILT (Proposal 04 §1 item 8; register 04-6.3, "
+            f"Proposal 05 §8 3.4; docs/04_CONTRACT.md Q-DATA-11). It weights each token's loss by "
+            f"its source's trust" + (" and multiplies the draw by it" if mode == "loss+draw" else "")
+            + ", through DATA.token_weights and LM.lm_loss(token_weights=), neither of which is in "
+            f"this tree; and 04-6.3's standing rules forbid either value as a default before copy "
+            f"detection is built and while a truthful source in another format is floored. Refused "
+            f"rather than run as 'observe' under a label naming an actuation that never happened. "
+            f"The built values are 'off' (the default) and 'observe', which keeps the book and "
+            f"changes nothing the run trains on.")
+    if mode == "off":
+        focus = Focus(mode="off", held=restored if isinstance(restored, dict) else None)
+        focus.gates = _trust_gates(dat, focus)
+        return focus
+
+    rule = str(dat.trust_rule)          # 'claims', the one rule built; SR5 adds the ablations
+    claim = str(dat.trust_claim)
+    ctx, val = int(dat.trust_ctx), int(dat.trust_val)
+    delims = _trust_delims(dat)
+    size, bound = int(dat.trust_sketch), int(dat.trust_table)
+    focus = Focus(mode="observe", rule=rule, claim=claim, ctx=ctx, val=val, delims=delims,
+                  sketch_size=size)
+    rec = restored if isinstance(restored, dict) and restored.get("mode") == "observe" else None
+    if rec is None:
+        sketch = array.array("i", bytes(4 * size))
+        if sketch.itemsize != 4:
+            raise RuntimeError(
+                f"DATA.new_focus: array('i') holds {sketch.itemsize}-byte items on this platform; "
+                f"the sketch is int32 (DATA_TRUST_SKETCH buckets) and a checkpoint would not "
+                f"restore across platforms.")
+        focus.sketch = sketch
+        focus.table = collections.OrderedDict()
+        focus.counters = {k: 0 for k in _TRUST_COUNTERS}
+        focus.counters[f"data.trust.claims_{claim}"] = 0
+        focus.gates = _trust_gates(dat, focus)
+        return focus
+
+    # THE CHECKPOINT'S BOOK, PUT BACK. The geometry first: a bucket index is crc32(key) % size and a
+    # key is the claim shape's, so a book of another size or shape cannot be read by this one.
+    then = int(rec.get("sketch_size", -1))
+    if then != size:
+        raise CorpusError(
+            f"DATA_TRUST_SKETCH={size}: the checkpoint's source-reliability book counts its claims "
+            f"in a sketch of {then} buckets, and a bucket is crc32(key) modulo that size, so every "
+            f"count would land in another bucket here. Resume at DATA_TRUST_SKETCH={then}, or with "
+            f"DATA_TRUST=off, which carries the book unchanged and reads nothing.")
+    for name, now, was in (("DATA_TRUST_RULE", rule, str(rec.get("rule"))),
+                           ("DATA_TRUST_CLAIM", claim, str(rec.get("claim"))),
+                           ("DATA_TRUST_CTX", ctx, int(rec.get("ctx", -1))),
+                           ("DATA_TRUST_VAL", val, int(rec.get("val", -1))),
+                           ("DATA_TRUST_DELIMS", delims,
+                            tuple(bytes(d) for d in (rec.get("delims") or ())))):
+        if now != was:
+            raise CorpusError(
+                f"{name}: the checkpoint's source-reliability book was built at {was!r} and this "
+                f"run asks for {now!r}. The claim table's keys and values are that shape's -- a "
+                f"key read another way is another key -- so the two books cannot be one. Resume "
+                f"at the recorded value, or with DATA_TRUST=off, which carries the book unchanged.")
+    sketch = rec.get("sketch")
+    if not isinstance(sketch, array.array) or sketch.typecode != "i" or len(sketch) != size:
+        raise CorpusError(
+            f"DATA_TRUST_SKETCH={size}: the checkpoint's book carries no int32 sketch of that size "
+            f"({type(sketch).__name__}), so it cannot be put back.")
+    focus.sketch = array.array("i", sketch)
+    table = collections.OrderedDict()
+    for key, per in rec.get("table") or ():
+        table[bytes(key)] = {str(s): {bytes(v): int(c) for v, c in vals} for s, vals in per}
+    focus.table = table
+    focus.evidence = {str(s): [float(r), int(n)] for s, (r, n) in (rec.get("evidence") or {}).items()}
+    focus.trust = {str(s): float(t) for s, t in (rec.get("trust") or {}).items()}
+    focus.first_seen = {str(s): [int(a), int(b)]
+                        for s, (a, b) in (rec.get("first_seen") or {}).items()}
+    focus.cursor = int(rec.get("cursor", 0))
+    focus.stream = int(rec.get("stream", 0))
+    focus.last_step = int(rec.get("last_step", -1))
+    focus.carry = [[bytes(u), None if s is None else str(s)] for u, s in (rec.get("carry") or ())]
+    focus.counters = {k: int(v) for k, v in (rec.get("counters") or {}).items()}
+    for k in _TRUST_COUNTERS + (f"data.trust.claims_{claim}",):
+        focus.counters.setdefault(k, 0)
+    # A SMALLER BOUND EVICTS THE LEAST RECENTLY CLAIMED KEYS TO FIT, counted as any eviction is.
+    while len(focus.table) > bound:
+        focus.table.popitem(last=False)
+        focus.counters["data.trust.table_evictions"] += 1
+    focus.gates = _trust_gates(dat, focus)
+    return focus
+
+
+def trust_period(dat: Config):
+    """The source-reliability book's cadence, AS units.Windows. Handed to RUN's Cadences.due.
+
+    ONE CONSTRUCTION, for the reason EVAL.curve_period gives: Cadences.due refuses a bare int while
+    Config hands one back for every Clock-unit lever, so the period arrives through this package's
+    typed accessor and spine/compose.py::_periods carries it under the key 'data.trust' (2026-09-28,
+    Q-DATA-11). It is DATA_TRUST_EVERY at DATA_TRUST='observe', and 0 at 'off' -- the gate is
+    disarmed there, and RUN.cadence_audit says so in those words rather than calling a gate the
+    arm test never asks one that "can fire". The loop's arm test runs before the gate is asked
+    either way, so at 'off' the ledger reads 'data.trust' with zero checks. DATA_TRUST_EVERY=0 is
+    the other disarmed arm: the book then passes at each epoch's end only.
+
+    A NEGATIVE IS REFUSED AT THE FIRST READ, BY THE LEVER'S DECLARED DOMAIN (0, None), and not here:
+    the six other period accessors refuse one under their packages' REFUSE_NEGATIVE_PERIOD, and a
+    second refusal of the same range here would be one the domain has left nothing to refuse
+    (tests/test_ownership.py's O15).
+
+    LEVERS READ: trust, trust_every
+    WIRES READ: none
+    DID IT FIRE: Cadences.ledger()["data.trust"]
+    """
+    dat = dat.owned_by("DATA")
+    every = int(dat.trust_every)
+    if str(dat.trust) == "off":
+        return U.Windows(0)
+    return U.Windows(every)
+
+
+def claims_observe(dat: Config, focus, *, units, sources, step, at):
+    """One pass of the source-reliability book over the units the run consumed since the last one.
+
+    Stage B, and R's tail (2026-09-28, Proposal 04 §5 entry point 6 and SR3; register §8 3.4;
+    docs/04_CONTRACT.md Q-DATA-11). `units` is the TOK units' BYTES, in stream order, and `sources`
+    each unit's source name -- or None for a unit whose bytes straddle two sources -- both sliced
+    by the root's join spine/compose.py::_trust_units through Segmentation.byte_pos and
+    Stream.sources. They replace 04's (ids, decode): DATA may not import TOK, and the root holds the
+    bytes. `at` is the index of units[0] in this epoch's segmentation: the book's cursor, where it
+    continues; or 0, where the stream is new -- the carry and the cursor reset and the stream
+    ordinal advances. Any other `at` is refused by name: the root's cut and the book's cursor would
+    disagree, and a unit read twice or skipped is a wrong count. `step` is RunClock.step,
+    units.Windows. Only at DATA_TRUST='observe'; the root's arm test withholds every call at 'off'.
+
+    THE CLAIMS (04 §1 item 8), formed unit by unit in stream order, so a claim does not depend on
+    where a pass falls -- the carry holds the units the next pass needs:
+      'kv'   at each occurrence of a DATA_TRUST_DELIMS entry in the units' bytes: the KEY is the text
+             from DATA_TRUST_CTX units before the unit holding the delimiter's first byte up to that
+             byte, cut after its last punctuation, line break or delimiter; the VALUE is the text
+             after the delimiter to the end of the DATA_TRUST_VAL-th unit after the one holding its
+             last byte, cut at its first punctuation, line break or delimiter. Both are case-folded
+             and their whitespace collapsed, so `@EEE=V;` and `@EEE:V;` are ONE claim, ("eee",
+             "v"). An empty key or value is no claim. The claim is formed when its last unit is
+             read.
+      'ctx'  at each unit with DATA_TRUST_CTX units before it in the stream: the key is those units
+             (each length-prefixed, so two unit sequences with the same bytes are two contexts) and
+             the value is the unit.
+    A claim counts only where ONE source holds every unit it spans (its key's first unit to its
+    value's last). Each goes into the count sketch -- bucket zlib.crc32(key) % DATA_TRUST_SKETCH --
+    and, once its bucket holds DATA_TRUST_HOT claims, into the claim table, as a count for (key,
+    source, value); a key the table holds is moved to its recent end, and a new key beyond
+    DATA_TRUST_TABLE evicts the least recently claimed one.
+
+    THE VOTE, recomputed from the whole table at every pass (d3's ClaimTD): a source's claim on a key
+    is its unique top value there, admitted when it read the key at least DATA_TRUST_MIN_N times and
+    the top value holds at least DATA_TRUST_SELF of them. A key is CONFLICTED when two or more
+    sources claim it with two or more values. Over the conflicted keys, reliability starts at 1 and
+    is re-voted 10 times: each key's truth is the value with the largest summed reliability of its
+    claimants -- a tie within 1e-9 decides nothing -- and r_s = (agree + 1) / (n + 2). A source
+    with n >= DATA_TRUST_MIN_EV has evidence, [r, n]; below it, none (ABSENT). When two or more
+    sources have evidence, each gets t = clip(r / max r, DATA_TRUST_MIN, 1); otherwise no trust is
+    set and every source's is 1. Sources are visited in name order and table keys are bytes hashed
+    by crc32, so the book is the same under every PYTHONHASHSEED.
+
+    RETURNS: None -- the book is updated in place.
+
+    LEVERS READ: trust (the data.trust gate's re-statement), trust_hot, trust_self, trust_min_n,
+                 trust_min_ev, trust_min, trust_table (the claim shape and the sketch size were
+                 read by new_focus and are the book's)
+    WIRES READ: none
+    DID IT FIRE: data.trust.passes (every call), data.trust.updates (passes whose vote had a
+                 conflicted claim), data.trust.units, data.trust.claims (claims formed),
+                 data.trust.claims_kv or claims_ctx (claims the table recorded),
+                 data.trust.conflicted_claims, data.trust.sources and data.trust.evidence_absent
+                 (readings of the last vote), data.trust.table_evictions, data.trust.sketch_load
+                 (occupied buckets); Gate data.trust re-stated
+    """
+    dat = dat.owned_by("DATA")
+    if focus is None or focus.mode != "observe":
+        raise ValueError(
+            f"DATA.claims_observe: the book is {getattr(focus, 'mode', None)!r}, not 'observe'. The "
+            f"loop's arm test (DATA_TRUST != 'off') withholds every pass where no book is kept.")
+    units = list(units)
+    sources = list(sources)
+    if len(units) != len(sources):
+        raise ValueError(f"DATA.claims_observe: {len(units)} unit(s) and {len(sources)} source(s); "
+                         f"the join hands one source per unit.")
+    at = int(at)
+    if at == 0 and focus.cursor != 0:
+        # A NEW STREAM: an epoch roll re-cut the text, or a boundary resume draws the next epoch.
+        focus.carry = []
+        focus.cursor = 0
+        focus.stream += 1
+    elif at != focus.cursor:
+        raise ValueError(
+            f"DATA.claims_observe: this pass starts at unit {at} and the book has read {focus.cursor} "
+            f"unit(s) of stream {focus.stream}. A pass continues at the cursor or opens a new stream "
+            f"at 0; anything else reads a unit twice or skips one.")
+    hot, self_share = int(dat.trust_hot), float(dat.trust_self)
+    min_n, min_ev, floor = int(dat.trust_min_n), int(dat.trust_min_ev), float(dat.trust_min)
+    size, bound = int(focus.sketch_size), int(dat.trust_table)
+    ctr = focus.counters
+    claim_key = f"data.trust.claims_{focus.claim}"
+
+    # THE UNITS THIS PASS READS, after the carry: first sight of each source, by position.
+    for i, s in enumerate(sources):
+        if s is not None and s not in focus.first_seen:
+            focus.first_seen[s] = [int(focus.stream), at + i]
+    seq_u = [bytes(u) for u, _ in focus.carry] + [bytes(u) for u in units]
+    seq_s = [s for _, s in focus.carry] + sources
+    k0 = len(focus.carry)
+    claims = (_kv_claims if focus.claim == "kv" else _ctx_claims)(focus, seq_u, seq_s, k0)
+
+    # INTO THE SKETCH, AND THE HOT ONES INTO THE TABLE, IN STREAM ORDER.
+    sketch, table = focus.sketch, focus.table
+    for key, value, src in claims:
+        ctr["data.trust.claims"] += 1
+        b = zlib.crc32(key) % size
+        c = sketch[b]
+        if c < _TRUST_SKETCH_MAX:
+            sketch[b] = c + 1
+            if c == 0:
+                ctr["data.trust.sketch_load"] += 1
+            c += 1
+        if c < hot:
+            continue
+        per = table.get(key)
+        if per is None:
+            per = table[key] = {}
+            if len(table) > bound:
+                table.popitem(last=False)
+                ctr["data.trust.table_evictions"] += 1
+        else:
+            table.move_to_end(key)
+        vals = per.setdefault(src, {})
+        vals[value] = vals.get(value, 0) + 1
+        ctr[claim_key] += 1
+
+    # THE CARRY: the last units a claim formed later can still reach back to.
+    if focus.claim == "kv":
+        keep = focus.ctx + focus.val + max(len(d) for d in focus.delims) - 1
+    else:
+        keep = focus.ctx
+    focus.carry = [[u, s] for u, s in zip(seq_u[-keep:], seq_s[-keep:])] if keep > 0 else []
+    focus.cursor = at + len(units)
+    focus.last_step = int(step)
+    ctr["data.trust.units"] += len(units)
+    ctr["data.trust.passes"] += 1
+
+    conflicted = _trust_vote(focus, min_n=min_n, self_share=self_share, min_ev=min_ev, floor=floor)
+    if conflicted:
+        ctr["data.trust.updates"] += 1
+    ctr["data.trust.conflicted_claims"] = conflicted
+    ctr["data.trust.sources"] = len(focus.first_seen)
+    ctr["data.trust.evidence_absent"] = sum(1 for s in focus.first_seen if s not in focus.evidence)
+    focus.gates = _trust_gates(dat, focus)
+
+
+def _trust_cut_key(raw, delims):
+    """A 'kv' key's raw bytes cut after the last punctuation, line break or delimiter in them."""
+    cut = 0
+    for i in range(len(raw) - 1, -1, -1):
+        if raw[i] in _TRUST_BOUND:
+            cut = i + 1
+            break
+    for d in delims:
+        j = raw.rfind(d)
+        if j >= 0:
+            cut = max(cut, j + len(d))
+    return cut
+
+
+def _trust_cut_value(raw, delims):
+    """A 'kv' value's raw bytes cut at the first punctuation, line break or delimiter in them."""
+    cut = len(raw)
+    for i, ch in enumerate(raw):
+        if ch in _TRUST_BOUND:
+            cut = i
+            break
+    for d in delims:
+        j = raw.find(d)
+        if 0 <= j < cut:
+            cut = j
+    return cut
+
+
+def _trust_norm(raw):
+    """Case-folded, punctuation stripped, whitespace collapsed (04 §1 item 8's normalisation)."""
+    kept = bytes(ch for ch in raw.lower() if ch not in _TRUST_BOUND)
+    return b" ".join(kept.split())
+
+
+def _one_source(seq_s, lo, hi):
+    """The source every unit in seq_s[lo:hi + 1] shares, or None."""
+    s = seq_s[lo]
+    if s is None:
+        return None
+    for j in range(lo + 1, hi + 1):
+        if seq_s[j] != s:
+            return None
+    return s
+
+
+def _kv_claims(focus, seq_u, seq_s, k0):
+    """The 'kv' claims whose last unit is one this pass read (index >= k0 in the carried sequence),
+    in stream order: [(key, value, source)]."""
+    text = b"".join(seq_u)
+    starts, pos = [], 0
+    for u in seq_u:
+        starts.append(pos)
+        pos += len(u)
+    ends = starts[1:] + [pos]
+    found = []
+    for d in focus.delims:
+        j = text.find(d)
+        while j >= 0:
+            found.append((j, d))
+            j = text.find(d, j + 1)
+    out = []
+    for d0, d in found:
+        e = d0 + len(d)
+        c0 = bisect.bisect_right(starts, d0) - 1
+        c1 = bisect.bisect_right(starts, e - 1) - 1
+        q = c1 + focus.val
+        if q < k0 or q >= len(seq_u):
+            continue                  # formed by an earlier pass, or its value is not read yet
+        k_lo = starts[max(0, c0 - focus.ctx)]
+        raw_key = text[k_lo:d0]
+        kp = k_lo + _trust_cut_key(raw_key, focus.delims)
+        key = _trust_norm(text[kp:d0])
+        raw_val = text[e:ends[q]]
+        value = _trust_norm(raw_val[:_trust_cut_value(raw_val, focus.delims)])
+        if not key or not value:
+            continue
+        src = _one_source(seq_s, bisect.bisect_right(starts, kp) - 1, q)
+        if src is None:
+            continue
+        out.append((q, d0, key, value, src))
+    out.sort(key=lambda t: (t[0], t[1]))
+    return [(k, v, s) for _q, _d, k, v, s in out]
+
+
+def _ctx_claims(focus, seq_u, seq_s, k0):
+    """The 'ctx' claims at every unit this pass read that has DATA_TRUST_CTX units before it:
+    [(key, value, source)], in stream order."""
+    k = focus.ctx
+    out = []
+    for q in range(max(k0, k), len(seq_u)):
+        src = _one_source(seq_s, q - k, q)
+        if src is None:
+            continue
+        key = b"".join(len(u).to_bytes(4, "big") + u for u in seq_u[q - k:q])
+        out.append((key, seq_u[q], src))
+    return out
+
+
+def _trust_vote(focus, *, min_n, self_share, min_ev, floor):
+    """The reliability-weighted vote over the whole table, recomputed from scratch; sets
+    focus.evidence and focus.trust and returns how many keys are conflicted."""
+    conflicted = []
+    for per in focus.table.values():
+        claimed = []
+        for src in sorted(per):
+            vals = per[src]
+            n = sum(vals.values())
+            if n < min_n:
+                continue
+            top = max(vals.values())
+            tops = [v for v, c in vals.items() if c == top]
+            if len(tops) != 1 or top / n < self_share:
+                continue
+            claimed.append((src, tops[0]))
+        if len(claimed) >= 2 and len({v for _s, v in claimed}) >= 2:
+            conflicted.append(claimed)
+    focus.evidence, focus.trust = {}, {}
+    if not conflicted:
+        return 0
+    names = sorted({s for claimed in conflicted for s, _v in claimed})
+    r = {s: 1.0 for s in names}
+    tally = {s: [0, 0] for s in names}
+    for _ in range(_TRUST_ITERATIONS):
+        tally = {s: [0, 0] for s in names}
+        for claimed in conflicted:
+            vote = {}
+            for s, v in claimed:
+                vote[v] = vote.get(v, 0.0) + r[s]
+            ranked = sorted(vote.items(), key=lambda kv: (-kv[1], kv[0]))
+            if len(ranked) > 1 and abs(ranked[0][1] - ranked[1][1]) < _TRUST_TIE:
+                continue              # a tie decides nothing
+            truth = ranked[0][0]
+            for s, v in claimed:
+                tally[s][0] += 1 if v == truth else 0
+                tally[s][1] += 1
+        r = {s: (a + 1) / (n + 2) for s, (a, n) in tally.items()}
+    focus.evidence = {s: [r[s], tally[s][1]] for s in names if tally[s][1] >= min_ev}
+    if len(focus.evidence) >= 2:
+        top = max(e[0] for e in focus.evidence.values())
+        focus.trust = {s: min(1.0, max(floor, e[0] / top)) for s, e in focus.evidence.items()}
+    return len(conflicted)
+
+
+def _focus_state(focus):
+    """What stream_state checkpoints of a Focus: everything but its gates, as plain data."""
+    return {
+        "mode": focus.mode, "rule": focus.rule, "claim": focus.claim, "ctx": int(focus.ctx),
+        "val": int(focus.val),
+        "delims": [bytes(d) for d in focus.delims], "sketch_size": int(focus.sketch_size),
+        "sketch": array.array("i", focus.sketch),
+        "table": [[key, [[src, [[v, int(c)] for v, c in vals.items()]] for src, vals in per.items()]]
+                  for key, per in focus.table.items()],
+        "evidence": {s: [float(r), int(n)] for s, (r, n) in focus.evidence.items()},
+        "trust": {s: float(t) for s, t in focus.trust.items()},
+        "first_seen": {s: [int(a), int(b)] for s, (a, b) in focus.first_seen.items()},
+        "cursor": int(focus.cursor), "stream": int(focus.stream),
+        "last_step": int(focus.last_step),
+        "carry": [[bytes(u), s] for u, s in focus.carry],
+        "counters": {k: int(v) for k, v in focus.counters.items()},
+    }
+
+
+def stream_state(dat: Config, areas, *, focus=None):
     """The mutable state that must survive into a checkpoint: the per-area read cursors, the epoch
     index of the last draw, the holdout block offsets and sizes (and, since 2026-09-27, a digest of
     each block's bytes: Q-DATA-9's review), the areas the lineage has drawn from (Areas.drawn, since
@@ -2354,6 +3106,17 @@ def stream_state(dat: Config, areas):
     seg_contig and silently trains a second time on material the parent already used. The counter
     vector is checkpointed because a DID-IT-FIRE count that resets on resume counts the wrong thing.
     The cached Stream at resample=False is NOT checkpointed -- it is rebuilt from (seed, epoch).
+
+    AND THE SOURCE-RELIABILITY BOOK, UNDER 'focus', WHERE THERE IS ONE (2026-09-28, Proposal 04 §5;
+    docs/04_CONTRACT.md Q-DATA-11): `focus` is the System's Focus, and at DATA_TRUST='observe' its
+    book is written whole -- the claim shape, the int32 sketch, the claim table in its LRU order,
+    each source's evidence, trust and first sight, the per-epoch cursor and stream ordinal, the
+    carried units and the data.trust.* counters -- for DATA.new_focus(restored=) to put back. At
+    'off' nothing is written, so an 'off' run's payload is the one this function wrote before the
+    book existed, unless the Focus holds a checkpoint's book, which is written back unchanged. The
+    sketch is DATA's payload and never a geometry-manifest field -- CKPT.check_geometry refuses a
+    field a checkpoint does not record, so a new one would refuse every checkpoint written before
+    it -- and its size is refused on a resume by new_focus instead.
 
     RETURNS: dict, handed to CKPT.save as part of the opaque payload.
 
@@ -2413,6 +3176,12 @@ def stream_state(dat: Config, areas):
         # thing -- it counts "since the last checkpoint" while being read as "this run".
         "counters": dict(areas.counters),
     }
+    # THE SOURCE-RELIABILITY BOOK (2026-09-28, Q-DATA-11): written only where there is one, so the
+    # payload at DATA_TRUST='off' is the one written before the book existed.
+    if focus is not None and focus.mode == "observe":
+        out["focus"] = _focus_state(focus)
+    elif focus is not None and focus.held is not None:
+        out["focus"] = focus.held
     # THE CACHED Stream AT resample=False IS NOT CHECKPOINTED and that is deliberate: it is rebuilt
     # from (seed, epoch), so saving it would put a second copy of a derivable thing in the payload
     # and let the two disagree.

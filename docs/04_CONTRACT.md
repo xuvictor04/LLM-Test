@@ -19,7 +19,7 @@ WIRES READ:  <comma-separated d_ fields, or "none">
 DID IT FIRE: <the counters that prove the mechanism executed, in G4's three states>
 ```
 
-`tests/test_contract.py` parses those blocks. **All 276** of the declared levers are named by at
+`tests/test_contract.py` parses those blocks. **All 290** of the declared levers are named by at
 least one stub as read by it — **261, not 259, since 2026-09-02: there are now TWO CENSUS
 AMENDMENTS, `OPT_GRAD_CLIP` under Q-OPT-3 and `MEM_JUDGE_FRAC` under Q-MEM-8** (see
 `.rework/CENSUS.md`, section `amendments`, which holds both and states that the census's 328 is
@@ -41,17 +41,18 @@ the same standard was applied to every row rather than to EVAL alone (§3.6). *(
 the count is checkable from the suite rather than from here.)*
 
 **Executable today.** `python3 -c "import sys;sys.path.insert(0,'src');from spine.compose import
-compose; compose(environ={})"` runs the composition root through all 41 rows in `ASSEMBLY_ORDER` and
+compose; compose(environ={})"` runs the composition root through all 42 rows in `ASSEMBLY_ORDER` and
 returns a System at stage `'assembled'` with no refusal — measured 2026-09-27. *(Until Q-EVAL-12's
 review this said it stopped with `NotImplementedError: CAP.startup_refusals: P4 (capacity) fills
 this in` at "the **29th** of the 41 rows": wrong twice, because `CAP.startup_refusals` has a body and
-the `probe` row made it the **30th**. Before that it named `RUN.process_setup`, until 2026-09-04, and
-had been wrong since that entry point got a body: the root then reached past the resume, the
-corpus, the vocabulary, the model, the fabric, the store, the partition and `CAP.new_valve` before it
-halted. Three further copies of the same stale claim — §3.8, §5's `Q-DERIVE-1`, and
-`capacity/api.py::<module>` — were corrected in the same edit, both times. A claim about where the
-root stops is a copy of a fact and rots the way a count does; **K13 could not see any of the four**,
-because what rots here is a symbol name and K13 reads digits.)*
+the `probe` row made it the **30th** — the **31st** since the `focus` row, 2026-09-28. Before that
+it named `RUN.process_setup`, until 2026-09-04, and had been wrong since that entry point got a
+body: the root then reached past the resume, the corpus, the vocabulary, the model, the fabric, the
+store, the partition and `CAP.new_valve` before it halted. Three further copies of the same stale
+claim — §3.8, §5's `Q-DERIVE-1`, and `capacity/api.py::<module>` — were corrected in the same edit,
+both times. A claim about where the root stops is a copy of a fact and rots the way a count does;
+**K13 could not see any of the four**, because what rots here is a symbol name and K13 reads
+digits.)*
 
 ---
 
@@ -144,7 +145,10 @@ eight is restated as a check in `tests/`: a check for them could only ever fire 
 The set declared in the tree and the "both ends obvious" set in `.rework/audits/options_domain.json`
 were compared name by name on 2026-09-14: 33 against 33, nothing in the report undeclared, nothing
 declared the report did not name. The other **174** of the 207 numeric levers carry no pair, and
-that is the honest state rather than an unfinished one — see the ceiling population below.
+that is the honest state rather than an unfinished one — see the ceiling population below. *(Those
+are the 2026-09-14 comparison's numbers. A lever minted since declares its pair where its ends are
+obvious, at birth: on 2026-09-28, 48 of the 224 numeric levers declare one — ten of them the
+source-reliability book's, Q-DATA-11 — and 176 carry none.)*
 
 **`spine/lever.py::REFUSE_NON_FINITE_FLOAT` — the floor.** `nan`, `inf` and `-inf` are refused on a
 **float** lever inside `Lever.coerce`. Its scope is the 97 float levers and nothing else: the 110
@@ -484,7 +488,7 @@ Each section: purpose, public surface, what it receives and from whom, state, ch
 The full prose — every measured defect, every line number — lives in the stub docstrings, which are
 the normative text. This is the index.
 
-### DATA — `src/data/api.py` (22 levers)
+### DATA — `src/data/api.py` (36 levers)
 
 Owns the only bytes the system sees and the only split it is honestly measured on. Goal B needs a
 **non-stationary** stream: `phase_sched` is not a parameter of the continual-learning experiment, it
@@ -495,7 +499,10 @@ Owns the only bytes the system sees and the only split it is honestly measured o
 | `open_areas(dat, *, seed)` | `seed` ← RUN | `Areas` |
 | `data_plan(dat, areas, *, epochs, win_tokens, bytes_per_token)` | RUN, LM, TOK (measured) | `Plan` |
 | `draw_stream(dat, areas, plan, *, epoch, seed)` | RUN | `Stream` |
-| `stream_state(dat, areas)` / `restore_stream_state(dat, areas, state)` | CKPT | dict / — |
+| `stream_state(dat, areas, *, focus=None)` / `restore_stream_state(dat, areas, state)` | CKPT; `focus` ← the `focus` row | dict / — |
+| `new_focus(dat, areas, plan, *, restored=None)` | `restored` ← CKPT (`Snapshot.payload['DATA'].get('focus')`) | `Focus` |
+| `claims_observe(dat, focus, *, units, sources, step, at)` | `units`, `sources` ← the root's join `_trust_units` (TOK's `byte_pos` over DATA's bytes); `step` ← RUN | — (the book, in place) |
+| `trust_period(dat)` | — | `units.Windows` |
 
 **Wires read:** none. **State:** per-area read cursors (load-bearing across epochs), holdout block
 offsets and sizes and, since 2026-09-27, each block's digest (Q-DATA-9's review),
@@ -512,6 +519,13 @@ review): the part of that list held only by the assumption and not drawn since �
 removes each area it draws, `stream_state` records the rest, a later resume reads it back and
 `data.drawn_assumed` names it — so a descendant of such a record does not read the assumption as a
 draw ([] wherever no record of the lineage predates the list, and on a record without the key).
+**The source-reliability book is checkpointed too, and only where it is kept** (2026-09-28,
+Q-DATA-11): `stream_state(..., focus=)` writes `state['focus']` at `trust='observe'` — the claim
+shape, the int32 sketch, the claim table in LRU order, each source's evidence, trust and first
+sight, the per-epoch cursor and stream ordinal, the carried units and the `data.trust.*` counters —
+and nothing at `'off'`, so an `'off'` payload is the one written before the book (a Focus holding a
+checkpoint's book writes it back unchanged). `Areas.sources` and `Stream.sources` are **not**
+checkpointed: `open_areas` and `draw_stream` recompute both from the same files and draw.
 **Counters:** `data.area_open`, `corpus_cap_trip`, `holdout_block`, `val_cap_trip`, `area_refused`,
 `stream_draw`, `segment`, `contig_wrap`, `resample`, `phase_entered`, `phase_resolved`,
 `state_written/restored/refused` (with `state_written_here`, the process twin of the lineage
@@ -520,7 +534,13 @@ only on a resume at `source="synthetic"`, `synth_holdout=True`, and ABSENT elsew
 `drawn_assumed` (Q-FAB-18's review), and three Gates (`exposure_max`, `exposure_skew`,
 `splice_window`) — five since 2026-09-28, with `replay` and `rehearse_parent` (Q-DATA-10), beside
 `replay.fixed_phases`, `replay.bytes`, `replay.newest_boosted`, `rehearse_parent.areas` and the
-per-phase share gauges `share.p<k>.<area>.planned` / `.realised`. **Printed at R since 2026-09-27**,
+per-phase share gauges `share.p<k>.<area>.planned` / `.realised`; and, since 2026-09-28 (Q-DATA-11),
+the book's `trust.passes`, `trust.updates`, `trust.units`, `trust.claims`, `trust.claims_kv` or
+`trust.claims_ctx`, `trust.conflicted_claims`, `trust.sources`, `trust.evidence_absent`,
+`trust.table_evictions` and `trust.sketch_load` (every one ABSENT at `trust='off'`, PRESENT-and-0 at
+`'observe'`) with its two Gates, `data.trust` (UNREACHABLE naming `DATA_TRUST='off'`) and
+`data.trust.actuation` (UNREACHABLE on every configuration this tree builds), all in the root's
+`DATA(trust)` row beside `data.trust.wall_s`, the root's float. **Printed at R since 2026-09-27**,
 in the root's `DATA(areas.counters)`,
 `DATA(areas.gates)`, `DATA(plan.counters)` and `DATA(stream.counters)`
 rows beside the older `DATA(stream.gates)` (Q-DATA-9); before that no row printed them. The Plan's
@@ -569,6 +589,25 @@ since the review). None of it is checkpointed: a resume recomputes the plan from
 and the record's drawn areas, and the stream digest (Q-DATA-9) refuses a continuing resume whose
 draw changed.
 
+**The source-reliability book, `trust='observe'` (2026-09-28, Q-DATA-11; register §8 3.4, 04-6.3),
+built OFF: `'off'` is the default until 04-6.3's flip, which lands last and alone.** Proposal 04 §1
+item 8's book, in observe mode only. `Areas.sources` names, per area, the file each run of its
+carved body came from (per-file boundaries `_read_area` already walks; a synthetic area is one
+source), and `draw_stream` carries them into `Stream.sources`/`Stream.source_names`, run-length,
+taking no draw — the bytes, labels, draw count, gates and the stream digest are what they were.
+`new_focus` is an ASSEMBLY row after `data_plan` and the only place the book is restored
+(`restore_stream_state` runs before any Plan exists). `claims_observe` reads the TOK units the
+windows consumed since its last pass — their bytes and sources, cut by the root's `_trust_units`
+through `Segmentation.byte_pos` (04's `ids` plus `decode`, which DATA may not import) — forms `'kv'`
+or `'ctx'` claims unit by unit in stream order, counts each in the int32 sketch, records the hot
+ones in the LRU table, and re-votes the whole table: r_s = (agree + 1)/(n + 2) over the conflicted
+keys, iterated 10 times, a tie within 1e-9 deciding nothing, evidence only at n ≥ `trust_min_ev` and
+trust t = clip(r/max r, `trust_min`, 1) only when two or more sources carry it. Its cursor is **per
+epoch**: a pass at 0 opens a new stream (the carry and cursor reset), a pass at the cursor continues
+it, and anything else is refused by name. `trust='loss'` and `'loss+draw'` are refused at startup
+with `NotBuilt`; `trust_period` is 0 at `'off'` and `trust_every` at `'observe'`. It moves nothing
+the run trains on: SR3's bit-identity is `tests/test_trust.py`.
+
 **The synthetic source's held-out law is a lever (2026-09-27, Q-DATA-9).** At `synth_holdout=True`
 `open_areas` runs the real sources' carve on each generated body **verbatim** — size, per-area child
 stream, removal, seam, overlap, val-cap tally, and the 0-byte refusal (whose message then names
@@ -591,14 +630,18 @@ source the record's block digest refuses a text that moved under agreeing offset
 Two levers (`dir`, `corpus_cap`) are **arm-dead** under `source="synthetic"`, and two more
 (`holdout_frac`, `val_cap`) are there at `synth_holdout=False` only; `n_processes` and `synth_holdout`
 are arm-dead under `source="real"`; `replay_share` and `replay_newest` are read only at
-`draw='replay'`, and `rehearse_parent` moves a byte only there (2026-09-28). That is a declared arm
-reported through a Gate, not an unread lever. (`seg_contig` was listed here as arm-dead under `source="synthetic"` until 2026-09-27, and it
-is not: `draw_stream` reads it on both sources.)
+`draw='replay'`, and `rehearse_parent` moves a byte only there (2026-09-28); the book's thirteen
+`trust_*` levers are read only at `trust='observe'` (2026-09-28, Q-DATA-11), `trust_every` also by
+`trust_period` at `'off'`, where it is not the period. That is a declared arm reported through a
+Gate, not an unread lever. (`seg_contig` was listed here as arm-dead under `source="synthetic"`
+until 2026-09-27, and it is not: `draw_stream` reads it on both sources.)
 **Where they are called (§3):** `draw_stream` is the first statement of stage `E` **and** an
 `ASSEMBLY_ORDER` row for epoch 0, called UNCONDITIONALLY so `dat.resample` is a state this package
 REPORTS rather than a branch the caller takes; `restore_stream_state` is a row immediately after
 `open_areas` and before `data_plan`; `stream_state` is a stage-`C` row. Before this edit nothing in
-either table drew a stream at all.
+either table drew a stream at all. Since 2026-09-28 (Q-DATA-11) `new_focus` is the `focus` row after
+`data_plan`, `claims_observe` a `B` row (behind its arm test, before the retention probe) and an `R`
+row (a stop's tail), and `trust_period` a value of `compose._periods`, key `'data.trust'`.
 
 ### TOK — `src/tok/api.py` (18 levers)
 
@@ -1316,6 +1359,7 @@ training path and 1 byte on the eval path with every check green.
 | `_holdout_units` / `_holdout_tokenize` / `_gen_prompts` | `units_by_domain` (the arrived areas' pinned `(prefix, window)` pairs, with `seen_by_parent`), `tokenize_fn` (`TOK.tokenize` at the last cut's view, no labels, no regularizer) and `prompts_by_domain` (report-half windows — each its routing prefix, its bytes and their cut at that view) — Q-EVAL-12. |
 | `_phase_of` / `_phase_windows` / `_probe_notices` | the phase a window's first byte falls in (the phase-start read's test) and the startup notices, printed and never applied — Q-EVAL-12. |
 | `_area_ids` / `_window_areas` / `_faded_ids` | `area_id` (`FAB.observe`: one per window, its first token's area), `areas` (`MEM.write`: one per position, beside `positions`) and `faded` (`FAB.manage`: `Plan.faded` at the window's phase plus `Plan.parent_faded`), each as `spine/derive.py::area_id` numbers over `Stream.area_names` — Q-FAB-18, Q-MEM-16. |
+| `_trust_units(sysm, lo, hi)` | `units` and `sources` (`DATA.claims_observe`): each TOK unit's **bytes** over this epoch's `ids[lo:hi]`, cut out of `Stream.bytes` at `Segmentation.byte_pos`, and each unit's source name off `Stream.sources`/`Stream.source_names` — `None` where a source run starts inside the unit. It replaces 04's `ids` plus a root-composed `decode` (DATA may not import TOK) — Q-DATA-11. |
 
 What is deliberately **not** there, because writing it would be inventing a producer rather than
 naming one: an `improving` EMA pair (FAB already keeps one, and a second would be two mechanisms
@@ -1339,9 +1383,9 @@ with a table of its own that no check can see is still an orphan.*
 |---|---|---|
 | `E` | before the first window of an epoch, and again whenever `RunClock.advance` returns `Tick.rolled` | `DATA.draw_stream` → `TOK.tokenize` → `RunClock.begin_epoch`. The root also stamps `clock.opt_steps` here as the `shift_at` `OPT.maybe_step` consumes — a resample is a **self-inflicted** shift, and the old tree carried that fact in a closure variable (`:6518-6521`). **At the shipped default these rows never run — see below.** |
 | `A` | per WINDOW, above the accumulator | `MEM.census` (before `DOM.manage`, whose `memory_counts`/`mem_floor_entries` had **no producer**), `DOM.manage`, `DOM.census` (supplying `live_sources` and `live_domains`), `FAB.manage`, `SIG.cadence_due` → `SIG.train_step` (before `encode`), `SIG.encode`, `DOM.observe`, `DOM.rekey` (after `observe`), `TOK.on_window`, `RunClock.advance`. `MEM.judge` and `WORLD.manage` **were here and are now deferred** (§3.6). |
-| `B` | per FLUSH | the flush body, plus `TOK.judge_probation`, event-driven on the `Due.probation` `TOK.on_window` already asked at `A`. `CAP.observe` and `FAB.contribution` **were here and are now deferred**. Since 2026-09-27, per WINDOW after the flush and the act: the retention probe's `EVAL.holdout_probe` → `EVAL.blowup` → `CKPT.Retention.consider`, behind its arm test (Q-EVAL-12). |
+| `B` | per FLUSH | the flush body, plus `TOK.judge_probation`, event-driven on the `Due.probation` `TOK.on_window` already asked at `A`. `CAP.observe` and `FAB.contribution` **were here and are now deferred**. Since 2026-09-27, per WINDOW after the flush and the act: the retention probe's `EVAL.holdout_probe` → `EVAL.blowup` → `CKPT.Retention.consider`, behind its arm test (Q-EVAL-12) — and since 2026-09-28, before them, the source-reliability book's `DATA.claims_observe`, behind its own (`DATA_TRUST != 'off'`), on its cadence and on the window that rolls the epoch (Q-DATA-11). |
 | `C` | the CHECKPOINT FAN-OUT — an **event**, entered from `B` (periodic/SIGUSR1, and a `BestAction` since 2026-09-27, followed by `Retention.note_saved`) and `R` (final) | the twelve `state_dict`/`state`/`vocab_state`/`stream_state`/`Retention.state`/`WORLD.geometry` calls that build the payload and the recorded manifest, then `TOK.save_vocabulary`, then `CKPT.save`. *(2026-09-26: the driver, `spine/loop.py::_save`, calls `CKPT.save` first and `TOK.save_vocabulary` only when it wrote, and since this date that order is load-bearing: the vocabulary's rotation with `ckpt.pt.prev` must not run for a checkpoint CKPT refused. The rows list the reverse order and are unchanged, since K6 checks reach, not order.)* |
-| `R` | once, after `Tick.finished` | the retention probe's boundary reading (`EVAL.holdout_probe`, both closures, at the head), `DOM.prior`, both censuses, every `counters()`, `Cadences.ledger()`, `RUN.bench_summary`, the `reason="final"` save, and `EVAL.generate` after it. `MEM.read` and `MEM.blend` **were rows here until 2026-08-30**; since 2026-09-27 they are reached through the memory-on closure the R probe row's note names (Q-MEM-10, amended). |
+| `R` | once, after `Tick.finished` | the retention probe's boundary reading (`EVAL.holdout_probe`, both closures, at the head), the source-reliability book's tail pass where a stop left consumed units unread (`DATA.claims_observe`, Q-DATA-11), `DOM.prior`, both censuses, every `counters()`, `Cadences.ledger()`, `RUN.bench_summary`, the `reason="final"` save, and `EVAL.generate` after it. `MEM.read` and `MEM.blend` **were rows here until 2026-08-30**; since 2026-09-27 they are reached through the memory-on closure the R probe row's note names (Q-MEM-10, amended). |
 
 **`Tick.rolled` and `Tick.finished`: the precedence, and the E stage on a one-epoch run.**
 `advance()` sets `rolled` when the stream is exhausted and the epoch increments, and `finished` when
@@ -1374,7 +1418,11 @@ Three independent reasons, any one of which is sufficient:
 `resume_source` → `load` (both before the first refusal, because six constructors already take
 `restored=`) → `DATA.restore_stream_state` (after `open_areas`, before `data_plan`) →
 `TOK.build_vocabulary` → `TOK.restore_vocab` → **`CKPT.check_geometry`** → everything else, with
-each remaining restore immediately after its own package's constructor.
+each remaining restore immediately after its own package's constructor. **The source-reliability
+book is put back by its constructor, `DATA.new_focus(restored=Snapshot.payload['DATA'].get('focus'))`,
+the `focus` row after `data_plan`** (2026-09-28, Q-DATA-11): 04 §5 moved `restore_stream_state` to
+take `focus=` and fill it in place, and that row runs before any `Plan` — so before the record it
+would fill — exists.
 
 **Where the gate sits is the load-bearing part.** `check_geometry` is the last row before
 `LM.build_model`, which is the **first allocation** in the whole assembly. The old gate at
@@ -1425,13 +1473,19 @@ Every periodic row names a period a package **declares**, evaluated through
 | `fab.manage` | `FAB.manage_period(fab)` ← `FAB.manage_every` | FAB |
 | `dom.rekey` | **`MEM.rekey_period(mem)`** ← `MEM.rekey_every` | MEM — delivered by the spine, with the `SIG.mode == "learned"` arm also evaluated here, because the old line made *two foreign reads in one line* (`:6688-6689`) |
 | `ckpt` | `CKPT.save_period(ck)` ← `CKPT.every` | CKPT |
+| `retention` | `EVAL.retention_period(ev)` ← `EVAL.retention_every` | EVAL — the retention probe, since 2026-09-27 (Q-EVAL-12); its arm test is asked first, so at the shipped 0 the key reads `checks == 0` |
+| `data.trust` | `DATA.trust_period(dat)` ← `DATA.trust_every` at `DATA_TRUST='observe'`, **0** at `'off'` | DATA — the source-reliability book, since 2026-09-28 (Q-DATA-11); its arm test (`DATA_TRUST != 'off'`) is asked first, so at the shipped `'off'` the key reads `checks == 0` at period 0, which `RUN.cadence_audit` reports DISARMED |
+| `progress` | `RUN.PROGRESS_WINDOWS`, a module constant written `units.Windows` | RUN — the progress/ETA line (Q-RUN-1); no lever and no row of its own |
 | MEM's probe/rekey | `MEM.probe_every`, `MEM.rekey_every`, compared inside `maintain` against a Windows `now` | MEM — **NOT ledger gates**, see below |
 
-**Five keys go through the ledger; three comparisons do not, and the document and the code must
-agree on the count.** The table above has six rows and `Cadences.ledger()` has five keys, because the
-last row is **two comparisons inside `MEM.maintain`** and a third, `SIG.cadence_due`, is a row of its
-own. None of the three is a ledger gate, and a gate that is not in the ledger has a **"0 fires"
-nobody can read** — so each names its own surface instead:
+**Eight keys go through the ledger; three comparisons do not, and the document and the code must
+agree on the count.** The table above has nine rows and `Cadences.ledger()` has eight keys, because
+the last row is **two comparisons inside `MEM.maintain`** and a third, `SIG.cadence_due`, is a row of
+its own. *(This said five keys and six rows until 2026-09-28: `progress` (Q-RUN-1, 2026-09-02) and
+`retention` (Q-EVAL-12, 2026-09-27) had joined the ledger without joining this table, and
+`data.trust` (Q-DATA-11) was added with the two.)* None of the three is a ledger gate, and a gate
+that is not in the ledger has a **"0 fires" nobody can read** — so each names its own surface
+instead:
 
 | comparison | why it cannot go through `Cadences.due` | the did-it-fire surface it uses instead |
 |---|---|---|
@@ -1442,10 +1496,14 @@ nobody can read** — so each names its own surface instead:
 `MEM.rekey_period`'s own docstring says this in as many words ("MEM.maintain compares this same lever
 against a Windows `now` internally; that is the second gate on one lever"). The rows now say it too,
 so a reader counting gates from the code and a reader counting them from this table get the same
-answer: **five ledger keys, three unledgered comparisons, each with a named counter.**
+answer: **eight ledger keys, three unledgered comparisons, each with a named counter.**
 
 **All five accessors now REFUSE a negative period, and the refusal is switchable — the owner's
-ruling of 2026-09-04, `.rework/DECISIONS.md` D17.** `EVAL.curve_period`, `DOM.manage_period`,
+ruling of 2026-09-04, `.rework/DECISIONS.md` D17.** *(Six since 2026-09-27: `EVAL.retention_period`
+refuses under EVAL's switch. The seventh accessor, `DATA.trust_period` (2026-09-28, Q-DATA-11),
+refuses nothing itself: `DATA_TRUST_EVERY` declares `domain=(0, None)`, so a negative is refused at
+the first read, by name, and a second refusal at the accessor would have nothing left to refuse —
+O15.)* `EVAL.curve_period`, `DOM.manage_period`,
 `FAB.manage_period`, `MEM.rekey_period` and `CKPT.save_period` each raise the spine's `LeverError` on
 a negative value of **their own** lever, naming the lever and the value, and each fires **before**
 the `units.Windows` is constructed, so nothing is derived from the bad number. **A period of 0 is
@@ -1480,8 +1538,9 @@ before any accessor is called — where it used to floor the value to `Flushes(1
 cadence in the system. FAB's own guard is unreachable through `assemble.build` because of it, and
 kept for the caller that builds a `Config` any other way, which is D4's rule and not an oversight.
 **What the ruling does NOT reach, said so this is not read as covering every cadence in the tree.**
-The sixth entry in `compose.py`'s `_periods` is `RUN.PROGRESS_WINDOWS`, a module constant rather than
-a lever, so no environment value can make it negative. Of the three **unledgered** comparisons in the
+The last entry in `compose.py`'s `_periods` is `RUN.PROGRESS_WINDOWS` (the sixth until 2026-09-27,
+the eighth since 2026-09-28), a module constant rather than a lever, so no environment value can make
+it negative. Of the three **unledgered** comparisons in the
 table above, MEM's probe and MEM's internal rekey read `probe_every` and `rekey_every` inside
 `MEM.maintain`, which is a stub — there is nothing to guard yet, and when P4 writes it the guard
 belongs at the first read of the lever under that package's own `REFUSE_NEGATIVE_PERIOD`, which is
@@ -1632,11 +1691,12 @@ on the resume path an empty environment never takes. That is the shape this file
 *"a defect hidden behind an earlier stub, this project's oldest"*. *(This paragraph said
 `RUN.process_setup` "raises several rows earlier" until 2026-09-04. It was true when written and had
 not been for some time — `RUN.process_setup` is the first row and has had a body since **D12**. The
-shape is unchanged; only the name of the stub these defects hide behind has moved. And it said
-"halts on the **29th** of the 41 rows in `ASSEMBLY_ORDER`" until Q-EVAL-12's review: nothing halts
-it now — `compose(environ={})` returns a System at stage `'assembled'` (measured 2026-09-27) — and
-`CAP.startup_refusals` is the **30th**. The six sit past a stub no longer; the resume path is still
-one an empty environment never takes.)*
+shape is unchanged; only the name of the stub these defects hide behind has moved. And until
+2026-09-27 (Q-EVAL-12's review) it said "halts on the **29th** of the 41 rows in `ASSEMBLY_ORDER`":
+nothing halts it now — `compose(environ={})` returns a System at stage `'assembled'` (measured
+2026-09-27) — and `CAP.startup_refusals` is the **31st** (the 30th until the `focus` row,
+2026-09-28). The six sit past a stub no longer; the resume path is still one an empty environment
+never takes.)*
 
 1. **`new_cadences` was called with no `periods`.** `new_cadences(run: Config, *, periods)` is
    keyword-only with no default, the ASSEMBLY row describes the five-key mapping in detail, and the
@@ -1648,7 +1708,7 @@ one an empty environment never takes.)*
    `System.warnings`; an **empty** list is a real result and must be printed as one.
 3. **`_run_windows` returned a bare `int`** into two functions that refuse one:
    `derive.cadences_that_cannot_fire` and `derive.opt_steps_from_windows` both raise `UnitError` on
-   a non-`Windows` (ISSUES P1-H51: all 37 Clock-unit levers resolve to bare ints and the typing is real
+   a non-`Windows` (ISSUES P1-H51: all 38 Clock-unit levers resolve to bare ints and the typing is real
    only where `derive` puts it back). It now returns `units.Windows`.
 4. **`_run_windows`' row said `run_windows=Plan's measured length`.** `Plan` has no such field
    (`data/api.py:22`) — the same wrong fact the helper's own docstring had already caught once, in
@@ -1799,7 +1859,7 @@ been fixed is a real outcome and acting on it writes a second wrong sentence. **
 The union of the five `levers_unconsumed` lists was **15**. Thirteen of them were EVAL's, and all
 thirteen were given a declared reader by writing the P6 instrument signatures into
 `src/eval/api.py`. **The last two were FAB's, and as of 2026-09-02 this table is EMPTY: every one of
-the 276 declared levers is named `LEVERS READ:` by a stub.** Neither of the two was dropped, and
+the 290 declared levers is named `LEVERS READ:` by a stub.** Neither of the two was dropped, and
 neither was given a fake reader; each was ruled, and the ruling is what produced the reader.
 
 | lever | env name | why it has no reader | disposition |
@@ -2018,7 +2078,8 @@ because `compose()` **then** stopped at `RUN.process_setup`, long before the val
 longer where it stops, and this sentence said it was until 2026-09-04: `compose(environ={})` then
 halted at `CAP.startup_refusals`, which is **past** `CAP.new_valve`. It halts nowhere now, and this
 sentence said "now halts on the 29th of the 41 rows" until Q-EVAL-12's review: it returns a System
-at stage `'assembled'` (measured 2026-09-27), and `CAP.startup_refusals` is the 30th row. Either
+at stage `'assembled'` (measured 2026-09-27), and `CAP.startup_refusals` is the 31st row (the 30th until
+the `focus` row, 2026-09-28). Either
 way the valve is built on every `compose()` today and all three of its Gates — `cap.valve`,
 `cap.vocab_arm_honest`, `cap.clamp`; "both" here until the same review, one Gate behind
 `capacity/api.py` — are readable without writing a line. The reading that found this one still had
@@ -2970,7 +3031,7 @@ prints rather than a claim in a docstring.
 **What it does NOT need, and this is why nothing was minted.** No typed accessor and therefore **no
 new entry point**. The **five** accessors — `EVAL.curve_period`, `DOM.manage_period`,
 `FAB.manage_period`, `MEM.rekey_period`, `CKPT.save_period` — exist because `Config` hands back a
-bare `int` for all 37 Clock-unit *levers* (ISSUES P1-H51, three of five gates handed bare ints until
+bare `int` for all 38 Clock-unit *levers* (ISSUES P1-H51, three of five gates handed bare ints until
 2026-08-30); a module constant has no `Config` to drop its kind, so it is written `units.Windows` at
 its definition. That is a **construction, not a conversion** — it re-attaches a kind, it does not
 cross one. *(This sentence said "four" until 2026-09-03. It is the sixth count this document has got
@@ -2978,9 +3039,9 @@ wrong, and the one K13 cannot catch: **`four` is a word, and the check reads dig
 in K13's own docstring as the worked example of what it does not see.)*
 
 **And this gate has no row**: rows are entry-point calls and no entry point prints the progress line
-— the loop driver does, the way it owns the window cut `_window_bounds` names. So seven keys since
-2026-09-27 (`'retention'`, Q-EVAL-12), six of them rowed, and that asymmetry is stated at `_periods`,
-at `new_cadences` and in the `cadence` row.
+— the loop driver does, the way it owns the window cut `_window_bounds` names. So eight keys since
+2026-09-28 (`'data.trust'`, Q-DATA-11; seven from 2026-09-27, `'retention'`, Q-EVAL-12), seven of them
+rowed, and that asymmetry is stated at `_periods`, at `new_cadences` and in the `cadence` row.
 
 **⚠ THE ASYMMETRY IS NO LONGER ONLY STATED — K9 WAS WIDENED TO READ THE MAPPING (2026-09-03).** This
 section said *"`K9` reads the order tables only"*, and that was true and was the defect: the sixth
@@ -3274,8 +3335,9 @@ load-bearing here: a P4 author who believes the docstring goes looking for eight
 **Why the root is the right owner, positively.** It already owns three named cross-package
 arithmetics with exactly this justification — `_signature_width` and `_alphabet_size` (*"the
 assembly's own arithmetic over two packages' frozen Configs, which is exactly what the root is
-for"*) and `_periods` (*"a mapping spanning six packages is exactly the object O10 forbids any one
-of them to build"*). The manifest is the same object and belongs in the same place.
+for"*) and `_periods` (*"a mapping spanning seven packages is exactly the object O10 forbids any one
+of them to build"* — six until `'data.trust'` brought DATA in, 2026-09-28). The manifest is the same
+object and belongs in the same place.
 
 **`WORLD.geometry` is NOT dropped, and (c) must not be read as dropping it.** It is the only
 `geometry()` in the tree and it is correctly placed: it is the only producer of a field that needs a
@@ -7548,6 +7610,197 @@ where it stood:
 counts and the Gates move only under 'replay', the refusal only at `DATA_REHEARSE_PARENT=1` under
 'replay', and the new record key is a list; B1, B3, B3r, B5, B6 and B6r reproduce their fixtures.
 
+### Q-DATA-11 — the source-reliability book in observe mode, and the sources it reads — **RESOLVED 2026-09-28 (Proposal 05 §8 3.4; register 04-6.3; Proposal 04 §1 item 8, §5, §6 and SR3): `DATA_TRUST` BUILT `'off'`, `'observe'` BUILT AND `'loss'`/`'loss+draw'` REFUSED WITH `NotBuilt`; THIRTEEN LEVERS OF ITS BOOK; `Areas.sources` AND `Stream.sources`; THE `Focus` RECORD THROUGH `DATA.new_focus(restored=)`, `DATA.claims_observe` AND `DATA.trust_period`; SR3's BIT-IDENTITY. ⚠ FOURTEEN NEW LEVERS, FOURTEEN CENSUS AMENDMENTS, THREE NEW ENTRY POINTS AND ONE MOVED (`DATA.stream_state(..., focus=None)`). NO WIRE, AND NO NUMBER A DEFAULT RUN TRAINS ON MOVES. `DATA_SRC_CAP` IS NOT BUILT: DEFERRED TO §8 4.7, WITH THE REGISTER'S NOTE**
+
+**What was asked.** Proposal 04 §1 item 8: a model-free source-reliability book, observe mode only —
+claims a source makes about a key ('kv', a normalised (key, value) pair around a delimiter, the build
+target; 'ctx', d3's raw context and next unit, kept as an arm), admitted at `DATA_TRUST_MIN_N` readings
+with a top-value share of `DATA_TRUST_SELF`, pre-filtered by a count sketch hot at `DATA_TRUST_HOT`;
+only conflicted claims (two or more sources, two or more values) are evidence; a reliability-weighted
+vote, r = (agree + 1)/(n + 2) iterated 10 times, a tie deciding nothing; t = clip(r / max r,
+`DATA_TRUST_MIN`, 1), set only with `DATA_TRUST_MIN_EV` conflicted claims, below which evidence is
+ABSENT and trust 1. §5 gives the surface: `DATA.claims_observe(dat, focus, *, ids, sources, step,
+decode)` at stage B, `DATA.new_focus(dat, areas, plan) -> Focus` as the assembly row after
+`data_plan`, `DATA.trust_period(dat)`, `stream_state` and `restore_stream_state` taking `focus=`, and
+the checkpoint carrying the claim table, the sketch, r, t and first-seen per source. §6 gives the
+levers and values, SR3 the build and its test — "'observe' against 'off' is bit-exact on training
+numbers" — and 04-6.3 rules 'observe' ON as telemetry once that holds, actuation OFF. The register's
+Stage-3 plan builds it OFF here, flips it last and alone, defers the TOK channels and the
+actuation, and defers `DATA_SRC_CAP` (O18: "built OFF (0) at SR3") with a note where it is ruled. Its
+critic asked for a per-EPOCH cursor reset at every roll and carried across saves, an epoch roll in the
+continuation test, `'focus'` in `System.__slots__`, `DATA_TRUST_EVERY` refused below 0 by a domain,
+and G3 extended to the new accessor (finding 23); `data.trust.wall_s` a float outside the integer
+channel, never checkpointed (19); 33 `ROW_ARGUMENTS_ELSEWHERE` entries (2); the `DATA_SRC_CAP`
+deferral written where it is ruled and not only here (13); and the counts no tool reads — 38
+Clock-unit levers, `_periods` spanning seven packages, EIGHT gates in `RUN.new_cadences`' row (16).
+
+**The ruling, as built.**
+* **The levers** (`src/data/levers.py` §6; census amendments, the eighteenth to the thirty-first).
+  `trust` ('off' | 'observe' | 'loss' | 'loss+draw', default 'off'); `trust_rule` ('claims', the one
+  rule built — 'peer', 'residual' and 'fluency' are SR5's and not choices until built); `trust_claim`
+  ('kv' | 'ctx'); `trust_ctx` 5 and `trust_val` 1 (TOK units, domain (1, None)); `trust_delims`
+  ('=|:| is | are | was | were ', a '|'-separated U.NAME, refused by name at `new_focus` for an empty,
+  repeated or prefix-of-another entry); `trust_hot` 20, `trust_min_n` 3, `trust_min_ev` 10 (U.COUNT,
+  domain (1, None)); `trust_self` 0.8 and `trust_min` 0.3 (U.FRACTION, domain (0.0, 1.0));
+  `trust_every` 160 (U.Windows, domain (0, None) — a negative is refused at the first read, so
+  `trust_period` carries no second refusal, O15; the Clock-unit lever count is 38); `trust_sketch`
+  4194301 (U.SLOTS) and `trust_table` 200000 (U.ENTRIES), domain (1, None). Every value but `trust`'s
+  is 04 §6's and provisional (NEW-19).
+* **The sources.** `Areas.sources` is, per area, [(body offset, source name)]: `_read_area` hands back
+  the per-file boundaries its walk already had (one entry per file contributing a byte), and
+  `open_areas` maps them onto the carved body — an offset before the held-out block stays, one past it
+  moves down by the block's size, one inside it moves to the block's offset, and of entries landing on
+  one offset the last is kept. A real area's source is its file, "<the entry's path under
+  DATA_DIR>/<file>" (`train/eng/alice.txt`); a synthetic area is one source,
+  `synthetic:order2:<label>` (`_synthetic_areas` returned a positional `synthetic:order2:<i>` that
+  nothing read). `draw_stream` carries them into **`Stream.sources`**, run-length ((stream offset,
+  index), …), and **`Stream.source_names`**, per chunk and per wrap piece, **taking no draw**: the
+  bytes, labels, splices, draw count, counters, gates and the digest the segmentation log carries are
+  what they were (`tests/test_trust.py` S2 draws the same Areas with its table emptied and compares
+  all of them). Neither is checkpointed; both are recomputed from the same files and draw.
+* **The book, `DATA.Focus`**, the one DATA record that is a book and not a statement, so not frozen.
+  `new_focus` is the `focus` ASSEMBLY row after `data_plan` and `System.focus` holds it. At 'off' it
+  allocates nothing — no sketch, no table, no counter, two UNREACHABLE gates — and holds a checkpoint's
+  book unchanged (`Focus.held`) for that run's saves to write back. At 'observe' it builds the int32
+  sketch (array('i'), itemsize checked) and an empty LRU table and seeds every `data.trust.*` counter
+  at 0, or puts a checkpoint's book back. 'loss' and 'loss+draw' raise `NotBuilt` there, at startup
+  before any tensor, their messages opening with `DATA_TRUST='loss'` / `'loss+draw'` (G2), the
+  `OPT_LR_CONTINUE='regulated'` precedent.
+* **The claims** (`claims_observe`), formed unit by unit in stream order and the same however a stream
+  is cut into passes — `Focus.carry` holds the units the next pass needs (`DATA_TRUST_CTX` for 'ctx';
+  `CTX + VAL + D - 1` for 'kv', D the longest delimiter). 'kv': at each occurrence of a delimiter in
+  the units' bytes, the key is the text from `CTX` units before the unit holding its first byte up to
+  that byte, **cut after its last punctuation, line break or delimiter** — the tree's reading of 04's
+  "up to CTX units", so `x=1; y=2` claims "y" and not "1 y" — and the value the text after it to the end
+  of the `VAL`-th unit after the one holding its last byte, cut at the first; both case-folded,
+  punctuation stripped, whitespace collapsed, so `@EEE=V;` and `@EEE:V;` are one claim ("eee", "v").
+  An empty key or value is none; a claim is formed when its last unit is read. 'ctx': each unit with
+  `CTX` units before it in the stream, the key those units length-prefixed. A claim counts only where
+  ONE source holds every unit it spans; a unit whose bytes straddle two sources has none. Each claim
+  goes into the sketch (bucket `zlib.crc32(key) % DATA_TRUST_SKETCH`, saturating int32) and, once its
+  bucket holds `DATA_TRUST_HOT`, into the table as a count for (key, source, value), the key moved to
+  the table's recent end or inserted with the least recently claimed evicted past `DATA_TRUST_TABLE`.
+* **The vote**, recomputed over the whole table at every pass (d3's ClaimTD): a source's claim on a key
+  is its UNIQUE top value there (a tie at the top is no claim — the vote's own "a tie decides
+  nothing"), admitted at `MIN_N` readings and a `SELF` share; conflicted keys as 04 says; r from 1,
+  re-voted 10 times, a tie within 1e-9 skipped; evidence [r, n] only at n ≥ `MIN_EV`, trust only when
+  two or more sources carry evidence. Sources in name order, keys bytes, the bucket a crc32: the book is
+  the same under every `PYTHONHASHSEED` (T4). `tests/test_trust.py` T3 holds the vote to a transcription
+  of the prototype's `update()` on random tables.
+* **The cursor is per epoch, and `claims_observe` takes `at`.** `at` is the index of `units[0]` in this
+  epoch's segmentation: the book's cursor continues it; 0 opens a new stream (the carry and cursor
+  reset, `Focus.stream` advances); anything else is refused by name. The root carries `lo`, the cursor,
+  and `hi`, the end of the ids the windows cut so far (`bounds[1]`, the cut's own end, so a mid-epoch
+  act's re-cut tail is never read early and the kept prefix `ids[:k0 + 1]` is the one trained); stage
+  E puts both back to 0. A process starts at 0 at `in_epoch` 0 and, mid-epoch, at the book's cursor
+  only if its last pass fell in this epoch (`Focus.last_step` past `clock.step - in_epoch`) — so a
+  periodic save taken after a roll and before the next pass (whose cursor is the last epoch's) resumes
+  reading this epoch from unit 0, as the uninterrupted run does (T5).
+* **The loop.** A `B` row at the flush tail, after the X block and before the retention probe: the arm
+  test (`DATA_TRUST != 'off'`) before `Cadences.due('data.trust', DATA.trust_period(dat), clock)`, and
+  a pass on the window that rolls the epoch, due or not (on a rolling tick that cut no window, after
+  the cut's branches), so the book reads every unit of an epoch before the roll replaces its
+  segmentation. An `R` row inside the try that saves on a raising R stage, after the boundary reading:
+  a stop that left consumed units unread (a `max_windows` stop mid-epoch) gets one more pass, so the
+  report and the final checkpoint hold every unit this process consumed and a continuation goes on
+  from the cursor. The join is `compose.py::_trust_units` (§3.0.2), `ROW_ARGUMENTS_ELSEWHERE` names it
+  (33 entries). `data.trust.wall_s` is the root's float, timed around the join and the call, printed
+  to six places in the `DATA(trust)` row, never checkpointed and never in the integer channel (T8).
+  `RunResult.trust_series` holds one dict per pass and `run.py --trust-series` writes it; the gated
+  call-site report carries `DATA.claims_observe` on `data.trust.passes`; `_CALLS` lists it at B and R.
+* **`DATA.trust_period(dat)`** is `units.Windows(DATA_TRUST_EVERY)` at 'observe' and **0 at 'off'**, so
+  `RUN.cadence_audit` calls the gate DISARMED there rather than one that can fire; `_periods` carries it
+  as `'data.trust'`, the eighth key, and the mapping now spans seven packages. `DATA_TRUST_EVERY=0` is
+  the other disarmed arm: the epoch-end and tail passes only.
+* **The checkpoint.** `stream_state(..., focus=)` writes `state['focus']` at 'observe' — mode, rule and
+  claim shape, the sketch, the table in LRU order, evidence, trust, first sights, cursor, stream
+  ordinal, `last_step`, carry and counters — and at 'off' nothing, unless the Focus holds a
+  checkpoint's book, written back unchanged (ON → OFF → ON resumes it: T6). The sketch is DATA's
+  payload and never a manifest field: `CKPT.check_geometry` refuses a field a checkpoint does not
+  record, so a new one would refuse every checkpoint written before it. `new_focus(restored=)` puts
+  it back and **refuses by name** a sketch of another size (`DATA_TRUST_SKETCH`) and another
+  estimator or claim shape (`DATA_TRUST_RULE`, `_CLAIM`, `_CTX`, `_VAL`, `_DELIMS`), since every
+  bucket and key is theirs; a smaller `DATA_TRUST_TABLE` evicts the least recently claimed keys to
+  fit, counted. A checkpoint with no book — before this build, or from an 'off' lineage — gives an
+  empty one, which reads a mid-epoch resume's epoch from its first unit.
+* **The surface it reports.** `data.trust.passes` (every pass), `.updates` (passes whose vote had a
+  conflicted claim), `.units`, `.claims` (formed), `.claims_kv` or `.claims_ctx` (recorded),
+  `.conflicted_claims`, `.sources`, `.evidence_absent` (readings of the last vote), `.table_evictions`
+  and `.sketch_load` (occupied buckets): ABSENT at 'off', PRESENT-and-0 at 'observe' — 04 §5's
+  spellings where it names them; `units` is added so "no unit read twice or skipped" is a printed
+  number. Gate `data.trust`: UNREACHABLE naming `DATA_TRUST='off'`; at 'observe' FIRED when trust is set
+  for some source (sources trusted vs sources read), armed-but-zero with the evidence arithmetic
+  otherwise. Gate `data.trust.actuation`: UNREACHABLE on every configuration this tree builds. The
+  `DATA(trust)` row prints both in three states, the counters, `data.trust.wall_s`, and per source
+  read its r over its n, and its t — or its evidence ABSENT and trust 1. A `'data.trust'` ledger row
+  joins `Cadences.ledger()`.
+
+**Departures, each recorded because the code showed the proposal's shape or the plan's could not hold
+as written.**
+1. **`claims_observe(dat, focus, *, units, sources, step, at)`.** `units` (each unit's bytes) replace
+   04's `ids` plus a root-composed `decode`, as the plan says: DATA may not import TOK and the root
+   holds the bytes. **`at` is not the plan's.** Without it the per-epoch cursor cannot be kept honest:
+   DATA sees no clock, so it cannot tell a new epoch's first pass from a continuation, and the only
+   other way to reset the cursor at a roll is the root writing DATA's record. With it, a pass
+   continues the cursor or opens a stream at 0, and a mismatch — a unit read twice or skipped — is a
+   refusal naming both numbers. The root reads `Focus.cursor` and `Focus.last_step` to place its
+   first pass of a process (above).
+2. **`restore_stream_state(dat, areas, state)` does not take `focus=`** (the plan's departure from 04
+   §5): it runs at the resume's restore row, before `data_plan`, so the record it would fill does not
+   exist yet. `new_focus(restored=Snapshot.payload['DATA'].get('focus'))` is the one restore.
+3. **The epoch's last window and a stop's tail both pass.** 04 says "at the consumed cursor" and the
+   plan names the B row and "the tail"; without the rolling window's pass an epoch's last units are
+   never read (the roll replaces the segmentation), and without the committing tail the final
+   checkpoint's cursor lags the stream a continuing resume goes on from. A tail pass counts in
+   `data.trust.passes` (and `.updates` where its vote had a conflict), so a lineage stopped mid-epoch
+   reads one pass more than an uninterrupted run; every other field of the book is the same (T5).
+4. **`trust_period` is 0 at 'off'**, reading `trust` beside `trust_every`, so the audit's word is
+   DISARMED; the plan's arm test still comes first.
+5. **A claim-shape change is refused on a resume**, beside the plan's sketch-size refusal: a table
+   read under another rule, context length, value length or delimiter class is another table.
+6. **An 'off' run carries a checkpoint's book**, so switching the book off for one leg of a lineage
+   does not destroy it (the retention probe's ON → OFF → ON rule, Q-EVAL-12).
+7. **`first_seen` is a position** ([stream ordinal, unit index]) and not a step, so a continuation
+   records what an uninterrupted run records.
+8. **`data.trust.units`, the `DATA(trust)` row, `RunResult.trust_series` and `run.py
+   --trust-series`** are additions: the count the continuation test reads, the row the plan's
+   `report['DATA(trust)']` names, and what E3 needs to read the book over a run.
+9. **The synthetic source's name** is `synthetic:order2:<label>`, not the positional name
+   `_synthetic_areas` computed and dropped, so it survives a reordered `DATA_AREAS`.
+
+**Not built, and where each lives.**
+* **`DATA_SRC_CAP`** — deferred to §8 4.7, because an unpromoted origin has no producer until the
+  preset writes O5's list; the trust detection floor's per-N-bytes clause (04-6.3) goes with it. The
+  register carries the dated note at O18, 04-Q12, Appendix B's `DATA_SRC_CAP` row and the detection
+  floor's, and §8 3.4's status line.
+* **The actuation** — `DATA.token_weights`, `LM.lm_loss(token_weights=)`, and so 'loss' and 'loss+draw'
+  (refused `NotBuilt`) — and **TOK's `channels=`** on `tokenize`/`splice`, which the book does not
+  need: `_trust_units` maps sources through `byte_pos` in the root.
+* **'focusbed'** and the known answers that read it (`data.trust.ranked_liar_last`,
+  `format_split_floored`, the K sweep, the format-variant world) — SR2's and E5's. Copy detection is
+  SR6's; the rules 'peer', 'residual' and 'fluency' SR5's.
+* **The wall measurement** is E3's (register §8 6.2): `data.trust.wall_s` is the instrument, 160 is
+  04's cadence, lengthened if E3 measures more than 2% of wall.
+
+**Tests.** `tests/test_trust.py`: S1-S3 (the sources, the draw's indifference to them, the join), T1
+(SR3's bit-identity at 300 windows on the synthetic source under 'ctx', on data/train under 'kv', and
+on a planted corpus of four files, one stating the next letter, on which the book floors that liar at t
+0.3 while nothing moves), T2 (`@EEE=V;` and `@EEE:V;` one claim under 'kv', two contexts under
+'ctx'), T3 (the planted liar at r 1/22 against 21/22, one conflicted claim or context per entity,
+evidence ABSENT below `MIN_EV`, forty random pass cuts reading one pass's book, the vote against the
+prototype's), T4 (`PYTHONHASHSEED` 0, 1 and 12345, in subprocesses), T5 (continuing, boundary and
+periodic-save resumes across the epoch roll, each ending with the uninterrupted run's book), T6 (a
+book-less checkpoint, the two refusals, ON → OFF → ON, the round trip), T7 (`NotBuilt`), T8
+(`wall_s` outside the channel, run.py end to end). `tests/test_prose_guards.py` G2 gains 'loss' and
+'loss+draw'; G3 gains `DATA_TRUST_EVERY=-1` refused by its domain and `trust_period`'s two arms. CPU
+runs establish operation only: whether the book is right about real sources is E3's, on GPU.
+
+**What the default changes:** nothing a run trains on and no integer counter a default run prints.
+At 'off' the book allocates nothing and is never called; the report gains the `DATA(trust)` row (two
+UNREACHABLE gates), a gated-call line and the ledger's `'data.trust'` key at 0 checks and period 0,
+and a checkpoint's `RUN.cadences` carries that key. `Stream.sources` is bookkeeping over a draw that
+did not change. B1, B3, B3r, B5, B6 and B6r reproduce their fixtures.
+
 ## 6. What `tests/test_contract.py` checks
 
 | check | what it proves | how it can fail |
@@ -7555,7 +7808,7 @@ counts and the Gates move only under 'replay', the refusal only at `DATA_REHEARS
 | K1 | every name this document declares exists in the tree **with the signature it claims** | rename a parameter; drop a function |
 | K2 | `spine.compose` imports and `compose()` raises **only `NotImplementedError`, from a stub** | a typo in the root surfaces as `AttributeError`/`TypeError`, not as a missing body |
 | K3 | no package imports another (O10 restated at the contract boundary) | add `from fabric import api` to `src/memory/` |
-| K4 | every one of the 276 declared levers is named `LEVERS READ:` by a stub, or is in the UNCONSUMED table above **with a reason** | declare a lever and give it no reader |
+| K4 | every one of the 290 declared levers is named `LEVERS READ:` by a stub, or is in the UNCONSUMED table above **with a reason** | declare a lever and give it no reader |
 | K5 | every `d_` field the ledger declares is read by a stub in its own package, and no stub reads an undeclared one | add a wire nobody consumes |
 | K6 | every entry point is **named by a row** in `ASSEMBLY_ORDER` or `LOOP_ORDER`, or is in `compose.DEFERRED_ENTRY_POINTS` with a reason | declare a mechanism the root never calls; or leave a deferral in place after a row starts naming it — the check reads that table **backwards** and reports the stale entry |
 | K7 | the root reads only names a package **declares** off a Config | `int(lm.depth)` where LM declares `layers` — a crash at whatever stage reaches it, invisible while an earlier stub raises first |
@@ -7611,7 +7864,7 @@ nobody has watched fail is indistinguishable from a check that cannot fail.
 
 ## 7. THE FROZEN SIGNATURE SET
 
-Everything above is prose about these 147 entry points — 121 until 2026-09-02, when Q-TOK-11 added
+Everything above is prose about these 150 entry points — 121 until 2026-09-02, when Q-TOK-11 added
 `LM.residual_ratios` (122) and Q-LM-12 added `LM.embed` (123); 133 from 2026-09-15, when P4 wrote
 `CAP.caps` and the `Caps` record it returns brought `Caps.headroom(n)` with it; **134 since
 2026-09-22, when `World.parameters(self)` closed the hole `spine/compose.py::_base_parameters` had
@@ -7625,12 +7878,14 @@ cadenced gate's schedule across a resume (Q-RUN-9); **137 since later that day**
 FAB moves (Q-FAB-13); **140 on 2026-09-26**, when 03b's stage S0b added the mid-epoch act's
 three: `TOK.splice`, `RunClock.revise_epoch_length` and `OPT.revise_horizon` (Q-RUN-8 option (a),
 Q-OPT-10); 141 later that day, with `TOK.view_of`, the match-table view a segmentation
-records so a continuing resume can cut at it again (Q-TOK-15, Q-RUN-16); **147 since 2026-09-27**,
+records so a continuing resume can cut at it again (Q-TOK-15, Q-RUN-16); **147 from 2026-09-27**,
 when the retention probe (Proposal 04 SR0 and NEW-03) added six: `EVAL.retention_period`,
 `EVAL.pin_holdout` and `EVAL.blowup` (Q-EVAL-12), `DOM.nearest` (Q-DOM-6), `MEM.encode_queries`
 (Q-MEM-15) and `CKPT.Retention.note_saved` (Q-CKPT-6) -- and MOVED one, `EVAL.holdout_probe`, whose
 `rng` left for `pin_holdout` and which gained `tokenize_fn`, `step`, `boundary` and `previous`
-(Q-EVAL-12). Neither of the two before them
+(Q-EVAL-12); **150 since 2026-09-28**, when the source-reliability book (Proposal 04 SR3, register
+§8 3.4) added three: `DATA.new_focus`, `DATA.claims_observe` and `DATA.trust_period` (Q-DATA-11) --
+and MOVED one, `DATA.stream_state`, which gained `focus=None`. Neither of the two before them
 is a new ruling: this document has said since the record was specified that "`Caps.headroom(n)`
 exists so the negative clamp (C30) **cannot be written** at a call site", and it became an ENTRY
 POINT the moment a body existed to carry it. A record's public method is public surface, which K1
@@ -7650,7 +7905,8 @@ a reordered one, a changed default or a positional-that-became-keyword-only all 
 moves of 2026-09-28 are that kind and were made here with the tree: §8 3.1's faded-area counters
 widened `FAB.observe` with `area_id=None` and `FAB.manage` with `faded=None` (Q-FAB-18), and
 `MEM.write` with `areas=None` (Q-MEM-16) — each a defaulted keyword at the end, so every existing
-call is the call it was, and none was added, so the count stands at 147.
+call is the call it was, and none was added, so the count stood at 147 until the book's three, the
+same day. `DATA.stream_state`'s `focus=None` (Q-DATA-11) is the same kind of move.
 
 Ten implementation agents work against this list independently. **It does not move without an edit
 to this document and to the tree in the same commit**, which is the only thing keeping them
@@ -7680,8 +7936,11 @@ CKPT: Retention.counters(self)
 DATA: open_areas(dat: Config, *, seed: int)
 DATA: data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_token: float)
 DATA: draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int)
-DATA: stream_state(dat: Config, areas)
+DATA: stream_state(dat: Config, areas, *, focus=None)
 DATA: restore_stream_state(dat: Config, areas, state)
+DATA: new_focus(dat: Config, areas, plan, *, restored=None)
+DATA: claims_observe(dat: Config, focus, *, units, sources, step, at)
+DATA: trust_period(dat: Config)
 DOM: open_partition(dom: Config, *, sig_dim, vocab_slots, device, rng, restored=None)
 DOM: observe(dom: Config, part, *, signature, sample_window, tokens, now)
 DOM: nearest(dom: Config, part, *, signature)

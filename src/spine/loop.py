@@ -23,17 +23,21 @@ other width, and CKPT_EVERY sat in that block. The keys are the root's, from com
 WHAT THIS DRIVER SKIPS, AND WHY IT SAYS SO OUT LOUD -- IN TWO LISTS, NOT ONE
 ============================================================================
 `RunResult.skipped` names every LOOP_ORDER B row this driver has NO CALL SITE FOR. It has been
-empty since the edit that wired the last of the then twenty-one, and stays empty at twenty-two
-(WORLD.forecast, Q-WORLD-10, arrived WITH its call site); an empty list is exactly the state that
+empty since the edit that wired the last of the then twenty-one, and stays empty at twenty-seven
+(WORLD.forecast, Q-WORLD-10, arrived WITH its call site, as did the retention probe's three,
+Q-EVAL-12, and the source-reliability book's DATA.claims_observe, Q-DATA-11; this said twenty-two
+until 2026-09-28); an empty list is exactly the state that
 made the FIRST version of this report wrong: it filtered the B row through "is the body a stub" and
 printed "0 MECHANISM(S) NOT CALLED" on a run that invoked six of twenty-one. The list is derived
 from the table and cross-checked against `_CALLS` in both directions, so a row this driver drops
 cannot vanish from the report and a `_CALLS` entry the table does not list raises.
 
 `RunResult.gated` IS THE SECOND LIST AND IT EXISTS BECAUSE A CALL SITE IS NOT A CALL. Three rows
-stand behind events (Due.mint, Due.probation) and one behind "the optimizer actually stepped"; at
-the shipped TOK_PROBATION_USES=0 the probation cadence is never even asked, so two of the
-twenty-two have a call site that CANNOT RUN. Reporting only the first list would say this run
+stand behind events (Due.mint, Due.probation) and one behind "the optimizer actually stepped", and
+since 2026-09-27 and 2026-09-28 the retention probe's and the source-reliability book's stand behind
+their arm tests; at the shipped TOK_PROBATION_USES=0, EVAL_RETENTION_EVERY=0 and DATA_TRUST='off'
+none of those three is even asked, so six of the twenty-seven have a call site that CANNOT RUN (two
+of twenty-two until 2026-09-27). Reporting only the first list would say this run
 judged probation when nothing did -- the same overstatement, one layer in. `_gate_report` reads the
 three states (fired N / armed but 0 / unreachable) off the counter each owning package keeps,
 rather than re-deriving a verdict here from levers this file does not own.
@@ -98,6 +102,7 @@ from spine.compose import _gen_prompts as _c_gen_prompts
 from spine.compose import _area_ids as _c_area_ids
 from spine.compose import _window_areas as _c_window_areas
 from spine.compose import _faded_ids as _c_faded_ids
+from spine.compose import _trust_units as _c_trust_units
 
 
 # THE ELEVEN, READ OFF THE TREE RATHER THAN TYPED. A hand-written list would rot the first time a
@@ -143,15 +148,16 @@ _CALLS = {
         "MEM.census", "DOM.manage", "DOM.census", "DOM.rekey",
         "SIG.cadence_due", "SIG.train_step", "FAB.manage",
         "RUN.RunClock.advance", "SIG.encode", "DOM.observe", "TOK.on_window"}),
-    # ---- stage B, per flush: all twenty-six -- the last three the retention probe's, per window
-    # after the flush, behind its arm test (2026-09-27, Q-EVAL-12)
+    # ---- stage B, per flush: all twenty-seven -- the last four per window after the flush, each
+    # behind its arm test: the source-reliability book's (2026-09-28, Q-DATA-11) and the retention
+    # probe's three (2026-09-27, Q-EVAL-12)
     "B": frozenset({
         "LM.embed", "WORLD.forecast", "LM.encode", "FAB.forward", "LM.decode", "LM.lm_loss",
         "WORLD.loss_terms", "LM.anchor_term", "OPT.remap_rows", "OPT.scaled_backward",
         "RUN.RunClock.note_backward",
         "OPT.maybe_step", "FAB.own_lr_scale", "CAP.caps", "FAB.observe", "FAB.grow_check",
         "MEM.write", "MEM.maintain", "TOK.mint_burst", "LM.residual_ratios", "TOK.judge_probation",
-        "DOM.note_competence", "CKPT.save",
+        "DOM.note_competence", "CKPT.save", "DATA.claims_observe",
         "EVAL.holdout_probe", "EVAL.blowup", "CKPT.Retention.consider"}),
     # ---- stage X, the mid-epoch act, after a flush with the batch empty (03b S0b)
     "X": frozenset({"TOK.splice", "RUN.RunClock.revise_epoch_length", "OPT.revise_horizon",
@@ -164,7 +170,7 @@ _CALLS = {
         "TOK.save_vocabulary", "CKPT.save", "CKPT.Retention.note_saved"}),
     # ---- stage R, the report, through _report and run's own tail
     "R": frozenset({
-        "EVAL.holdout_probe", "DOM.prior", "MEM.census", "DOM.census",
+        "EVAL.holdout_probe", "DATA.claims_observe", "DOM.prior", "MEM.census", "DOM.census",
         "LM.counters", "SIG.counters", "FAB.counters", "OPT.counters", "CAP.counters",
         "RUN.RunClock.counters", "RUN.Cadences.ledger", "CKPT.Retention.counters",
         "RUN.bench_summary", "CKPT.save", "EVAL.generate"}),
@@ -303,6 +309,11 @@ _GATED = {
     "EVAL.generate": ("the retention probe armed, EVAL_GENERATE on, and a report-half window in an "
                       "arrived area to prompt with -- after the final save",
                       "eval.generate.samples"),
+    # THE SOURCE-RELIABILITY BOOK (2026-09-28, Q-DATA-11). Its counters are DATA's, on System.focus:
+    # ABSENT at DATA_TRUST='off', where no book is kept, and PRESENT-and-0 at 'observe'.
+    "DATA.claims_observe": ("the book's arm test (DATA_TRUST != 'off'), then its cadence or the "
+                            "window that rolls the epoch at B, and a stop's tail at R",
+                            "data.trust.passes"),
 }
 # CKPT.save IS GATED TOO AND IS NOT IN THAT TABLE, because its count is not in a counters dict this
 # file can index -- CKPT keeps its books on the Retention record and in its own _SAVES ledger --
@@ -325,7 +336,10 @@ def _gate_report(sysm):
              "fab.": getattr(sysm.fabric, "counters", {}) or {},
              # THE ROOT'S OWN BOOK FOR THE RETENTION PROBE (2026-09-27): without it an eval. row
              # would raise below on every run, the default one included.
-             "eval.": getattr(sysm, "eval_books", None) or {}}
+             "eval.": getattr(sysm, "eval_books", None) or {},
+             # AND THE SOURCE-RELIABILITY BOOK'S, DATA's own (2026-09-28, Q-DATA-11): empty at
+             # DATA_TRUST='off', which is this tree's ABSENT.
+             "data.": getattr(getattr(sysm, "focus", None), "counters", None) or {}}
     out = []
     for name in sorted(_GATED):
         why, key = _GATED[name]
@@ -441,6 +455,11 @@ class RunResult:
     # non-finite windows and the per-area means. Empty where the probe is off. run.py
     # --probe-series writes it as JSON.
     probe_series: tuple = ()
+    # EVERY PASS OF THE SOURCE-RELIABILITY BOOK THIS PROCESS MADE (2026-09-28, Q-DATA-11), in order:
+    # one dict each -- kind (cadence, roll or tail), step, the unit index it started at, the units
+    # it read, its seconds, the conflicted claims, the sources read, and each source's evidence and
+    # trust after it. Empty at DATA_TRUST='off'. run.py --trust-series writes it as JSON.
+    trust_series: tuple = ()
 
 
 def _payload(sysm):
@@ -467,7 +486,8 @@ def _payload(sysm):
         "DOM": dom_api.state_dict(cfg["DOM"], sysm.partition),
         "CAP": cap_api.state(sysm.valve),
         "OPT": opt_api.state_dict(cfg["OPT"], sysm.optimizer),
-        "DATA": data_api.stream_state(cfg["DATA"], sysm.areas),
+        "DATA": data_api.stream_state(cfg["DATA"], sysm.areas,
+                                      focus=getattr(sysm, "focus", None)),
         "TOK": tok_api.vocab_state(cfg["TOK"], sysm.vocab),
         # THE ROOT'S OWN STATE, UNDER A KEY NO PACKAGE OWNS, AND THE ONE EXCEPTION TO THE PARAGRAPH
         # ABOVE. System.token_seen is the per-token appearance counter the loop allocates and
@@ -1159,6 +1179,48 @@ def run(sysm, *, max_windows=None, progress=True):
             and int(clock.step) == int(sysm.snapshot.step)):
         _boundary_read("resume", view=_evc.get("view"), live=_evc.get("live_domains"))
 
+    # ---- THE SOURCE-RELIABILITY BOOK (2026-09-28, Proposal 04 SR3, Q-DATA-11) -------------------
+    # ARMED AT DATA_TRUST != 'off' ONLY, and the arm test comes before Cadences.due('data.trust',
+    # ...), so at 'off' the gate is never asked, DATA.claims_observe is never called and no
+    # data.trust.* key exists: a default run is this driver before the book. `_trust_lo` is the
+    # book's cursor as this driver carries it -- the first unit of this epoch's segmentation no pass
+    # has read -- and `_trust_hi` the end of the ids the windows cut so far (the last cut window's
+    # own end, bounds[1]): a pass reads ids[lo:hi], and DATA refuses one that neither continues its
+    # own cursor nor opens a new stream at 0. WHERE A PROCESS STARTS: at 0 at in_epoch 0 (a fresh
+    # run, an epoch-boundary resume); on a continuing mid-epoch resume at the book's cursor if its
+    # last pass fell in THIS epoch -- a step past the epoch's first, clock.step - in_epoch -- and at
+    # 0 otherwise, so a cursor left by the previous epoch's last pass, or a book with no pass, reads
+    # this epoch from its first unit. Its seconds are a float of this process's, `data.trust.wall_s`
+    # in the DATA(trust) row, never checkpointed and never in the integer channel.
+    _trust_on = str(dat_cfg.trust) != "off"
+    _trust_lo, _trust_hi, _trust_wall, trust_series = 0, 0, 0.0, []
+    if _trust_on:
+        _ie = int(_c_start["in_epoch"])
+        if _ie > 0:
+            _trust_hi = min(len(ids), _ie * ctx + 1)
+            if int(sysm.focus.last_step) > int(_c_start["step"]) - _ie:
+                _trust_lo = int(sysm.focus.cursor)
+
+    def _trust_read(kind):
+        """One pass of the book over ids[_trust_lo:_trust_hi], timed; the cursor moves to hi."""
+        nonlocal _trust_lo, _trust_wall
+        _t0 = time.perf_counter()
+        _hi = max(_trust_hi, _trust_lo)
+        _u, _s = _c_trust_units(sysm, _trust_lo, _hi)
+        data_api.claims_observe(dat_cfg, sysm.focus, units=_u, sources=_s,
+                                step=U.Windows(int(clock.step)), at=_trust_lo)
+        _dt = time.perf_counter() - _t0
+        _trust_wall += _dt
+        _f = sysm.focus
+        trust_series.append({
+            "kind": kind, "step": int(clock.step), "at": int(_trust_lo), "units": len(_u),
+            "seconds": round(_dt, 6),
+            "conflicted_claims": int(_f.counters.get("data.trust.conflicted_claims", 0)),
+            "sources": int(_f.counters.get("data.trust.sources", 0)),
+            "evidence": {k: [float(v[0]), int(v[1])] for k, v in sorted(_f.evidence.items())},
+            "trust": {k: float(v) for k, v in sorted(_f.trust.items())}})
+        _trust_lo = _hi
+
     _last_step = int(clock.counters()["step"])
     while True:
         tick = clock.advance()
@@ -1208,6 +1270,8 @@ def run(sysm, *, max_windows=None, progress=True):
                 f"on disagree, which is a defect rather than arithmetic.")
         else:
             batch.append(bounds)
+            # THE BOOK'S hi: the ids this epoch's windows have cut so far end here (Q-DATA-11).
+            _trust_hi = int(bounds[1])
             _wb = _window_bytes(sysm.segmentation.byte_pos, len(sysm.stream.bytes), bounds)
             books["loop.bytes_scored"] += _wb
             batch_bytes += _wb
@@ -1607,6 +1671,17 @@ def run(sysm, *, max_windows=None, progress=True):
                         if "loop.act_seconds" in books:
                             books["loop.act_seconds"] += time.perf_counter() - _t_act
 
+            # ---- THE SOURCE-RELIABILITY BOOK: AFTER THE FLUSH AND THE ACT, BEFORE THE PROBE -------
+            # (2026-09-28, Proposal 04 SR3, Q-DATA-11.) THE ARM TEST COMES FIRST and the gate second,
+            # so at DATA_TRUST='off' 'data.trust' reads zero checks. The window that rolls the epoch
+            # passes too, due or not: the roll rebuilds the segmentation, so the book reads every
+            # unit of an epoch before it goes. A mid-epoch act above kept ids[:hi], so the units a
+            # pass reads are the ones the windows trained on, under either cut.
+            if _trust_on:
+                _tdue = cadences.due("data.trust", periods["data.trust"], clock)
+                if _tdue or tick.rolled:
+                    _trust_read("roll" if tick.rolled else "cadence")
+
             # ---- THE RETENTION PROBE: AFTER THE FLUSH AND THE ACT, BEFORE THE CHECKPOINT GATE ------
             # (2026-09-27, Proposal 04 SR0 and NEW-03, Q-EVAL-12.) THE ARM TEST COMES FIRST and the
             # gate second, so at EVAL_RETENTION_EVERY=0 'retention' reads zero checks. A PHASE START
@@ -1712,6 +1787,11 @@ def run(sysm, *, max_windows=None, progress=True):
                       f"n_live={int(pop.n_live)} vocab={int(vocab.size())} "
                       f"uncalled={len(skipped)}", flush=True)
 
+        # A ROLLING TICK THAT CUT NO WINDOW still closes the epoch, so the book reads the epoch's
+        # last units here, after the cut's branches (Q-DATA-11); the window body above passed on
+        # every other rolling tick.
+        if _trust_on and tick.rolled and (_no_window or bounds is None):
+            _trust_read("roll")
         if tick.finished:
             _end = "the finishing epoch roll"
             break
@@ -1759,6 +1839,10 @@ def run(sysm, *, max_windows=None, progress=True):
             batch, sigs, dids, samples = [], [], [], []
             batch_bytes = 0
             win_in_epoch = 0
+            # THE BOOK'S CURSOR IS PER EPOCH (Q-DATA-11): this epoch's segmentation is about to be
+            # replaced, so the next pass reads the new one from its first unit -- a pass at 0, which
+            # DATA.claims_observe takes as a new stream.
+            _trust_lo = _trust_hi = 0
             # probe_prev IS DROPPED FOR THE SAME REASON ONE LAYER OVER: a tensor of token ids under
             # a segmentation that has just been replaced, which MEM.read would encode as current.
             probe_prev = None
@@ -2007,6 +2091,12 @@ def run(sysm, *, max_windows=None, progress=True):
     try:
         if _armed and arrived:
             _boundary_read("boundary")
+        # THE BOOK'S TAIL (Q-DATA-11): the units a stop left since the last pass -- a max_windows
+        # stop mid-epoch; the finishing roll's pass has read the epoch to its end -- so the report
+        # and the final checkpoint hold every unit this process consumed, and a continuing resume
+        # goes on from the book's cursor.
+        if _trust_on and _trust_hi > _trust_lo:
+            _trust_read("tail")
         report = _report(sysm, elapsed_s, ctx)
     except Exception:
         _carry()
@@ -2016,6 +2106,10 @@ def run(sysm, *, max_windows=None, progress=True):
     # this arm (batch_windows=1 and a routed fabric) -- so it is printed with that sentence rather
     # than as nothing. The act's two wall-clock readings are printed to six places, as FAB prints
     # its growth readings; a float never reads as an integer counter line (Q-RUN-17).
+    # THE SOURCE-RELIABILITY BOOK'S ROW (2026-09-28, Q-DATA-11): its counters, its gates in G4's
+    # three states, each source's reliability and trust, and its seconds -- data.trust.wall_s, the
+    # root's float, printed to six places and never read as an integer counter line.
+    report["DATA(trust)"] = _trust_row(sysm, _trust_on, _trust_wall)
     report["LOOP(flush books)"] = {k: (round(v, 6) if isinstance(v, float) else v)
                                    for k, v in books.items()} if books else (
         "no key is reachable on this arm: loop.flush_mixed_domain needs OPT_BATCH_WINDOWS > 1 and "
@@ -2132,7 +2226,35 @@ def run(sysm, *, max_windows=None, progress=True):
         report=report,
         cadence_ledger=cadences.ledger(), warnings=tuple(warnings),
         never_backward=never_backward, flush_bytes=tuple(flush_bytes),
-        probe_series=tuple(probe_series))
+        probe_series=tuple(probe_series), trust_series=tuple(trust_series))
+
+
+def _trust_row(sysm, armed, wall_s):
+    """The R report's DATA(trust) row (2026-09-28, Q-DATA-11): at DATA_TRUST='off' the book's two
+    gates alone, both UNREACHABLE with their reasons; at 'observe' also its data.trust.* counters,
+    data.trust.wall_s -- this process's seconds, a float to six places, outside the integer channel
+    tests/test_baseline.py reads -- and one line per source read: its reliability and conflicted
+    claims, and its trust, or its evidence ABSENT and trust 1."""
+    focus = getattr(sysm, "focus", None)
+    if focus is None:
+        return "no book: this System was built without the 'focus' stage"
+    row = {f"gate:{k}": v for k, v in _gate.three_state(focus.gates).items()}
+    if not armed or focus.mode != "observe":
+        return row
+    row.update({k: int(v) for k, v in focus.counters.items()})
+    row["data.trust.wall_s"] = round(float(wall_s), 6)
+    min_ev = int(sysm.configs["DATA"].trust_min_ev)
+    for src in sorted(focus.first_seen):
+        ev = focus.evidence.get(src)
+        if ev is None:
+            row[f"source:{src}"] = (f"evidence ABSENT (fewer than DATA_TRUST_MIN_EV={min_ev} "
+                                    f"conflicted claims), trust 1")
+        else:
+            t = focus.trust.get(src)
+            row[f"source:{src}"] = (f"r {float(ev[0]):.4f} over {int(ev[1])} conflicted claim(s), "
+                                    + (f"t {float(t):.4f}" if t is not None else
+                                       "trust 1 (two or more sources must carry evidence)"))
+    return row
 
 
 # ---- THE RETENTION PROBE'S RECORDS, AS PLAIN DATA (2026-09-27, Q-EVAL-12) ----------------------

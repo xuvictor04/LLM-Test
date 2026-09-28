@@ -100,7 +100,8 @@ calls an accessor (spine/compose.py::_periods, a probe, a test) and became live 
 root on the day CAP.startup_refusals got a body. That is the standing this accessor's own refusal
 has had since it shipped; the four siblings inherit it rather than introduce it. THAT DAY HAS COME
 AND THIS PARAGRAPH SAID "halts" UNTIL Q-EVAL-12's REVIEW (2026-09-27): CAP.startup_refusals has a
-body, it is the 30th of the 41 rows, and compose(environ={}) returns a System at stage 'assembled'.
+body, it is the 31st of the 42 rows (the 30th of 41 until the 'focus' row, 2026-09-28), and
+compose(environ={}) returns a System at stage 'assembled'.
 Measured the same day: CKPT_EVERY, DOM_MANAGE_EVERY, MEM_REKEY_EVERY and EVAL_CURVE_EVERY at -5
 each raise their LeverError from the `cadence` row's _periods, as EVAL_RETENTION_EVERY=-5 does --
 a sixth refusal, under EVAL's switch, since Q-EVAL-12 -- while FAB_MANAGE_EVERY=-5 never reaches
@@ -437,9 +438,10 @@ def save_period(ckpt: Config):
     # function while doing it -- is DISCHARGED in the same edit and is not merely dropped: that
     # sentence now reads "its declared levers" and states which two THIS accessor reads.
     # THE ACCESSOR'S WHOLE JOB is that Cadences.due REFUSES a bare int while Config hands one back
-    # for all 37 levers that declare a Clock unit (ISSUES P1-H51; recounted r4 -- exactly 35 Lever
+    # for all 38 levers that declare a Clock unit (ISSUES P1-H51; recounted r4 -- exactly 35 Lever
     # declarations across the registry carried a unit that is in spine/units.py::CLOCK_KINDS then,
-    # and 37 do since 2026-09-27, EVAL_RETENTION_EVERY the latest).
+    # 37 did from 2026-09-27, EVAL_RETENTION_EVERY then the latest, and 38 do since 2026-09-28,
+    # DATA_TRUST_EVERY the latest).
     # Leaving it a stub kept spine.compose._periods -- and therefore
     # RUN.cadence_audit, the one statement that makes ISSUES P1-C11 visible -- unreachable
     # until P4, for no reason but symmetry with entry points that have real work to do.

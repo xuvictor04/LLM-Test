@@ -70,6 +70,7 @@ tree that may name os.environ (check O1), and build() warns loudly when it is ha
 registry.unread_env then has no mapping to scan and a misspelled knob is silently the default. Pass
 the process environment in from the entry point.
 """
+import bisect
 import hashlib
 
 # NOT `from spine.assemble import build, render`, and not a re-export of anything.
@@ -454,6 +455,24 @@ ASSEMBLY_ORDER = (
                                               "draw_stream rows lay and gauge, Plan.shares, with "
                                               "Plan.replay_faded naming the phases the 'replay' "
                                               "law lays by deficit (Q-DATA-10)"),
+    ("focus",     "DATA",  "new_focus",       "(areas, plan, restored=Snapshot.payload['DATA']"
+                                              ".get('focus')) -- THE SOURCE-RELIABILITY BOOK "
+                                              "(2026-09-28, Proposal 04 SR3; Q-DATA-11), after the "
+                                              "plan as 04 section 5 places it. At DATA_TRUST='off' "
+                                              "it allocates nothing; 'loss' and 'loss+draw' are "
+                                              "refused here with NotBuilt, before any tensor exists; "
+                                              "at 'observe' it builds the int32 sketch and the claim "
+                                              "table, or puts the checkpoint's book back and refuses "
+                                              "a sketch or claim shape that moved by name. THE ONE "
+                                              "PLACE THE BOOK IS RESTORED: DATA.restore_stream_state "
+                                              "does not take focus= (04 section 5 moved it), because "
+                                              "it runs at the resume's restore row, before this Plan "
+                                              "exists",
+                                              "focus -- the Focus record both DATA.claims_observe "
+                                              "rows take and fill in place, carried on "
+                                              "System.focus, and the book the C row's "
+                                              "DATA.stream_state(focus=) writes into "
+                                              "payload['DATA']"),
     ("stream",    "DATA",  "draw_stream",     "(areas, plan, epoch=Snapshot.epoch on a resume and 0 "
                                               "otherwise, seed=RUN.seed) -- THE RUN'S FIRST EPOCH's "
                                               "draw (it was epoch=0 unconditionally until "
@@ -755,12 +774,13 @@ ASSEMBLY_ORDER = (
                                               "FAB.manage_period(fab), 'dom.rekey': "
                                               "MEM.rekey_period(mem), 'ckpt': CKPT.save_period(ck), "
                                               "'retention': EVAL.retention_period(ev), "
+                                              "'data.trust': DATA.trust_period(dat), "
                                               "'progress': RUN.PROGRESS_WINDOWS}) "
-                                              "-- the SEVEN gates the loop evaluates, each period "
-                                              "supplied by the package that DECLARES its kind. Six "
+                                              "-- the EIGHT gates the loop evaluates, each period "
+                                              "supplied by the package that DECLARES its kind. Seven "
                                               "arrive through a typed accessor because a Config "
                                               "hands back a bare int for a Clock-unit LEVER; the "
-                                              "seventh is RUN's own module CONSTANT, written "
+                                              "eighth is RUN's own module CONSTANT, written "
                                               "units.Windows at its definition, so it needs no "
                                               "accessor and mints no entry point -- Q-RUN-1, "
                                               "RESOLVED 2026-09-02. 'progress' is the ONLY key here "
@@ -773,11 +793,13 @@ ASSEMBLY_ORDER = (
                                               "first compose() to reach this row -- a defect hidden "
                                               "behind an earlier stub, this file's oldest shape. "
                                               "THERE ARE THREE EARLIER STUBS AND NOT ONE: "
-                                              "CAP.startup_refusals at row 30, RUN.new_clock at "
-                                              "row 33 and RUN.RunClock.begin_epoch at row 34, each "
-                                              "raising NotImplementedError before this row 36 is "
+                                              "CAP.startup_refusals at row 31, RUN.new_clock at "
+                                              "row 34 and RUN.RunClock.begin_epoch at row 35, each "
+                                              "raising NotImplementedError before this row 37 is "
                                               "reached -- measured by stubbing them one at a time "
-                                              "and re-running compose() in a fresh process. This "
+                                              "and re-running compose() in a fresh process (rows "
+                                              "of the 42-row order; each one lower before the "
+                                              "'focus' row, 2026-09-28). This "
                                               "row named RUN.process_setup until 2026-09-04 and "
                                               "then CAP.startup_refusals alone: process_setup is "
                                               "row 1 and has had a body since P4 wrote it, so it "
@@ -804,8 +826,11 @@ ASSEMBLY_ORDER = (
                                               "(data/api.py::<module>) and the same wrong fact "
                                               "_run_windows' own docstring already caught once; "
                                               "periods=the SAME mapping) -- states which of those "
-                                              "SEVEN cannot fire at this run's length BEFORE the "
-                                              "first window. Seven since 2026-09-27, when "
+                                              "EIGHT cannot fire at this run's length BEFORE the "
+                                              "first window. Eight since 2026-09-28, when "
+                                              "'data.trust' joined (DATA.trust_period, 0 at "
+                                              "DATA_TRUST='off' and so reported DISARMED there), "
+                                              "seven from 2026-09-27, when "
                                               "'retention' joined (EVAL.retention_period, off at 0 "
                                               "and so reported DISARMED), and six before that, "
                                               "since the cadence stage was repaired to pass "
@@ -1396,6 +1421,24 @@ LOOP_ORDER = (
                                       "time (spine/loop.py::_build_token_scale); at DOM_LEVELS=0 "
                                       "the per-token loss / ln 2, bits per token; the rate is the "
                                       "d_comp_ema wire"),
+    ("B", "DATA",  "claims_observe",  "THE SOURCE-RELIABILITY BOOK (2026-09-28, Proposal 04 SR3; "
+                                      "Q-DATA-11), once per window AFTER the flush and the X block "
+                                      "and BEFORE the retention probe and the checkpoint gate. THE "
+                                      "ARM TEST COMES FIRST -- DATA_TRUST != 'off' -- and only then "
+                                      "Cadences.due('data.trust', DATA.trust_period(dat), clock), "
+                                      "so at 'off' the gate is never asked and no data.trust.* key "
+                                      "exists. A pass also runs on the window that rolls the epoch, "
+                                      "due or not, so the book reads every unit of an epoch before "
+                                      "the roll rebuilds the segmentation (on a rolling tick that "
+                                      "read no window, after the cut's branches). Each pass reads "
+                                      "the units consumed since the last: focus=System.focus, "
+                                      "units and sources from _trust_units(sysm, lo, hi) -- lo the "
+                                      "book's per-epoch cursor, hi the ids the windows cut so far "
+                                      "consumed (the last cut window's end), step=clock.step, "
+                                      "at=lo. An epoch roll puts lo back to 0, and the next pass "
+                                      "opens the new stream. It REPORTS and changes nothing the "
+                                      "run trains on; its seconds are the root's float "
+                                      "data.trust.wall_s, outside every compared book"),
     ("B", "EVAL",  "holdout_probe",   "THE RETENTION PROBE (Q-EVAL-12), once per window AFTER the "
                                       "flush and the X block and BEFORE the checkpoint gate. THE "
                                       "ARM TEST COMES FIRST -- EVAL_RETENTION_EVERY > 0 and a "
@@ -1502,9 +1545,14 @@ LOOP_ORDER = (
     # writes a 'sidecar' key into its OWN payload slice -- and spine/compose.py::_sidecar reads it
     # there. Read off a real checkpoint: payload['SIG']['sidecar'] has all five compared fields and
     # payload['FAB']['sidecar'] all four, against three in the flat manifest's sig.*.
-    ("C", "DATA",  "stream_state",    "(areas) -- the per-area cursors, without "
-                                      "which a resume re-reads the head of every area under "
-                                      "seg_contig and trains a second time on the parent's material",
+    ("C", "DATA",  "stream_state",    "(areas, focus=System.focus) -- the per-area cursors, "
+                                      "without which a resume re-reads the head of every area under "
+                                      "seg_contig and trains a second time on the parent's "
+                                      "material; and, since 2026-09-28 (Q-DATA-11), the "
+                                      "source-reliability book under 'focus' at DATA_TRUST="
+                                      "'observe' -- nothing at 'off', so an 'off' payload is the "
+                                      "one written before the book, unless the Focus carries a "
+                                      "checkpoint's book, which it writes back unchanged",
                                       "payload['DATA'] -- and its KEY SPELLINGS ARE NOWHERE "
                                       "DECLARED (data/api.py::stream_state says 'dict' and lists the contents "
                                       "in prose), so the round trip through DATA.restore_stream_"
@@ -1626,6 +1674,15 @@ LOOP_ORDER = (
                                       "parent's final reading; eval.holdout.boundary_reads and "
                                       "eval.holdout.resume_reads count the two. Boundary readings "
                                       "are reported and never consumed"),
+    ("R", "DATA",  "claims_observe",  "THE BOOK'S TAIL (2026-09-28, Q-DATA-11), inside the same "
+                                      "try, after the boundary reading and before the report: where "
+                                      "a stop left units consumed since the last pass -- a "
+                                      "max_windows stop mid-epoch; the finishing roll's pass has "
+                                      "read the epoch to its end -- one more pass reads them, so "
+                                      "the report and the final checkpoint hold every unit this "
+                                      "process consumed and a continuing resume goes on from its "
+                                      "cursor. The same arm test, the same join and arguments as "
+                                      "the B row, and no gate"),
     ("R", "DOM",   "prior",           "(did) -- the per-domain token prior AND its weight, together. "
                                       "At R it is asked once for EACH id DOM.census's `live` list "
                                       "carries (it was asked for did=0 alone until 2026-09-24), not "
@@ -2106,12 +2163,13 @@ ROW_ARGUMENTS_ELSEWHERE = {
     # shift_at_windows, added 2026-09-02 with Q-FAB-6; the fifth is its Steps twin
     # shift_at_steps, added 2026-09-24 when OPT.maybe_step was first handed a shift_at).
     "RUN.new_cadences":
-        "periods is _periods(sysm) -- the SEVEN gates' thresholds. Six arrive through their OWNING "
+        "periods is _periods(sysm) -- the EIGHT gates' thresholds. Seven arrive through their OWNING "
         "package's typed accessor (EVAL.curve_period, DOM.manage_period, FAB.manage_period, "
-        "MEM.rekey_period, CKPT.save_period and, since 2026-09-27, EVAL.retention_period); the "
-        "seventh is RUN.PROGRESS_WINDOWS, a module constant "
+        "MEM.rekey_period, CKPT.save_period, since 2026-09-27 EVAL.retention_period and, since "
+        "2026-09-28, DATA.trust_period); the "
+        "eighth is RUN.PROGRESS_WINDOWS, a module constant "
         "and not a lever, for the progress/ETA line and the profiler dump (Q-RUN-1, RESOLVED "
-        "2026-09-02). A mapping spanning six packages is precisely the object O10 forbids any one "
+        "2026-09-02). A mapping spanning seven packages is precisely the object O10 forbids any one "
         "of them to build, so the root builds it. RUN evaluates gates and owns no threshold that "
         "decides anything the model computes; a log cadence is the stated exception, and it is "
         "stated rather than smuggled.",
@@ -2242,6 +2300,17 @@ ROW_ARGUMENTS_ELSEWHERE = {
         "a value the loop holds between the EVAL.holdout_probe row and this one, finite or not "
         "forwarded at all, which no produces column can carry because it is taken and consumed in "
         "one window. step is RunClock.step, units.Windows, as consider requires.",
+    # ---- THE SOURCE-RELIABILITY BOOK'S JOIN (2026-09-28, Proposal 04 SR3, Q-DATA-11).
+    "DATA.claims_observe":
+        "focus is System.focus, the 'focus' ASSEMBLY row's Focus. units and sources are "
+        "_trust_units(sysm, lo, hi) -- the TOK units' bytes of System.segmentation over ids[lo:hi], "
+        "cut out of Stream.bytes through Segmentation.byte_pos, and each unit's source name off "
+        "Stream.sources (None for a unit whose bytes straddle two sources): two packages' records "
+        "joined, which O10 forbids either to form, and the reason 04 section 5's (ids, decode) "
+        "became bytes -- DATA may not import TOK. lo is the book's cursor as the loop carries it, "
+        "0 after an epoch roll; hi is where the windows cut so far end; at is lo, so DATA can tell "
+        "a continuation from a new stream and refuse anything else. step is RunClock.step, "
+        "units.Windows.",
 }
 
 
@@ -2423,7 +2492,12 @@ class System:
                  #                  that reads nothing does not write its parent's reading state
                  #                  as its own (the 'probe' stage says why).
                  "probe_set", "eval_books", "probe_reading", "live_domains", "gen_rng",
-                 "eval_carried")
+                 "eval_carried",
+                 # THE SOURCE-RELIABILITY BOOK (2026-09-28, Proposal 04 SR3; Q-DATA-11): DATA.Focus,
+                 # made at the 'focus' stage by DATA.new_focus and filled in place by both
+                 # DATA.claims_observe rows; the C row's DATA.stream_state(focus=) checkpoints it.
+                 # A Focus holding nothing at DATA_TRUST='off'.
+                 "focus")
 
     def __init__(self, configs, wires, warnings):
         for name in self.__slots__:
@@ -2692,6 +2766,15 @@ def compose(environ=None, *, restored=None):
     sysm.plan = data_api.data_plan(
         data, sysm.areas, epochs=int(run.epochs), win_tokens=int(lm.ctx),
         bytes_per_token=float(sysm.vocab.bytes_per_token))
+
+    # -- THE SOURCE-RELIABILITY BOOK (2026-09-28, Proposal 04 SR3; docs/04_CONTRACT.md Q-DATA-11) ---
+    # After the plan, as 04 §5 places the row, and the ONLY place the book is put back:
+    # DATA.restore_stream_state ran at `restore.data`, before any Plan existed, so the checkpoint's
+    # state['focus'] is handed here as `restored`. At DATA_TRUST='off' nothing is allocated; 'loss'
+    # and 'loss+draw' are refused here with NotBuilt, before any tensor is built.
+    sysm.stage = "focus"
+    sysm.focus = data_api.new_focus(data, sysm.areas, sysm.plan,
+                                    restored=(saved.get("DATA") or {}).get("focus"))
 
     # -- 7. EPOCH 0's MATERIAL, drawn here because two rows below need it -------------------------
     # OPT.build needs run_windows measured from a segmentation that exists (opt/api.py::build), and
@@ -3297,18 +3380,19 @@ def compose(environ=None, *, restored=None):
 
     # THE PERIODS ARE ARGUMENTS AND THE CALL WAS NOT PASSING ANY. new_cadences(run: Config, *,
     # periods) is keyword-only with no default (train/api.py::new_cadences), so this line was a TypeError on
-    # every compose() -- unreachable behind THREE stubs and not one. This is row 36 of
-    # ASSEMBLY_ORDER's 41 (35 of 40 until the 'probe' row landed, 2026-09-27), and rows 30, 33 and
-    # 34 each raised NotImplementedError before it:
+    # every compose() -- unreachable behind THREE stubs and not one. This is row 37 of
+    # ASSEMBLY_ORDER's 42 (36 of 41 until the 'focus' row landed, 2026-09-28, and 35 of 40 until
+    # the 'probe' row, 2026-09-27), and rows 31, 34 and 35 each raised NotImplementedError before it:
     # capacity/api.py::startup_refusals, train/api.py::new_clock and
-    # train/api.py::RunClock.begin_epoch. Row 30 is the FIRST of the three and was not the reason, so
+    # train/api.py::RunClock.begin_epoch. Row 31 is the FIRST of the three and was not the reason, so
     # repairing CAP alone did not bring this line into reach -- the run then stopped earlier, at
     # this file's `clock` stage. Measured one stub at a time by re-running
     # compose.compose(environ={}) in a fresh process and reading where the traceback ended:
-    # unpatched -> `refuse`, row 30; startup_refusals returning [] -> `clock`, row 33; new_clock
-    # also handing back a bare RunClock -> `epoch0`, row 34; the clock stubbed whole -> here.
-    # Rows 31, 32 and 35 (OPT.build, OPT.load_state, SIG.warm_up) had bodies and passed through.
-    # (The row numbers are the 41-row order's; this said "Row 29" beside "rows 30, 33 and 34" until
+    # unpatched -> `refuse`, row 31; startup_refusals returning [] -> `clock`, row 34; new_clock
+    # also handing back a bare RunClock -> `epoch0`, row 35; the clock stubbed whole -> here.
+    # Rows 32, 33 and 36 (OPT.build, OPT.load_state, SIG.warm_up) had bodies and passed through.
+    # (The row numbers are the 42-row order's -- the 41-row order's until the 'focus' row,
+    # 2026-09-28; this said "Row 29" beside "rows 30, 33 and 34" until
     # Q-EVAL-12's review. THAT STACK IS GONE: all three have bodies, and compose(environ={}) returns
     # a System at stage 'assembled' with no refusal -- measured 2026-09-27 -- so this line runs on
     # every compose().)
@@ -3327,7 +3411,7 @@ def compose(environ=None, *, restored=None):
     # 'progress' -- so RUN.PROGRESS_WINDOWS had no Cadences.ledger row and no cadence_audit
     # coverage, which is exactly the "0 fires nobody can read" state new_cadences' docstring
     # describes, and K9 could not see it because K9 reads _periods rather than this call. The
-    # ROW says "periods is _periods(sysm) -- the SEVEN gates' thresholds" and the audit's row says
+    # ROW says "periods is _periods(sysm) -- the EIGHT gates' thresholds" and the audit's row says
     # "the SAME _periods(sysm) mapping new_cadences receives -- the same object, not a second
     # construction, or the audit would describe gates other than the ones evaluated". Both are
     # true of the call now. Found 2026-09-15, writing the three RUN bodies these two rows call.
@@ -3474,23 +3558,24 @@ def _run_windows(sysm):
     and derive.opt_steps_from_windows does the same (derive.py::opt_steps_from_windows), so RUN.cadence_audit would
     have raised on its first call and OPT.build on its first horizon. BOTH ARE REACHED ON EVERY
     compose() TODAY: compose.compose(environ={}) returns a System at stage 'assembled' with no
-    refusal (measured 2026-09-27, Q-EVAL-12's review), past OPT.build at row 31 of ASSEMBLY_ORDER's
-    41 -- this function is CALLED there, at the `optimizer` stage -- and past RUN.cadence_audit at
-    row 38. THE TWO WERE UNREACHABLE FOR DIFFERENT REASONS, AND SAYING SO WAS THE WHOLE VALUE OF THIS
-    PARAGRAPH WHILE THEY WERE. capacity/api.py::startup_refusals at row 30 was OPT.build's ONLY
+    refusal (measured 2026-09-27, Q-EVAL-12's review), past OPT.build at row 32 of ASSEMBLY_ORDER's
+    42 -- this function is CALLED there, at the `optimizer` stage -- and past RUN.cadence_audit at
+    row 39. THE TWO WERE UNREACHABLE FOR DIFFERENT REASONS, AND SAYING SO WAS THE WHOLE VALUE OF THIS
+    PARAGRAPH WHILE THEY WERE. capacity/api.py::startup_refusals at row 31 was OPT.build's ONLY
     blocker: with startup_refusals returning an empty list compose() ran straight through OPT.build
-    and OPT.load_state and stopped at row 33. RUN.cadence_audit had FOUR blockers above it, not one:
-    row 30, then train/api.py::new_clock at row 33, train/api.py::RunClock.begin_epoch at row 34 and
-    train/api.py::new_cadences at row 36, each raising NotImplementedError in its turn (one row
-    lower each until the 'probe' row landed, 2026-09-27). So
+    and OPT.load_state and stopped at row 34. RUN.cadence_audit had FOUR blockers above it, not one:
+    row 31, then train/api.py::new_clock at row 34, train/api.py::RunClock.begin_epoch at row 35 and
+    train/api.py::new_cadences at row 37, each raising NotImplementedError in its turn (one row
+    lower each until the 'focus' row landed, 2026-09-28, and two lower until the 'probe' row,
+    2026-09-27). So
     "unreachable today only because CAP.startup_refusals", which stood in this paragraph until
     2026-09-04, was true of one consumer and false of the other, and a reader who repaired CAP
     expecting the audit's UnitError to surface would not have seen it. MEASURED ONE STUB AT A TIME,
     by re-running compose.compose(environ={}) in a fresh process and reading where the traceback
-    ended: unpatched it stopped at the `refuse` stage, row 30; with startup_refusals returning [] at
-    `clock`, row 33; with new_clock also handing back a bare RunClock at `epoch0`, row 34; with the
-    clock stubbed whole at `cadence`, row 36; and with new_cadences returning a mapping at `audit`,
-    row 38, which is this function's second call site and the audit's first. Rows 32 and 35
+    ended: unpatched it stopped at the `refuse` stage, row 31; with startup_refusals returning [] at
+    `clock`, row 34; with new_clock also handing back a bare RunClock at `epoch0`, row 35; with the
+    clock stubbed whole at `cadence`, row 37; and with new_cadences returning a mapping at `audit`,
+    row 39, which is this function's second call site and the audit's first. Rows 33 and 36
     (OPT.load_state, SIG.warm_up) had bodies and passed through. A stack of stubs is this file's
     oldest shape and the reason K7 exists; what it costs is that "unreachable" needs the whole list
     to stay true, and one name is the answer a repair disproves. THE BLOCKER NAMED HERE UNTIL
@@ -3501,8 +3586,9 @@ def _run_windows(sysm):
     nothing. AND THIS PARAGRAPH MADE THAT FALSE EQUATION AGAIN UNTIL Q-EVAL-12's REVIEW: "measured,
     not inferred", it said compose.compose(environ={}) raised NotImplementedError from the `refuse`
     stage into capacity/api.py::startup_refusals, quoting docs/04_CONTRACT.md's "halts on the 29th
-    of the 41 rows" -- of a function that had a body, at a row that is the 30th. ISSUES P1-H51 is
-    the general case: all 37 Clock-unit levers resolve to bare ints and the typing is real only
+    of the 41 rows" -- of a function that had a body, at a row that was the 30th (the 31st since
+    the 'focus' row, 2026-09-28). ISSUES P1-H51 is
+    the general case: all 38 Clock-unit levers resolve to bare ints and the typing is real only
     where derive or assemble puts it back, which for this quantity is here, at the one place it is
     computed.
 
@@ -3514,7 +3600,7 @@ def _run_windows(sysm):
     number was right at every configuration, which is the point of the rule and not an argument
     against it. It is now spine/derive.py::run_windows_from_epochs, which refuses anything but an
     Epochs at the count end and any Clock at the rate end, and the kind is put on HERE -- at the
-    call, where P1-H51 says it has to be, because RUN.epochs resolves to a bare int like all 36
+    call, where P1-H51 says it has to be, because RUN.epochs resolves to a bare int like all 38
     Clock-unit levers.
 
     WHY O11 DID NOT SEE IT, WHICH MATTERS MORE THAN THE LINE DID. Three independent reasons, each
@@ -4207,6 +4293,39 @@ def _faded_ids(sysm, byte):
     return frozenset(_dv.area_id(str(names[int(i)])) for i in phase + parent)
 
 
+def _trust_units(sysm, lo, hi):
+    """DATA.claims_observe's `units` and `sources` over this epoch's ids[lo:hi] (2026-09-28,
+    Proposal 04 SR3; Q-DATA-11): each TOK unit's BYTES, cut out of Stream.bytes at
+    Segmentation.byte_pos -- unit p is bytes[byte_pos[p]:byte_pos[p + 1]], the last to the stream's
+    end, the definition spine/loop.py::_window_bytes counts with -- and each unit's source name off
+    Stream.sources and Stream.source_names: the source run holding its first byte, or None where a
+    later run starts inside the unit, whose bytes then come from two sources and which no claim may
+    span. A join over TOK's record and DATA's, which O10 forbids either package to form; 04
+    section 5's (ids, decode) became bytes here because DATA may not import TOK. It draws nothing
+    and writes nothing. A Stream carrying no source table gives every unit None."""
+    pos = sysm.segmentation.byte_pos
+    data = sysm.stream.bytes
+    n = len(data)
+    runs = tuple(getattr(sysm.stream, "sources", ()) or ())
+    names = tuple(getattr(sysm.stream, "source_names", ()) or ())
+    offs = [int(o) for o, _i in runs]
+    units, sources = [], []
+    r = bisect.bisect_right(offs, int(pos[lo])) - 1 if (runs and hi > lo) else -1
+    for p in range(int(lo), int(hi)):
+        b0 = int(pos[p])
+        b1 = int(pos[p + 1]) if p + 1 < len(pos) else n
+        units.append(data[b0:b1])
+        while r + 1 < len(offs) and offs[r + 1] <= b0:
+            r += 1
+        if r < 0:
+            sources.append(None)
+        elif r + 1 < len(offs) and offs[r + 1] < b1:
+            sources.append(None)
+        else:
+            sources.append(names[int(runs[r][1])])
+    return units, sources
+
+
 def _probe_notices(sysm, ev):
     """The two startup notices the register asks for, PRINTED AND NEVER APPLIED (04 section 6).
 
@@ -4472,9 +4591,10 @@ def _periods(sysm):
 
     ASSEMBLED HERE BECAUSE NO PACKAGE CAN. Each period belongs to the package that DECLARES its kind
     and arrives through that package's typed accessor -- EVAL.curve_period, DOM.manage_period,
-    FAB.manage_period, MEM.rekey_period, CKPT.save_period and, since 2026-09-27 (Q-EVAL-12),
-    EVAL.retention_period -- and a mapping spanning six packages is exactly the object O10 forbids
-    any one of them to build (EVAL was already in it, so the seventh key added no package). RUN
+    FAB.manage_period, MEM.rekey_period, CKPT.save_period, since 2026-09-27 (Q-EVAL-12)
+    EVAL.retention_period and, since 2026-09-28 (Q-DATA-11), DATA.trust_period -- and a mapping
+    spanning seven packages is exactly the object O10 forbids any one of them to build (EVAL was
+    already in it, so the seventh key added no package; the eighth, 'data.trust', added DATA). RUN
     evaluates gates, and RUN owns no threshold THAT DECIDES ANYTHING THE MODEL COMPUTES -- which is
     the sentence new_cadences means, and the one 'progress' entry is the exception that has to be
     stated rather than smuggled.
@@ -4502,10 +4622,10 @@ def _periods(sysm):
     be edited to a bare int -- H51 exactly, and Cadences.due raises on it at the first evaluation --
     with every suite green. K9 now reads THIS MAPPING as well as the rows: every value here must be
     a CALL or a module-level constant CONSTRUCTED with a Clock kind, and its detail line prints how
-    many of these seven are which.
+    many of these eight are which.
 
     THE ACCESSORS EXIST BECAUSE Cadences.due REFUSES A BARE INT. Three of the five gates were handed
-    cfg.manage_every directly until 2026-08-30, and Config hands back a bare int for all 37 levers
+    cfg.manage_every directly until 2026-08-30, and Config hands back a bare int for all 38 levers
     that declare a Clock unit (ISSUES P1-H51), so three of the five would have raised on their first
     evaluation while the row said they were fine. K9 refuses that shape now.
 
@@ -4521,6 +4641,9 @@ def _periods(sysm):
         "dom.rekey": mem_api.rekey_period(r["MEM"]),
         "ckpt": ckpt_api.save_period(r["CKPT"]),
         "retention": eval_api.retention_period(r["EVAL"]),
+        # THE SOURCE-RELIABILITY BOOK'S CADENCE (2026-09-28, Q-DATA-11): DATA_TRUST_EVERY at
+        # DATA_TRUST='observe', and 0 -- disarmed, which the audit says -- at 'off'.
+        "data.trust": data_api.trust_period(r["DATA"]),
         "progress": run_api.PROGRESS_WINDOWS,
     }
 

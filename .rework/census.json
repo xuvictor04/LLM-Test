@@ -5639,6 +5639,211 @@
      "DATA_PHASE_SCHED",
      "CKPT_RESUME"
     ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST",
+    "unit": "name",
+    "purpose": "The source-reliability book's mode: 'off' keeps none (DATA.new_focus allocates nothing and the loop's arm test withholds every DATA.claims_observe call); 'observe' reads every source's (key, value) claims in the training stream, votes over the conflicted ones and reports each source's reliability and trust while changing nothing the run trains on; 'loss' and 'loss+draw' would weight the loss (and the draw) by that trust and are refused at startup with NotBuilt.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8 and SR3 (the source-reliability book), register 04-6.3 and \u00a78 3.4, ruled in docs/04_CONTRACT.md Q-DATA-11. There is no ancestor knob: the old tree kept no book of which source to believe. IT DOES NOT CHANGE THE 328. WHY: the only estimator 04's arms measured moving contested facts consistently, and it reads no model output, so fluency cannot game it. BUILT 'off' so a default run is the tree before the book, bit for bit (SR3's bit-identity, tests/test_trust.py); 04-6.3 rules 'observe' ON after that bit-identity, and the flip lands last and alone. Actuation stays OFF: neither 'loss' value may become a default while a truthful source in another format is floored, nor before copy detection (SR6).",
+    "couples_with": [
+     "DATA_TRUST_RULE",
+     "DATA_TRUST_CLAIM",
+     "DATA_TRUST_EVERY",
+     "DATA_SOURCE",
+     "DATA_AREAS"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_RULE)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_RULE",
+    "unit": "name",
+    "purpose": "Which estimator fills the book: 'claims', the model-free reliability-weighted vote over the claims sources make -- the one rule built. Read only at DATA_TRUST != 'off'; a resume that changes it is refused by name.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8 and SR3 (the source-reliability book), register 04-6.3 and \u00a78 3.4, ruled in docs/04_CONTRACT.md Q-DATA-11. There is no ancestor knob: the old tree kept no book of which source to believe. IT DOES NOT CHANGE THE 328. WHY: 04 names three more rule values ('peer', 'residual', 'fluency') as SR5's ablations; a value that is not built is not a choice, so the lever carries one until they are.",
+    "couples_with": [
+     "DATA_TRUST",
+     "DATA_TRUST_CLAIM"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_CLAIM)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_CLAIM",
+    "unit": "name",
+    "purpose": "What counts as one claim: 'kv', a (key, value) pair around a DATA_TRUST_DELIMS delimiter, the key up to DATA_TRUST_CTX TOK units before it and the value DATA_TRUST_VAL units after, both cut at punctuation, case-folded and whitespace-collapsed, so '@EEE=V;' and '@EEE:V;' are one claim; or 'ctx', d3's prototype, a raw DATA_TRUST_CTX-unit context and the unit after it. A claim counts only where one source holds every unit it spans. Read only at DATA_TRUST != 'off'; a resume that changes it is refused by name.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8 and SR3 (the source-reliability book), register 04-6.3 and \u00a78 3.4, ruled in docs/04_CONTRACT.md Q-DATA-11. There is no ancestor knob: the old tree kept no book of which source to believe. IT DOES NOT CHANGE THE 328. WHY: 'kv' is 04's build target (R-5) and is unprototyped -- E5's format-variant world is its acceptance test; 'ctx' measures conformity to the majority's surface form, not truth (a truthful source writing '@EEE:V;' was floored at 2 of 2 seeds), and is kept as the prototype's arm.",
+    "couples_with": [
+     "DATA_TRUST",
+     "DATA_TRUST_CTX",
+     "DATA_TRUST_VAL",
+     "DATA_TRUST_DELIMS"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_CTX)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_CTX",
+    "unit": "tokens",
+    "purpose": "Key length in TOK units: the most units before a delimiter a 'kv' key reads, or the context length of a 'ctx' claim. Read only at DATA_TRUST != 'off'; a resume that changes it is refused by name.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8 and SR3 (the source-reliability book), register 04-6.3 and \u00a78 3.4, ruled in docs/04_CONTRACT.md Q-DATA-11. There is no ancestor knob: the old tree kept no book of which source to believe. IT DOES NOT CHANGE THE 328. WHY: 04 section 6's value, 5, in TOK units and not bytes: after minting five units span more than five bytes, so the testbed's known answer (K = 5 = len('@EEE=')) does not port. PROVISIONAL (NEW-19).",
+    "couples_with": [
+     "DATA_TRUST_CLAIM",
+     "DATA_TRUST_VAL",
+     "TOK_MODE"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_VAL)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_VAL",
+    "unit": "tokens",
+    "purpose": "Value length in TOK units for a 'kv' claim: how many units after the delimiter the value reads, cut at the first punctuation or delimiter. Read only at DATA_TRUST=observe with DATA_TRUST_CLAIM='kv'; a resume that changes it is refused by name.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8 and SR3 (the source-reliability book), register 04-6.3 and \u00a78 3.4, ruled in docs/04_CONTRACT.md Q-DATA-11. There is no ancestor knob: the old tree kept no book of which source to believe. IT DOES NOT CHANGE THE 328. WHY: 04 section 6's value, 1. At one byte-level unit a spaced form ('x = 5') reads the space as its value and makes no claim; stated, not tuned. PROVISIONAL (NEW-19).",
+    "couples_with": [
+     "DATA_TRUST_CLAIM",
+     "DATA_TRUST_CTX",
+     "DATA_TRUST_DELIMS"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_DELIMS)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_DELIMS",
+    "unit": "name",
+    "purpose": "The 'kv' delimiter class, '|'-separated byte strings: '=', ':' and the space-bounded copulas ' is ', ' are ', ' was ', ' were '. An empty entry, a repeated one and one that is a prefix of another are refused by name, the last because a claim must be decidable from the bytes it spans. A resume that changes it is refused by name.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8 and SR3 (the source-reliability book), register 04-6.3 and \u00a78 3.4, ruled in docs/04_CONTRACT.md Q-DATA-11. There is no ancestor knob: the old tree kept no book of which source to believe. IT DOES NOT CHANGE THE 328. WHY: 04 section 6's class, unmeasured on real text; one string because a Lever holds one value.",
+    "couples_with": [
+     "DATA_TRUST_CLAIM",
+     "DATA_TRUST_CTX",
+     "DATA_TRUST_VAL"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_HOT)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_HOT",
+    "unit": "count",
+    "purpose": "The count-sketch pre-filter: a claim enters the claim table once its sketch bucket (zlib.crc32 of its key modulo DATA_TRUST_SKETCH) has counted this many claims.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8 and SR3 (the source-reliability book), register 04-6.3 and \u00a78 3.4, ruled in docs/04_CONTRACT.md Q-DATA-11. There is no ancestor knob: the old tree kept no book of which source to believe. IT DOES NOT CHANGE THE 328. WHY: d3's HOT, 20; a key seen a handful of times across the stream costs no table entry. PROVISIONAL (NEW-19).",
+    "couples_with": [
+     "DATA_TRUST_SKETCH",
+     "DATA_TRUST_TABLE"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_SELF)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_SELF",
+    "unit": "fraction 0..1",
+    "purpose": "Admission: a source's claim on a key counts only when its most frequent value there -- the only most frequent -- holds at least this share of its readings of the key.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8 and SR3 (the source-reliability book), register 04-6.3 and \u00a78 3.4, ruled in docs/04_CONTRACT.md Q-DATA-11. There is no ancestor knob: the old tree kept no book of which source to believe. IT DOES NOT CHANGE THE 328. WHY: d3's SELF, 0.8: a source that contradicts itself about a key makes no claim about it. PROVISIONAL (NEW-19).",
+    "couples_with": [
+     "DATA_TRUST_MIN_N",
+     "DATA_TRUST_MIN_EV"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_MIN_N)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_MIN_N",
+    "unit": "count",
+    "purpose": "Admission: a source's claim on a key counts only after this many readings of that key from that source.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8 and SR3 (the source-reliability book), register 04-6.3 and \u00a78 3.4, ruled in docs/04_CONTRACT.md Q-DATA-11. There is no ancestor knob: the old tree kept no book of which source to believe. IT DOES NOT CHANGE THE 328. WHY: d3's MIN_N, 3. PROVISIONAL (NEW-19).",
+    "couples_with": [
+     "DATA_TRUST_SELF",
+     "DATA_TRUST_MIN_EV"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_MIN_EV)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_MIN_EV",
+    "unit": "count",
+    "purpose": "Conflicted claims -- keys at least two sources claim with at least two values -- a source must take part in before its reliability r is reported and its trust set; below it both are ABSENT and its trust is 1, which is how a new source joins.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8 and SR3 (the source-reliability book), register 04-6.3 and \u00a78 3.4, ruled in docs/04_CONTRACT.md Q-DATA-11. There is no ancestor knob: the old tree kept no book of which source to believe. IT DOES NOT CHANGE THE 328. WHY: d3's MIN_EV, 10: agreement alone says nothing about which source is the more reliable, so only conflict is evidence. PROVISIONAL (NEW-19).",
+    "couples_with": [
+     "DATA_TRUST_MIN",
+     "DATA_TRUST_SELF",
+     "DATA_TRUST_MIN_N"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_MIN)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_MIN",
+    "unit": "fraction 0..1",
+    "purpose": "The trust floor: t = clip(r / max r, this, 1), set only when two or more sources carry evidence. Under 'observe' it multiplies nothing; t is the weight a built actuation would apply.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8 and SR3 (the source-reliability book), register 04-6.3 and \u00a78 3.4, ruled in docs/04_CONTRACT.md Q-DATA-11. There is no ancestor knob: the old tree kept no book of which source to believe. IT DOES NOT CHANGE THE 328. WHY: d3's T_MIN, 0.3. PROVISIONAL (NEW-19).",
+    "couples_with": [
+     "DATA_TRUST_MIN_EV",
+     "DATA_TRUST"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_EVERY)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_EVERY",
+    "unit": "Windows",
+    "purpose": "Windows between passes of the book over the stream the run consumed since its last pass, evaluated once per window after the flush through Cadences.due('data.trust', DATA.trust_period(dat), clock), behind the arm test; the window that rolls an epoch also passes, so the book reads every unit of an epoch, and 0 leaves the epoch-end passes only. A negative is refused by its declared domain.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8 and SR3 (the source-reliability book), register 04-6.3 and \u00a78 3.4, ruled in docs/04_CONTRACT.md Q-DATA-11. There is no ancestor knob: the old tree kept no book of which source to believe. IT DOES NOT CHANGE THE 328. WHY: 04 section 6's 160, the testbed's 10 steps x 16 windows, to be lengthened if E3 measures more than 2% of wall. A Windows cadence like every period in compose._periods, where it is the key 'data.trust'.",
+    "couples_with": [
+     "DATA_TRUST",
+     "RUN_EPOCHS"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_SKETCH)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_SKETCH",
+    "unit": "slots",
+    "purpose": "Count-sketch size in int32 buckets, fixed for a lineage: 16.8 MB at the default, held only at DATA_TRUST != 'off' and checkpointed with the book as DATA's payload, never as a geometry-manifest field. A resume at another size is refused by name at DATA.new_focus.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8 and SR3 (the source-reliability book), register 04-6.3 and \u00a78 3.4, ruled in docs/04_CONTRACT.md Q-DATA-11. There is no ancestor knob: the old tree kept no book of which source to believe. IT DOES NOT CHANGE THE 328. WHY: d3's NB, 4194301, a prime; 04 section 5 fixes it at build.",
+    "couples_with": [
+     "DATA_TRUST_HOT",
+     "DATA_TRUST_TABLE"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_TABLE)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_TABLE",
+    "unit": "entries",
+    "purpose": "The most keys the claim table holds; the least recently claimed key is evicted beyond it, counted in data.trust.table_evictions, and a resume at a smaller bound evicts to fit, counted the same way.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8 and SR3 (the source-reliability book), register 04-6.3 and \u00a78 3.4, ruled in docs/04_CONTRACT.md Q-DATA-11. There is no ancestor knob: the old tree kept no book of which source to believe. IT DOES NOT CHANGE THE 328. WHY: 04 section 6's LRU bound, 200000, unmeasured on real text.",
+    "couples_with": [
+     "DATA_TRUST_HOT",
+     "DATA_TRUST_SKETCH"
+    ]
    }
   ]
  }

@@ -88,7 +88,7 @@ DISARMED — which the cadence audit reports as a different state from starved.
 
 ## 2. Every lever, by package
 
-276 levers across 13 packages.
+290 levers across 13 packages.
 
 
 ### CAP (7 levers)
@@ -113,7 +113,7 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `CKPT_EVERY` | `0` | Windows |  | How often a mid-run checkpoint is written, in windows elapsed since the last one; 0 disables periodic saving, leaving the final save and SIGUSR1. |
 | `CKPT_RESUME` | `''` | path |  | Checkpoint to continue training from -- a run directory or a .pt file; empty starts from scratch. |
 
-### DATA (22 levers)
+### DATA (36 levers)
 
 | lever | default | unit | accepts | what it is |
 |---|---|---|---|---|
@@ -138,6 +138,20 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `DATA_SOURCE` | `'synthetic'` | name | choices `'real'`, `'synthetic'` | Which stream the run trains on: `real` splices the corpora under DATA_DIR, `synthetic` generates from Markov processes. |
 | `DATA_STREAM_BYTES` | `120000` | bytes |  | Bytes of stream one epoch draws from the areas. |
 | `DATA_SYNTH_HOLDOUT` | `False` | on/off |  | Hold out a block per area on DATA_SOURCE=synthetic, under the real sources' law: min(DATA_HOLDOUT_FRAC x body, DATA_VAL_CAP) bytes, a seeded contiguous block removed from the body. |
+| `DATA_TRUST` | `'off'` | name | choices `'off'`, `'observe'`, `'loss'`, `'loss+draw'` | The source-reliability book: 'off' keeps none; 'observe' reads every source's claims, votes, and reports each source's reliability and trust while changing nothing the run trains on; 'loss' and 'lo... |
+| `DATA_TRUST_CLAIM` | `'kv'` | name | choices `'kv'`, `'ctx'` | What counts as one claim: 'kv' a normalised (key, value) pair around a DATA_TRUST_DELIMS delimiter, 'ctx' a raw DATA_TRUST_CTX-unit context and the unit after it. |
+| `DATA_TRUST_CTX` | `5` | tokens | domain (1, ∞) | Key length in TOK units: the most units before a delimiter a 'kv' key reads, or the context length of a 'ctx' claim. |
+| `DATA_TRUST_DELIMS` | `'=|:| is | are | was | were '` | name |  | The 'kv' delimiter class, '\|'-separated byte strings: a claim is read around each occurrence. |
+| `DATA_TRUST_EVERY` | `160` | Windows | domain (0, ∞) | Windows between passes of the book over the stream consumed since the last one (0 = epoch-end passes only). |
+| `DATA_TRUST_HOT` | `20` | count | domain (1, ∞) | Count-sketch pre-filter: a claim enters the table once its sketch bucket has counted this many claims. |
+| `DATA_TRUST_MIN` | `0.3` | fraction 0..1 | domain (0.0, 1.0) | Trust floor: the least trust a source is given, however unreliable its claims. |
+| `DATA_TRUST_MIN_EV` | `10` | count | domain (1, ∞) | Conflicted claims a source must take part in before its reliability is reported and its trust set; below it both are ABSENT and trust is 1. |
+| `DATA_TRUST_MIN_N` | `3` | count | domain (1, ∞) | Admission: a source's claim on a key counts only after this many readings of that key from that source. |
+| `DATA_TRUST_RULE` | `'claims'` | name | choices `'claims'` | Which estimator fills the book: 'claims', the model-free reliability-weighted vote over the (key, value) claims sources make; the only one built. |
+| `DATA_TRUST_SELF` | `0.8` | fraction 0..1 | domain (0.0, 1.0) | Admission: a source's claim on a key counts only when its most frequent value holds at least this share of its readings of that key. |
+| `DATA_TRUST_SKETCH` | `4194301` | slots | domain (1, ∞) | Count-sketch size, in int32 buckets; fixed for a lineage. |
+| `DATA_TRUST_TABLE` | `200000` | entries | domain (1, ∞) | Most keys the claim table holds; the least recently claimed is evicted beyond it. |
+| `DATA_TRUST_VAL` | `1` | tokens | domain (1, ∞) | Value length in TOK units: how many units after a 'kv' delimiter the value reads, cut at the first punctuation or delimiter. |
 | `DATA_VAL_CAP` | `4000000` | bytes |  | Maximum bytes of held-out tail kept per area. |
 
 ### DOM (29 levers)

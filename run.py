@@ -100,6 +100,14 @@ def main(argv=None):
     ap.add_argument("--probe-series", default=None, metavar="PATH",
                     help="after the run, write RunResult.probe_series (one dict per retention "
                          "reading this process took) to PATH as a JSON list")
+    # THE SOURCE-RELIABILITY BOOK'S PASSES, WRITTEN FOR A SCRIPT TO READ (2026-09-28,
+    # docs/04_CONTRACT.md Q-DATA-11): every pass this process made, in order, with its kind, the
+    # units it read, its seconds and each source's evidence and trust after it -- what E3 reads on
+    # real text. An empty list at DATA_TRUST='off'. A driver argument like --probe-series, not a
+    # lever.
+    ap.add_argument("--trust-series", default=None, metavar="PATH",
+                    help="after the run, write RunResult.trust_series (one dict per pass of the "
+                         "source-reliability book this process made) to PATH as a JSON list")
     args = ap.parse_args(argv)
 
     # THE CALLER OWNS THE ENVIRONMENT, which is compose()'s own first line: `system =
@@ -245,6 +253,10 @@ def main(argv=None):
         import json
         with open(args.probe_series, "w", encoding="utf-8") as fh:
             json.dump(list(result.probe_series), fh)
+    if args.trust_series:
+        import json
+        with open(args.trust_series, "w", encoding="utf-8") as fh:
+            json.dump(list(result.trust_series), fh)
     # THE PRECISION ASKED FOR AND THE PRECISION OBSERVED, ON ONE LINE, BECAUSE THEY DISAGREED FOR
     # THE LIFE OF THIS DRIVER. amp_state above is what RUN.process_setup decided; this is the dtype
     # of the tensor the step actually produced. RUN_AMP=bf16 printed "active" and ran fp32 until
@@ -264,11 +276,13 @@ def main(argv=None):
     print(f"=== {len(result.skipped)} MECHANISM(S) ON LOOP_ORDER HAVE NO CALL SITE AT ALL:")
     for s in result.skipped:
         print(f"      - {s}")
-    # AND THE GATED ONES, SEPARATELY, BECAUSE "IT HAS A CALL SITE" IS NOT "IT RAN". Three of the
-    # twenty-two B rows stand behind events that are UNREACHABLE at the shipped defaults --
-    # TOK_PROBATION_USES=0 turns the whole probation family off -- so a report that printed "0 not
-    # called" and stopped would say this run judged probation when nothing did. That is the same
-    # overstatement the skipped list itself was written to repair, one layer in.
+    # AND THE GATED ONES, SEPARATELY, BECAUSE "IT HAS A CALL SITE" IS NOT "IT RAN". Six of the
+    # twenty-seven B rows' calls stand behind events that are UNREACHABLE at the shipped defaults --
+    # TOK_PROBATION_USES=0 turns the whole probation family off, EVAL_RETENTION_EVERY=0 the retention
+    # probe and DATA_TRUST='off' the source-reliability book (this said "three of the twenty-two"
+    # until 2026-09-28) -- so a report that printed "0 not called" and stopped would
+    # say this run judged probation when nothing did. That is the same overstatement the skipped
+    # list itself was written to repair, one layer in.
     print("=== GATED CALL SITES (a call site is not a call):")
     for g in result.gated:
         print(f"      - {g}")

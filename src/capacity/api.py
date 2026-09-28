@@ -36,9 +36,9 @@ refused by the type system rather than by discipline.
     CAP.startup_refusals -- PAST the valve's own row. IT NO LONGER HALTS AT ALL, and this sentence
     said "now halts on the 29th of the 40 rows" until Q-EVAL-12's review (2026-09-27), long after
     CAP.startup_refusals got a body: compose(environ={}) returns a System at stage 'assembled' with
-    no refusal (measured 2026-09-27), and CAP.startup_refusals is the 30th of the 41 rows in
-    spine/compose.py::ASSEMBLY_ORDER. Either way new_valve IS built on every compose() today and all
-    THREE of its Gates are
+    no refusal (measured 2026-09-27), and CAP.startup_refusals is the 31st of the 42 rows in
+    spine/compose.py::ASSEMBLY_ORDER (the 30th of 41 until the 'focus' row, 2026-09-28). Either
+    way new_valve IS built on every compose() today and all THREE of its Gates are
     readable without writing a line -- THREE, corrected 2026-09-05: this said "both its Gates" from
     the edit that added cap.clamp, a count-in-prose falsified in the file that respells "EIGHT keys
     to TEN" twice for exactly this reason and that no check catches, because K13 reads digits and

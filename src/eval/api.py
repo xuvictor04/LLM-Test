@@ -340,7 +340,7 @@ def curve_period(ev: Config):
     # THIS accessor really does read one, `curve_every`, which is what its LEVERS READ line above
     # says -- the correction is to the general sentence, not to this function's count.
     # Its whole job is that Cadences.due REFUSES a
-    # bare int while Config hands one back for all 37 levers that declare a Clock unit
+    # bare int while Config hands one back for all 38 levers that declare a Clock unit
     # (ISSUES P1-H51). Leaving it a stub kept spine.compose._periods -- and therefore
     # RUN.cadence_audit, the one statement that makes ISSUES P1-C11 visible -- unreachable
     # until P4, for no reason but symmetry with entry points that have real work to do.
