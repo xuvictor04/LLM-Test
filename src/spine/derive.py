@@ -1472,6 +1472,58 @@ def blowup_horizon(period):
     return stale, windows_for_readings(period, stale)
 
 
+# === a windows cadence at another context width ==================================================
+
+def windows_at_ctx(period, old_ctx, new_ctx):
+    """A cadence written in windows of `old_ctx` tokens, re-expressed in windows of `new_ctx` tokens:
+    the same TEXT between two firings, to the nearest whole window.
+
+    UNIT IN: period = Windows, old_ctx and new_ctx = tokens per window (counts). UNIT OUT: Windows.
+
+    THE CADENCE-RESCALING KNOWN ANSWER NEW-13 ASKED FOR (2026-09-28, register §8 3.6; NEW-13's critic:
+    "a wider context changes what every windows cadence means"; docs/04_CONTRACT.md Q-LM-15). A
+    window is LM_CTX tokens, so a widening resume at LM_CTX_WIDEN=1 (64 -> 128, say) leaves every
+    Windows-unit lever counting windows twice as long: FAB_MANAGE_EVERY=500 manages every 64,000
+    tokens where the parent managed every 32,000. The root PRINTS each Windows-unit lever beside
+    this function's value at a widening resume and APPLIES NONE (N4: a lever reading another lever
+    at run time is the L1 defect); an operator who wants the parent's spacing in text sets the
+    printed values.
+
+    THE ARITHMETIC IS period x old_ctx / new_ctx, IN INTEGERS, ROUNDED TO THE NEAREST WHOLE WINDOW
+    WITH A HALF GOING UP -- (2 x period x old_ctx + new_ctx) // (2 x new_ctx) -- so 1000 -> 500 and
+    333 -> 167 at 64 -> 128. Nearest, not truncated: the question is "the same text", and the nearest
+    window is the closest answer to it (flush_period truncates because it converts a clock that must
+    never fire LATE; this is a printed suggestion, not a clock). A POSITIVE PERIOD NEVER COMES BACK
+    0: 0 is OFF for most Windows levers (DISARMED to RUN.Cadences), and a cadence narrower in text
+    than one window is one window -- so 1 -> 1. A period of 0 is off and stays 0.
+
+    REFUSES, AS THE FAMILY DOES: a period that is not Windows (a Steps or Flushes cadence would come
+    back batch-fold wrong), a NEGATIVE period (not a short one; a negative is DISARMED, never
+    rescaled), and a context that is not a positive int -- a Clock among them, since `int()` on a
+    Clock succeeds silently (opt_steps_from_backwards records the measurement). The two widths may
+    come in either order: the root asks only for widenings, which is where a run can reach it.
+    """
+    if type(period) is not Windows:
+        raise UnitError(f"windows_at_ctx: period must be Windows, got {type(period).__name__}. A "
+                        f"window is LM_CTX tokens, so only a WINDOWS cadence changes meaning with the "
+                        f"context; a Steps or Flushes one would come back batch-fold wrong.")
+    for name, c in (("old_ctx", old_ctx), ("new_ctx", new_ctx)):
+        if isinstance(c, Clock) or type(c) is not int:
+            raise UnitError(f"windows_at_ctx: {name}={c!r} is a {type(c).__name__}. A context width "
+                            f"is TOKENS per window, a count, so it is an int and nothing else -- a "
+                            f"Clock would pass through int() silently.")
+        if c < 1:
+            raise UnitError(f"windows_at_ctx: {name}={c} -- a window holds at least one token.")
+    if period.n < 0:
+        raise UnitError(f"windows_at_ctx: period={period!r} is negative. A negative cadence is not a "
+                        f"short one -- RUN.Cadences reads it DISARMED -- and rescaling it would print "
+                        f"a number nobody could have meant.")
+    if period.n == 0:
+        return Windows(0)
+    n = (2 * period.n * old_ctx + new_ctx) // (2 * new_ctx)
+    return Windows(n if n >= 1 else 1)
+
+
 # === the continual-learning schedule shape =======================================================
 
 def phase_schedule(n_areas, n_phases=None, width=None):

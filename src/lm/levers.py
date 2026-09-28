@@ -4,10 +4,12 @@ WHAT THIS PACKAGE OWNS. One network that maps a window of token ids to a distrib
 and every number that sets its SHAPE: which arm is built (a GRU or a transformer), how wide, how deep,
 how many attention heads, how many context positions it is trained over, how many rows the softmax has,
 and what happens to those rows when the tokenizer mints a new symbol into them. It owns no data, no
-cadence, no optimizer setting and no instrument. Four of its twelve levers arrived here from three other
-families in the old tree -- `tokenizer`, `data`, `optim` and `plumbing` -- and that is the whole point of
-the census: the old file filed a knob by the subsystem whose NAME it wore, and this package is filed by
-the tensors the knob actually sizes.
+cadence, no optimizer setting and no instrument. Four of the twelve levers its census rows declare
+arrived here from three other families in the old tree -- `tokenizer`, `data`, `optim` and `plumbing` --
+and that is the whole point of the census: the old file filed a knob by the subsystem whose NAME it wore,
+and this package is filed by the tensors the knob actually sizes. (Two more, `pos` and `ctx_widen`, are
+census amendments of 2026-09-28 with no ancestor at all -- register O17's position lever and NEW-13's
+declared widening, section 4 below.)
 
 WHY THESE ARE THE LEVERS, against the two goals and nothing else.
 
@@ -36,17 +38,23 @@ WHY THESE ARE THE LEVERS, against the two goals and nothing else.
   (sd 0.078), last/first 1.4822 (sd 0.011) (:7663-7673) -- and `mask_dead_rows` is the other end of it:
   rows nobody has minted yet must not take probability mass from rows somebody has.
 
-CENSUS ACCOUNTING (.rework/census.json, filtered on new_owner == "LM"): 17 rows.
+CENSUS ACCOUNTING (.rework/census.json, filtered on new_owner == "LM"): 17 rows + 2 AMENDMENTS.
     10 rename + 2 keep             -> 12 levers declared below
      2 merge                       -> both fold into levers declared here: WARMSTART into `new_row_init`
                                       (the "random" value), D_MODEL_B into `width`
      2 drop                        -> not declared (TOK_ANCHOR_TAU, WARMSTART_OPT)
      1 promote-to-wire             -> not declared (MAXLEN -> d_pos_max); see THE WIRES below
-   12 levers in total, from 17 rows. CENSUS.md:37 says "LM 17" because it counts ROWS assigned to this
-   package, not declarations that survive them, and for a package with two merges and two drops in it
-   those are different numbers. The five that do not become declarations are listed above rather than
-   subtracted silently, because a reader who counts twelve against a table that says seventeen otherwise
-   has to re-derive which five went where.
+     2 amend                       -> `pos` and `ctx_widen`, minted 2026-09-28 (register §8 3.6, O17,
+                                      NEW-13, C43; docs/04_CONTRACT.md Q-LM-15), with NO ANCESTOR KNOB:
+                                      the old tree had one position scheme per arm and no switch over
+                                      either, and it never widened a context across a resume
+   14 levers in total, 12 from 17 rows and 2 amendments. CENSUS.md:37 says "LM 17" because it counts
+   ROWS assigned to this package, not declarations that survive them, and for a package with two merges
+   and two drops in it those are different numbers. The five that do not become declarations are listed
+   above rather than subtracted silently, because a reader who counts twelve against a table that says
+   seventeen otherwise has to re-derive which five went where. (This read "12 levers in total, from 17
+   rows" until the two amendments landed; the amendments do not move the 17, which counts rows about
+   knobs the old system had.)
 
 FOUR ROWS THAT LOOK LIKE ANOTHER PACKAGE'S AND ARE THIS ONE'S, listed because their OLD names all wear
 somebody else's prefix and a reader will go looking in the wrong file:
@@ -88,13 +96,14 @@ that it was looked for rather than skipped.
   spelled because a wire is not prefixed.
 
   DEFECT 2 -- CLOCK KINDS. NO CORRECTION WAS NEEDED HERE AND THE REASON IS WORTH STATING, because "no
-  clock levers" is a claim about this package that a later reader can check. Not one of the twelve levers
-  is a cadence, a deadline or a horizon: every one is a SHAPE (arch, width, layers, heads, ctx,
-  vocab_slots), a WEIGHT (anchor_w, dropout), a SWITCH (compose, mask_dead_rows), a NAMED ARM
-  (new_row_init) or a per-token counter (anchor_uses). Nothing in this file is ever compared against
-  `step`, and `step` is the thing whose kind the survey's 32 unit records are about (it advances once per
-  WINDOW, :7708 `i += WIN; step += 1`, while the loop body runs once per FLUSH, :934). Two boundary cases
-  were examined rather than waved through:
+  clock levers" is a claim about this package that a later reader can check. Not one of the fourteen
+  levers is a cadence, a deadline or a horizon: every one is a SHAPE (arch, width, layers, heads, ctx,
+  vocab_slots), a WEIGHT (anchor_w, dropout), a SWITCH (compose, mask_dead_rows, ctx_widen), a NAMED ARM
+  (new_row_init, pos) or a per-token counter (anchor_uses). (It said "twelve" until the two amendments
+  of 2026-09-28, which are a named arm and a switch and change nothing here.) Nothing in this file is
+  ever compared against `step`, and `step` is the thing whose kind the survey's 32 unit records are
+  about (it advances once per WINDOW, :7708 `i += WIN; step += 1`, while the loop body runs once per
+  FLUSH, :934). Two boundary cases were examined rather than waved through:
     * `ctx` is typed TOKENS and that is metadata, not a clock. It is a WIDTH -- how many positions are in
       one window -- and it is what MAKES `step` a window counter; it is never itself compared against
       one. Its real unit hazard is the other one the census names: it was spent as a BYTE length in three
@@ -388,6 +397,9 @@ class LMLevers(LeverSet):
     # IT SIZES THE POSITIONAL TABLE, WHICH IS d_pos_max AND NOT DECLARED HERE. See conflict (b) in the
     # header: raising this past the positional table's height silently collapses every position beyond it
     # onto one shared embedding at :1586.
+    # ACROSS A RESUME IT IS EXACT, AND ONE SWITCH MAKES IT GROW-ONLY (2026-09-28, Q-LM-15): `ctx_widen`
+    # in section 4 admits a larger value at an epoch-boundary resume and still refuses a smaller one.
+    # At LM_POS='learned' that is the table growing by rows; at 'alibi' and 'none' there is no table.
 
     dropout = Lever(0.0, "Dropout probability, at three sites: the token embedding, between GRU layers "
                          "when depth is greater than one, and the READOUT in LM.decode before the head. "
@@ -587,6 +599,73 @@ class LMLevers(LeverSet):
     # without a conversion nobody had written. With one horizon there is one unit and no conversion.
 
     # ==============================================================================================
+    # 4. WHERE A TOKEN SITS IN ITS WINDOW, AND WHETHER A PARENT'S CONTEXT MAY GROW
+    #
+    # Two census amendments of 2026-09-28 (register §8 3.6; O17, NEW-13, C43; docs/04_CONTRACT.md
+    # Q-LM-15), and ONE DOOR: both LM arms add a learned row per position before the arch branch
+    # (lm/api.py::_LM builds the table, lm/api.py::encode adds it), and a model trained with that
+    # table is locked to the context it was trained at. O17 rules that no checkpoint on either arm is
+    # designated B's long-lived parent until a context-widening route PASSes on GPU (§8 5.8), and that
+    # the refusal is a switch -- lm/api.py::REFUSE_CONTEXT_LOCKED_PARENT, the D17 shape, a module
+    # constant and NOT a lever here. What the two levers build is the pair of routes 5.8 reads: an
+    # extrapolating value per arm (A), and 'learned''s own row-append widening (B).
+    # ==============================================================================================
+
+    pos = Lever("learned", "Where a token sits in its window: 'learned' adds a learned row per "
+                           "position (both arms), 'alibi' biases the transformer's attention by "
+                           "distance, and 'none' adds nothing on the GRU.",
+                U.NAME, choices=("learned", "alibi", "none"))
+    # CENSUS AMENDMENT, 2026-09-28 (register §8 3.6, O17, NEW-13, C43; docs/04_CONTRACT.md Q-LM-15),
+    # with NO ANCESTOR KNOB: in the old tree the arch implied the scheme and nothing chose between
+    # them -- MiniLM built NO position table (self_organize.py:1546-1561, this lever's 'none') and
+    # TinyTransformer a learned one clamped at 512 (:1563-1566) -- so there is no knob to rename.
+    # THIS TREE GAVE BOTH ARMS THE LEARNED TABLE, which is O17's premise correction and why this is
+    # ONE lever for both arms: the table feeds the default GRU too, not only the transformer.
+    # 'learned' IS TODAY'S MODEL, BIT FOR BIT, AND IT IS THE DEFAULT (O17: ON on both arms). The two
+    # other values are the EXTRAPOLATING ones, one per arm and OFF -- the arms §8 5.8's (A) reads
+    # against 'learned' on GPU:
+    #   'alibi' (transformer only): no position table at all; every layer's attention score is biased
+    #     by -m_h x (query position - key position), m_h a per-head slope (Press, Smith and Lewis,
+    #     "Train Short, Test Long", ICLR 2022, the paper's geometric slopes), so a context wider than
+    #     the one trained at is read with the same rule.
+    #   'none' (GRU only): no position table; the recurrence is the only order signal, and it runs at
+    #     any length.
+    # THE OTHER TWO PAIRS ARE REFUSED BY NAME AT lm/api.py::resolve, BEFORE ANY TENSOR: 'alibi' on the
+    # GRU (there is no attention to bias) and 'none' on the transformer (a causal transformer with no
+    # position signal is an arm O17 did not name; the transformer's extrapolating value is 'alibi').
+    # `choices=` cannot state a relation between two levers, which is the LM_WIDTH % LM_HEADS case
+    # again.
+    # A CHECKPOINT RECORDS IT AND A RESUME REFUSES A CHANGE BY NAME (lm/api.py::load_state): the scheme
+    # decides which tensors exist, so the two sides do not fit. A record from before this lever carries
+    # no scheme and reads as 'learned', which is what built it. It is NOT a manifest field: a field
+    # the live manifest adds and an older recording lacks is a REFUSAL at ckpt/api.py::check_geometry,
+    # so a new one would make every existing checkpoint unresumable.
+
+    ctx_widen = Lever(False, "Admit a larger LM_CTX than the checkpoint's at an epoch-boundary resume: "
+                             "the learned position table keeps the parent's rows and the appended ones "
+                             "keep this build's initial values.", U.FLAG)
+    # CENSUS AMENDMENT, 2026-09-28 (register §8 3.6, NEW-13, O17; docs/04_CONTRACT.md Q-LM-15), with
+    # NO ANCESTOR: the old tree never widened a context across a resume, and `ctx` has been EXACT at
+    # the geometry gate since the gate existed. NEW-13 keeps it EXACT "until an identity check and a
+    # cadence-rescaling known answer exist; then a widening is a declared operation at a resume
+    # boundary" -- this switch is the declaration, and it ships OFF, so `lm.ctx` stays EXACT.
+    # AT 1, THREE THINGS MOVE AND NOTHING ELSE. spine/compose.py::_geometry_manifest records lm.ctx
+    # and lm.pos_max as MAY_WIDEN, so a larger LM_CTX passes the gate and a smaller one is still
+    # refused; lm/api.py::load_state copies the parent's rows of the learned table and leaves the
+    # appended ones at this build's initialisation (OPT pads their moments with zeros, as for any
+    # dim-0 widening); and the root keeps SIG's width at the PARENT's context, because the encoder was
+    # trained at that width and SIG refuses a moved one. A continuing mid-epoch resume across a
+    # widening is refused by name: the saved cursor counts windows of the parent's width.
+    # IT RE-TYPES EVERY WINDOWS CADENCE, AND NOTHING RESCALES ONE FOR YOU (N4). A window is LM_CTX
+    # tokens, so after 64 -> 128 every Windows-unit lever spans twice the text it did. The widening
+    # resume PRINTS each one beside spine/derive.py::windows_at_ctx's value -- the same text per
+    # period at the new width -- and applies none: a lever reading another lever at run time is
+    # the L1 defect.
+    # WHAT IT DOES NOT BUY: a designation. A widened child is still a 'learned' model and still
+    # context-locked in O17's sense until §8 5.8's (B) passes; the row-append widening is the route
+    # that arm reads, not a route that has passed.
+
+    # ==============================================================================================
     # WHAT IS DELIBERATELY ABSENT, one line each, because a reader who finds them missing will otherwise
     # go looking for a mistake. Full reasons are in the header.
     #
@@ -606,4 +685,10 @@ class LMLevers(LeverSet):
     #                      also reached into three packages' optimizer state from inside a tokenizer mint.
     #   MAX_TOK            TOK's lever (CENSUS.md:308); LM receives d_max_token_bytes and sizes the
     #                      composer's byte tables from it instead of the hardcoded maxb=16 at :1441.
+    #   the designation    NOT A LEVER (2026-09-28, O17's switch). Whether a context-locked checkpoint
+    #   refusal            may be designated B's long-lived parent is decided by two module constants
+    #                      in D17's shape, lm/api.py::REFUSE_CONTEXT_LOCKED_PARENT and
+    #                      lm/api.py::PASSED_WIDENING_ROUTES: a run never designates anything, so a
+    #                      lever here would be read by no run, and turning the refusal off is a code
+    #                      edit on purpose.
     # ==============================================================================================

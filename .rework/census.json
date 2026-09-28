@@ -5943,6 +5943,38 @@
      "FAB_SLOTS",
      "FAB_FADED_CULL"
     ]
+   },
+   {
+    "old_name": "(amendment: LM_POS)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "LM",
+    "new_name": "LM_POS",
+    "unit": "name",
+    "purpose": "How the base LM is told where a token sits in its window. 'learned' (the default, today's model bit for bit, on both arms): a learned row per position, from a table LM_CTX rows tall, added to the token vectors before the arch branch -- which locks a model trained with it to its context. 'alibi' (LM_ARCH=transformer only): no table; every layer's attention score is biased by -m_h x (query position - key position), m_h the ALiBi paper's per-head geometric slopes, with the causal cut in the same float mask. 'none' (LM_ARCH=gru only): no table; the recurrence is the only order signal. 'alibi' on the GRU and 'none' on the transformer are refused by name at LM.resolve. A checkpoint records the scheme in its LM geometry and a resume that changes it is refused by name at LM.load_state; a record from before the lever reads as 'learned'.",
+    "reason": "AMENDMENT, 2026-09-28, register \u00a78 3.6 (O17, NEW-13, C43), ruled in docs/04_CONTRACT.md Q-LM-15. There is no ancestor knob: the old arch selector implied the scheme and nothing chose between them -- the old MiniLM built NO position table (self_organize.py:1546-1561, this lever's 'none') and the old TinyTransformer a learned one clamped at 512 (:1563-1566) -- so there is no (family, old_name) key a DEPARTURES entry could be written under and N2 could only be satisfied by amending the census. IT DOES NOT CHANGE THE 328. WHY: this tree gave BOTH arms the learned table, and O17 corrects C43's transformer-only premise accordingly -- and rules ONE position lever, 'learned' ON on both arms and an extrapolating value per arm OFF, so that \u00a78 5.8's arm (A) can read 'learned' against each arm's extrapolating value on GPU. Built so a default run is the tree before the lever, bit for bit. CPU tests establish operation only (\u00a78 3.6); which scheme a long-lived parent should carry is a GPU reading.",
+    "couples_with": [
+     "LM_ARCH",
+     "LM_CTX",
+     "LM_HEADS",
+     "LM_CTX_WIDEN"
+    ]
+   },
+   {
+    "old_name": "(amendment: LM_CTX_WIDEN)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "LM",
+    "new_name": "LM_CTX_WIDEN",
+    "unit": "on/off",
+    "purpose": "Whether a resume may widen the context. Off (the shipped default): lm.ctx is EXACT at the geometry gate, as it always was. On: the gate records lm.ctx and lm.pos_max MAY_WIDEN, so a larger LM_CTX than the checkpoint's is admitted at an epoch-boundary resume and a smaller one is still refused; LM.load_state copies the parent's rows of the learned position table and leaves the appended rows at this build's initialisation (OPT pads their moments with zeros), so on a window of the parent's width or less the model computes what the parent computed; SIG keeps the parent's width. A widening across a continuing mid-epoch resume is refused by name. The resume prints every Windows-unit lever beside spine/derive.py::windows_at_ctx's value -- the same text per period at the new width -- and applies none (N4).",
+    "reason": "AMENDMENT, 2026-09-28, register \u00a78 3.6 (NEW-13, O17, C43), ruled in docs/04_CONTRACT.md Q-LM-15. There is no ancestor knob: the old tree never widened a context across a resume. IT DOES NOT CHANGE THE 328. WHY: NEW-13 keeps lm.ctx EXACT 'until an identity check and a cadence-rescaling known answer exist; then a widening is a declared operation at a resume boundary', and O17 names 'learned''s row-append widening as its route -- \u00a78 5.8's arm (B), 128 -> 256 against a parent trained at 256 on GPU. This switch is the declaration, built OFF so lm.ctx stays EXACT; \u00a78 3.6's CPU known answers (the identity to 1e-6, bitwise on CPU, and the rescaling grid) establish operation only. A widened child is still context-locked in O17's sense until a route passes.",
+    "couples_with": [
+     "LM_CTX",
+     "LM_POS",
+     "CKPT_RESUME",
+     "RUN_EPOCHS"
+    ]
    }
   ]
  }

@@ -39,13 +39,14 @@ here was never asked, and no counter in any report can say so on its own.
 | `FAB_NORM_ONLY` | Control arm: keep the fabric's normalization, remove nodes and routing from the forward pass. |
 | `FAB_SOCIETY` | One hop with experts blended at the PREDICTION level, instead of multi-hop chaining through Fabric.forward. |
 | `LM_COMPOSE` | Build each token's vector from its bytes plus a learned residual, instead of storing a free row per token. |
+| `LM_CTX_WIDEN` | Admit a larger LM_CTX than the checkpoint's at an epoch-boundary resume: the learned position table keeps the parent's rows and the appended ones keep this build's initial values. |
 | `LM_MASK_DEAD_ROWS` | Take never-minted and retired vocabulary rows out of the distribution wherever logits become one. |
 | `MEM_WRONG_SWEEP` | Whether the selected wrongness detector DELETES flagged entries or only flags them. |
 | `RUN_BENCH` | Stop immediately after the training loop and print throughput instead of running the eval battery. |
 | `RUN_PROFILE` | Per-component wall-clock attribution of the training step, rendered at the end of the run and in the throughput summary. |
 | `WORLD_FEEDBACK` | Condition the base LM on the forecast (h += world_proj(forecast)) instead of leaving the world model as an unused side head. |
 
-15 levers ship False.
+16 levers ship False.
 
 **Numeric levers that ship 0.** Zero is this tree's documented OFF sentinel in most of these places
 and a legitimate value in some, so the help text is quoted rather than summarised. `spine/lever.py`
@@ -89,7 +90,7 @@ DISARMED — which the cadence audit reports as a different state from starved.
 
 ## 2. Every lever, by package
 
-296 levers across 13 packages.
+298 levers across 13 packages.
 
 
 ### CAP (7 levers)
@@ -307,7 +308,7 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `FAB_XOVER` | `0.35` | fraction 0..1 | domain (0.0, 1.0) | Fraction of births assembled from several parents by taking whole rank slices from a second parent. |
 | `FAB_Z` | `4.0` | count |  | How many robust deviations (running MAD) above the slow EMA a loss must sit to count as an unexpected REGRESSION. |
 
-### LM (12 levers)
+### LM (14 levers)
 
 | lever | default | unit | accepts | what it is |
 |---|---|---|---|---|
@@ -316,11 +317,13 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `LM_ARCH` | `'gru'` | name | choices `'gru'`, `'transformer'` | Which base language model is constructed: the GRU (MiniLM) or the transformer (TinyTransformer). |
 | `LM_COMPOSE` | `False` | on/off |  | Build each token's vector from its bytes plus a learned residual, instead of storing a free row per token. |
 | `LM_CTX` | `128` | tokens |  | The model's context width -- how many tokens one training or eval window holds. |
+| `LM_CTX_WIDEN` | `False` | on/off |  | Admit a larger LM_CTX than the checkpoint's at an epoch-boundary resume: the learned position table keeps the parent's rows and the appended ones keep this build's initial values. |
 | `LM_DROPOUT` | `0.0` | probability | domain (0.0, 1.0) | Dropout probability, at three sites: the token embedding, between GRU layers when depth is greater than one, and the READOUT in LM.decode before the head. |
 | `LM_HEADS` | `8` | count |  | Attention heads per transformer block; read only when arch is transformer. |
 | `LM_LAYERS` | `0` | count |  | Depth of the base LM -- transformer blocks or GRU layers; 0 means take the current arm's depth (4 for transformer, 1 for gru). |
 | `LM_MASK_DEAD_ROWS` | `False` | on/off |  | Take never-minted and retired vocabulary rows out of the distribution wherever logits become one. |
 | `LM_NEW_ROW_INIT` | `'mean'` | name | choices `'random'`, `'mean'`, `'last_first'` | How a newly minted token's embedding and head rows are initialized from its two parent tokens. |
+| `LM_POS` | `'learned'` | name | choices `'learned'`, `'alibi'`, `'none'` | Where a token sits in its window: 'learned' adds a learned row per position (both arms), 'alibi' biases the transformer's attention by distance, and 'none' adds nothing on the GRU. |
 | `LM_VOCAB_SLOTS` | `4096` | slots |  | How many vocabulary rows the model preallocates -- emb.weight, head.weight and head.bias are all this tall, and the tokenizer may not mint past it. |
 | `LM_WIDTH` | `128` | count |  | Hidden width of the base LM, and through it the width of every representation keyed off it -- memory keys, expert bodies, the world-model projection. |
 

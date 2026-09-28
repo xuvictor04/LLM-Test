@@ -997,6 +997,23 @@ def smoke():
     except UnitError:
         pass
     #
+    # THE CADENCE-RESCALING KNOWN ANSWER (2026-09-28, register §8 3.6 and NEW-13; Q-LM-15). No shipped
+    # ancestor to replay: the old tree never widened a context. The properties: the same text per
+    # period -- period x old / new -- to the nearest whole window, a half going up; a positive period
+    # never comes back 0; 0 stays 0; a negative period, a non-Windows period and a width that is not
+    # a positive int are refused. tests/test_position.py Q3 carries the grid through the run.
+    assert [int(derive.windows_at_ctx(Windows(p), 64, 128)) for p in (1000, 333, 1, 0)] == \
+        [500, 167, 1, 0]
+    assert derive.windows_at_ctx(Windows(1), 64, 1024) == Windows(1)
+    assert derive.windows_at_ctx(Windows(250), 128, 64) == Windows(500)     # a narrowing is arithmetic
+    for _bad in ((Windows(-1), 64, 128), (Steps(1000), 64, 128), (1000, 64, 128),
+                 (Windows(1000), 0, 128), (Windows(1000), 64, 128.0)):
+        try:
+            derive.windows_at_ctx(*_bad)
+            raise AssertionError(f"windows_at_ctx accepted {_bad!r}")
+        except UnitError:
+            pass
+    #
     # THE AREA ID (2026-09-28, Q-FAB-18 and Q-MEM-16). No shipped ancestor to replay: the old tree
     # booked nothing by area. The properties: crc32 of the label's UTF-8 bytes with the top bit
     # cleared -- 'eng''s crc32 is 2582995467, above 2**31, so the mask is what keeps a real id off

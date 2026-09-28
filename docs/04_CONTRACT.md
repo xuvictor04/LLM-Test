@@ -19,7 +19,7 @@ WIRES READ:  <comma-separated d_ fields, or "none">
 DID IT FIRE: <the counters that prove the mechanism executed, in G4's three states>
 ```
 
-`tests/test_contract.py` parses those blocks. **All 296** of the declared levers are named by at
+`tests/test_contract.py` parses those blocks. **All 298** of the declared levers are named by at
 least one stub as read by it — **261, not 259, since 2026-09-02: there are now TWO CENSUS
 AMENDMENTS, `OPT_GRAD_CLIP` under Q-OPT-3 and `MEM_JUDGE_FRAC` under Q-MEM-8** (see
 `.rework/CENSUS.md`, section `amendments`, which holds both and states that the census's 328 is
@@ -35,7 +35,7 @@ of the entry points (§7 holds the count, and it is the only place that does —
 of five copies) are named by a row — 111 in a row's entry column and 22 by a call written
 into a row's note (2026-09-28, after Q-FAB-19's `A` row; 118, 102 and 16 on 2026-09-26, after 03b
 S0b's act rows and its MEM remap, which the deferred count below had outrun) — with the remaining
-**17 declared deferred**, each with the argument that has no
+**18 declared deferred**, each with the argument that has no
 producer as the reason. That number was seven until the order tables grew a `produces` column and
 the same standard was applied to every row rather than to EVAL alone (§3.6). *(This sentence said
 "14" while `DEFERRED_ENTRY_POINTS` held 15; corrected 2026-09-02. K6 prints all three numbers, so
@@ -725,13 +725,27 @@ and the parent's newer generation lost its vocabulary). See Q-TOK-13's closing n
 report after the final save; `vocab_rotated_in_place` is present only on the in-place arm), `state_*`,
 and Gates `mint_pmin` and `probation_embed`.
 
-### LM — `src/lm/api.py` (12 levers)
+### LM — `src/lm/api.py` (14 levers, two of them census amendments — `LM_POS` and `LM_CTX_WIDEN`)
 
 Goal A's engine. **One logits path**: `decode` is the only place logits are produced, for training,
 eval and the fabric.
 
 `resolve` · `build_model` · `embed` · `encode` · `decode` · `lm_loss` · `anchor_term` · `on_mint` ·
-`residual_ratios` · `state_dict` · `load_state` · `counters`.
+`residual_ratios` · `state_dict` · `load_state` · `parent_designation` (deferred: a checkpoint's
+question, which no run asks — §3.6) · `counters`.
+
+**Where a token sits is a lever, and the learned table is a door (2026-09-28, Q-LM-15; register
+§8 3.6, O17, NEW-13, C43).** Both arms add a learned row per position before the arch branch, which
+locks a model trained with it to its context. `LM_POS` names the scheme — `'learned'` (today's, ON,
+on both arms), `'alibi'` (the transformer's extrapolating value: a per-head distance bias in every
+layer's attention, no table) and `'none'` (the GRU's: no table, the old `MiniLM`'s own scheme), both
+OFF; the wrong arm's value is refused by name at `resolve`, a scheme change at `load_state`.
+`LM_CTX_WIDEN` (OFF) declares the one widening `'learned'` has: at an epoch-boundary resume a larger
+`LM_CTX` passes the gate and the table grows by rows, the parent's copied and the new ones left at
+this build's initialisation, so on a window of the parent's width the model computes what the
+parent computed. `parent_designation` refuses — by name, switchably (`REFUSE_CONTEXT_LOCKED_PARENT`,
+D17's shape) — to designate any checkpoint B's long-lived parent until a context-widening route in
+`PASSED_WIDENING_ROUTES` has PASSED on GPU (§8 5.8); that set is empty.
 
 **Three layers, three entry points, and the distinction is now structural.** `embed` returns the
 token vectors (the lowest layer, no positional term, no dropout); `encode` returns the hidden
@@ -752,9 +766,13 @@ is still produced at mint time and is still the right number *for the mint*; it 
 probation test wanted. **Both LM additions landed the same day from two independent rulings and the
 set is 123, not 122 — §7 holds the count.**
 **Checkpointed:** the module, the composer's `born` tensor, the counters, the resolved
-`LMGeometry`. **Not:** the derived byte-index tensors (rebuilt on load) or the dead-row mask cache.
+`LMGeometry` — which carries the position scheme `pos` since 2026-09-28 (a record without it reads
+`'learned'`). **Not:** the derived byte-index tensors (rebuilt on load), the dead-row mask cache, or
+ALiBi's slopes (a non-persistent buffer, derived from `LM_HEADS`).
 The counters were written and never read back until 2026-09-24; `load_state` now restores them
-(except `lm.resolve.*`), and its `LoadReport` is bound by the root — a refusal stops the run (Q-CKPT-4).
+(except `lm.resolve.*`, `lm.build.*` and, since 2026-09-28, `lm.pos.scheme` and
+`lm.ckpt.ctx_widened`, each this process's), and its `LoadReport` is bound by the root — a refusal
+stops the run (Q-CKPT-4).
 
 A resume across a `compose` flip is **refused in both directions** and named — under compose,
 `emb`/`head` are not constructed at all. That is a real operational restriction and P7's add-area
@@ -828,7 +846,9 @@ signature, on any path; `sig.encode_width_mismatch` must be 0 and a nonzero valu
 `load_state_dict` · `encoder_parameters` · `encoder_embedding`.
 
 **Wires read:** none. **Receives:** `width_units` (from `derive.signature_width_bytes`, computed
-once by the root), `alphabet_size`, the unit stream, `seen_units`, **`OptState.encoder`** — the
+once by the root — at a declared context widening from the PARENT's `LM_CTX`, so a widened child's
+encoder keeps the width it was trained at, Q-LM-15), `alphabet_size`, the unit stream,
+`seen_units`, **`OptState.encoder`** — the
 encoder AdamW built by OPT, addressable by name as of 2026-09-02 (Q-OPT-7), where the whole
 `OptState` crossed before — `windows_since_boundary` ← DOM, `reservoir` ← DOM.
 **SIG owns the encoder step.** `OPT.maybe_step` writes `lr` into both optimizers and steps `base`
@@ -1028,7 +1048,11 @@ A resume is not a convenience, it is the experiment.
 **`payload` is opaque**; `geometry` is a manifest of `GeometryField(value, rule, env_name, why)`
 records the packages produced, and **the rules are the owner package's** because the legal direction
 differs per field. **A missing field is a refusal, not a skip** — the comparison is driven off the
-manifest's key set, so `if recorded and recorded != live` is not writable here.
+manifest's key set, so `if recorded and recorded != live` is not writable here. **One rule is
+conditional since 2026-09-28 (Q-LM-15):** `lm.ctx` and `lm.pos_max` are EXACT at the shipped
+`LM_CTX_WIDEN=0` and MAY_WIDEN at 1 — the live run's rule is the one applied, and the recording's
+own is never read — and the root reads `check_geometry`'s `GeometryReport.widened` for one field, an
+`lm.ctx` it widened, which is a declared widening.
 **The suffix applies to the whole snapshot**, tokenizer bytes included (M46).
 **So does the one kept generation** (2026-09-26): `ckpt.pt<suffix>.prev`'s vocabulary is
 `<base><suffix>.prev.dyntok.json`, rotated by TOK, which owns the file, inside `save_vocabulary`.
@@ -1490,6 +1514,8 @@ on this path only) on a hold-out admission (`data.holdout_admitted` > 0, naming
 (`_stream_digest`: the bytes and the segment table) differs from the one the log's first event
 recorded, naming the draw-shaping levers. A log written before the digest warns once and keeps the
 rebuilt-length check at the `epoch0` stage; the child's copy of the log then records its own stream.
+**A declared context widening is refused there first** (2026-09-28, Q-LM-15): the saved cursor and
+epoch length count windows of the parent's width, so a widening is an epoch-boundary operation.
 
 **`WORLD.load_into` is strictly before `OPT.build`.** `WORLD.manage` mints parameters mid-run
 through `add_param_group`, so a checkpoint taken after growth has more groups than a freshly built
@@ -1620,7 +1646,7 @@ stage (a save site). **`SIG.cadence_due` is the one periodic gate that cannot go
 did-it-fire surface the encoder's cadence has. That is stated in its row rather than left for a
 reader to discover from a missing ledger line.
 
-### 3.6 `DEFERRED_ENTRY_POINTS` — seventeen, and no longer only EVAL
+### 3.6 `DEFERRED_ENTRY_POINTS` — eighteen, and no longer only EVAL
 
 `{"PFX.entry": "the phase that will call it, and why it cannot be called now"}`. K6 reads it **both
 ways**: an entry no row names is accepted, and an entry a row **now** names is reported as *stale*
@@ -1640,7 +1666,10 @@ the whole tree was stubs. **Since 2026-09-27 the retention probe (Q-EVAL-12) has
 has an `A` row inside the `fab.manage` answer — `candidates` defaults to the next `FAB_CONTRIB_MAX`
 past-grace experts off a cursor FAB keeps (so the root reaches into no `Population`), the batch is
 the probe's pinned control half and `targets` its own shifted ids, and the memory-off closure bound
-to that batch is both the baseline and the source of `baseline_loss`. The table below holds the nine
+to that batch is both the baseline and the source of `baseline_loss`. **Later the same day
+`LM.parent_designation` joined it** (Q-LM-15): O17's designation refusal judges a CHECKPOINT, and
+its `saved_geometry` is a checkpoint's record that no row of a run produces — its caller is the
+unbuilt preset builder, and `tools/designate_parent.py` until then. The table below holds the ten
 deferred for an argument or a scope; the eight deferred for want of a CALLER (accessors and
 RUN.Timing's two) are listed in `spine/compose.py` with their reasons.
 
@@ -1655,6 +1684,7 @@ RUN.Timing's two) are listed in `spine/compose.py` with their reasons.
 | `MEM.judge` | P4/P5 | `scorer(ctx, src) -> logits` is needed by the **default** arm (`MEM.verify` defaults to `selfcon`) and must be *the same forward path training used* (M47). **Since 2026-09-27 that path exists as a closure, and its ARITY is the gap:** `_logits_fn` is `fn(x, *, prefix_bytes)` and routes on the bytes before the window (Q-EVAL-12), while a **stored** entry has no prefix bytes and carries `Store.src` — so the declared shape is two arguments (Q-MEM-8), and a scorer that routes on a stored id is a second routing rule nobody has ruled on. **Q-MEM-8 is RESOLVED and names the row to write when the scorer lands:** at the END of the `dom.manage` block, inside that block's single `Cadences.due` answer. Because `scorer` carries a default, **no check can see it**: a row calling `judge(mem, store)` passes everything and yields `n_checked = 0` forever, which `memory/api.py:350-352` itself names as the inert state. |
 | `CAP.observe` | P4 | **New.** `improving` = `(slow - fast)/|slow|` off the growth controller's EMAs, which live **inside FAB** and are on no returned record; `observations` is the valve-evaluation count tied to a hardcoded 0.998 EMA rate the caller cannot see. The root must **not** maintain a second EMA pair over the same loss to manufacture them — two mechanisms deciding independently whether the run has stalled is the recorded defect where the valve fired hardest exactly when the run was degrading worst. `blackout`'s home is now half-built: **Q-FAB-6** gave `FAB.grow_check` the `shift_at` stamp and put the resulting blackout state on `GrowReport`, so CAP neither reads FAB's `cooldown` at the call site nor has to mint a blackout-window lever it has no census row for; what is still missing is the root join and the two EMAs. |
 | `WORLD.manage` | P4 | **New.** `plateau` contradicts the package's own `state_dict`, which says the plateau state `(_wl_ema, _wl_lastgrow)` **moves inside this package** and travels in the checkpoint — if the state is inside, the boolean is computed inside, and both sentences cannot hold. `add_param_group` needs OPT to name one of its two AdamW instances (**Q-OPT-7**). `latent` is real but arrives **backwards** (`loss_terms` is a `B` row, this pass was `A`). |
+| `LM.parent_designation` | the continue preset (O17) | **New, 2026-09-28 (Q-LM-15).** `saved_geometry` is `payload['LM']['geometry']` of a checkpoint on disk, which the ASSEMBLY rows read only for the checkpoint this run resumes — and a run never designates its own parent. Its producer is outside the run by design: the continue preset's builder, not built, and `tools/designate_parent.py` until it is, which reads the checkpoint through `CKPT.load` and exits non-zero on the refusal having written nothing. |
 
 **A later phase is not by itself a reason to defer.** Each reason above is about an **argument with
 no producer**, which is the only kind that survives the backwards check.
@@ -1809,7 +1839,18 @@ five, and "ten" was arithmetic over both errors.
 **The direction rule, which is what kept being confused.** In the LIVE manifest and absent from the
 RECORDING is a **REFUSAL** — *"A MISSING FIELD IS A REFUSAL, NOT A SKIP … the comparison is driven
 off the manifest's KEY SET rather than off truthiness."* **UNCHECKED** is the other direction:
-recorded and absent from the manifest, which is where WORLD's grown `n` sits.
+recorded and absent from the manifest, which is where WORLD's grown `n` sits. **That rule is why the
+position scheme is not a manifest field** (2026-09-28, Q-LM-15): a field the live manifest adds and
+every older recording lacks refuses every existing checkpoint, so `LM_POS` travels in LM's own
+payload (`LMGeometry.pos`) and `LM.load_state` refuses a change by name.
+
+**One rule is conditional (2026-09-28, Q-LM-15).** `lm.ctx` and `lm.pos_max` are EXACT at the
+shipped `LM_CTX_WIDEN=0` — NEW-13's "`lm.ctx` stays EXACT" — and MAY_WIDEN at 1, the declared
+widening: a larger `LM_CTX` passes, a smaller one is refused, and `lm.pos_max` takes `lm.ctx`'s rule
+because it is the local wire from it (it printed the environment name `LM_POS_MAX`, which nothing
+reads, and prints `LM_CTX (LM.d_pos_max)` now, the name `LM.load_state` already used). The rule
+applied is the live run's; the recording's own rule is carried and never read. The root binds the
+`GeometryReport` for one field — an `lm.ctx` in `widened` — and nothing else in it.
 
 **The one quantity that genuinely needs a live object is `world.n`.** `WORLD.geometry(world, w)` is
 the only `geometry()` in the tree and is correctly placed on the **save** side, where a built world
@@ -1920,7 +1961,7 @@ been fixed is a real outcome and acting on it writes a second wrong sentence. **
 The union of the five `levers_unconsumed` lists was **15**. Thirteen of them were EVAL's, and all
 thirteen were given a declared reader by writing the P6 instrument signatures into
 `src/eval/api.py`. **The last two were FAB's, and as of 2026-09-02 this table is EMPTY: every one of
-the 296 declared levers is named `LEVERS READ:` by a stub.** Neither of the two was dropped, and
+the 298 declared levers is named `LEVERS READ:` by a stub.** Neither of the two was dropped, and
 neither was given a fake reader; each was ruled, and the ruling is what produced the reader.
 
 | lever | env name | why it has no reader | disposition |
@@ -8494,6 +8535,166 @@ three numbers is. Two lever help strings name their refused ends, so `docs/05_DE
 rows, and the census rows for `DATA_TRUST_COPY_RATE` and `_P` say the same. B1, B3, B3r, B5, B6 and
 B6r reproduce their fixtures.
 
+### Q-LM-15 — the position table's door: an extrapolating value per arm, a declared context widening, and the designation it gates — **RESOLVED 2026-09-28 (Proposal 05 §8 3.6; register O17, NEW-13 and C43): `LM_POS`, BUILT `'learned'` — `'alibi'` ON THE TRANSFORMER AND `'none'` ON THE GRU ARE BUILT OFF; `LM_CTX_WIDEN`, BUILT `False`, SO `lm.ctx` STAYS EXACT — AT `True` THE LEARNED TABLE GROWS BY ROWS AT AN EPOCH-BOUNDARY RESUME; `LM.parent_designation` REFUSES EVERY DESIGNATION BY NAME, SWITCHABLY, WHILE NO ROUTE HAS PASSED; `derive.windows_at_ctx`, THE CADENCE-RESCALING KNOWN ANSWER. ⚠ TWO NEW LEVERS, TWO CENSUS AMENDMENTS; ONE NEW ENTRY POINT, DEFERRED. NO WIRE, AND NO NUMBER A DEFAULT RUN PRODUCES MOVES**
+
+**What was asked.** O17 rules that "no checkpoint on either LM arm is designated B's long-lived
+parent until its position scheme has a context-widening route that PASSes on GPU, and the preset
+builder refuses the designation by name (switchable)", with "one LM position lever: 'learned'
+(today's table) ON on both arms, an extrapolating value per arm OFF, and for 'learned' a row-append
+widening at a declared resume boundary (NEW-13)", and `lm.ctx` EXACT until a route passes. NEW-13
+keeps `lm.ctx` EXACT "until an identity check and a cadence-rescaling known answer exist; then a
+widening is a declared operation at a resume boundary". C43's premise — that only the transformer
+carries the table — is O17's correction: this tree adds the table on both arms (`_LM` builds it,
+`encode` adds it before the arch branch). The register's §8 3.6 asks, on CPU and for operation only,
+for the widening's identity known answer ("loss unchanged to 1e-6 on windows at the old ctx"), the
+cadence-rescaling known answer, both extrapolating values building, running finite and resuming
+exactly, and the designation refused by name with a working switch. §8 5.8 on GPU decides: arm (A),
+'learned' against each arm's extrapolating value; arm (B), 'learned''s 128 → 256 widening against a
+parent trained at 256.
+
+**The ruling, as built.**
+* **The levers** (`src/lm/levers.py` section 4; census amendments, the thirty-eighth and
+  thirty-ninth). `pos` (`LM_POS`, U.NAME, choices 'learned' | 'alibi' | 'none', default 'learned')
+  and `ctx_widen` (`LM_CTX_WIDEN`, U.FLAG, default False). Neither is a clock, so the Clock-unit
+  lever count is unchanged. **The switch on the refusal is not a lever**: a run never designates
+  anything, so a lever would be read by no run, and O17 names D17 as the switch's precedent — two
+  module constants in `src/lm/api.py`, below.
+* **The schemes in the model.** At 'learned' `_LM` builds `pos` (pos_max rows) where it always did,
+  first, so the parameter order and `build_model`'s initialisation draws are the tree's before the
+  lever bit for bit, and `encode` adds its first L rows — the statement it always ran. At 'alibi'
+  (transformer only) there is no table: every layer's attention takes one float mask,
+  −m_h × (i − j) for a key j at or before the query i and −inf after it, one (L, L) slab per head
+  repeated over the batch in the (batch × heads) order `nn.MultiheadAttention` indexes a 3-D mask by,
+  with `is_causal=False` because that flag promises the plain causal mask. The slopes m_h are the
+  ALiBi paper's (Press, Smith and Lewis, "Train Short, Test Long", ICLR 2022): 1/2 .. 1/256 at the
+  shipped `LM_HEADS=8`, and for a head count that is not a power of two the paper's interleave; a
+  NON-PERSISTENT buffer (`alibi_slopes`) derived from `LM_HEADS`, so it is not checkpoint state. At
+  'none' (GRU only) nothing is added: the recurrence is the only order signal, and it is the old
+  tree's own GRU — `MiniLM` built no table (`self_organize.py:1546-1561`), while `TinyTransformer`
+  built a learned one clamped at 512 — so on the GRU arm §8 5.8's (A) also reads the scheme this tree
+  added against the one it replaced. `_param_estimate` counts the table only at 'learned'.
+* **The wrong arm's value is refused by name at `LM.resolve`**, before any tensor, with both names:
+  'alibi' on the GRU (no attention to bias) and 'none' on the transformer (a position-free causal
+  transformer is an arm O17 did not name). `choices=` cannot state a relation between two levers;
+  this is the `LM_WIDTH % LM_HEADS` shape.
+* **The scheme across a resume.** `LMGeometry` gains `pos`, so `LM.state_dict` records it with the
+  rest of the geometry and `LM.load_state` refuses a change **by name** before its tensor-set refusal
+  could report the same move as a nameless list. A record without the field — every checkpoint
+  before this ruling — reads 'learned', which built it. **It is not a manifest field**:
+  `CKPT.check_geometry` refuses a field the live manifest carries and a recording lacks, so a new
+  manifest field would refuse every existing checkpoint (the register's R11).
+* **The declared widening, `LM_CTX_WIDEN=1`.** (1) `_geometry_manifest` records `lm.ctx` MAY_WIDEN
+  at 1 and EXACT at 0; `lm.pos_max` takes `lm.ctx`'s rule and why, because it is the local wire from
+  `ctx` and an EXACT one would refuse the move `lm.ctx` admitted, and it now prints `LM_CTX
+  (LM.d_pos_max)` — the name `LM.load_state` already used — where it printed `LM_POS_MAX`, a name
+  nothing reads (never reached: the gate compares `lm.ctx` first). The rule applied is the live run's;
+  a recording's is never read. `lm.ctx`'s why names `LM_CTX_WIDEN`, so the gate's refusal at 0 tells
+  the operator the lever exists. (2) The root binds `check_geometry`'s `GeometryReport` for one field:
+  an `lm.ctx` in `widened` is a declared widening, `System.ctx_widening` = (the parent's `LM_CTX`,
+  this run's). (3) `LM.load_state`, reading `ctx_widen`, admits a LARGER `ctx`/`pos_max` and refuses a
+  smaller one, and fits `pos.weight` **by prefix, matched by name** before the vocabulary rule (whose
+  dim-0 test would take the table for a vocabulary tensor wherever `LM_CTX` equals
+  `LM_VOCAB_SLOTS`): rows [0, parent) are the parent's, and every appended row keeps the
+  initialisation this build drew for it — what a run built wide would have held there before its
+  first step. At 'alibi' and 'none' nothing is appended. No other LM tensor depends on the context,
+  so on any window of the parent's width or less the child computes exactly what the parent did.
+  (4) `OPT.load_state` pads the table's moments with zeros by its existing dim-0 rule
+  (`opt/api.py::_pad_moments`, Q-OPT-8) — `opt.ckpt.moments_widened` 1 — which is the moment state
+  a row that has never been trained holds. (5) **SIG keeps the parent's width**: `_signature_width`
+  takes the recorded `lm.ctx` at a declared widening, which with the parent's adopted bytes/token
+  (Q-TOK-13) is the parent's number exactly — the encoder was trained at it and SIG's restore refuses
+  any other. (6) The retention probe re-pins its parent's windows from `LOOP.eval`'s geometry, as it
+  does at any resume (Q-EVAL-12), so reads across the widening pair on the same bytes. (7) WORLD's
+  `load_into` keeps this build's `world.ctx_tokens` rather than the parent's, which would report a
+  width the child does not run at (a WORLD edit this ruling needed: until a context could move
+  across a resume the two were always equal). (8) **A widening across a continuing mid-epoch resume
+  is refused by name** at the `segment` stage, before the log's replay and before the hold-out and
+  digest checks: the saved cursor and epoch length count windows of the parent's width. A widening
+  is an epoch-boundary operation — the final save of a finished run, or `run.py --max-windows` at the
+  epoch's end — where the child cuts its epoch fresh at its own width. (A resume that replays its
+  epoch from window 0, off a checkpoint older than the segmentation log, is not refused: it is not a
+  continuation.)
+* **The cadence-rescaling known answer, `spine/derive.py::windows_at_ctx(period, old_ctx,
+  new_ctx)`.** A window is `LM_CTX` tokens, so after 64 → 128 every lever counted in windows spans
+  twice the text. The function is the one named conversion (O11): `period` × `old_ctx` / `new_ctx`
+  in integers, rounded to the nearest whole window with a half going up — 1000 → 500, 333 → 167 at
+  64 → 128 — never below 1 for a positive period (0 is OFF for most Windows levers, so 1 → 1), 0 → 0,
+  and a negative period, a non-Windows period and a width that is not a positive int refused with
+  `UnitError`. Nearest and not truncated, because the question is "the same text" and this is a
+  printed suggestion, not a clock that must never fire late (`flush_period`'s reason for
+  truncating). **At a widening resume the root prints, in one warning before the first window, every
+  lever declared in `units.Windows` — read off the declarations, 27 of them at this ruling's sha —
+  beside `windows_at_ctx`'s value, and applies none** (N4: a lever reading another lever at run time
+  is the L1 defect). The plan's wording was "every U.Windows period"; the population is the
+  declarations and not `_periods`' eight keys, because TOK's, FAB's, SIG's and CAP's windows cadences
+  are not in that mapping and change meaning all the same.
+* **The designation, `LM.parent_designation(lm, *, saved_geometry)`** — a new entry point (151 in
+  §7) and **deferred** (§3.6): it judges a CHECKPOINT, and its `saved_geometry` — the checkpoint's
+  `payload['LM']['geometry']` — has no producer in a run's order by design. Its answer in order: the
+  record's (arch, pos) — pos absent reads 'learned' — is admitted when it is in
+  `PASSED_WIDENING_ROUTES`, a `Designation` with `route_passed` True; otherwise it is admitted only
+  with `REFUSE_CONTEXT_LOCKED_PARENT` False, `route_passed` False and a reason saying the refusal
+  was off; otherwise it RAISES `ContextLockedParent`, naming the arm, the scheme, O17 and the switch.
+  A record with no arch or ctx is a `GeometryError` — a checkpoint it cannot read is not judged.
+  **All three schemes are refused today**: 'alibi' and 'none' carry no table, but no GPU reading has
+  shown either to extrapolate, and O17 asks for a route that has PASSED. `PASSED_WIDENING_ROUTES` is
+  an empty frozenset of (arm, scheme) pairs, entered by hand with the GPU reading's commit, the way a
+  ruling is; both constants are D17-shaped code edits. `Designation` (arch, pos, ctx, route_passed,
+  reason) is a fields-only record; `ContextLockedParent` a named `ValueError`.
+* **Its caller until the preset builder exists: `tools/designate_parent.py <checkpoint>`.** It reads
+  the checkpoint through `CKPT.load` with `CKPT_RESUME` set through the lever system (so every
+  spelling `CKPT_RESUME` takes works and nothing reads the environment), asks
+  `LM.parent_designation`, and on an admission writes one record, `<checkpoint file>.designation.json`
+  (or `--out`), holding the `Designation`, the checkpoint's path, step and epoch and both switches as
+  they stood, and exits 0. On the refusal it prints it and **writes nothing**, exit 2 (run.py's
+  refusal code); an unreadable path exits 1.
+* **Counters.** `lm.pos.scheme` is a NAMED gauge, a sentence in LM's tally (the `world.built`
+  precedent), written by `build_model`: 'learned: context-locked (O17: no passed widening route)' at
+  'learned', '<scheme>: extrapolating, not yet designable (O17: no passed widening route)' at 'alibi'
+  and 'none', and '<scheme>: a context-widening route has passed on GPU (O17,
+  PASSED_WIDENING_ROUTES)' once one is entered. It is this process's: `load_state` does not restore
+  it over the build's own. Not an integer, so it is in no integer channel a test reads.
+  `lm.pos.alibi_applied` counts every `encode` call that built the ALiBi mask, eval calls included as
+  `lm.encode.calls` counts them — equal to it on `LM_ARCH=transformer LM_POS='alibi'` and ABSENT on
+  every other arm. `lm.ckpt.ctx_widened` is THIS restore's reading — 1 when it admitted a larger
+  context, 0 when the context stood still — PRESENT on every restore at `LM_CTX_WIDEN=1` and ABSENT at
+  0, where no widening can be admitted (the finding that asked for PRESENT-and-0 on any resume at 1,
+  and not ABSENT, is kept); never taken from a parent's ledger. `lm.ckpt.rows_widened` still counts
+  VOCABULARY tensors only; the table's widening is named in the `LoadReport`'s reason.
+
+**What a CPU run establishes, and what it cannot.** `tests/test_position.py` Q1-Q7, CPU, operation
+only. Q1: on both arms with FAB, SIG and MEM on, a parent at `LM_CTX=64` stopped at its epoch boundary
+(232 windows of `E1`'s 20,000-byte stream) and a child resumed from it at `LM_CTX=128
+LM_CTX_WIDEN=1` give the same LM-level loss (`LM.lm_loss` of `LM.decode(LM.encode(x))`) on windows of
+64, 17 and 1 tokens at three offsets — **bitwise**, so within the register's 1e-6; the child's table
+is the parent's 64 rows and the 64 a fresh `LM_CTX=128` build draws, and its moments the parent's and
+64 rows of zeros; SIG's width stays the parent's 87 units (a fresh 128 run would take 175); the child's
+start read, through both closures and so through SIG, DOM, FAB and MEM, is the unwidened boundary
+resume's window for window; `lm.ckpt.ctx_widened` 1 against ABSENT; the child trains windows of 128;
+one notice lists all 27 Windows-unit levers. Q2: without the lever the gate refuses naming `LM_CTX`,
+the EXACT rule and `LM_CTX_WIDEN`; a smaller context is refused at 1; a widening across a continuing
+resume is refused at the `segment` stage; a continuing resume at 1 that widens nothing continues
+exactly with the gauge 0; and `LM.load_state`'s two answers driven directly, alone and beside a
+vocabulary widening (both in one restore at 1, the vocabulary alone at 0). Q3: the grid. Q4:
+'alibi' and 'none' build with no table, run 120 windows finite, continue exactly from 60, and are
+causal on the built model; ALiBi's slopes and mask have their known answers. Q5: both wrong-arm
+refusals, a scheme change refused, and a record without the field resuming as 'learned' exactly and
+refused at any other scheme. Q6: the designation refused on all three schemes and on a legacy record,
+both switches working, and the tool exiting 2 having written nothing, 1 on a missing path, and 0
+with one record when the refusal is off. Q7: B1, and a checkpoint written by 494936d — the tree
+before the lever, run from a clean copy of its `src/` — whose first 30 losses are this tree's and
+which continues here exactly. **None of it says whether a widened parent learns its new positions
+without losing its old ones, or which scheme a long-lived parent should carry**: those are §8 5.8's
+arms on GPU, and nothing here enters a route.
+
+**What does not move at the default.** At `LM_POS='learned'` `_LM` and `encode` run the statements
+they ran, in order, with the same draws; at `LM_CTX_WIDEN=0` the manifest's `lm.ctx` is EXACT as
+before and `load_state` takes no new branch; no row calls `parent_designation`. The only changes a
+default run carries are text: `lm.pos.scheme`, a sentence and not an integer, in the R report's LM
+row; `pos` in LM's checkpointed geometry; and the manifest's `lm.ctx`/`lm.pos_max` why and
+`lm.pos_max`'s printed name, which the gate prints only on a refusal. B1, B3, B3r, B5, B6 and B6r
+reproduce their fixtures with no new integer counter line.
+
 ## 6. What `tests/test_contract.py` checks
 
 | check | what it proves | how it can fail |
@@ -8501,7 +8702,7 @@ B6r reproduce their fixtures.
 | K1 | every name this document declares exists in the tree **with the signature it claims** | rename a parameter; drop a function |
 | K2 | `spine.compose` imports and `compose()` raises **only `NotImplementedError`, from a stub** | a typo in the root surfaces as `AttributeError`/`TypeError`, not as a missing body |
 | K3 | no package imports another (O10 restated at the contract boundary) | add `from fabric import api` to `src/memory/` |
-| K4 | every one of the 296 declared levers is named `LEVERS READ:` by a stub, or is in the UNCONSUMED table above **with a reason** | declare a lever and give it no reader |
+| K4 | every one of the 298 declared levers is named `LEVERS READ:` by a stub, or is in the UNCONSUMED table above **with a reason** | declare a lever and give it no reader |
 | K5 | every `d_` field the ledger declares is read by a stub in its own package, and no stub reads an undeclared one | add a wire nobody consumes |
 | K6 | every entry point is **named by a row** in `ASSEMBLY_ORDER` or `LOOP_ORDER`, or is in `compose.DEFERRED_ENTRY_POINTS` with a reason | declare a mechanism the root never calls; or leave a deferral in place after a row starts naming it — the check reads that table **backwards** and reports the stale entry |
 | K7 | the root reads only names a package **declares** off a Config | `int(lm.depth)` where LM declares `layers` — a crash at whatever stage reaches it, invisible while an earlier stub raises first |
@@ -8557,7 +8758,7 @@ nobody has watched fail is indistinguishable from a check that cannot fail.
 
 ## 7. THE FROZEN SIGNATURE SET
 
-Everything above is prose about these 150 entry points — 121 until 2026-09-02, when Q-TOK-11 added
+Everything above is prose about these 151 entry points — 121 until 2026-09-02, when Q-TOK-11 added
 `LM.residual_ratios` (122) and Q-LM-12 added `LM.embed` (123); 133 from 2026-09-15, when P4 wrote
 `CAP.caps` and the `Caps` record it returns brought `Caps.headroom(n)` with it; **134 since
 2026-09-22, when `World.parameters(self)` closed the hole `spine/compose.py::_base_parameters` had
@@ -8576,9 +8777,11 @@ when the retention probe (Proposal 04 SR0 and NEW-03) added six: `EVAL.retention
 `EVAL.pin_holdout` and `EVAL.blowup` (Q-EVAL-12), `DOM.nearest` (Q-DOM-6), `MEM.encode_queries`
 (Q-MEM-15) and `CKPT.Retention.note_saved` (Q-CKPT-6) -- and MOVED one, `EVAL.holdout_probe`, whose
 `rng` left for `pin_holdout` and which gained `tokenize_fn`, `step`, `boundary` and `previous`
-(Q-EVAL-12); **150 since 2026-09-28**, when the source-reliability book (Proposal 04 SR3, register
+(Q-EVAL-12); **150 from 2026-09-28**, when the source-reliability book (Proposal 04 SR3, register
 §8 3.4) added three: `DATA.new_focus`, `DATA.claims_observe` and `DATA.trust_period` (Q-DATA-11) --
-and MOVED one, `DATA.stream_state`, which gained `focus=None`. Neither of the two before them
+and MOVED one, `DATA.stream_state`, which gained `focus=None`; **151 since later that day**, when
+O17's position lever (register §8 3.6) added `LM.parent_designation` (Q-LM-15), DEFERRED -- it
+judges a checkpoint, and no run asks it (§3.6). Neither of the two before them
 is a new ruling: this document has said since the record was specified that "`Caps.headroom(n)`
 exists so the negative clamp (C30) **cannot be written** at a call site", and it became an ENTRY
 POINT the moment a body existed to carry it. A record's public method is public surface, which K1
@@ -8684,6 +8887,7 @@ LM: on_mint(lm: Config, model, mints, id2bytes, *, at_window, sig_emb=None)
 LM: residual_ratios(lm: Config, model)
 LM: state_dict(lm: Config, model, geom)
 LM: load_state(lm: Config, model, geom, saved)
+LM: parent_designation(lm: Config, *, saved_geometry)
 LM: counters(lm: Config, model)
 MEM: open_store(mem: Config, *, key_dim, vocab_slots, device, rng, lm_kind, restored=None)
 MEM: write(mem: Config, store, *, contexts, tokens, surprise, sources, owners, positions, key_fn, now, areas=None)

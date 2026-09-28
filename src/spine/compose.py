@@ -331,7 +331,10 @@ ASSEMBLY_ORDER = (
                                               "non-empty list RAISES RefusedRun here, before "
                                               "geometry and before any model tensor"),
     ("geometry",  "LM",    "resolve",         "() -- refuses width % heads and the ctx/pos_max "
-                                              "overflow BEFORE a tensor is allocated",
+                                              "overflow BEFORE a tensor is allocated, and since "
+                                              "2026-09-28 a position scheme on the wrong arm -- "
+                                              "LM_POS 'alibi' on the GRU, 'none' on the transformer "
+                                              "(Q-LM-15)",
                                               "geom -- the LMGeometry LM.build_model, LM.load_state "
                                               "and LM.state_dict all take under that name, and the "
                                               "AUTHORITY for the shapes four rows below spell as "
@@ -438,7 +441,14 @@ ASSEMBLY_ORDER = (
                                               "where _sidecar reads it now. The GROWN population "
                                               "counts genuinely "
                                               "cannot be here (they need a built object) and are "
-                                              "re-refused by WORLD.load_into and FAB.load_state_dict"),
+                                              "re-refused by WORLD.load_into and FAB.load_state_dict. "
+                                              "ITS REPORT IS READ FOR ONE FIELD SINCE 2026-09-28 "
+                                              "(Q-LM-15): lm.ctx and lm.pos_max are recorded "
+                                              "MAY_WIDEN only at LM_CTX_WIDEN=1 and EXACT otherwise, "
+                                              "and an lm.ctx the gate WIDENED is a declared "
+                                              "widening, bound on System.ctx_widening for the "
+                                              "segment and signature rows below and the startup "
+                                              "notice"),
     ("plan",      "DATA",  "data_plan",       "(epochs=RUN.epochs, win_tokens=LM.ctx, "
                                               "bytes_per_token=Vocabulary.bytes_per_token) -- the "
                                               "exposure gates, before a single step runs, and "
@@ -512,7 +522,10 @@ ASSEMBLY_ORDER = (
                                               "place of this cut (Q-RUN-16), and first compares "
                                               "the redrawn stream's digest with the one the log's "
                                               "first event recorded, refusing a mismatch and a "
-                                              "hold-out admission before the replay (Q-DATA-9)",
+                                              "hold-out admission before the replay (Q-DATA-9) -- "
+                                              "and, before either, a declared context widening "
+                                              "(Q-LM-15), since its saved cursor counts windows of "
+                                              "the parent's width",
                                               "ids -- Segmentation.ids, which TOK.on_window takes "
                                               "one window of; positions -- Segmentation.byte_pos "
                                               "under MEM.write's spelling, TRUE BYTE OFFSETS and "
@@ -539,10 +552,17 @@ ASSEMBLY_ORDER = (
                                               "is BOUND on System.lm_load and a refused one is "
                                               "appended to System.refusals, which stops the run. "
                                               "Until 2026-09-24 it was discarded and a refused "
-                                              "restore trained the random model"),
+                                              "restore trained the random model. Since 2026-09-28 "
+                                              "(Q-LM-15) it refuses a moved LM_POS by name and, at "
+                                              "LM_CTX_WIDEN=1, fits a larger context's learned "
+                                              "position table by prefix"),
     ("signature", "SIG",   "build",           "(width_units=derive.signature_width_bytes(LM.ctx, "
                                               "bytes_per_token), alphabet_size, device, generator) "
-                                              "-- the ONE width, resolved once, here",
+                                              "-- the ONE width, resolved once, here; at a declared "
+                                              "context widening from the PARENT's LM_CTX, the "
+                                              "recorded lm.ctx the gate widened from (Q-LM-15), "
+                                              "because the encoder was trained at that width and "
+                                              "SIG's restore refuses any other",
                                               "encode -- SIG.encode bound to the SigState by "
                                               "_sig_encode_fn, which is DOM.rekey's spelling for "
                                               "the same callable"),
@@ -1816,23 +1836,27 @@ LOOP_ORDER = (
 # close it. NONE was deferred for being late, and none because a body was missing: the whole tree
 # was stubs.
 #
-# THE TABLE HOLDS SEVENTEEN ENTRIES SINCE 2026-09-28, when FAB.contribution got its A row (Q-FAB-19),
-# the day after the retention probe (Q-EVAL-12) closed five: EVAL.holdout_probe and EVAL.generate got
-# rows, CKPT.Retention.consider got its caller, and MEM.read and MEM.blend are reached through the
-# memory-on closure the R row's note names. The seventeen divide by WHY rather than by package:
-#   NINE are deferred at the ARGUMENT or at the SCOPE. Six are EVAL's -- EVAL.null_excess,
+# THE TABLE HOLDS EIGHTEEN ENTRIES SINCE LATER ON 2026-09-28, when O17's position lever added
+# LM.parent_designation (Q-LM-15), a checkpoint's question no run asks; SEVENTEEN from earlier that
+# day, when FAB.contribution got its A row (Q-FAB-19), the day after the retention probe (Q-EVAL-12)
+# closed five: EVAL.holdout_probe and EVAL.generate got rows, CKPT.Retention.consider got its caller,
+# and MEM.read and MEM.blend are reached through the memory-on closure the R row's note names. The
+# eighteen divide by WHY rather than by package:
+#   TEN are deferred at the ARGUMENT or at the SCOPE. Six are EVAL's -- EVAL.null_excess,
 #   EVAL.verdicts, EVAL.wrongness_probe and EVAL.verification_fit wait on an argument nothing
 #   produces, and EVAL.curve_probe and EVAL.coherence, whose producers exist since the probe
-#   landed, are SCOPE deferrals: no row of the register's section 8 builds them. Three are not
-#   EVAL's -- MEM.judge (the scorer's (ctx, src) arity the closure does not have), CAP.observe and
-#   WORLD.manage.
+#   landed, are SCOPE deferrals: no row of the register's section 8 builds them. Four are not
+#   EVAL's -- MEM.judge (the scorer's (ctx, src) arity the closure does not have), CAP.observe,
+#   WORLD.manage, and LM.parent_designation, whose `saved_geometry` is a checkpoint's record that no
+#   row of a run produces (its caller is the unbuilt preset builder, and a tool until then).
 #   EIGHT are deferred because the CALLER is missing while every argument is one the caller already
 #   holds: FAB.Population's two accessors, WORLD.World.parameters, three of Vocabulary's five
 #   accessors (live_size, at_cap, blen), and RUN.Timing's two.
 # (Until 2026-09-27 this paragraph counted twenty-four entries, FIFTEEN by argument and NINE by
 # caller with "four of Vocabulary's five" -- which was stale twice by then: the table held
 # twenty-three, and three Vocabulary accessors, since TOK.Vocabulary.size left it. It counted
-# eighteen, TEN by argument or scope, until FAB.contribution left on 2026-09-28.) The count is not
+# eighteen, TEN by argument or scope, until FAB.contribution left on 2026-09-28, and seventeen, NINE
+# by argument or scope, until LM.parent_designation arrived the same day.) The count is not
 # cosmetic -- this table's whole claim is that every orphan is enumerated, and an enumeration whose
 # own total is wrong is one no reader re-checks.
 # SOME OF THOSE NOW HAVE A CALLER THAT IS NOT A ROW, AND THEIR ENTRIES SAY SO (2026-09-24):
@@ -2071,6 +2095,19 @@ DEFERRED_ENTRY_POINTS = {
         "without the row saying so, and Cadences.due RECORDS the fire, so asking twice under one "
         "key consumes it -- inside FAB.manage's single answer, in the shape the dom.manage block "
         "uses, or with a key of its own.",
+    "LM.parent_designation":
+        "NOT A RUN'S CALL, AND NO ROW OF THIS TABLE WILL NAME IT (2026-09-28, register O17 and "
+        "section 8 3.6; docs/04_CONTRACT.md Q-LM-15). It judges a CHECKPOINT, not a System: whether "
+        "the checkpoint whose LM wrote `saved_geometry` may be designated B's long-lived parent, "
+        "refused by name -- switchably, lm/api.py's REFUSE_CONTEXT_LOCKED_PARENT -- until its "
+        "position scheme's context-widening route PASSes on GPU (section 8 5.8). `saved_geometry` "
+        "HAS NO PRODUCER IN THE ORDER TABLES AND CANNOT HAVE ONE: it is payload['LM']['geometry'] of "
+        "a checkpoint on disk, which the ASSEMBLY rows read only for the checkpoint this run resumes "
+        "-- and a run never designates its own parent. Its caller is whatever designates one: the "
+        "continue preset's builder, which is not built, and until then tools/designate_parent.py, "
+        "which reads the checkpoint through CKPT.load and exits non-zero on the refusal having "
+        "written nothing. Deferred at the ARGUMENT, and the argument's producer is outside the run "
+        "by design, not missing from it.",
 }
 
 
@@ -2547,7 +2584,14 @@ class System:
                  # made at the 'focus' stage by DATA.new_focus and filled in place by both
                  # DATA.claims_observe rows; the C row's DATA.stream_state(focus=) checkpoints it.
                  # A Focus holding nothing at DATA_TRUST='off'.
-                 "focus")
+                 "focus",
+                 # A DECLARED CONTEXT WIDENING (2026-09-28, register §8 3.6; Q-LM-15): (the parent's
+                 # LM_CTX, this run's) when the geometry gate widened lm.ctx -- which it does only at
+                 # LM_CTX_WIDEN=1 -- and None everywhere else, a fresh run included. Read at the
+                 # `segment` stage (refused across a continuing mid-epoch resume), at the `signature`
+                 # stage (SIG keeps the parent's width) and for the startup notice. Not checkpointed:
+                 # a child of this run records this run's LM_CTX, and widens from it or not.
+                 "ctx_widening")
 
     def __init__(self, configs, wires, warnings):
         for name in self.__slots__:
@@ -2592,7 +2636,8 @@ def _stop_if_refused(sysm):
     and after the restore and finished-resume refusals, before the SIG warm-up. AND AT A FOURTH,
     ONLY ON A CONTINUING MID-EPOCH RESUME (2026-09-27, Q-DATA-9): at the `segment` stage, before
     the log's replay, where a hold-out admission or a redrawn stream that is not the parent's is
-    refused -- neither needs the model, and the replay would cut the parent's log over other text."""
+    refused -- neither needs the model, and the replay would cut the parent's log over other text.
+    A context widening across such a resume stops there too (2026-09-28, Q-LM-15), first."""
     if sysm.refusals:
         raise RefusedRun(sysm, sysm.stage)
 
@@ -2830,8 +2875,17 @@ def compose(environ=None, *, restored=None):
     # naming no knob on a warm GPU (:4413-4468).
     sysm.stage = "gate"
     sysm.manifest = _geometry_manifest(sysm)
+    sysm.ctx_widening = None
     if restored is not None:
-        ckpt_api.check_geometry(ckpt, restored, sysm.manifest)
+        # THE REPORT IS READ FOR ONE FIELD (2026-09-28, register §8 3.6; Q-LM-15): an lm.ctx the gate
+        # WIDENED. That is a declared widening -- the manifest records lm.ctx MAY_WIDEN only at
+        # LM_CTX_WIDEN=1 -- and three rows below act on it: the `segment` stage refuses it across a
+        # continuing mid-epoch resume, SIG keeps the parent's width, and the root prints what it
+        # does to every windows cadence. (parent ctx, this run's ctx), or None.
+        _gate = ckpt_api.check_geometry(ckpt, restored, sysm.manifest)
+        for _field, _rule, _was, _now in _gate.widened:
+            if _field == "lm.ctx":
+                sysm.ctx_widening = (int(_was), int(_now))
 
     sysm.stage = "plan"
     sysm.plan = data_api.data_plan(
@@ -2878,6 +2932,22 @@ def compose(environ=None, *, restored=None):
             and int(_spos.get("in_epoch") or 0) > 0 and _spos.get("windows_in_epoch") is not None):
         _where = (f"CKPT_RESUME={sysm.resume_src!r} continues epoch {int(restored.epoch)} "
                   f"mid-epoch (window {int(_spos['in_epoch'])} of {int(_spos['windows_in_epoch'])})")
+        # A CONTEXT WIDENING ACROSS A CONTINUING RESUME IS REFUSED BY NAME (2026-09-28, register §8
+        # 3.6; Q-LM-15), before the checks below: the saved cursor and the saved epoch length count
+        # windows of the PARENT's width, so continuing at them in windows of this run's would train
+        # from a position that names other text, over an epoch whose length the rebuilt-length check
+        # would then refuse unnamed. A widening is a declared operation at an epoch boundary, where
+        # the child cuts its epoch fresh at its own width.
+        if sysm.ctx_widening is not None:
+            _o, _n = sysm.ctx_widening
+            sysm.refusals.append(
+                f"{_where}, and LM_CTX_WIDEN=1 widens LM_CTX {_o} -> {_n} across it (Q-LM-15). The "
+                f"saved cursor and epoch length count windows of {_o} tokens, so continuing them in "
+                f"windows of {_n} would read from a position that names other text. Resume at "
+                f"LM_CTX={_o} to continue this epoch exactly, or widen at an epoch boundary (the "
+                f"final save of a finished run, or run.py --max-windows at the epoch's end), where "
+                f"the child cuts its epoch fresh at LM_CTX={_n}.")
+            _stop_if_refused(sysm)
         # BOTH CHECKS BELOW STOP HERE, BEFORE THE REPLAY AND BEFORE ANY ALLOCATION (2026-09-27,
         # Q-DATA-9): a refusal that depends on neither the model nor a restore row has no reason to
         # wait for the second stop, and the replay itself would cut the parent's log over other text.
@@ -2997,13 +3067,23 @@ def compose(environ=None, *, restored=None):
             sysm.warnings.append(f"LM.load_state: {sysm.lm_load.reason}.")
 
     sysm.stage = "signature"
+    # AT A DECLARED WIDENING SIG KEEPS THE PARENT'S WIDTH (2026-09-28, Q-LM-15): the encoder was
+    # trained at signature_width_bytes(the PARENT's LM_CTX, the adopted bytes/token), SIG refuses a
+    # resume whose width moved, and a routing signature is the same bytes-before-the-window question
+    # whatever the window's width.
     sysm.sig = sig_api.build(
-        sig, width_units=_signature_width(lm, sysm.vocab), alphabet_size=_alphabet_size(sig, lm),
+        sig, width_units=_signature_width(
+            lm, sysm.vocab, ctx=None if sysm.ctx_widening is None else sysm.ctx_widening[0]),
+        alphabet_size=_alphabet_size(sig, lm),
         device=sysm.process.device, generator=sysm.streams["sig"])
     if "SIG" in saved:
         sysm.stage = "restore.sig"
         sig_api.load_state_dict(sig, sysm.sig, saved["SIG"],
                                 sidecar=_sidecar(sysm, restored, "SIG"))
+    # WHAT A DECLARED WIDENING DOES TO EVERY WINDOWS CADENCE, SAID BEFORE THE FIRST WINDOW AND NEVER
+    # APPLIED (2026-09-28, register §8 3.6 and N4; Q-LM-15).
+    if sysm.ctx_widening is not None:
+        sysm.warnings.append(_widening_notice(sysm))
 
     # -- 8b. THE RETENTION PROBE'S ONE DRAW (2026-09-27, Proposal 04 SR0 and NEW-03, Q-EVAL-12) ---
     # AFTER SIG's restore row because the routing prefix is SIG's width, and before anything the
@@ -3565,7 +3645,7 @@ def compose(environ=None, *, restored=None):
 # that the quantity has a name a reader can grep for.
 # ==================================================================================================
 
-def _signature_width(lm, vocab):
+def _signature_width(lm, vocab, ctx=None):
     """THE ONE SIGNATURE WIDTH, resolved once, here, and never recomputed as the vocabulary grows.
 
     spine.assemble lists this under "considered and rejected": it cannot be a Coupling because
@@ -3576,9 +3656,15 @@ def _signature_width(lm, vocab):
     the same knob in two places, `max(WIN, int(WIN*bpt))` = 614 bytes in training at :5675 and
     `max(1, SIG_WIN)` = ONE BYTE in eval at :3919, so every eval-path routing decision in every
     report was made on a one-byte signature and nothing failed.
+
+    `ctx` IS THE PARENT's LM_CTX AT A DECLARED WIDENING, AND None EVERYWHERE ELSE (2026-09-28,
+    Q-LM-15). A widened child keeps the width its encoder was trained at: the recorded lm.ctx the
+    gate widened from, with the bytes/token build_vocabulary adopted from the parent's file, gives
+    the parent's number exactly, and SIG's own restore refuses any other.
     """
     from spine import derive
-    return derive.signature_width_bytes(int(lm.ctx), float(vocab.bytes_per_token))
+    return derive.signature_width_bytes(int(lm.ctx) if ctx is None else int(ctx),
+                                        float(vocab.bytes_per_token))
 
 
 def _alphabet_size(sig, lm):
@@ -3589,6 +3675,60 @@ def _alphabet_size(sig, lm):
     in its checkpoint sidecar and refuses a resume that disagrees.
     """
     return int(lm.vocab_slots) if sig.space == "tokens" else 256
+
+
+def _widening_notice(sysm):
+    """The one sentence a declared context widening owes the operator, before the first window: what
+    moved, what did not, and every Windows-unit lever beside the value that would keep the parent's
+    spacing in TEXT -- PRINTED, NEVER APPLIED (2026-09-28, register §8 3.6, NEW-13 and N4;
+    docs/04_CONTRACT.md Q-LM-15).
+
+    A window is LM_CTX tokens, so after a widening every lever declared in units.Windows -- every
+    cadence, horizon and cooldown the tree counts in windows, 27 of them on 2026-09-28 -- spans more
+    text than it did under the parent. NEW-13's critic makes that the reason `lm.ctx` stayed EXACT
+    until a cadence-rescaling known answer existed; spine/derive.py::windows_at_ctx is that answer,
+    and this is where a run reaches it. N4 forbids the other half -- rescaling them at run time is a
+    lever reading another lever -- so each is printed with its rescaled value and left as the
+    operator set it.
+
+    THE LIST IS READ OFF THE DECLARATIONS, NOT TYPED HERE: every Config's levers whose declared unit
+    is units.Windows (Config.lever's read-only view), in env-name order, so a Windows lever added
+    later is listed without an edit. A negative value is printed as it stands (DISARMED to RUN's
+    Cadences, and windows_at_ctx refuses to rescale one)."""
+    from spine import derive, units
+    old, new = sysm.ctx_widening
+    rows = []
+    for pfx in sorted(sysm.configs):
+        cfg = sysm.configs[pfx]
+        wired = set(cfg.wired())
+        for field in cfg.keys():
+            if field in wired:
+                continue
+            view = cfg.lever(field)
+            if view.unit is not units.Windows:
+                continue
+            value = int(getattr(cfg, field))
+            rows.append((view.env_name, value,
+                         None if value < 0 else
+                         int(derive.windows_at_ctx(units.Windows(value), old, new))))
+    rows.sort()
+    listed = ", ".join(f"{env} {v} -> {r}" if r is not None else f"{env} {v} (negative, DISARMED)"
+                       for env, v, r in rows)
+    scheme = str(sysm.geometry.pos)
+    return (f"LM_CTX_WIDEN=1 WIDENED LM_CTX {old} -> {new} AT THIS RESUME (docs/04_CONTRACT.md "
+            f"Q-LM-15; register NEW-13, O17). "
+            + (f"The learned position table keeps the parent's {old} rows and appends {new - old} "
+               f"at this build's initialisation (lm.ckpt.ctx_widened), so on a window of {old} "
+               f"tokens or fewer the model computes what the parent computed. "
+               if scheme == "learned" else
+               f"LM_POS={scheme!r} builds no position table, so nothing is appended. ")
+            + f"SIG keeps the parent's width ({int(sysm.sig.width_units)} units), and a retention "
+              f"probe the parent pinned keeps its windows. EVERY WINDOWS-UNIT LEVER NOW COUNTS "
+              f"WINDOWS OF {new} TOKENS WHERE THE PARENT'S COUNTED {old}, so each spans more text "
+              f"than it did. The value that keeps the parent's spacing in text "
+              f"(spine/derive.py::windows_at_ctx), PRINTED AND NEVER APPLIED (N4) -- set the ones "
+              f"you want held: {listed}. The widening is register §8 5.8's route (B) on CPU, "
+              f"operation only; it is not a route that has passed (O17).")
 
 
 def _base_parameters(sysm):
@@ -3848,8 +3988,9 @@ def _geometry_manifest(sysm):
     man = {
         "lm.width":     (int(lm.width), "EXACT", "LM_WIDTH", "every tensor in the model"),
         # `layers`, NOT `depth`, and the environment name is LM_LAYERS. LM declares
-        # ['anchor_uses','anchor_w','arch','compose','ctx','dropout','heads','layers',
-        # 'mask_dead_rows','new_row_init','vocab_slots','width'] -- there is no `depth`, and
+        # ['anchor_uses','anchor_w','arch','compose','ctx','ctx_widen','dropout','heads','layers',
+        # 'mask_dead_rows','new_row_init','pos','vocab_slots','width'] (the two amendments of
+        # 2026-09-28 among them, Q-LM-15) -- there is no `depth`, and
         # Config.__getattr__ RAISES on an undeclared name rather than returning a default. So the
         # first draft of this line killed every compose() at the gate stage, and the reason nothing
         # caught it is the reason it is worth this comment: RUN.process_setup RAISED
@@ -3866,7 +4007,16 @@ def _geometry_manifest(sysm):
         # general form of the check that would have caught it at author time.
         "lm.layers":    (int(lm.layers), "EXACT", "LM_LAYERS", "the layer stack"),
         "lm.heads":     (int(lm.heads), "EXACT", "LM_HEADS", "head partition of width"),
-        "lm.ctx":       (int(lm.ctx), "EXACT", "LM_CTX", "positional table extent"),
+        # EXACT UNLESS A WIDENING IS DECLARED (2026-09-28, register §8 3.6 and NEW-13; Q-LM-15):
+        # at LM_CTX_WIDEN=1 a LARGER LM_CTX passes the gate, which lm/api.py::load_state then fits
+        # by prefix, and a smaller one is still refused. The rule is read off the lever on each side
+        # of the comparison that matters -- this run's -- and a recording's own rule is never read
+        # (ckpt/api.py::check_geometry compares values under the LIVE rule).
+        "lm.ctx":       (int(lm.ctx), "MAY_WIDEN" if bool(lm.ctx_widen) else "EXACT", "LM_CTX",
+                         "positional table extent. EXACT at LM_CTX_WIDEN=0, the shipped value "
+                         "(NEW-13); at 1 a larger LM_CTX is admitted at an epoch-boundary resume, "
+                         "the learned table keeping the parent's rows (docs/04_CONTRACT.md "
+                         "Q-LM-15)"),
         "lm.vocab_slots": (int(lm.vocab_slots), "MAY_WIDEN", "LM_VOCAB_SLOTS",
                            "the embedding and output rows; a smaller checkpoint is a prefix"),
         "sig.d":        (int(sig.d), "EXACT", "SIG_D", "the signature space the router keys on"),
@@ -3931,6 +4081,7 @@ def _geometry_manifest(sysm):
     # the ctx/pos_max overflow -- so where LMGeometry carries a field, its value replaces the raw
     # lever read above and pos_max joins the manifest. Two sources for one shape is how the
     # signature width came out 614 on one path and 1 on the other.
+    _ctx_why = man["lm.ctx"][3]
     for name in ("width", "layers", "heads", "ctx", "pos_max", "vocab_slots"):
         value = getattr(geom, name, None)
         if value is None:
@@ -3939,7 +4090,20 @@ def _geometry_manifest(sysm):
         prior = man.get(key)
         rule = prior[1] if prior else "EXACT"
         env = prior[2] if prior else ("LM_" + name.upper())
-        man[key] = (value, rule, env, "LM.resolve's resolved value, not the raw lever")
+        why = "LM.resolve's resolved value, not the raw lever"
+        if name in ("ctx", "pos_max"):
+            # THE TABLE'S HEIGHT MOVES WITH lm.ctx, UNDER lm.ctx's RULE, AND BOTH CARRY lm.ctx's WHY
+            # (2026-09-28, Q-LM-15). pos_max is the local wire from ctx, so at a declared widening
+            # the two grow together and an EXACT pos_max would refuse the move lm.ctx admitted; and
+            # the why is what CKPT's refusal prints, so it is the sentence that tells an operator
+            # LM_CTX_WIDEN exists. pos_max's name is the one lm/api.py::load_state already prints
+            # for this field: "LM_POS_MAX", which this line printed, names an environment variable
+            # nothing reads (never reached -- the gate compares lm.ctx first, and pos_max cannot
+            # move while ctx stands).
+            rule, why = man["lm.ctx"][1], f"{_ctx_why}; {why}"
+            if name == "pos_max":
+                env = "LM_CTX (LM.d_pos_max)"
+        man[key] = (value, rule, env, why)
     # THE FIELDS THAT DECIDE WHICH TENSORS EXIST ARE COMPARED FIRST, because check_geometry refuses
     # on the FIRST mismatch it meets and a shape field can move BECAUSE one of these did. LM_LAYERS=0
     # is a sentinel LM.resolve turns into a per-arch depth, so an LM_ARCH change alone (gru ->

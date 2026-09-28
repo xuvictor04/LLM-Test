@@ -85,7 +85,10 @@ are the ones that touch something you said; say so only if one is wrong.
   manager's note, not your words.
 - **"Nothing frozen".** A frozen codec stays a test control and never becomes the default by winning.
   Both language-model arms carry a context-locked position table, so no checkpoint is made B's
-  long-lived parent until a context-widening route passes on GPU.
+  long-lived parent until a context-widening route passes on GPU. Built 2026-09-28, all off by
+  default: the alternative position schemes and the context widening those GPU tests will compare,
+  and the refusal itself, which says so by name when anyone tries to designate a parent. Nothing is
+  designated; training runs are unchanged.
 - **03b's D-1..D-10** (the live-codec design choices of 2026-09-25) carry no quote from you, so they
   are treated as design decisions that GPU readings may revise. If you took any of them yourself,
   name it and it will stand as yours.

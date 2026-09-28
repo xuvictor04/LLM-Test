@@ -1042,7 +1042,9 @@ def load_into(world: Config, w, sd):
                  and 0 when every load restored a trained one; ABSENT on a fresh run and on the
                  null world), world.proj_trained_basis (a string gauge for THIS load: which
                  evidence decided -- the saved `proj_trained` field, or the `world.forecasts`
-                 counter fallback for a blob that predates the field)
+                 counter fallback for a blob that predates the field). The parent's ledger comes
+                 back but for world.state_written_here and world.ctx_tokens, which are this
+                 process's (the second since 2026-09-28, Q-LM-15: a resume may widen LM_CTX)
     """
     world = world.owned_by("WORLD")
 
@@ -1149,8 +1151,11 @@ def load_into(world: Config, w, sd):
     if sd.get("counters"):
         # EVERY KEY BUT THE SAVE COUNT'S PROCESS TWIN (2026-09-27, register
         # LOW-RESUME-SAVED-COUNTERS): the parent's saves are not this process's.
+        # AND BUT world.ctx_tokens (2026-09-28, docs/04_CONTRACT.md Q-LM-15): build wrote THIS run's
+        # LM_CTX there, and at LM_CTX_WIDEN=1 a resume may widen the context, so the parent's value
+        # would report the width this run does not run at. Everywhere else the two are equal.
         w.counters.update({k: v for k, v in sd["counters"].items()
-                           if k != "world.state_written_here"})
+                           if k not in ("world.state_written_here", "world.ctx_tokens")})
     # WRITTEN AFTER THE MERGE, ON BOTH ARMS. The parent's saved counters carry the parent's own
     # values of these keys, so a value written before the update would be overwritten by them and
     # this load would report the PARENT's re-zero (driven in the Q-WORLD-10 design round: a lineage
