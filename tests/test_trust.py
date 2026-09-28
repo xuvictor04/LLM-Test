@@ -76,13 +76,18 @@ fixed by construction, and the book reads it with no model -- and through the lo
   SR6-4  AT 'off' THE KEYS ARE ABSENT AND THE VOTE IS C5's; on 300 random tables the vote with the
          detection equals a transcription of the plan's model, and a detection that finds nothing
          above its threshold moves nothing.
-  SR6-5  THE PRIOR's ENDS ARE REFUSED BY NAME, and a value past them by the lever's domain.
+  SR6-5  EVERY END AT WHICH NO CLAIM CAN MOVE A VERDICT IS REFUSED BY NAME -- the prior's two and,
+         since Q-DATA-12's review, the threshold's two and the rate's 0 -- and a value past them by
+         the lever's domain; the rate's 1 is legal, and on it both verdicts are reached.
   SR6-6  THROUGH THE LOOP, on a planted corpus holding a copy of its liar: the copy dependent at its
-         hand posterior and the row printing it; 'accu' against 'off' moving nothing the run trains
-         on; a continuing resume ending with the uninterrupted run's book; ON -> OFF -> ON for the
+         hand posterior and the row printing it; the copy steps timed -- data.trust.copy.seconds
+         above 0, the sum of the passes' own, inside wall_s, and on a second run() over one System
+         that run()'s alone (the review); 'accu' against 'off' moving nothing the run trains on; a
+         continuing resume ending with the uninterrupted run's book; ON -> OFF -> ON for the
          detection, the 'off' leg carrying the copy part unchanged.
   T1, T7 read the book's third gate; T4 digests SR6's book under three hash seeds; T8 holds
-  data.trust.copy.seconds outside the integer channel.
+  data.trust.copy.seconds outside the integer channel, on the planted copier corpus, where it is a
+  non-zero reading (the review: on the synthetic source no claim was formed and it read 0.0).
 
 WHAT THIS FILE CANNOT SEE: whether the trust the book reports is right about real sources. CPU runs
 establish operation only; the book's readings on real text are E3's (register §8 6.2), on GPU, and
@@ -460,6 +465,7 @@ def main():
 def _main(tmp):
     planted_dir = plant_corpus(os.path.join(tmp, "planted"))
     big_dir = plant_corpus(os.path.join(tmp, "planted_big"), size=45000)
+    cop_dir = plant_corpus(os.path.join(tmp, "copier"), copier=True)    # T8 and SR6-6
     E5 = dict(E5_BASE, DATA_DIR=planted_dir)
     # ---- S1: Areas.sources --------------------------------------------------------------------------
     rnd = random.Random(1)
@@ -900,13 +906,17 @@ def _main(tmp):
           f"{fu.counters['data.trust.units']} - {lost}, book {book_diff(on2.focus, fu)}")
 
     # ---- T8: wall_s outside the integer channel ----------------------------------------------------------
-    # WITH SR6's COPY DETECTION ON (Q-DATA-12), so data.trust.copy.seconds -- DATA's float for the copy
-    # steps -- is held to the same rule as the root's wall_s in the same run.
-    env = dict(os.environ, OMP_NUM_THREADS="1", MKL_NUM_THREADS="1", DATA_TRUST="observe",
-               DATA_TRUST_EVERY="10", DATA_TRUST_COPY="accu",
+    # WITH SR6's COPY DETECTION ON (Q-DATA-12), so data.trust.copy.seconds -- the seconds DATA timed in
+    # this run's copy steps -- is held to the same rule as the root's wall_s in the same run. ON THE
+    # PLANTED COPIER CORPUS since Q-DATA-12's review: on the synthetic source a 'kv' book forms no
+    # claim, so no copy step ran and the float this held outside the channel was 0.0 -- as it is on a
+    # build that never times a step. 90 windows at E5's period of 30: the first pass reads the
+    # truthful areas alone, and the passes at 61 and at the stop's tail vote over conflicts.
+    env = dict(os.environ, OMP_NUM_THREADS="1", MKL_NUM_THREADS="1",
                **{k: v for k, v in BASE.items() if k != "DATA_DIR"})
+    env.update(E5_BASE, DATA_DIR=cop_dir, DATA_TRUST_COPY="accu")
     out = os.path.join(tmp, "series.json")
-    p = subprocess.run([sys.executable, "run.py", "--max-windows", "30", "--quiet", "--trust-series",
+    p = subprocess.run([sys.executable, "run.py", "--max-windows", "90", "--quiet", "--trust-series",
                         out], cwd=os.path.abspath(_ROOT), env=env, capture_output=True, text=True)
     lines = p.stdout.splitlines()
     wall = [ln for ln in lines if ln.strip().startswith("data.trust.wall_s")]
@@ -928,6 +938,27 @@ def _main(tmp):
           and all(type(r.get("copy_seconds")) is float and isinstance(r.get("copy_pairs"), list)
                   for r in series),
           f"rc {p.returncode}; {wall} {cwall}; series {None if series is None else len(series)}")
+    # THE FLOAT IS A READING: above 0, the sum of the passes' copy_seconds to their rounding, inside
+    # wall_s -- the copy steps run inside the passes the root times -- and every pass's own reading
+    # positive where it voted over a conflicted claim, exactly 0 where it voted over none.
+    try:
+        cw, ww = float(cwall[0].split()[-1]), float(wall[0].split()[-1])
+    except (IndexError, ValueError):
+        cw = ww = None
+    ser_ok = isinstance(series, list) and all(
+        type(r.get("copy_seconds")) is float and type(r.get("seconds")) is float for r in series)
+    per = [(r["conflicted_claims"], r["copy_seconds"], r["seconds"]) for r in series] if ser_ok \
+        else series
+    check("T8 on the planted copier corpus data.trust.copy.seconds is a non-zero reading: the sum of "
+          "the passes' copy_seconds to their rounding and within data.trust.wall_s, each pass's "
+          "positive where it voted over a conflicted claim and within its own seconds, 0 where it "
+          "voted over none",
+          cw is not None and ser_ok and cw > 0 and cw <= ww
+          and abs(cw - sum(r["copy_seconds"] for r in series)) <= (len(series) + 1) * 5e-7
+          and any(r["conflicted_claims"] for r in series)
+          and all((r["copy_seconds"] > 0) == bool(r["conflicted_claims"])
+                  and r["copy_seconds"] <= r["seconds"] for r in series),
+          f"{cw} of {ww}; (conflicted, copy_seconds, seconds) per pass {per}")
 
     # ---- T9: the cadence audit's line for the book is the root's ---------------------------------------
     # RUN's two sentences are a cadence's, and the book is armed by DATA_TRUST and passes beside its
@@ -996,10 +1027,10 @@ def _main(tmp):
           and stop_ser == [("tail", 0, 30 * 128 + 1)]
           and r_30.cadence_ledger["data.trust"][:2] == (30, 0), f"{all_ser} {stop_ser}")
 
-    _sr6(tmp)
+    _sr6(tmp, cop_dir)
 
 
-def _sr6(tmp):
+def _sr6(tmp, cop_dir):
     """SR6's COPY DETECTION (2026-09-28, Proposal 04 SR6 and §1 item 8's standing rule (2); register
     §8 3.7; docs/04_CONTRACT.md Q-DATA-12), on model-free tables in §8 0.6's td_stress style and
     through the loop. Operation only: whether it catches copies in E5's worlds is §8 5.12's, on GPU."""
@@ -1126,6 +1157,10 @@ def _sr6(tmp):
           and (f3o.evidence, f3o.trust, f3o.counters["data.trust.conflicted_claims"])
           == (ev_p, t_p, n_p)
           and moff.counters == {} and moff.gates[2].reason.startswith("DATA_TRUST='off'"))
+    # THE VOTE CALLED DIRECTLY, on 300 random tables. The rates and thresholds drawn include the ends
+    # DATA_TRUST_COPY_RATE and _P refuse by name since Q-DATA-12's review -- a rate of 0, a threshold
+    # of 0 or 1 (_trust_copy) -- where the arithmetic is still the model's and no configuration
+    # reaches it: the draw is kept whole, so the tables are the ones the build compared.
     rnd = random.Random(23)
     vbad, nbad, n_dep = [], [], 0
     for trial in range(300):
@@ -1152,7 +1187,8 @@ def _sr6(tmp):
                 or any(not close(mine[k][2], pairs[k][0]) or tuple(mine[k][3:6]) != pairs[k][1:]
                        for k in pairs)):
             vbad.append((trial, model, kw))
-        # NOTHING DEPENDENT, NOTHING MOVED: at DATA_TRUST_COPY_P = 1.0 no posterior is above it.
+        # NOTHING DEPENDENT, NOTHING MOVED: at a threshold of 1.0 no posterior is above it -- which is
+        # why DATA_TRUST_COPY_P refuses 1 by name (the review), and why this arm is reached directly.
         fz1 = D.Focus(mode="observe", table=dict(tab), first_seen=dict(seen))
         fz0 = D.Focus(mode="observe", table=dict(tab), first_seen=dict(seen))
         D._trust_vote(fz1, floor=0.3, copy=(model[0], model[1], 1.0), **kw)
@@ -1160,14 +1196,15 @@ def _sr6(tmp):
         if (fz1.evidence, fz1.trust) != (fz0.evidence, fz0.trust) or \
                 fz1.counters.get("data.trust.copy.votes_discounted") not in (0, None):
             nbad.append(trial)
-    check(f"SR6-4 on 300 random tables (random first sights, priors 0.05-0.9, rates 0-1, thresholds "
-          f"0-1; {n_dep} dependent pairs among them) the vote with copy detection equals a "
-          f"transcription of the plan's model -- evidence, trust and the conflicted count exactly, "
-          f"every judged pair's counts exactly and its posterior (by Bayes' rule in product form) to "
-          f"1e-9 -- and a detection that finds no pair above its threshold moves nothing",
+    check(f"SR6-4 on 300 random tables (random first sights, priors 0.05-0.9, rates 0-1 and "
+          f"thresholds 0-1, the ends the levers refuse included; {n_dep} dependent pairs among "
+          f"them) the vote with copy detection, called directly, equals a transcription of the "
+          f"plan's model -- evidence, trust and the conflicted count exactly, every judged pair's "
+          f"counts exactly and its posterior (by Bayes' rule in product form) to 1e-9 -- and a "
+          f"detection that finds no pair above its threshold moves nothing",
           not vbad and not nbad and n_dep > 0, f"model {vbad[:2]}; moved {nbad[:3]}")
 
-    # ---- SR6-5: the prior's endpoints are refused by name; the lever's domain refuses beyond them -----
+    # ---- SR6-5: every end at which no claim moves a verdict is refused by name; the domains past them --
     msgs = []
     for v in ("0.0", "1.0"):
         try:
@@ -1193,9 +1230,56 @@ def _sr6(tmp):
               for m, v in zip(msgs, ("0.0", "0.0", "1.0", "1.0")))
           and held.copy_mode == "off" and dom is not None
           and dom.startswith("DATA_TRUST_COPY_PRIOR=1.5") and "domain" in dom, f"{msgs} {dom}")
+    # THE REVIEW's ENDS (Q-DATA-12's review): a threshold of 0 or 1 and a rate of 0, each admitted by
+    # its lever's closed domain and each an end at which no claim moves a verdict. Driven on SR6-1's
+    # table before it: at DATA_TRUST_COPY_P=1.0 the planted copy was certified independent and the
+    # gate read armed, not fired, 0 vs 15; at 0.0 the truthful pair (a, b) was dependent, 15 vs 15;
+    # at DATA_TRUST_COPY_RATE=0 every posterior was the prior, 0.2 -- every pair certified at
+    # DATA_TRUST_COPY_P=0.5 and every pair dependent at 0.1, with nothing discounted.
+    got5 = []
+    for name, v, why in (("DATA_TRUST_COPY_P", "0.0", "strictly between 0 and 1"),
+                         ("DATA_TRUST_COPY_P", "1.0", "strictly between 0 and 1"),
+                         ("DATA_TRUST_COPY_RATE", "0.0", "posterior is the prior")):
+        for via in ("new_focus", "compose"):
+            try:
+                if via == "new_focus":
+                    D.new_focus(dat_of(DATA_TRUST_COPY="accu", **{name: v}, **SR6_ENV), None, None)
+                else:
+                    build(DATA_TRUST="observe", DATA_TRUST_COPY="accu", **{name: v})
+                got5.append((name, v, via, why, None))
+            except _lever.LeverError as e:
+                got5.append((name, v, via, why, str(e)))
+    held5 = D.new_focus(dat_of(DATA_TRUST_COPY="off", DATA_TRUST_COPY_P="1.0",
+                               DATA_TRUST_COPY_RATE="0.0", **SR6_ENV), None, None)
+    check("SR6-5 DATA_TRUST_COPY_P at 0 or 1 and DATA_TRUST_COPY_RATE at 0 are refused by name when "
+          "the detection is on -- at DATA.new_focus and through compose -- a threshold every "
+          "posterior clears or none can, and a rate at which every posterior is the prior; at "
+          "DATA_TRUST_COPY=off neither is read",
+          all(m is not None and m.startswith(f"{name}={v}:") and why in m
+              for name, v, _via, why, m in got5) and held5.copy_mode == "off",
+          str([(name, v, via, m if m is None else m[:48]) for name, v, via, _w, m in got5]))
+    # THE RATE's TOP END IS LEGAL, and on it both verdicts are reached: a copier that copies every
+    # value never differs from its source, so one differing claim proves a pair independent (its
+    # posterior exactly 0), and the shared false values still make the copy dependent.
+    f5 = observe(dat_of(DATA_TRUST_COPY="accu", DATA_TRUST_COPY_RATE="1.0", **SR6_ENV),
+                 *records(SR6_X, SR6_ORDER))
+    v5 = {(q[0], q[1]): q for q in f5.copy_pairs}
+    w5c = hand_posterior(0, {2: 20}, 0, f_ok, rate=1.0)        # the copy: 20 shared false, n = 2
+    w5t = hand_posterior(20, {}, 0, t_ok, rate=1.0)           # a truthful pair: 20 shared true
+    g5 = f5.gates[2]
+    diff5 = [q for q in f5.copy_pairs if q[5] > 0]
+    check(f"SR6-5 DATA_TRUST_COPY_RATE=1.0 is legal and reaches both verdicts: on SR6-1's table the "
+          f"copy is dependent at the hand-computed {w5c:.10f}, the truthful pairs certified at "
+          f"{w5t:.6f}, each of the eleven pairs that differ certified at exactly 0, and the gate "
+          f"fires, 1 vs 15",
+          ("l", "c") in v5 and close(v5[("l", "c")][2], w5c) and v5[("l", "c")][6] == "dependent"
+          and ("a", "b") in v5 and close(v5[("a", "b")][2], w5t)
+          and v5[("a", "b")][6] == "independent" and len(diff5) == 11
+          and all(q[2] == 0.0 and q[6] == "independent" for q in diff5)
+          and g5.fired and (g5.value, g5.threshold) == (1, 15), str(f5.copy_pairs))
 
     # ---- SR6-6: through the loop -- nothing trained on moves, the continuation is exact ---------------
-    cop_dir = plant_corpus(os.path.join(tmp, "copier"), copier=True)
+    # `cop_dir` is _main's planted copier corpus, the one T8 runs on.
     E6 = dict(E5_BASE, DATA_DIR=cop_dir, DATA_TRUST_COPY="accu")
     ua = build(**E6)
     rua = loop.run(ua, progress=False)
@@ -1223,6 +1307,39 @@ def _sr6(tmp):
                            "train/pc/liar.txt": 0.3, "train/pc/liar2.txt": 0.3}
           and all("copy_pairs" in x for x in rua.trust_series),
           f"{pq} {fa.trust} {row.get('gate:data.trust.copy')}")
+    # THE COPY STEPS ARE TIMED (Q-DATA-12's review: no check read a non-zero reading before it, and a
+    # build whose clock never moved passed every one). The row's float is the sum of the passes' own
+    # copy seconds, above 0 and inside wall_s -- the steps run inside the passes the root times --
+    # and a pass's reading is positive where its vote had a conflicted claim, 0 where it had none.
+    ser = rua.trust_series
+    cs, ws = row.get("data.trust.copy.seconds"), row.get("data.trust.wall_s")
+    check("SR6-6 the copy steps are timed: that run's data.trust.copy.seconds is above 0, the sum of "
+          "its passes' copy_seconds to their rounding and within its data.trust.wall_s; each pass's "
+          "reading is positive where its vote had a conflicted claim, within its own seconds, and "
+          "exactly 0 where it had none",
+          type(cs) is float and type(ws) is float and cs > 0 and cs <= ws
+          and abs(cs - sum(x["copy_seconds"] for x in ser)) <= (len(ser) + 1) * 5e-7
+          and all((x["copy_seconds"] > 0) == bool(x["conflicted_claims"])
+                  and x["copy_seconds"] <= x["seconds"] for x in ser),
+          f"{cs} of {ws}; {[(x['conflicted_claims'], x['copy_seconds'], x['seconds']) for x in ser]}")
+    # A SECOND run() OVER ONE System (the review): both floats are that run()'s. The row printed
+    # Focus.copy_seconds -- DATA's running float, every copy step since new_focus -- until then, so a
+    # second run()'s copy seconds held the first's too and overstated their share of its wall_s.
+    tw = build(**E6)
+    loop.run(tw, max_windows=70, progress=False)
+    first = float(tw.focus.copy_seconds)
+    rt2 = loop.run(tw, max_windows=70, progress=False)
+    row2, ser2 = rt2.report["DATA(trust)"], rt2.trust_series
+    cs2, ws2 = row2.get("data.trust.copy.seconds"), row2.get("data.trust.wall_s")
+    check("SR6-6 on a second run() over one System data.trust.copy.seconds is that run()'s, as its "
+          "data.trust.wall_s is: the sum of its own passes' copy_seconds and the growth of "
+          "Focus.copy_seconds over it, within its wall_s -- not the running total, which holds the "
+          "first run()'s copy steps too",
+          first > 0 and type(cs2) is float and type(ws2) is float and cs2 > 0 and cs2 <= ws2
+          and abs(cs2 - sum(x["copy_seconds"] for x in ser2)) <= (len(ser2) + 1) * 5e-7
+          and abs(cs2 - (float(tw.focus.copy_seconds) - first)) <= 1e-6,
+          f"first run() {first:.6f}; second {cs2} of {ws2}, its passes "
+          f"{[x['copy_seconds'] for x in ser2]}; Focus.copy_seconds {tw.focus.copy_seconds:.6f}")
     da, do_ = sd.digest(ua, exclude=EXCL, detail=True), sd.digest(uo, exclude=EXCL, detail=True)
     ia, io_ = flat_ints(rua.report), flat_ints(ruo.report)
     check("SR6-6 copy detection moves nothing the run trains on: 'accu' against 'off' on that run -- "

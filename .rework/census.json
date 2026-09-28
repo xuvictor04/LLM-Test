@@ -5884,7 +5884,7 @@
     "new_owner": "DATA",
     "new_name": "DATA_TRUST_COPY_RATE",
     "unit": "fraction 0..1",
-    "purpose": "The copy model's c: the share of its values a dependent source copies. It sets the likelihood of a pair's shared-true, shared-false and differing claims under dependence, and the discount -- a dependent pair's later source votes at 1 - c x P on the values it shares with the earlier. Both ends are legal. Read only at DATA_TRUST=observe with DATA_TRUST_COPY=accu.",
+    "purpose": "The copy model's c: the share of its values a dependent source copies. It sets the likelihood of a pair's shared-true, shared-false and differing claims under dependence, and the discount -- a dependent pair's later source votes at 1 - c x P on the values it shares with the earlier. The domain is closed and DATA.new_focus refuses 0 by name (Q-DATA-12's review, 2026-09-28): at 0 every judged pair's posterior is the prior, whatever it claims. 1 is legal. Read only at DATA_TRUST=observe with DATA_TRUST_COPY=accu.",
     "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8's standing actuation rule (2) and SR6 (copy detection, the ACCU-COPY family), register \u00a78 3.7 (operation only; \u00a78 5.12 decides) and 04-Q12, C05 and O5, ruled in docs/04_CONTRACT.md Q-DATA-12. There is no ancestor knob: the old tree kept no book of which source to believe, so it judged no pair of sources. IT DOES NOT CHANGE THE 328. WHY: the family's c, 0.8, as Proposal 04 cites it (from memory). PROVISIONAL (NEW-19): no toy, CPU or GPU reading is behind it.",
     "couples_with": [
      "DATA_TRUST_COPY",
@@ -5899,7 +5899,7 @@
     "new_owner": "DATA",
     "new_name": "DATA_TRUST_COPY_P",
     "unit": "fraction 0..1",
-    "purpose": "The posterior of dependence above which a judged pair is reported dependent and its later-seen source discounted; below it the pair is certified independent and votes in full; exactly at it, judged and neither. Read only at DATA_TRUST=observe with DATA_TRUST_COPY=accu.",
+    "purpose": "The posterior of dependence above which a judged pair is reported dependent and its later-seen source discounted; below it the pair is certified independent and votes in full; exactly at it, judged and neither. The domain is closed and DATA.new_focus refuses 0 and 1 by name (Q-DATA-12's review, 2026-09-28): no posterior is above 1, so no pair could be dependent, and none below 0, so none could be certified. Read only at DATA_TRUST=observe with DATA_TRUST_COPY=accu.",
     "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8's standing actuation rule (2) and SR6 (copy detection, the ACCU-COPY family), register \u00a78 3.7 (operation only; \u00a78 5.12 decides) and 04-Q12, C05 and O5, ruled in docs/04_CONTRACT.md Q-DATA-12. There is no ancestor knob: the old tree kept no book of which source to believe, so it judged no pair of sources. IT DOES NOT CHANGE THE 328. WHY: 0.5, the even-odds line. PROVISIONAL (NEW-19); it is 'SR6's threshold', the first next arm O5 names if \u00a78 5.12 fails.",
     "couples_with": [
      "DATA_TRUST_COPY",

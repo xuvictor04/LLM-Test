@@ -2544,7 +2544,7 @@ class Focus:
     material fixed when they are made.
 
     AT DATA_TRUST='off' IT HOLDS NOTHING: `mode` 'off', no sketch, no table, no counter -- the
-    data.trust.* keys are ABSENT -- and two UNREACHABLE gates saying why. `held` is the one
+    data.trust.* keys are ABSENT -- and three UNREACHABLE gates saying why. `held` is the one
     exception: a checkpoint's book, carried through an 'off' run's saves unchanged, so a lineage
     that switches the book off for one leg and on again resumes it (the retention probe's ON -> OFF
     -> ON rule, Q-EVAL-12). That leg makes no pass, and what the next 'observe' leg reads of it is
@@ -2608,10 +2608,15 @@ class Focus:
                                counters -- carried unchanged to this run's saves, so a lineage that
                                switches the detection off for one leg and on again keeps its count
                                (the book's ON -> OFF -> ON rule, Q-DATA-11). None otherwise.
-      copy_seconds             this process's seconds in the copy steps (data.trust.copy.seconds, a
-                               float the root prints to six places). DATA's to time, unlike
-                               wall_s, because only DATA knows where a copy step starts and ends
-                               inside a pass; never checkpointed and never compared.
+      copy_seconds             the seconds this book's copy steps have taken since new_focus built
+                               it: a running float, DATA's to time, unlike wall_s, because only
+                               DATA knows where a copy step starts and ends inside a pass; never
+                               checkpointed and never compared. It is NOT what the root prints: the
+                               root reads its growth over each pass and prints the sum over one
+                               run()'s passes as data.trust.copy.seconds, so that float and wall_s
+                               cover the same run() -- on a second run() over one System, that
+                               run() alone (Q-DATA-12's review: the root printed this field until
+                               then, the earlier run()'s steps included).
     """
     mode: str
     counters: dict = dataclasses.field(default_factory=dict)
@@ -2642,11 +2647,28 @@ def _trust_copy(dat: Config):
     """SR6's copy model as the vote reads it (2026-09-28, Q-DATA-12): None at DATA_TRUST_COPY='off',
     else (prior, rate, p) -- DATA_TRUST_COPY_PRIOR, _RATE and _P.
 
-    REFUSES BY NAME A PRIOR OF 0 OR 1, which the lever's closed domain admits (spine/lever.py::Lever's
-    rule for an interval open at an end: the declaration under-refuses by the endpoint and the body
-    refuses it, saying why). At 0 every pair's posterior is 0, so every judged pair would be CERTIFIED
-    independent before a claim is read; at 1 every pair is dependent. A certainty no count can move is
-    not a prior, and a certificate issued by one is not evidence."""
+    REFUSES BY NAME EVERY END OF THE THREE AT WHICH NO CLAIM CAN MOVE A VERDICT, each one admitted by
+    its lever's closed domain (spine/lever.py::Lever's rule for an interval open at an end: the
+    declaration under-refuses by the endpoint and the body refuses it, saying why):
+      * a PRIOR of 0 or 1. At 0 every pair's posterior is 0, so every judged pair would be CERTIFIED
+        independent before a claim is read; at 1 every pair is dependent. A certainty no count can
+        move is not a prior, and a certificate issued by one is not evidence.
+      * a RATE of 0 (Q-DATA-12's review, 2026-09-28; the build called both ends legal). A copier
+        that copies nothing predicts the claims an independent source makes, so every ratio is 1
+        and every judged pair's posterior is the prior whatever it claims: each verdict is the prior
+        against DATA_TRUST_COPY_P, the same for every pair, a dependent one discounting nothing
+        (1 - 0 x P = 1), and at the model's values no pair can be dependent -- Gate
+        data.trust.copy armed and untrippable, every pair certified. A rate of 1 stays legal: every
+        count still moves the posterior, and one differing claim proves a pair independent.
+      * a THRESHOLD of 0 or 1 (the same review). No posterior is above 1, so at 1 no pair could be
+        reported dependent -- the gate armed and untrippable -- and every judged pair, a planted
+        copy of a liar included, would be certified independent (undecided where its posterior
+        rounds to 1); none is below 0, so at 0 no pair could be certified and every judged pair
+        would be reported dependent (undecided where its posterior is exactly 0), two truthful
+        sources that agree included, the later one's votes discounted.
+    INSIDE THOSE ENDS EVERY SETTING CAN REACH BOTH VERDICTS: a shared false claim's ratio is above 1
+    (n >= 1 and A < 1) and a differing one's below 1 (c > 0), so enough of either carries a pair
+    across the threshold."""
     dat = dat.owned_by("DATA")
     if str(dat.trust_copy) == "off":
         return None
@@ -2658,7 +2680,38 @@ def _trust_copy(dat: Config):
             f"pair would be certified independent before one of its claims was read; at 1 every "
             f"pair is dependent whatever it claims. A certainty no count moves is not a prior. The "
             f"model's value is 0.2 (the ACCU-COPY family's, as Proposal 04 cites it).")
-    return prior, float(dat.trust_copy_rate), float(dat.trust_copy_p)
+    # THE RATE's AND THE THRESHOLD's REFUSALS ARE WRITTEN FOR tests/test_ownership.py's O15, which
+    # pairs a refusal with every lever whose name its message holds. The rate's names the prior and
+    # the threshold in words: by name, O15 cannot read it as a refusal of the prior and sets the
+    # prior aside from its over-refusal arm. And the threshold is read where it is tested, bound to
+    # no local: 'DATA_TRUST_COPY_P' is a prefix of 'DATA_TRUST_COPY_PRIOR', so with a local bound to
+    # it O15 takes the prior's refusal above for one of the threshold too and sets the threshold
+    # aside. Driven: either sets 2 levers aside there and both 3, where this tree's reads 1.
+    rate = float(dat.trust_copy_rate)
+    if rate <= 0.0:
+        raise LeverError(
+            f"DATA_TRUST_COPY_RATE={rate!r}: copy detection's copy rate must be above 0. At 0 the "
+            f"model's copier copies nothing, so a dependent source predicts exactly the claims an "
+            f"independent one makes: every likelihood ratio is 1, and every judged pair's posterior "
+            f"is the prior, {prior!r}, whatever the two sources claim. Each verdict would be that "
+            f"prior against the threshold, the same for every pair -- all certified independent, or "
+            f"all reported dependent with nothing discounted (1 - 0 x P is 1) -- and at the model's "
+            f"values no pair could ever be dependent. A verdict no claim moves is not a judgment. 1 "
+            f"is legal: a copier that copies every value, which one differing claim proves "
+            f"independent. The model's value is 0.8 (the ACCU-COPY family's, as Proposal 04 cites "
+            f"it).")
+    if not 0.0 < float(dat.trust_copy_p) < 1.0:
+        raise LeverError(
+            f"DATA_TRUST_COPY_P={float(dat.trust_copy_p)!r}: copy detection's threshold must lie "
+            f"strictly between 0 and 1. No posterior is above 1, so at 1 no pair could ever be "
+            f"reported dependent -- Gate data.trust.copy armed and never able to fire -- and every "
+            f"judged pair, a planted copy of a liar included, would be certified independent (or, "
+            f"where its posterior rounds to 1, left undecided); no posterior is below 0, so at 0 no "
+            f"pair could ever be certified, and every judged pair would be reported dependent (or, "
+            f"where its posterior is exactly 0, left undecided), two truthful sources that agree "
+            f"included, the later one's votes discounted. A threshold every posterior clears, or "
+            f"none can, tests nothing. The model's value is 0.5, the even-odds line.")
+    return prior, rate, float(dat.trust_copy_p)
 
 
 def _trust_delims(dat):
@@ -2801,18 +2854,20 @@ def new_focus(dat: Config, areas, plan, *, restored=None):
     SR6's COPY DETECTION (2026-09-28, Q-DATA-12) is read here too, at 'observe' only: at
     DATA_TRUST_COPY='accu' the data.trust.copy.* counters are seeded at 0, or the checkpoint's copy
     part -- its judged pairs and counts, state['focus']['copy'] -- is put back (a book without one,
-    older than the detection or from an 'off' leg, starts it at 0); DATA_TRUST_COPY_PRIOR at 0 or 1
-    is REFUSED BY NAME (_trust_copy). At DATA_TRUST_COPY='off' no copy key exists and a checkpoint's
-    copy part is held unchanged for this run's saves (Focus.copy_held). The detection changes no
-    table key, so a resume may switch it either way, and none is refused for it.
+    older than the detection or from an 'off' leg, starts it at 0); DATA_TRUST_COPY_PRIOR and
+    DATA_TRUST_COPY_P at 0 or 1, and DATA_TRUST_COPY_RATE at 0, are REFUSED BY NAME (_trust_copy),
+    each an end at which no claim can move a verdict (the rate and threshold since Q-DATA-12's
+    review). At DATA_TRUST_COPY='off' no copy key exists and a checkpoint's copy part is held
+    unchanged for this run's saves (Focus.copy_held). The detection changes no table key, so a
+    resume may switch it either way, and none is refused for it.
 
     RETURNS: Focus.
 
     LEVERS READ: trust, trust_rule, trust_claim, trust_ctx, trust_val, trust_delims, trust_sketch,
                  trust_table, trust_min_ev (at 'observe', in the data.trust gate's reason),
                  trust_copy (at 'observe'), trust_copy_prior (at 'accu', refused here at 0 or
-                 1), trust_copy_rate (at 'accu', through _trust_copy), trust_copy_p (at 'accu',
-                 in the data.trust.copy gate's reason)
+                 1), trust_copy_rate (at 'accu', refused here at 0), trust_copy_p (at 'accu',
+                 refused here at 0 or 1, and in the data.trust.copy gate's reason)
     WIRES READ: none
     DID IT FIRE: Gate data.trust (UNREACHABLE at 'off', naming it; armed at 'observe' until a
                  source's trust is set), Gate data.trust.actuation (UNREACHABLE on every
@@ -2845,8 +2900,8 @@ def new_focus(dat: Config, areas, plan, *, restored=None):
     ctx, val = int(dat.trust_ctx), int(dat.trust_val)
     delims = _trust_delims(dat)
     size, bound = int(dat.trust_sketch), int(dat.trust_table)
-    # SR6's COPY DETECTION (Q-DATA-12): None at DATA_TRUST_COPY='off'; a prior of 0 or 1 is refused
-    # here, at startup, before any tensor.
+    # SR6's COPY DETECTION (Q-DATA-12): None at DATA_TRUST_COPY='off'; a prior or threshold of 0 or
+    # 1, or a rate of 0, is refused here, at startup, before any tensor.
     copy = _trust_copy(dat)
     focus = Focus(mode="observe", rule=rule, claim=claim, ctx=ctx, val=val, delims=delims,
                   sketch_size=size, copy_mode="off" if copy is None else "accu")
@@ -3402,8 +3457,10 @@ def _trust_copy_posterior(k_true, k_false, k_diff, acc, prior, rate):
     ACCU-COPY posterior (the arithmetic is written out at _TRUST_COPY_COUNTERS): `k_true` shared-true
     claims, `k_false` the shared-false ones as {n: count} (n the key's false values), `k_diff`
     differing ones; `acc` the later source's accuracy, its r this round, strictly inside (0, 1);
-    `prior` alpha, strictly inside (0, 1); `rate` c, in [0, 1]. The log-likelihood ratio is summed
-    in n order and the logistic taken on the side that cannot overflow."""
+    `prior` alpha, strictly inside (0, 1); `rate` c, in (0, 1] as _trust_copy admits it (the
+    arithmetic holds at 0 too, where every ratio is 1 and the posterior is the prior). The
+    log-likelihood ratio is summed in n order and the logistic taken on the side that cannot
+    overflow."""
     if k_diff and rate >= 1.0:
         return 0.0                # a copier that copies every value never differs from its source
     llr = 0.0

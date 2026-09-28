@@ -964,22 +964,32 @@ class DATALevers(LeverSet):
 
     trust_copy_rate = Lever(0.8, "Copy rate (the model's c): the share of its values a dependent source "
                                  "copies; a dependent pair's later-seen source votes at 1 - c x "
-                                 "P(dependent) on the values it shares with the earlier.",
+                                 "P(dependent) on the values it shares with the earlier; 0 is refused.",
                             U.FRACTION, domain=(0.0, 1.0))
     # CENSUS AMENDMENT, 2026-09-28 (Q-DATA-12). The family's c, 0.8 as 04 recalls it; PROVISIONAL
     # (NEW-19). It enters twice, and both are the model's: in the likelihood of the pair's shared
-    # and differing claims under dependence, and in the discount. BOTH ENDS ARE LEGAL. At 0 a
-    # "copier" copies nothing, so dependence is independence: every judged pair's posterior is its
-    # prior and nothing is discounted. At 1 a copier copies every value, so a single differing value
-    # proves the pair independent (its posterior is 0), and a dependent pair's copy votes at 1 - P.
-    # Read only at DATA_TRUST=observe with DATA_TRUST_COPY=accu.
+    # and differing claims under dependence, and in the discount. THE DOMAIN IS CLOSED AND THE BODY
+    # REFUSES ITS LOW END BY NAME at DATA.new_focus when the detection is on (Q-DATA-12's review,
+    # 2026-09-28; this said both ends were legal). At 0 a "copier" copies nothing, so dependence is
+    # independence: every judged pair's posterior is its prior whatever it claims, every verdict is
+    # that prior against DATA_TRUST_COPY_P, and a pair called dependent discounts nothing -- a
+    # verdict no claim moves, and at the model's values a gate that cannot fire. THE TOP END IS
+    # LEGAL: at 1 a copier copies every value, so a single differing value proves the pair
+    # independent (its posterior is 0), and a dependent pair's copy votes at 1 - P. Read only at
+    # DATA_TRUST=observe with DATA_TRUST_COPY=accu.
 
     trust_copy_p = Lever(0.5, "Posterior of dependence above which a judged pair of sources is reported "
                               "dependent and its later-seen source discounted; below it the pair is "
-                              "certified independent.", U.FRACTION, domain=(0.0, 1.0))
+                              "certified independent; 0 and 1 are refused.", U.FRACTION,
+                         domain=(0.0, 1.0))
     # CENSUS AMENDMENT, 2026-09-28 (Q-DATA-12). 0.5, the even-odds line; PROVISIONAL (NEW-19), and
     # it is "SR6's threshold" O5 names as the first next arm after a failed §8 5.12. ONLY A PAIR
     # ABOVE IT IS DISCOUNTED: a pair below it is certified independent and votes in full, so two
     # truthful sources that agree -- which the model can never tell from a copy, since agreeing on
     # true values is what accurate sources do -- are not taxed for it. A pair exactly at it is judged
-    # and neither. Read only at DATA_TRUST=observe with DATA_TRUST_COPY=accu.
+    # and neither. THE DOMAIN IS CLOSED AND THE BODY REFUSES BOTH ENDS BY NAME at DATA.new_focus when
+    # the detection is on (Q-DATA-12's review, 2026-09-28): no posterior is above 1, so at 1 no pair
+    # could be reported dependent -- Gate data.trust.copy armed and untrippable -- and a planted copy
+    # of a liar would be certified independent; none is below 0, so at 0 no pair could be certified
+    # and two agreeing truthful sources would be reported dependent, the later one discounted. Read
+    # only at DATA_TRUST=observe with DATA_TRUST_COPY=accu.

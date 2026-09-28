@@ -548,8 +548,9 @@ copy detection's `trust.copy.passes`, `trust.copy.pairs_judged`, `trust.copy.pai
 `trust.copy.pairs_certified` and `trust.copy.votes_discounted` (ABSENT unless `trust='observe'` and
 `trust_copy='accu'`, PRESENT-and-0 there), a third Gate, `data.trust.copy` (UNREACHABLE naming
 `DATA_TRUST='off'` or `DATA_TRUST_COPY='off'`, whichever is off; FIRED when a judged pair is
-reported dependent), one line per judged pair in the same row and `data.trust.copy.seconds`, DATA's
-float for the copy steps, beside `wall_s`. **Printed at R since 2026-09-27**,
+reported dependent), one line per judged pair in the same row and `data.trust.copy.seconds`, the
+seconds DATA timed in the run()'s copy steps, beside `wall_s` and over the same run() (Q-DATA-12's
+review). **Printed at R since 2026-09-27**,
 in the root's `DATA(areas.counters)`,
 `DATA(areas.gates)`, `DATA(plan.counters)` and `DATA(stream.counters)`
 rows beside the older `DATA(stream.gates)` (Q-DATA-9); before that no row printed them. The Plan's
@@ -626,13 +627,16 @@ under the round's truth as shared true, shared false (grouped by n, the key's cl
 truth) and differing (on any key): the posterior that the later-seen of the two (`Focus.first_seen`)
 copies the earlier is α L / (α L + 1 − α), L the product of 1 − c + c/A per shared true, 1 − c + c n/(1
 − A) per shared false and 1 − c per differing claim, with α `trust_copy_prior` (0.2; 0 and 1 refused by
-name), c `trust_copy_rate` (0.8) and A the later source's r that round. A pair above `trust_copy_p`
-(0.5) is dependent, and the next round counts the later source's vote for each value it shares with
-the earlier at 1 − c × P; a pair below it is certified independent and votes in full. The last round's
-pairs are `Focus.copy_pairs`, checkpointed under `state['focus']['copy']` with the `trust.copy.*`
-counts — held unchanged by an `'off'` leg (`Focus.copy_held`) — and `Focus.copy_seconds` is this
-process's float, never checkpointed. Observe-only: the discount moves the book's truth, r and t and
-nothing the run trains on, and no actuation is built (§8 5.12 decides SR6 on GPU; O5's lock holds).
+name), c `trust_copy_rate` (0.8; 0 refused by name) and A the later source's r that round. A pair
+above `trust_copy_p` (0.5; 0 and 1 refused by name — each refused end one at which no claim can move a
+verdict, the rate's and the threshold's since Q-DATA-12's review) is dependent, and the next round
+counts the later source's vote for each value it shares with the earlier at 1 − c × P; a pair below
+it is certified independent and votes in full. The last round's pairs are `Focus.copy_pairs`,
+checkpointed under `state['focus']['copy']` with the `trust.copy.*` counts — held unchanged by an
+`'off'` leg (`Focus.copy_held`) — and `Focus.copy_seconds` is DATA's running float for the book's copy
+steps, never checkpointed, whose growth over one run()'s passes the root prints as
+`data.trust.copy.seconds`. Observe-only: the discount moves the book's truth, r and t and nothing the
+run trains on, and no actuation is built (§8 5.12 decides SR6 on GPU; O5's lock holds).
 
 **The synthetic source's held-out law is a lever (2026-09-27, Q-DATA-9).** At `synth_holdout=True`
 `open_areas` runs the real sources' carve on each generated body **verbatim** — size, per-area child
@@ -7695,7 +7699,9 @@ Clock-unit levers, `_periods` spanning seven packages, EIGHT gates in `RUN.new_c
   sketch (array('i'), itemsize checked) and an empty LRU table and seeds every `data.trust.*` counter
   at 0, or puts a checkpoint's book back. 'loss' and 'loss+draw' raise `NotBuilt` there, at startup
   before any tensor, their messages opening with `DATA_TRUST='loss'` / `'loss+draw'` (G2), the
-  `OPT_LR_CONTINUE='regulated'` precedent.
+  `OPT_LR_CONTINUE='regulated'` precedent. *(2026-09-28: three UNREACHABLE gates at 'off' since
+  Q-DATA-12 — its `data.trust.copy` names `DATA_TRUST='off'` too; `DATA.Focus`'s docstring said two
+  until Q-DATA-12's review.)*
 * **The claims** (`claims_observe`), formed unit by unit in stream order and the same however a stream
   is cut into passes — `Focus.carry` holds the units the next pass needs (`DATA_TRUST_CTX` for 'ctx';
   `CTX + VAL + D - 1` for 'kv', D the longest delimiter). 'kv': at each occurrence of a delimiter in
@@ -7843,7 +7849,8 @@ UNREACHABLE gates), a gated-call line and the ledger's `'data.trust'` key at 0 c
 and a checkpoint's `RUN.cadences` carries that key. **The run also prints one more startup warning**
 — the cadence audit's `'data.trust'` line, DISARMED by `DATA_TRUST='off'`, in the root's words since
 the review (below); this list left it out until then. `Stream.sources` is bookkeeping over a draw
-that did not change. B1, B3, B3r, B5, B6 and B6r reproduce their fixtures.
+that did not change. B1, B3, B3r, B5, B6 and B6r reproduce their fixtures. *(2026-09-28: the row's
+UNREACHABLE gates are three since Q-DATA-12, which adds `data.trust.copy` and the line.)*
 
 **AMENDED 2026-09-28 — THE REVIEW OF THIS RULING.** Three findings, each driven on the tree before it
 (00e6fc3; CPU, operation only). The two that printed something false are repaired and held:
@@ -7942,10 +7949,14 @@ levers are on, and a Gate `data.trust.copy` UNREACHABLE naming whichever is off.
   at `DATA.new_focus` when the detection is on (`_trust_copy`; the `LM_DROPOUT` shape — a closed
   domain, the open end refused by the body saying why): at 0 every pair's posterior is 0, so every
   judged pair would be *certified* independent before a claim is read, and at 1 every pair is
-  dependent; a certainty no count moves is not a prior. The rate's ends are legal — at 0 a "copier"
-  copies nothing, so every posterior is its prior and nothing is discounted; at 1 a single differing
-  claim proves a pair independent. The three numbers are the family's values as 04 recalls them and
-  are **provisional** (§8's NEW-19 backlog rows): no toy, CPU or GPU reading is behind any of them.
+  dependent; a certainty no count moves is not a prior. **So, since this ruling's review, are the
+  threshold's two ends and the rate's 0**, each an end at which no claim can move a verdict: no
+  posterior is above a threshold of 1 or below one of 0, and at a rate of 0 a "copier" copies
+  nothing, so every posterior is the prior. The rate's 1 is legal — a single differing claim proves a
+  pair independent, and every other count still moves the posterior. *(The build called both of the
+  rate's ends legal and left the threshold's unruled; the review below.)* The three numbers are the
+  family's values as 04 recalls them and are **provisional** (§8's NEW-19 backlog rows): no toy, CPU
+  or GPU reading is behind any of them.
 * **The pairs.** After each of the vote's ten rounds a copy step (`_trust_copy_step`) runs over the
   conflicted keys. A pair is two sources that claim one key, ordered by **first sight** —
   `Focus.first_seen`'s [stream, unit] positions, then name; a source the book never saw (a table
@@ -7991,8 +8002,9 @@ levers are on, and a Gate `data.trust.copy` UNREACHABLE naming whichever is off.
   `DATA_TRUST='off'` or `DATA_TRUST_COPY='off'`, the latter saying when a held part is carried; at
   'accu' FIRED when a pair is dependent (dependent pairs vs pairs judged), armed-but-zero with the
   reason otherwise. The `DATA(trust)` row prints the counters, one line per judged pair (its
-  posterior, three counts and verdict) and **`data.trust.copy.seconds`**, the copy steps' seconds in
-  this process — a float to six places beside `wall_s`, outside the integer channel
+  posterior, three counts and verdict) and **`data.trust.copy.seconds`**, the seconds DATA timed in
+  this run()'s copy steps — summed by the root over the run()'s passes, so it covers the span
+  `wall_s` covers (the review) — a float to six places beside `wall_s`, outside the integer channel
   `tests/test_baseline.py` reads (T8), never checkpointed. `RunResult.trust_series` gains
   `copy_seconds` and `copy_pairs` per pass at 'accu'.
 * **One book under every `PYTHONHASHSEED`**: pairs in first-sight order, values in byte order, the
@@ -8028,7 +8040,9 @@ left a choice open.**
    `votes_discounted` counts the votes that step's dependent pairs discount, which is the tenth
    round's own discount wherever the vote has settled.
 8. **`data.trust.copy.seconds` is DATA's to time**, not the root's as `wall_s` is: the root cannot
-   time a step inside a pass. It is a `Focus` field outside `_focus_state` and outside the counters.
+   time a step inside a pass. `Focus.copy_seconds` is a running float outside `_focus_state` and
+   outside the counters, and the root prints its growth over one run()'s passes — since the review;
+   the row printed the field whole until then, an earlier run()'s steps included.
 9. **The gate list is three at every setting**, so the default run's `DATA(trust)` row prints one
    more UNREACHABLE gate (below).
 
@@ -8056,19 +8070,82 @@ vote loses the ten keys the copy and its source outvote the truth on (cred at r 
 the discounted vote wins them (cred at r 31/32, t 1; the pair at the hand posterior over 20 shared
 false at n 2 and 10 at n 1). SR6-4: at 'off' no copy key, the gate naming the lever, the vote C5's;
 300 random tables against a transcription of the plan's model; a detection with nothing above its
-threshold moves nothing. SR6-5: the prior's ends refused by name, 1.5 by the domain. SR6-6: through
+threshold moves nothing. SR6-5: the prior's ends refused by name, 1.5 by the domain — and, since the
+review, the threshold's ends and the rate's 0, the rate's 1 reaching both verdicts. SR6-6: through
 the loop on a planted corpus with a copy of its liar — the copy dependent at its hand posterior, the
-row's fired gate and pair line; 'accu' against 'off' with float-exact losses, equal state digests but
+row's fired gate and pair line; since the review, the copy steps timed, and on a second run() over
+one System that run()'s alone; 'accu' against 'off' with float-exact losses, equal state digests but
 the book and every integer but `data.trust.copy.*`; a continuing resume ending with the uninterrupted
 run's book, judged pairs included; the parent's record put back whole at 'accu', started at 0
 without its copy part and held unchanged at 'off'; ON → OFF → ON for the detection. T4 digests SR6's
-book under three `PYTHONHASHSEED`s; T8 holds `data.trust.copy.seconds` outside the integer channel;
-T1 and T7 read the third gate.
+book under three `PYTHONHASHSEED`s; T8 holds `data.trust.copy.seconds` outside the integer channel,
+on the planted copier corpus since the review, where it is a non-zero reading; T1 and T7 read the
+third gate.
 
 **What the default changes:** nothing a run trains on and no integer counter a default run prints.
 At the shipped `DATA_TRUST='off'` the book's gates are three, so the `DATA(trust)` row prints one more
 line, `gate:data.trust.copy`, UNREACHABLE naming `DATA_TRUST='off'`; no startup warning is added.
 B1, B3, B3r, B5, B6 and B6r reproduce their fixtures.
+
+**AMENDED 2026-09-28 — THE REVIEW OF THIS RULING.** Four findings, each driven on the tree before it
+(72ff28a; CPU, operation only) and each repaired; the ruling's levers, surface, departure-8 and tests
+text above is corrected in place. Run against that tree's `src/`, the new SR6-5 refusal check and
+SR6-6's second-run check fail; with DATA's clock held constant on this one, T8's reading check and
+SR6-6's two timing checks fail.
+* **The threshold's ends and the rate's 0 are refused by name.** `trust_copy_p` and
+  `trust_copy_rate` declare the closed domain (0.0, 1.0), and no body refused an end of either, while
+  `_trust_copy` refused the prior's for a reason that holds at these too: a verdict no claim can move.
+  Driven on SR6-1's table: at `DATA_TRUST_COPY_P=1.0` no posterior can exceed the threshold (the
+  verdict is `post > p`), so the planted copy, at 0.9999863065, was reported certified independent and
+  Gate `data.trust.copy` read armed-but-zero, 0 vs 15 — an untrippable gate printed as one that never
+  had to fire; at 0.0 the truthful pair (a, b), at 0.3455758077, was reported dependent, the gate
+  fired 15 vs 15 and 60 votes were discounted; at `DATA_TRUST_COPY_RATE=0` every posterior was the
+  prior, 0.2, whatever the pair claimed — every pair certified at the model's threshold, the gate
+  unable to fire, and at a threshold of 0.1 every pair dependent, 15 vs 15, with not one vote
+  discounted (1 − 0 × P is 1) while the row's line for every pair said the later source's votes
+  were. **Ruled:** `_trust_copy` refuses `DATA_TRUST_COPY_P` at 0 and at 1 and `DATA_TRUST_COPY_RATE`
+  at 0 by name, beside the prior's refusal — at `DATA.new_focus`, before any tensor, and only where
+  the detection is on — each message saying which verdict could not move. The rate's 1 stays legal.
+  Inside those ends every setting can reach both verdicts, since a shared false claim's ratio is
+  above 1 (n ≥ 1 and A < 1) and a differing one's below 1 (c > 0), so the gate is armed exactly
+  where it can fire. The finding's lesser remedies were not taken: a gate UNREACHABLE at a threshold
+  of 1 would have left every pair line certifying a planted copy, and recording that a rate of 0
+  decides by the prior would have kept, at the model's own threshold, a gate that cannot fire. SR6-5
+  drives the three refusals at `new_focus` and through compose, and the rate's 1 on SR6-1's table:
+  the copy dependent at its hand posterior, the truthful pairs certified at theirs, the eleven pairs
+  that differ certified at exactly 0, the gate fired 1 vs 15. SR6-4's random tables still call the
+  vote directly at the refused ends, where the arithmetic is the model's and no configuration
+  reaches.
+* **`data.trust.copy.seconds` covers the run() `wall_s` covers.** The row printed
+  `Focus.copy_seconds` — DATA's running float, every copy step since `new_focus` built the book —
+  beside `wall_s`, which `loop.run` starts at 0, and both docstrings called both floats "this
+  process's". On a second `run()` over one System, a path the loop supports, the copy seconds held
+  the first run()'s too. Driven on the planted copier corpus, two 100-window runs over one System: the
+  second printed 0.011767 copy seconds, its own passes' 0.007114 and the first run's 0.004653, so the
+  copy share of its wall read 0.196 against 0.119. **Ruled:** the root sums, pass by pass, the growth
+  of `Focus.copy_seconds` — the `copy_seconds` each `trust_series` entry already carried — and prints
+  that sum; the field stays DATA's running float, never checkpointed and never printed whole. The
+  `Focus` and `_trust_row` docstrings, the loop's comments, the DATA section and this ruling's surface
+  bullet and departure 8 name one span, the run(). SR6-6 drives a second 70-window run() over one
+  System: its float is the sum of its own passes' and the growth of the field over it, within its
+  `wall_s`.
+* **The `Focus` docstring counts three gates at 'off'.** It still said two after this build added the
+  third, where `new_focus`'s said three. Corrected, with a dated pointer at Q-DATA-11's `Focus` bullet
+  and at its default list.
+* **The copy seconds are a reading the tests read.** T8 ran on the synthetic source, where a 'kv' book
+  forms no claim, so run.py printed `data.trust.copy.seconds 0.0` and every series entry read 0.0 with
+  no pair; SR6-6 checked only that the row's value was a float; and with DATA's clock held constant
+  every SR6 check passed. **Held:** T8 runs on the planted copier corpus — 90 windows at E5's period of
+  30, the first pass reading the truthful areas alone and the passes at 61 and at the tail voting over
+  conflicts — and SR6-6 on its whole run: the printed float above 0, the sum of the passes'
+  `copy_seconds` to their rounding and within `wall_s`, and each pass's reading positive where its
+  vote had a conflicted claim, within its own seconds, and exactly 0 where it had none.
+
+**What the review changes at the default:** nothing a run trains on and nothing a default run prints:
+at the shipped `DATA_TRUST='off'` no copy lever is read, and at `DATA_TRUST_COPY='off'` none of the
+three numbers is. Two lever help strings name their refused ends, so `docs/05_DEFAULTS.md` moves two
+rows, and the census rows for `DATA_TRUST_COPY_RATE` and `_P` say the same. B1, B3, B3r, B5, B6 and
+B6r reproduce their fixtures.
 
 ## 6. What `tests/test_contract.py` checks
 
