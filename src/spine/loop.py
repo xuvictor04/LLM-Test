@@ -95,6 +95,9 @@ from spine.compose import _holdout_units as _c_holdout_units
 from spine.compose import _holdout_tokenize as _c_holdout_tokenize
 from spine.compose import _logits_fn as _c_logits_fn
 from spine.compose import _gen_prompts as _c_gen_prompts
+from spine.compose import _area_ids as _c_area_ids
+from spine.compose import _window_areas as _c_window_areas
+from spine.compose import _faded_ids as _c_faded_ids
 
 
 # THE ELEVEN, READ OFF THE TREE RATHER THAN TYPED. A hand-written list would rot the first time a
@@ -1297,11 +1300,19 @@ def run(sysm, *, max_windows=None, progress=True):
             # standard deviation of 1.61 nats (2.32 bits) against a threshold of 0.01 bits, so the
             # plateau test compared two draws of noise 500 windows apart. The mean over the ~500
             # flushes between passes is the smoothing the lever names; NaN flushes are left out.
+            # `faded` IS THE AREA IDS FADED AT THIS WINDOW'S PHASE (2026-09-28, register §8 3.1,
+            # NEW-10 and C37; Q-FAB-18): DATA's Plan.faded for the phase this window's first byte
+            # falls in -- the byte the probe's phase-start test reads -- plus Plan.parent_faded, the
+            # areas a resumed parent trained and this schedule never makes live. Through the root's
+            # join compose.py::_faded_ids, because FAB may see neither the plan nor a name. At the
+            # shipped FAB_FADED_CULL='as_is' the pass only COUNTS against it.
             if cadences.due("fab.manage", periods["fab.manage"], clock):
                 _ml = (sum(manage_losses) / len(manage_losses)) if manage_losses else None
                 manage_losses = []
                 with _timing.span("fab.manage"):
-                    fab_api.manage(fab_cfg, pop, step_windows=tick.step, flush_loss=_ml)
+                    fab_api.manage(fab_cfg, pop, step_windows=tick.step, flush_loss=_ml,
+                                   faded=_c_faded_ids(sysm,
+                                                      sysm.segmentation.byte_pos[bounds[0]]))
             # SIG'S OWN CADENCE AND ITS STEP, WHICH ARE ONE MECHANISM AND LAND TOGETHER. Until
             # SIG.train_step had a body neither was asked, because asking a gate RECORDS its fire
             # and a fire nobody can act on is thrown away -- tok/api.py::on_window's rule ("asking
@@ -2348,6 +2359,17 @@ def _report(sysm, elapsed_s, ctx):
     # render them in and the driver may not import FAB's private renderer.
     out["MEM.census(reconcile=True)"].update(
         {f"gate:{k}": v for k, v in _gate.three_state(_mc.gates).items()})
+    # MEMORY OCCUPANCY BY AREA, BY NAME (2026-09-28, register §8 3.1, NEW-10; Q-MEM-16): MEM counts
+    # its active entries per area id (StoreCensus.by_area) and only the root holds the names, so the
+    # join is here. store.occupancy.<area> for every area of this run -- 0 where none of its entries
+    # survive, which is the reading NEW-10 exists for -- and store.occupancy_unknown for entries
+    # written with no area (a checkpoint older than the column) or under an id this run does not
+    # name. UNDERSCORED AND NOT `.unknown`, because an area may be labelled "unknown" and the two
+    # would print under one key. The row's numbers sum to the store's active entries.
+    _occ_left = dict(_mc.by_area)
+    for _an, _aid in _c_area_ids(sysm).items():
+        out["MEM.census(reconcile=True)"][f"store.occupancy.{_an}"] = int(_occ_left.pop(_aid, 0))
+    out["MEM.census(reconcile=True)"]["store.occupancy_unknown"] = int(sum(_occ_left.values()))
     # DATA'S OTHER SURFACES, READ BY THE ROOT AS ITS STREAM GATES ARE (2026-09-27, Q-DATA-9). DATA
     # declares no counters() entry point, so its records are read here, spelled `DATA(<record>.<field>)`
     # like MEM's and TOK's -- the root took them, it did not ask. Until these rows no report printed
@@ -2534,6 +2556,12 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     dev = sysm.process.device
     x = torch.tensor([ids[a:a + ctx] for a, b in pairs], dtype=torch.long, device=dev)
     y = torch.tensor([ids[a + 1:b] for a, b in pairs], dtype=torch.long, device=dev)
+    # THE FLUSH'S AREAS, ON THE SAME CUT (2026-09-28, register §8 3.1, NEW-10 and C37; Q-FAB-18,
+    # Q-MEM-16): one spine/derive.py::area_id per window (its first token's area) for FAB.observe's
+    # area book, and one per position (each input token's, beside `positions`) for MEM.write's
+    # `area` column -- read off Segmentation.labels through compose.py::_window_areas. Books only:
+    # no logit, loss, gate or eviction of this flush reads either.
+    win_areas, pos_areas = _c_window_areas(sysm, pairs, ctx)
 
     # THE EMBEDDING IS TAKEN BEFORE THE ENCODER AND IT IS NOT encode()'s INPUT REUSED.
     # WORLD.loss_terms takes obs_emb, "the lowest layer, the point where a new sense plugs in", and
@@ -2895,7 +2923,7 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
     # earlier window of those was affiliated (dom_of, which the breadth cap reads) with the last
     # one's domain. Identical at the shipped OPT_BATCH_WINDOWS=1, where `dids` is [domain_id].
     fab_api.observe(fab_cfg, pop, out, per_window_loss=per_window.detach(),
-                    domain_id=list(dids) if dids else domain_id)
+                    domain_id=list(dids) if dids else domain_id, area_id=win_areas)
 
     # GROWTH. THE ONE MECHANISM GOAL B CANNOT BE STUDIED WITHOUT, and until this line the run's
     # report read "0 experts born" for a population that was never asked to grow.
@@ -2998,10 +3026,15 @@ def _flush(sysm, batch, ctx, model, pop, st, lm_cfg, fab_cfg, sig_cfg, opt_cfg, 
         # disagree about which token a position is.
         bp = sysm.segmentation.byte_pos
         positions = torch.tensor([bp[a:a + ctx] for a, _b in pairs], dtype=torch.long, device=dev)
+        # AND THE AREA OF THE SAME POSITIONS (Q-MEM-16), int32 as MEM stores it; None when the
+        # segmentation carries no labels, and every entry is then written with area -1.
+        areas = (None if pos_areas is None else
+                 torch.tensor(pos_areas, dtype=torch.int32, device=dev))
     now_w = U.Windows(int(clock.step))
     with _timing.span("flush/mem.write"):
         mem_api.write(cfg_mem, sysm.store, contexts=x, tokens=y, surprise=surprise,
-                      sources=sources, owners=owners, positions=positions, key_fn=key_fn, now=now_w)
+                      sources=sources, owners=owners, positions=positions, key_fn=key_fn, now=now_w,
+                      areas=areas)
     # MAINTAIN, AND THE PROBE NOW HAS CONTEXTS -- WHICH IT COULD NOT HAVE UNTIL MEM.read EXISTED.
     # This block said "the None IS FORCED rather than chosen" and quoted maintain's own sentence,
     # "MEM.read is still a P4 stub, so this line raises NotImplementedError the moment a caller

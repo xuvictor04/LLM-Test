@@ -35,10 +35,11 @@ text while every check here stayed green.
 
 WHAT A `domain=` ON A DECLARATION DOES TO THIS FILE, WHICH IS NOTHING, AND THAT IS A MEASUREMENT
 RATHER THAN AN ASSUMPTION. `domain=(lo, hi)` landed on 33 levers on 2026-09-14. A census row has
-exactly nine fields and all 341 rows carry all nine (331 until §8 1.4's five OPT amendments landed
+exactly nine fields and all 342 rows carry all nine (331 until §8 1.4's five OPT amendments landed
 on 2026-09-26, 336 until §8 1.2's DOM_LEVELS the same day, 337 until §8 3.1's DATA_SYNTH_HOLDOUT on
 2026-09-27, 338 until the retention probe's three -- EVAL_RETENTION_EVERY, EVAL_RETENTION_N and
-OPT_DAMP_SOURCE -- the same day) -- old_name, old_default, verdict, new_owner,
+OPT_DAMP_SOURCE -- the same day, 341 until §8 3.1's FAB_FADED_CULL on 2026-09-28) -- old_name,
+old_default, verdict, new_owner,
 new_name, unit, purpose, reason, couples_with -- and not one of them is a range, a bound, an
 interval, a minimum or a maximum. The checks below read fewer than that: family, old_name, verdict,
 new_owner and new_name, plus the DEPARTURES table. `unit`, `purpose`, `reason`, `old_default` and
@@ -111,7 +112,7 @@ def _report(tag, title, ok, detail, findings, vacuous=False):
 
 DEPARTURES = {
     ("fabric", "FAB_NMAX"): dict(
-        census="FAB_NMAX", lands="FAB_SLOTS", where="src/fabric/levers.py:314-325",
+        census="FAB_NMAX", lands="FAB_SLOTS", where="src/fabric/levers.py:320-331",
         why="The field is `slots`, so the generated environment name is FAB_SLOTS. Not cosmetic and not "
             "reversible by preference: spine/assemble.py reads r['FAB'].slots in five couplings, "
             "spine/derive.py's cull_gate_open and operating_population are both written against that "
@@ -134,13 +135,13 @@ DEPARTURES = {
             "AND converting the threshold -- would fire the valve 16x too EARLY. That can no longer "
             "happen silently, because Windows >= Flushes raises."),
     ("fabric", "FAB_NORM_ONLY"): dict(
-        census="FAB_MODE", lands="FAB_NORM_ONLY", where="src/fabric/levers.py:68-74, :155-167",
+        census="FAB_MODE", lands="FAB_NORM_ONLY", where="src/fabric/levers.py:74-80, :161-173",
         why="The census merges this into a three-valued FAB_MODE, and no row in the census creates the "
             "third value -- the FABRIC row it names produces the two-valued FAB_ON instead. Minting a "
             "three-valued enum with one unreachable value is an armed-but-inert branch by construction, "
             "so the boolean stands until a row exists that needs the third."),
     ("fabric", "ROUTE_LEARN"): dict(
-        census="FAB_ROUTE_IDENT_W", lands="FAB_ROUTE_LEARN", where="src/fabric/levers.py:68-74, :362-370",
+        census="FAB_ROUTE_IDENT_W", lands="FAB_ROUTE_LEARN", where="src/fabric/levers.py:74-80, :368-376",
         why="The census merges the flag into a WEIGHT, which is the better design and needs the "
             "identity term's scale to be a real number somewhere in the mechanism. It is not, yet: the "
             "term is added or not added. Shipping FAB_ROUTE_IDENT_W now would be a lever whose "
@@ -605,7 +606,7 @@ def selftest():
         # still right and someone added a note to it -- which is what made it worth closing.
         DEPARTURES[("fabric", "FAB_NMAX")] = dict(
             saved8[("fabric", "FAB_NMAX")],
-            where="src/fabric/levers.py:314-325, and the note below it")
+            where="src/fabric/levers.py:320-331, and the note below it")
         case("N8 catches a `where` that names a file and then no readable line", True,
              check_n8_departure_arguments_still_there, rows, env, dsts)
         DEPARTURES.clear(); DEPARTURES.update(saved8)
@@ -633,7 +634,7 @@ def selftest():
         # colon it came back as prose and was never opened. Measured before the repair: this one
         # entry took N8 from 10 spans across 6 departures to 9 across 5, and it PASSED.
         DEPARTURES[("fabric", "FAB_NMAX")] = dict(
-            saved8[("fabric", "FAB_NMAX")], where="see the note, src/fabric/levers.py:314-325")
+            saved8[("fabric", "FAB_NMAX")], where="see the note, src/fabric/levers.py:320-331")
         case("N8 catches a clause placed BEFORE the citation, not only after it", True,
              check_n8_departure_arguments_still_there, rows, env, dsts)
         DEPARTURES.clear(); DEPARTURES.update(saved8)
@@ -655,7 +656,7 @@ def selftest():
         # `spine/assemble.py: the DOM row`, the same pointer as the live entry with a colon instead
         # of a comma -- is reported as a broken pointer. No live entry has that shape and
         # _where_spans states the rule, and the alternative (accepting a colon followed by prose)
-        # re-admits `src/fabric/levers.py:314-325, and the note below it` by the same test, which
+        # re-admits `src/fabric/levers.py:320-331, and the note below it` by the same test, which
         # is the escape the repair closed. So this case exists to say the strictness is chosen.
         DEPARTURES[("domains", "MAX_DOMAINS")] = dict(
             saved8[("domains", "MAX_DOMAINS")], where="spine/assemble.py: the DOM row")
@@ -922,7 +923,7 @@ def _where_spans(where):
     entry says it is naming lines in a file and then does not parse. Guessing at a half-understood
     pointer is how a check invents a finding, so nothing is guessed here -- but the two cases are
     handed back distinguishable, because N8 reports the second and abstains on the first. Before
-    that split, a trailing prose clause on a line-form `where` -- `src/fabric/levers.py:314-325, and
+    that split, a trailing prose clause on a line-form `where` -- `src/fabric/levers.py:320-331, and
     the note below it`, a natural edit -- parsed to zero spans, was counted as prose and was never
     opened; put on all six line-form entries it drove N8's examined population to zero and the check
     PASSED, printing "0 line span(s) opened across 0 departure(s); 9 point at prose". A data table is
@@ -930,7 +931,7 @@ def _where_spans(where):
 
     A COLON ANYWHERE IN THE ENTRY MEANS IT MEANT TO CITE LINES, AND TESTING ONLY `parts[0]` LEFT THE
     MIRROR IMAGE OF THAT ESCAPE OPEN. This function used to ask `if ":" not in parts[0]`, so a clause
-    placed BEFORE the path rather than after it -- `see the note, src/fabric/levers.py:314-325`, the
+    placed BEFORE the path rather than after it -- `see the note, src/fabric/levers.py:320-331`, the
     same natural edit written the other way round -- came back `("", [])`, was counted as prose and
     was never opened, and N8 printed PASS. Measured on the tree before this repair: that one entry
     took N8 from "10 line span(s) opened across 6 departure(s); 3 point at prose" to "9 ... across 5

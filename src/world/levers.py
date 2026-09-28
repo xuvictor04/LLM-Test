@@ -53,7 +53,7 @@ file emits 11 levers:
 Not emitted, by verdict: none. WORLD is the only package in the census with no drop, no merge and no
 promote-to-wire row, so CENSUS.md:39's "WORLD 11" and the eleven declarations below are the same eleven
 names -- which is worth stating, because for every sibling package those two numbers differ and a reader
-who has just come from src/fabric/levers.py (110 rows, 82 declarations) will be expecting a subtraction.
+who has just come from src/fabric/levers.py (110 rows, 83 declarations) will be expecting a subtraction.
 
 -------------------------------------------------------------------------------------------------
 THE THREE CENSUS DEFECTS, AS THEY LAND HERE

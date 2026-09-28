@@ -41,6 +41,7 @@ the only intended behavioural difference, and it is noted on the function.
 """
 import inspect
 import re
+import zlib
 
 from .units import Backwards, Clock, Epochs, Flushes, Steps, UnitError, Windows
 
@@ -1548,6 +1549,30 @@ def stream_key(label):
     entries, which is where the operator can act on it. Pure string work, no lever and no state.
     """
     return re.sub(r"[^a-z0-9_]", "_", str(label).lower())
+
+
+# === the number an area's label becomes ==========================================================
+
+def area_id(label):
+    """The integer an area's label is booked under: crc32 of its UTF-8 bytes, masked to 31 bits.
+
+    UNIT IN: label = an area label (name). UNIT OUT: id (a non-negative integer below 2**31).
+
+    ONE NUMBER PER AREA FOR EVERY PACKAGE THAT BOOKS BY AREA AND MAY NOT SEE ITS NAME (2026-09-28,
+    register §8 3.1, NEW-10 and C37; docs/04_CONTRACT.md Q-FAB-18 and Q-MEM-16). FAB's per-expert
+    area books and MEM's per-entry `area` column are keyed by it, the root maps each window's label
+    to it, and data/api.py::open_areas refuses two labels that land on one id. It is a function of
+    the LABEL ALONE, for the reason stream_key above is: both books are checkpointed, so the key must
+    mean the same area in a child whose DATA_AREAS inserted, appended or reordered areas -- a
+    position in Areas.names would not, and Python's hash() is salted per process (PYTHONHASHSEED)
+    and would not survive the process that wrote it. 31 bits and not 32 because MEM stores it in an
+    int32 column where -1 means "no area was booked", so a real id is never negative.
+
+    WHAT IT DOES NOT DO: refuse. Two labels can share a crc32; data/api.py::open_areas refuses that at
+    startup, naming both labels and the id, where the operator can rename one. Pure arithmetic on
+    bytes, no lever and no state.
+    """
+    return zlib.crc32(str(label).encode("utf-8")) & 0x7fffffff
 
 
 # === the checkpoint's base path ==================================================================

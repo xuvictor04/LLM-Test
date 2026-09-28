@@ -21,13 +21,19 @@ declared in spine/assemble.py, and `grep d_` finds every one of them.
 -------------------------------------------------------------------------------------------------
 WHAT WAS EMITTED, AND WHAT WAS NOT
 -------------------------------------------------------------------------------------------------
-The census (.rework/census.json) files 110 of its 328 rows under new_owner FAB. This file emits 82
+The census (.rework/census.json) files 110 of its 328 rows under new_owner FAB. This file emits 83
 levers:
 
     80  rows with verdict keep (51) or rename (29)
   +  2  rows with verdict merge whose merge TARGET has no row of its own (see UNRESOLVED MERGES)
+  +  1  AMENDMENT with no ancestor knob: FAB_FADED_CULL, minted 2026-09-28 (register §8 3.1, NEW-10
+        and C37; docs/04_CONTRACT.md Q-FAB-18), declared in section 6 with its reason
   -------
-    82  Lever declarations, all reachable as FAB_<FIELD>
+    83  Lever declarations, all reachable as FAB_<FIELD>
+
+The amendment does not move the 110: that figure, like every per-package total in .rework/CENSUS.md,
+counts rows about knobs the old system had, and the census's `amendments` group carries the new one.
+(This block read "emits 82" with no amendment line until 2026-09-28.)
 
 Not emitted, by verdict: 20 drop, 9 merge (7 of which fold into a lever this file does declare), and
 1 promote-to-wire. The promote-to-wire row is MAX_DOMAINS, which was never a lever -- it was
@@ -916,6 +922,33 @@ class FABLevers(LeverSet):
     # says which of the two is winning, and lowering merge_dist is the operator's answer if it is
     # this one.
 
+    faded_cull = Lever("as_is", "What the management pass does with a cull or merge whose removed "
+                                "expert mostly served a FADED area: 'as_is' removes it and counts "
+                                "it; 'defer' keeps it, and it keeps its cull-budget slot.",
+                       U.NAME, choices=("as_is", "defer"))
+    # CENSUS AMENDMENT, 2026-09-28 (register §8 3.1, NEW-10 and C37; docs/04_CONTRACT.md Q-FAB-18),
+    # with NO ANCESTOR KNOB: the old tree culled and merged whatever its ranking named, and never
+    # asked which area an expert served -- there was nothing to ask it with. FAB.manage now reads each
+    # removed expert's area book (Population.area_use, routing mass per area) and the faded set the
+    # root hands it (DATA's Plan.faded for the window's phase, plus Plan.parent_faded), and counts
+    # every cull and merge whose removed expert's most-served area is faded, at EVERY value of this
+    # lever. The lever decides only whether such a removal happens.
+    #   'as_is' (SHIPPED): the pass removes exactly what it removed before the books existed -- no
+    #     decision reads a book -- and fab.culled_faded_area / fab.merged_faded_area say how many of
+    #     its removals were a faded area's experts. The training default does not move (C37: training
+    #     runs unchanged; NEW-10's training-default flip, if its E2 arm passes the epsilon rule, goes
+    #     to the owner first, because it would alter the owner's D3 reservoir quota).
+    #   'defer' (an E2 arm, and C37's preset value until FAB.contribution works, §8 3.5): such a cull
+    #     or merge is skipped and counted as an event (fab.cull_faded_deferred,
+    #     fab.merge_faded_deferred), with this pass's distinct deferred experts as a gauge. THE
+    #     DEFERRED VICTIM KEEPS ITS SLOT IN THE UTILIZATION CULL'S BUDGET, so the ranking never walks
+    #     on to cull a live-area expert in its place -- a deferral that freed a slot for a
+    #     substitute would be a cull of the NEXT-least-used expert, which is substitution, not
+    #     deferral. The cost is stated, not discovered: with the pool at FAB_SLOTS a deferred expert
+    #     holds a slot a new area could have been born into (NEW-20).
+    #   'contrib' is NOT BUILT: the cull gated on FAB.contribution <= 0 is §8 3.5's, and the value
+    #     joins the choices with that build rather than being declared ahead of its producer.
+
     # ==============================================================================================
     # 7. PER-EXPERT LEARNING RATE
     #
@@ -978,7 +1011,7 @@ class FABLevers(LeverSet):
 
 
 # ==================================================================================================
-# ELEVEN DECLARATIONS CARRY A DOMAIN AND SEVENTY-ONE DO NOT, AND WHAT THAT COSTS WAS MEASURED
+# ELEVEN DECLARATIONS CARRY A DOMAIN AND SEVENTY-TWO DO NOT, AND WHAT THAT COSTS WAS MEASURED
 # ==================================================================================================
 # WRITTEN AT THE FOOT OF THE FILE AND NOT IN THE MODULE DOCSTRING, ON PURPOSE. The census departures
 # table in tests/test_census.py cites three of the arguments in this file BY LINE SPAN -- the rows
@@ -995,7 +1028,7 @@ class FABLevers(LeverSet):
 # declaration surface ... There is no lo/hi, so the ONLY thing a number above is checked against is
 # its TYPE." WHAT IS TRUE NOW: spine/lever.py::Lever takes `domain=(lo, hi)` as well, checked at
 # declaration by spine/lever.py::_domain_ends and again after coercion in spine/lever.py::Lever.coerce
-# -- BOTH ENDS INCLUSIVE, either end may be None for unbounded -- and ELEVEN of this package's 82
+# -- BOTH ENDS INCLUSIVE, either end may be None for unbounded -- and ELEVEN of this package's 83
 # declarations now carry one. The paragraph is kept rather than deleted because everything the sweep
 # below measured was measured against the tree it describes, and the block after it says which
 # eleven, on what argument, and what they still do not buy. A lever-domain sweep
@@ -1280,7 +1313,7 @@ class FABLevers(LeverSet):
 # this declaration does not stand in front of, and O15 does not report it.
 # The other ten pairs duplicate no existing guard in this package.
 #
-# AND WHY ONLY ELEVEN, SO THE SILENCE OF THE OTHER SEVENTY-ONE IS NOT READ AS A VERDICT. An END was
+# AND WHY ONLY ELEVEN, SO THE SILENCE OF THE OTHER SEVENTY-TWO IS NOT READ AS A VERDICT. An END was
 # written only where THAT END falls out of what the consumer does -- ten of the eleven get both, and
 # pressure gets one, because its low end falls out and its high end does not. That is the shape this
 # sentence used to forbid by saying "a pair was written only where BOTH ends fall out", and the

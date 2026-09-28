@@ -4,7 +4,7 @@ WHAT THIS PACKAGE OWNS. One function from a window of the stream to a unit vecto
 the online contrastive objective that trains it. Nothing else in the tree decides what a window IS.
 The domain assembler's centroids, the fabric's routing keys, the boundary test, the separability
 instruments and every "which expert served this material" number are all statements about the space
-this package produces. That is why it is small -- 18 levers against the fabric's 82 -- and why it is
+this package produces. That is why it is small -- 18 levers against the fabric's 83 -- and why it is
 load-bearing out of all proportion to its size: an encoder that collapses makes every downstream
 partition number technically valid and meaningless. Measured, on a single corpus: separation ran
 0.16 -> 0.05, the run found 0 boundaries and 1 live domain, and every report line still printed.

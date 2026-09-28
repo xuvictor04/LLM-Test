@@ -19,7 +19,7 @@ WIRES READ:  <comma-separated d_ fields, or "none">
 DID IT FIRE: <the counters that prove the mechanism executed, in G4's three states>
 ```
 
-`tests/test_contract.py` parses those blocks. **All 272** of the declared levers are named by at
+`tests/test_contract.py` parses those blocks. **All 273** of the declared levers are named by at
 least one stub as read by it — **261, not 259, since 2026-09-02: there are now TWO CENSUS
 AMENDMENTS, `OPT_GRAD_CLIP` under Q-OPT-3 and `MEM_JUDGE_FRAC` under Q-MEM-8** (see
 `.rework/CENSUS.md`, section `amendments`, which holds both and states that the census's 328 is
@@ -512,6 +512,17 @@ Gates (`exposure_max`, `exposure_skew`, `splice_window`). **Printed at R since 2
 root's `DATA(areas.counters)`, `DATA(areas.gates)`, `DATA(plan.counters)` and `DATA(stream.counters)`
 rows beside the older `DATA(stream.gates)` (Q-DATA-9); before that no row printed them.
 
+**The schedule's faded sets (2026-09-28, Q-FAB-18; register §8 3.1, NEW-10 and C37).** `Plan`
+gains `faded` — per phase, every area live in an earlier phase and not in this one (index tuples in
+Plan order; `[(), (0,), (0,), (0, 1)]` on the generated four-area schedule) — and `parent_faded`,
+the areas the resumed record names (`Areas.parent_names`) that no phase of this schedule makes live.
+Both are computed by `data_plan` at startup, move no byte of the stream and are not checkpointed;
+they are printed as the readings `data.phase_faded` (every run) and `data.parent_faded` (only where
+a parent record was restored). The root hands their union to `FAB.manage` as area ids. **An area's
+id** is `spine/derive.py::area_id` of its label (crc32, 31 bits), the key FAB's area books and MEM's
+area column share, and `open_areas` refuses two labels on one id beside the label and key
+collisions (`data.area_id_collision`).
+
 **The synthetic source's held-out law is a lever (2026-09-27, Q-DATA-9).** At `synth_holdout=True`
 `open_areas` runs the real sources' carve on each generated body **verbatim** — size, per-area child
 stream, removal, seam, overlap, val-cap tally, and the 0-byte refusal (whose message then names
@@ -709,7 +720,7 @@ optimizer row; `cadence_due` → `train_step` are stage-`A` rows **before** `enc
 stage-`R` row and is the encoder cadence's **only** did-it-fire surface, because its two-arm gate
 cannot go through `Cadences.due`. Until those rows existed the run trained no encoder at all.
 
-### FAB — `src/fabric/api.py` (82 levers, all 82 read since 2026-09-02)
+### FAB — `src/fabric/api.py` (83 levers, all 83 read, one of them a census amendment — `FAB_FADED_CULL`)
 
 The expert population. D1 rules it stays. **One forward pass, both arms**: `society=True` is the soc
 loop at depth 1 with per-expert logits retained.
@@ -721,7 +732,9 @@ loop at depth 1 with per-expert logits retained.
 `d_base_lr`, `d_lr_min_frac`.
 **Receives:** `d_model` ← LM, `signature_dim` ← SIG, `h`/`head` ← LM, `signature` ← SIG,
 `targets` ← the loop, `domain_id`/`live_domains` ← DOM, `soft_cap` ← CAP, `memory_pressure` ← MEM,
-`applied_lr` ← OPT, `baseline_logits_fn` and `per_window_loss` ← the loop.
+`applied_lr` ← OPT, `baseline_logits_fn` and `per_window_loss` ← the loop, and since 2026-09-28
+`area_id` and `faded` ← the loop, off DATA's labels and schedule as `spine/derive.py::area_id`
+numbers (Q-FAB-18).
 **Two alarms the report must carry:** `fab.balance_nonzero == 0` while `balance > 0` is **C2** back;
 `fab.contrib_distinct_values == 1` is **C3** back.
 **`observe` splits `use` from `uage`** — a behaviour change with no measurement behind it, since
@@ -743,6 +756,16 @@ did. `live_domains` is `DOM.census`'s `n_live` (**Q-FAB-9**), `observe` takes on
 window (**Q-FAB-10**), and the two control arms `FAB_ON=0` / `FAB_NORM_ONLY=1` run end to end,
 with `FAB_ON=0` handing OPT no fabric parameter (**Q-FAB-11**), and neither grows, culls or merges
 (2026-09-27, register LOW-FAB_NORM_ONLY-GROWS).
+**`manage` gained a step 7, FADED AREAS** (**Q-FAB-18**, 2026-09-28; register §8 3.1, NEW-10 and
+C37). `observe(..., area_id=None)` credits each computed expert's new area book
+(`Population.area_use`, routing mass per area, one of `_BOOKS`, checkpointed) under its window's
+area, and `manage(..., faded=None)` reads every expert it removes against the root's faded set --
+DATA's `Plan.faded` for the window's phase plus `Plan.parent_faded` — counting
+`fab.culled_faded_area`, `fab.merged_faded_area` and `fab.faded_unknown`. **`FAB_FADED_CULL`** (a
+census amendment) is `'as_is'`, shipped, where no decision reads a book, or `'defer'`, an E2 arm and
+C37's preset value until `FAB.contribution` works, where such a removal is skipped and counted and a
+deferred victim **keeps its slot in the utilization cull's budget**, so no live-area expert is culled
+in its place.
 
 ### MEM — `src/memory/api.py` (26 levers, 25 read directly, one of them a census amendment)
 
@@ -765,7 +788,14 @@ writes are partitioned: knowledge is owned but not walled off.
 **`born` (write tick) is a new field beside `last` (retrieval tick)** — one field carrying both
 meanings is what made "LRU" evict the domain that had *stopped being written*.
 **Checkpointed additions:** `prob`, `recon`, `nsrc_max`, `gate_theta` — four omissions that each
-disarmed a live mechanism at the run boundary — and the victim generator `gen` (Q-CKPT-4).
+disarmed a live mechanism at the run boundary — the victim generator `gen` (Q-CKPT-4), and each
+row's `area` (Q-MEM-16).
+**Occupancy by area** (**Q-MEM-16**, 2026-09-28; register §8 3.1, NEW-10). `write(..., areas=None)`
+takes one `spine/derive.py::area_id` per POSITION, beside `positions`, into a new int32 `area` column
+(-1 = no area booked; not `src`, which is DOM's domain); `census` returns `StoreCensus.by_area`,
+active entries per id, and the root prints `store.occupancy.<area>` for every area of the run and
+`store.occupancy_unknown` in the R row `MEM.census(reconcile=True)`. Nothing that writes, evicts,
+reads or rekeys an entry reads the column.
 **Record types are DECLARED, not prose** — `census` returns **`StoreCensus`**, added to the RECORD
 TYPES block 2026-09-02 under **Q-MEM-11**, under MEM's own field spellings; the renames into DOM and
 FAB stay in `compose.py`'s `produces` column.
@@ -1235,6 +1265,7 @@ training path and 1 byte on the eval path with every check green.
 | `_logits_fn(sysm, *, use_memory, view=None, live_domains=None, live_vocab=None)` | `logits_fn` (`EVAL.holdout_probe`, `EVAL.generate`) — **the two closures**, `memory-off` and `memory-on`, each `fn(x, *, prefix_bytes) -> (B, L, V)` along the path the run trained, at the next window's routing clock, under `no_grad` in eval mode; the only place `softmax → MEM.read(promote=False) → MEM.blend → log` is written (Q-EVAL-12, Q-MEM-10). A resume's start reading passes its parent's `view` and `live_domains`; generation passes `live_vocab`, the live vocabulary it may draw from. |
 | `_holdout_units` / `_holdout_tokenize` / `_gen_prompts` | `units_by_domain` (the arrived areas' pinned `(prefix, window)` pairs, with `seen_by_parent`), `tokenize_fn` (`TOK.tokenize` at the last cut's view, no labels, no regularizer) and `prompts_by_domain` (report-half windows — each its routing prefix, its bytes and their cut at that view) — Q-EVAL-12. |
 | `_phase_of` / `_phase_windows` / `_probe_notices` | the phase a window's first byte falls in (the phase-start read's test) and the startup notices, printed and never applied — Q-EVAL-12. |
+| `_area_ids` / `_window_areas` / `_faded_ids` | `area_id` (`FAB.observe`: one per window, its first token's area), `areas` (`MEM.write`: one per position, beside `positions`) and `faded` (`FAB.manage`: `Plan.faded` at the window's phase plus `Plan.parent_faded`), each as `spine/derive.py::area_id` numbers over `Stream.area_names` — Q-FAB-18, Q-MEM-16. |
 
 What is deliberately **not** there, because writing it would be inventing a producer rather than
 naming one: an `improving` EMA pair (FAB already keeps one, and a second would be two mechanisms
@@ -1718,7 +1749,7 @@ been fixed is a real outcome and acting on it writes a second wrong sentence. **
 The union of the five `levers_unconsumed` lists was **15**. Thirteen of them were EVAL's, and all
 thirteen were given a declared reader by writing the P6 instrument signatures into
 `src/eval/api.py`. **The last two were FAB's, and as of 2026-09-02 this table is EMPTY: every one of
-the 272 declared levers is named `LEVERS READ:` by a stub.** Neither of the two was dropped, and
+the 273 declared levers is named `LEVERS READ:` by a stub.** Neither of the two was dropped, and
 neither was given a fake reader; each was ruled, and the ruling is what produced the reader.
 
 | lever | env name | why it has no reader | disposition |
@@ -6984,6 +7015,146 @@ trained — but the ratio gauges and the applied count describe the training flu
 probe pass neither measures nor counts them. `lm.encode.calls` still counts every call; it is in the
 probe's exact-accounting set (Q-EVAL-12).
 
+### Q-FAB-18 — which experts the management pass removes from a faded area, and whether it may wait — **RESOLVED 2026-09-28 (Proposal 05 §8 3.1; register NEW-10, C37 and CONTRACT-Q-FAB-5): `FAB.observe(..., area_id=None)` KEEPS A PER-EXPERT AREA BOOK; `FAB.manage(..., faded=None)` COUNTS EVERY REMOVAL WHOSE EXPERT MOSTLY SERVED A FADED AREA; `FAB_FADED_CULL`, BUILT `'as_is'` — `'defer'` IS THE E2 ARM, AND A DEFERRED VICTIM KEEPS ITS BUDGET SLOT. ⚠ ONE NEW LEVER, A CENSUS AMENDMENT; TWO FROZEN SIGNATURES WIDENED WITH A DEFAULTED KEYWORD. NO WIRE, AND NO NUMBER A DEFAULT RUN PRODUCES MOVES**
+**What was asked.** NEW-10 rules that from SR0 on every training run reports "faded-area expert
+culls", C37 that the continue preset defers "culls and merges of experts whose most-served area is
+faded ... (not executed, counted)" until `FAB.contribution` works, with training runs unchanged and
+the deferral an E2 arm, and CONTRACT-Q-FAB-5 asks, per manage pass, for "the count of culled or
+merged experts whose most-served area is faded". At the owner's shape both removals are reached
+(the fleet archive: 481-1,002 experts past grace, 203-810 `cull_fail` and 336-648 merges per run),
+and nothing in FAB knew which area an expert served.
+
+**The ruling, as built.**
+* **An area's number.** `spine/derive.py::area_id(label)` — crc32 of the label's UTF-8 bytes masked
+  to 31 bits. A function of the label alone, so a checkpointed book means the same area in a child
+  whose `DATA_AREAS` inserted, appended or reordered areas (a position in `Areas.names` would not,
+  and Python's `hash` is salted per process); 31 bits, so MEM's int32 column keeps -1 for "none".
+  `DATA.open_areas` refuses two labels on one id beside its label and key collisions
+  (`data.area_id_collision`), naming both.
+* **The faded set.** DATA's `Plan.faded[k]` — every area live in a phase before k and not in k — and
+  `Plan.parent_faded` — the recorded parent areas (`Areas.parent_names`) no phase of this schedule
+  makes live (the DATA section). At each `fab.manage` pass the root hands `faded` = the ids of
+  `Plan.faded` at the phase this window's first byte falls in (the byte the probe's phase-start test
+  reads) together with `Plan.parent_faded`, through the join `compose.py::_faded_ids`. **The parent's
+  half is what makes the count, and the deferral, mean anything in the continue preset C37 is about**:
+  a pure-add child's own schedule fades nothing, while every expert it inherits served the parent's
+  areas.
+* **The area book.** `Population.area_use`, per expert `{area id: mass}`. `FAB.observe`'s new
+  `area_id` (one id per window, in `domain_id`'s shapes; the root passes each window's FIRST token's
+  area, read off `Segmentation.labels` through `compose.py::_window_areas`) credits each computed
+  expert the routing mass `use` gets — so, where every window's area is known, an expert's book sums
+  to its `use` — and a negative id credits nothing. It is one of `_BOOKS`: `_remove` moves it with its
+  expert and clears the vacated last row with a fresh dict, `_claim_slot` clears it, `_merge_into`
+  sums the absorbed book into the survivor's. `fab.area_windows` counts the booked windows (ABSENT
+  until a routed call is handed an area). It is checkpointed in `FAB.state_dict`'s books as sorted
+  `[id, mass]` pairs, and a blob without it restores empty books. A DOMAIN IS NOT AN AREA: `dom_of`
+  is DOM's learned partition, which merges, splits and culls; an area is a corpus the schedule fades
+  by name.
+* **The count** (`FAB.manage`'s step 7). The pass decides first; then every expert it removes — the
+  merge's absorbee, either cull's victim — is read against its book. Its most-served area is the
+  argmax of the book, the smallest id on a tie (never a dict's order, which a checkpoint round trip
+  need not keep). A faded one counts `fab.merged_faded_area` or `fab.culled_faded_area`; an EMPTY
+  book (no area ever booked: a founder no window reached, or every expert restored from a checkpoint
+  older than the book) counts `fab.faded_unknown` instead, so a 0 over empty books is not read as a 0
+  over read ones. The three are cumulative, PRESENT-and-0 from the first pass handed a set (an empty
+  set included: phase 0 hands one) and ABSENT while none was; `fab.faded_areas_last_pass` is the
+  pass's set size. `ManageReport` carries the pass's own counts (`culled_faded_area`,
+  `merged_faded_area`, `faded_unknown`, `cull_faded_deferred`, `merge_faded_deferred`).
+* **`FAB_FADED_CULL`** (`'as_is'` | `'defer'`, U.NAME; a census amendment, the fourteenth;
+  `fabric/levers.py` section 6). **`'as_is'`** (shipped): no decision reads a book, and the pass
+  removes exactly what it removed before the book existed. **`'defer'`** (NEW-10's and C37's E2 arm,
+  and C37's preset value until `FAB.contribution` works, §8 3.5): a removal whose expert's most-served
+  area is faded is SKIPPED — the pair is not merged (its other expert stays free for the rest of the
+  scan), the expert is not culled — and counted as an EVENT, `fab.merge_faded_deferred` /
+  `fab.cull_faded_deferred` (an expert deferred on a later pass counts again), beside
+  `fab.faded_deferred_experts`, the distinct experts this pass deferred (a gauge; the pass follows
+  their slots through its own renumbering, and one a later merge of the same pass removes still
+  counts); all three are ABSENT at `'as_is'`. **A deferred utilization-cull victim keeps its budget
+  slot**: the ranked walk stops at `budget` victims plus deferrals, so it never culls the
+  next-least-used live-area expert in a deferred one's place — deferral, not substitution (the
+  critic's finding on the draft). The failure cull has no budget, so a deferral there is one removal
+  fewer. An empty book is not faded and is removed at either value. **The cost is stated, not
+  discovered:** with the pool at `FAB_SLOTS` a deferred expert holds a slot a new area could have been
+  born into (NEW-20). `'contrib'` (a removal gated on `FAB.contribution <= 0`) is §8 3.5's and joins
+  the choices with that build rather than ahead of its producer.
+* **Rescue is not deferred.** `FAB_RESCUE`'s heavy mutation is neither a cull nor a merge and keeps
+  the expert's slot and book; it is OFF at the shipped 0.0, and whether a faded-area expert may be
+  rescued is the question of an arm that turns it on beside `'defer'`.
+
+**What the rule does not see (recorded, not repaired).** (a) The faded set is the schedule's within
+one epoch: at an epoch roll the schedule restarts, so an area only the previous epoch's later phases
+trained is not faded in the next epoch's early phases (the shipped `RUN_EPOCHS=1` has no roll). (b)
+A parent area a child schedules in a later phase is not faded before that phase; only one the child
+never schedules is `parent_faded`. (c) A window straddling a segment seam books its routing mass to
+its first token's area. Each is a rule a later build may widen; none moves a number a run produces.
+
+**Found while building it, and not repaired (a ruling is owed).** The failure cull walks the
+`eligible` list `FAB.manage` took at entry, before the merge's removals renumbered the population by
+swap-with-last, so an expert moved into a merged-away slot is judged under that slot's past-grace
+entry. Driven on a scripted pass (`FAB_GRACE=2`; one merge absorbs slot 0 and moves the last expert —
+`uage` 0, both error EMAs above `comp_glob + FAB_FAIL_TOL` — into it): that expert, inside grace, was
+failure-culled. B3's shape never reaches it (its six passes, recounted, removed no expert inside
+grace), and at the shipped defaults no expert is past grace; at the owner's shape, where merges and
+failure culls both run, it can cull an expert inside grace. Recomputing the list after the merge
+changes which experts a pass can remove there, so it is left for its own ruling; step 7 counts the
+expert actually removed either way.
+
+**Bit-identity.** Both new arguments default to None and the loop hands both; nothing in the forward
+pass reads a book, at `'as_is'` no decision in FAB does, and no draw is taken — so a default run
+removes, keeps and trains exactly what it did. B1, B3, B3r, B5, B6 and B6r reproduce their fixtures
+and list the new keys as new and nothing else: `fab.area_windows` and Q-MEM-16's five
+`store.occupancy.*` keys on every leg, and `fab.culled_faded_area`, `fab.merged_faded_area`,
+`fab.faded_unknown` and `fab.faded_areas_last_pass` on the three legs that reach a manage pass (B3
+and both of B3r's).
+
+**Known answers** (`tests/test_faded.py`, CPU, operation only). F1 `Plan.faded` on the generated
+four-area schedule is `[(), (0,), (0,), (0, 1)]`, and hand-computed on five explicit schedules and on
+a parent record. F2 `area_id`'s pinned values, and `open_areas` refusing a full crc32 collision
+(`qh9par8f`, `gd221zva`) and one only the mask makes (`g4bgcsbc`, `gyz44zl0`). F3 the book under
+scripted routing, merge, removal, birth and a state_dict round trip. F4 the count on scripted passes
+through each removal path, and `faded=None` leaving every step-7 key ABSENT. F5 `'defer'` on the same
+populations: the utilization cull removes exactly the non-faded members of `'as_is'`'s five victims
+and not the next live-area expert. F6 on B3's shape (314 windows, six passes over phases 0, 1, 1, 2,
+3, 3): every pass handed `Plan.faded` at its window's phase, and the counts (2 merged, 23 culled, 0
+unknown of 146 removals) equal an independent recount of what was removed. F7 `'defer'` on the same
+workload removes no faded-area expert after the fade (55 cull and 15 merge deferrals). F8 a pure-add
+child of an eng-only parent hands every pass `{eng}` from its first. F9 continuing resumes at both
+values are exact and end with the uninterrupted run's books, counts and deferrals; a checkpoint
+stripped of the book resumes exactly, and the removals of experts whose books were not refilled
+count as `fab.faded_unknown`.
+
+### Q-MEM-16 — which area each stored entry came from, and the store's occupancy by area — **RESOLVED 2026-09-28 (Proposal 05 §8 3.1; register NEW-10): `MEM.write(..., areas=None)` FILLS A NEW PER-ENTRY `area` COLUMN; `MEM.census` RETURNS `by_area`; THE ROOT PRINTS `store.occupancy.<area>` BY NAME. A FROZEN SIGNATURE WIDENED WITH A DEFAULTED KEYWORD. NO LEVER, NO WIRE, AND NO NUMBER A DEFAULT RUN PRODUCES MOVES**
+NEW-10 rules that from SR0 on every training run reports "memory occupancy by area" — the reading
+that says whether a parent leaves training with its faded areas' memory evicted (the old tree's
+phased run a9d7258 evicted every English entry). The store kept `src`, DOM's learned domain, which
+folds, splits and is culled (`MEM.apply_domain_plan` rewrites it), and no record of the corpus an
+entry came from.
+* **The column.** `Store.area`, int32, one per row: `spine/derive.py::area_id` of the DATA area the
+  entry came from, and **-1 for "no area was booked"** — every row of a fresh store, every entry a
+  caller wrote without `areas`, every entry restored from a checkpoint older than the column.
+  `_commit_window` writes it beside `tok` and `pos` on every commit, so an overwritten slot never
+  keeps the evicted entry's area.
+* **`write(..., areas=None)`** takes a (B, L) integer tensor, one id per POSITION: the input token's
+  area, whose byte offset `positions` records, so an entry's area and its `pos` name one byte. It is
+  refused by name when mis-shaped, like the other per-row arguments. No gate, eviction, floor, read or
+  rekey reads it, so a write with and without it keeps and evicts the same entries.
+* **`census` returns `StoreCensus.by_area`**: `{area id: active entries}`, ascending ids, an exact
+  count over the active rows' column on every call, so it sums to the active entries by
+  construction. A reading; it moves no counter. It is keyed by id because MEM never sees a name, and
+  it is not `counts`, whose keys are DOM's domains.
+* **The root prints it by name** in the R row `MEM.census(reconcile=True)`: `store.occupancy.<area>`
+  for every area of the run — 0 where none of its entries survive, which is the reading NEW-10 exists
+  for — and `store.occupancy_unknown` for the -1 entries and any id the run does not name. The plan
+  wrote `.unknown`; it is underscored because `DATA_AREAS` may label an area "unknown", and the two
+  would print under one key.
+* **Checkpointed per row** (`"area"`); a row without the key restores -1, so a checkpoint written
+  before the column resumes exactly, its restored entries counted as unknown until they are evicted.
+**Known answers** (`tests/test_faded.py`). F6: on B3's shape the four areas' occupancies (eng 346, py
+2,867, num 2,746, c 569 at the end of the epoch — eng, faded since phase 1, holds the fewest)
+sum to the 6,528 active entries, and every active entry's area is the label of the byte its `pos`
+records. F9: a checkpoint stripped of the column resumes exactly with every restored entry at -1, and
+the child's report counts the survivors as `store.occupancy_unknown`.
+
 ## 6. What `tests/test_contract.py` checks
 
 | check | what it proves | how it can fail |
@@ -6991,7 +7162,7 @@ probe's exact-accounting set (Q-EVAL-12).
 | K1 | every name this document declares exists in the tree **with the signature it claims** | rename a parameter; drop a function |
 | K2 | `spine.compose` imports and `compose()` raises **only `NotImplementedError`, from a stub** | a typo in the root surfaces as `AttributeError`/`TypeError`, not as a missing body |
 | K3 | no package imports another (O10 restated at the contract boundary) | add `from fabric import api` to `src/memory/` |
-| K4 | every one of the 272 declared levers is named `LEVERS READ:` by a stub, or is in the UNCONSUMED table above **with a reason** | declare a lever and give it no reader |
+| K4 | every one of the 273 declared levers is named `LEVERS READ:` by a stub, or is in the UNCONSUMED table above **with a reason** | declare a lever and give it no reader |
 | K5 | every `d_` field the ledger declares is read by a stub in its own package, and no stub reads an undeclared one | add a wire nobody consumes |
 | K6 | every entry point is **named by a row** in `ASSEMBLY_ORDER` or `LOOP_ORDER`, or is in `compose.DEFERRED_ENTRY_POINTS` with a reason | declare a mechanism the root never calls; or leave a deferral in place after a row starts naming it — the check reads that table **backwards** and reports the stale entry |
 | K7 | the root reads only names a package **declares** off a Config | `int(lm.depth)` where LM declares `layers` — a crash at whatever stage reaches it, invisible while an earlier stub raises first |
@@ -7082,7 +7253,11 @@ here rather than a sixth copy. This block is the normative list, and
 `tests/test_contract.py`'s K1 compares it against `src/<pkg>/api.py` **in both directions**: a name
 here that the tree does not have is a failure, and a public entry point in the tree that is not here
 is also a failure. The signature text is `ast.unparse` of the argument list, so a renamed parameter,
-a reordered one, a changed default or a positional-that-became-keyword-only all fail.
+a reordered one, a changed default or a positional-that-became-keyword-only all fail. The three
+moves of 2026-09-28 are that kind and were made here with the tree: §8 3.1's faded-area counters
+widened `FAB.observe` with `area_id=None` and `FAB.manage` with `faded=None` (Q-FAB-18), and
+`MEM.write` with `areas=None` (Q-MEM-16) — each a defaulted keyword at the end, so every existing
+call is the call it was, and none was added, so the count stands at 147.
 
 Ten implementation agents work against this list independently. **It does not move without an edit
 to this document and to the tree in the same commit**, which is the only thing keeping them
@@ -7141,9 +7316,9 @@ FAB: build(fab: Config, *, d_model, signature_dim, device, generator)
 FAB: Population.n(self)
 FAB: Population.parameters(self)
 FAB: forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None, step_windows, domain_id, live_domains, training, hold_out=None)
-FAB: observe(fab: Config, pop, out, *, per_window_loss, domain_id)
+FAB: observe(fab: Config, pop, out, *, per_window_loss, domain_id, area_id=None)
 FAB: contribution(fab: Config, pop, *, h, signature, novelty, head, targets, baseline_loss, baseline_logits_fn, step_windows, domain_id, live_domains, candidates)
-FAB: manage(fab: Config, pop, *, step_windows, flush_loss=None)
+FAB: manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None)
 FAB: grow_check(fab: Config, pop, *, flush_loss, step_windows, soft_cap, memory_pressure, signature, shift_at=None)
 FAB: own_lr_scale(fab: Config, pop, *, applied_lr)
 FAB: counters(fab: Config, pop)
@@ -7163,7 +7338,7 @@ LM: state_dict(lm: Config, model, geom)
 LM: load_state(lm: Config, model, geom, saved)
 LM: counters(lm: Config, model)
 MEM: open_store(mem: Config, *, key_dim, vocab_slots, device, rng, lm_kind, restored=None)
-MEM: write(mem: Config, store, *, contexts, tokens, surprise, sources, owners, positions, key_fn, now)
+MEM: write(mem: Config, store, *, contexts, tokens, surprise, sources, owners, positions, key_fn, now, areas=None)
 MEM: read(mem: Config, store, *, queries, promote=True)
 MEM: encode_queries(mem: Config, *, contexts, key_fn)
 MEM: blend(mem: Config, model_probs, retrieval)

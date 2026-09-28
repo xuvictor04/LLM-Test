@@ -13,14 +13,15 @@ tree declared it and then memory.py:36 silently overrode it -- `if self.n_own > 
 
 RECORD TYPES RETURNED (P4 defines them):
   Store          the per-entry arrays (keys, tok, src, pos, ctx, own, active, prob, use, last,
-                 born, selfcon, recon), the scalars (tick, gate_theta, write counter, rekey
+                 born, selfcon, recon, area), the scalars (tick, gate_theta, write counter, rekey
                  cursor), nsrc/nsrc_max, live_src, and every n_* counter
   WriteReceipt   offered, kept, committed, evicted_free/probation/main, floor_blocked, gate_theta
   Retrieval      dist, conf, hits, weights, blend
   StoreCensus    what MEM.census returns, DECLARED HERE rather than left in that docstring's prose
                  (Q-MEM-11, RESOLVED 2026-09-02): counts (the per-source table), floor_entries,
                  quota_arm, pressure, probation_share, live_src, nsrc, nsrc_max, census_drift,
-                 n_census_reconciles, and every store.n_* counter passed through.
+                 n_census_reconciles, by_area (2026-09-28, Q-MEM-16: active entries per area id,
+                 -1 for entries written with no area), and every store.n_* counter passed through.
                  TWO MORE FIELDS THE BODY RETURNS, DECLARED HERE IN THE FORM
                  fabric/api.py::grow_check uses for the extra ledger keys its own body writes: a
                  field on the record the contract does not admit to producing is the same defect as
@@ -174,7 +175,7 @@ class Store:
     """
 
     __slots__ = ("keys", "tok", "src", "pos", "ctx", "ctx_w", "own", "active", "prob", "use",
-                 "last", "born", "selfcon", "recon", "tick", "gate_theta", "gate_seeded",
+                 "last", "born", "selfcon", "recon", "area", "tick", "gate_theta", "gate_seeded",
                  "n_written", "rekey_cursor", "rekey_snap", "nsrc", "nsrc_max", "live_src",
                  "capacity", "quota", "owners", "key_dim", "vocab_slots", "lm_kind", "counters",
                  "gates", "rng", "gen")
@@ -204,6 +205,15 @@ class Store:
         self.born = z(capacity, dtype=torch.long)      # WRITE tick -- see the class docstring
         self.selfcon = z(capacity)
         self.recon = z(capacity)
+        # THE AREA AN ENTRY WAS WRITTEN FROM (2026-09-28, register §8 3.1, NEW-10; Q-MEM-16):
+        # spine/derive.py::area_id of the DATA area its position's token came from, int32, and -1
+        # for "no area was booked" -- every row of a fresh store, every entry a caller wrote without
+        # `areas`, and every entry restored from a checkpoint written before this column existed. A
+        # SEPARATE COLUMN FROM `src`, AND NOT A REPURPOSING OF IT: `src` is DOM's learned domain,
+        # which merges, folds and is culled (MEM.apply_domain_plan rewrites it), while an area is a
+        # corpus the schedule fades by name. It is what MEM.census counts occupancy by, and nothing
+        # that writes, evicts, reads or rekeys an entry reads it.
+        self.area = torch.full((capacity,), -1, dtype=torch.int32, device=device)
         for b in range(owners):
             self.own[b * quota:(b + 1) * quota] = b
         self.tick = 0
@@ -587,6 +597,11 @@ def _restore_by_block(store, blob):
         # which is exactly the M66/H32 shape this restore exists to close.
         store.recon[free] = float(r.get("recon", 0.0))
         store.selfcon[free] = float(r.get("selfcon", 0.0))
+        # THE AREA COLUMN (2026-09-28, Q-MEM-16). A row written before the column existed carries
+        # no key and reads -1, "no area was booked": MEM.census then counts it as unknown rather
+        # than filing it under some area, and nothing that trains reads the column, so such a
+        # resume continues exactly.
+        store.area[free] = int(r.get("area", -1))
         restored += 1
         # THE CENSUS IS REBUILT EXACTLY. A resume left it at zeros and the source floor protected
         # nothing for the rest of the run while the banner still printed "src floor 0.5" and a
@@ -734,18 +749,19 @@ def _declare_gates(store, gates):
 def _require_rows(name, t, shape, what):
     """A shape refusal that names the argument, both shapes and what the argument is FOR.
 
-    NOT A RESHAPE AND NOT A BROADCAST. Every one of write's six per-row arguments is a different
+    NOT A RESHAPE AND NOT A BROADCAST. Every one of write's seven per-row arguments is a different
     quantity about the same rows, and the two that are per-WINDOW (sources, owners) differ from the
-    four that are per-POSITION by exactly one dimension -- so a silently broadcast argument writes
+    five that are per-POSITION by exactly one dimension -- so a silently broadcast argument writes
     every entry of a flush with window 0's domain id, which is a provenance error the per-source
-    floor then protects the wrong source against.
+    floor then protects the wrong source against. (Six until 2026-09-28, when `areas` joined the
+    per-position five, Q-MEM-16.)
     """
     if not torch.is_tensor(t) or tuple(t.shape) != tuple(shape):
         got = tuple(t.shape) if torch.is_tensor(t) else type(t).__name__
         raise StoreError(
             f"MEM.write: `{name}` arrived as {got} where {tuple(shape)} is required -- {what}. "
-            f"Refused rather than reshaped: the six per-row arguments are six different quantities "
-            f"about the same rows, and a broadcast one writes a whole flush under one window's "
+            f"Refused rather than reshaped: the per-row arguments are different quantities about "
+            f"the same rows, and a broadcast one writes a whole flush under one window's "
             f"provenance.")
 
 
@@ -1107,7 +1123,8 @@ def _windows_of(now, where):
     return int(now)
 
 
-def _commit_window(store, o, keys, toks, poss, ctxs, src, quota, evict, prob_frac, share, born):
+def _commit_window(store, o, keys, toks, poss, ctxs, src, quota, evict, prob_frac, share, born,
+                   ars=None):
     """Put one window's already-gated, already-keyed rows into ONE owner block.
 
     -> (committed, free_used, evicted_probation, evicted_main, floor_blocked, deadlock).
@@ -1218,12 +1235,15 @@ def _commit_window(store, o, keys, toks, poss, ctxs, src, quota, evict, prob_fra
     store.born[idx] = int(born)
     store.selfcon[idx] = -1.0                      # new entry: self-consistency not yet checked
     store.recon[idx] = -1.0                        # new entry: reconstruction not yet checked
+    # THE AREA EACH KEPT POSITION CAME FROM, or -1 where the caller named none (Q-MEM-16). Written
+    # on every commit, so an overwritten slot never keeps the evicted entry's area.
+    store.area[idx] = -1 if ars is None else ars.to(device=dev, dtype=store.area.dtype)
     return m, free_used, (evicted if branch == "probation" else 0), \
         (evicted if branch == "main" else 0), blocked, deadlock
 
 
 def write(mem: Config, store, *, contexts, tokens, surprise, sources, owners, positions, key_fn,
-          now):
+          now, areas=None):
     """Gate one flush's candidate rows on surprise, encode the survivors ONCE, and commit them.
 
     ORDER, AND IT IS LOAD-BEARING: the gate runs for every window first, IN WINDOW ORDER, so
@@ -1261,6 +1281,15 @@ def write(mem: Config, store, *, contexts, tokens, surprise, sources, owners, po
     src < 0 is "no provenance" and is never protected by the floor. -2 is reserved for synthetic
     eval-injected entries so the wrongness harness can never collide with a real domain id (H30 --
     the old harness used src=99, a real domain id).
+
+    `areas` (2026-09-28, register §8 3.1, NEW-10; Q-MEM-16) is None -- the default, and every
+    committed entry's `area` is then -1, "no area was booked" -- or a (B, L) integer tensor: the
+    spine/derive.py::area_id of the DATA area each POSITION's token came from, the same position
+    `positions` gives the byte offset of. It is written into the store's `area` column beside the
+    entry and read by MEM.census, which counts occupancy by it; no gate, eviction, floor or key
+    reads it, so a write with and without it keeps and evicts the same entries. It is not `sources`:
+    that is DOM's learned domain, which folds and is culled, while an area is a corpus the schedule
+    fades by name.
 
     LEVERS READ: write_mode, write_gate, write_target, evict, use_decay, use_decay_every,
                  probation_frac, src_share, quota, key_win, key_depth, key_src
@@ -1324,6 +1353,10 @@ def write(mem: Config, store, *, contexts, tokens, surprise, sources, owners, po
     _require_rows("owners", owners, (B,),
                   "one owner block per WINDOW, argmax over FabricOut.weights modulo "
                   "MEM.d_owner_blocks")
+    if areas is not None:
+        _require_rows("areas", areas, (B, L),
+                      "the spine/derive.py::area_id of the DATA area each POSITION's token came "
+                      "from, beside `positions` (Q-MEM-16); None when the caller names no area")
 
     # THE CONTEXT ARRAY IS GROWN TO MEM_KEY_WIN ONCE, HERE, because this is the first place in the
     # package that may read that lever (open_store's LEVERS READ line does not name it).
@@ -1424,7 +1457,8 @@ def write(mem: Config, store, *, contexts, tokens, surprise, sources, owners, po
         o = int(owners[b]) % int(store.owners)
         c, f, p, mn, fb, dl = _commit_window(
             store, o, keys[off:off + m], tokens[b][k], positions[b][k], wins[b][k],
-            int(sources[b]), quota, evict, prob_frac, share, w)
+            int(sources[b]), quota, evict, prob_frac, share, w,
+            ars=None if areas is None else areas[b][k])
         off += m
         committed += c
         free_used += f
@@ -2698,6 +2732,14 @@ class StoreCensus:
     says "a dead source that still holds entries is still protected by it".
     The table width is already on the record twice over -- as counters['store.census_slots'] and as
     len(counts).
+
+    `by_area` IS THE STORE'S OCCUPANCY BY DATA AREA (2026-09-28, register §8 3.1, NEW-10; Q-MEM-16):
+    {area id: active entries}, ids in ascending order, -1 holding the entries written with no area
+    (and every entry restored from a checkpoint older than the column). An exact count over the
+    `area` column on every call, so it sums to the active entries by construction. Only the ids
+    that hold entries appear: an area with none is ABSENT here, and the root, which alone holds the
+    names, prints it 0 beside the others. It is keyed by id and not by name because MEM never sees a
+    name; it is not `counts`, whose keys are DOM's domains.
     """
     counts: dict
     floor_entries: int
@@ -2711,6 +2753,7 @@ class StoreCensus:
     n_census_reconciles: int
     counters: dict
     gates: tuple
+    by_area: dict = dataclasses.field(default_factory=dict)
 
 
 def census(mem: Config, store, *, reconcile=False):
@@ -2778,7 +2821,8 @@ def census(mem: Config, store, *, reconcile=False):
                  defect signal rather than a repair. The `mem.pressure` Gate reads
                  store.n_promoted, n_probe_fired, n_probe_rows, n_evict_main and
                  n_evict_probation plus maintain's mem.probe Gate, and names every no-verdict
-                 state and the unselected-arm cause named above
+                 state and the unselected-arm cause named above; and StoreCensus.by_area, the
+                 occupancy by area id (2026-09-28, Q-MEM-16), a reading the root prints by name
     """
     mem = mem.owned_by("MEM")
     share, prob_frac = float(mem.src_share), float(mem.probation_frac)
@@ -3022,6 +3066,14 @@ def census(mem: Config, store, *, reconcile=False):
     # frozen record holding a live reference to it is a caller that can still change what the run
     # reported. `gates` is a tuple already and is re-wrapped for the same reason.
     counters = {k: (list(v) if isinstance(v, list) else v) for k, v in store.counters.items()}
+    # OCCUPANCY BY AREA (2026-09-28, Q-MEM-16): an exact count over the active rows' `area` column,
+    # ascending by id, so it sums to the active entries by construction. A reading, recomputed on
+    # every call and moving no counter.
+    _areas = store.area[store.active]
+    by_area = {}
+    if int(_areas.numel()):
+        _ids, _ns = torch.unique(_areas, return_counts=True)
+        by_area = {int(a): int(n) for a, n in zip(_ids.tolist(), _ns.tolist())}
     return StoreCensus(
         counts=counts,
         floor_entries=floor,
@@ -3038,15 +3090,17 @@ def census(mem: Config, store, *, reconcile=False):
         census_drift=drift,
         n_census_reconciles=int(c["store.n_census_reconciles"]),
         counters=counters,
-        gates=tuple(store.gates))
+        gates=tuple(store.gates),
+        by_area=by_area)
 
 
 def state_dict(mem: Config, store):
     """The checkpoint blob. Everything mutable that the store cannot re-derive: keys, tok, src,
     pos, ctx, own, active, use, last, born, prob, selfcon, recon, nsrc_max, gate_theta,
     gate_seeded, ctx_w, live_src, the rekey cursor, the write counter behind use_decay_every, the
-    tick clocks, every store.n_* counter, and (since 2026-09-24) the victim sampler's generator
-    state, `gen`.
+    tick clocks, every store.n_* counter, (since 2026-09-24) the victim sampler's generator
+    state, `gen`, and (since 2026-09-28, Q-MEM-16) each row's `area`, which open_store reads back
+    as -1 from a row that lacks it.
 
     TWO OF THOSE NAMES ARE NEW AND ONE OF THE TWO WAS ALREADY HERE. `live_src` is DOM's last
     verdict on which sources are alive, and it is the only scalar in this blob that is not a
@@ -3120,6 +3174,9 @@ def state_dict(mem: Config, store):
             "prob": bool(store.prob[i]),
             "use": float(store.use[i]), "last": int(store.last[i]), "born": int(store.born[i]),
             "recon": float(store.recon[i]), "selfcon": float(store.selfcon[i]),
+            # THE AREA THE ENTRY WAS WRITTEN FROM (2026-09-28, Q-MEM-16), -1 for none: occupancy by
+            # area is a reading about these rows, so it must cross a resume with them.
+            "area": int(store.area[i]),
         })
     out = {
         "rows": rows,

@@ -440,7 +440,11 @@ ASSEMBLY_ORDER = (
                                               "plan -- the Plan both DATA.draw_stream rows take as "
                                               "their second positional. Plan carries NO length: "
                                               "the run's extent is MEASURED off the segmentation "
-                                              "two rows down, never read off this record"),
+                                              "two rows down, never read off this record. Since "
+                                              "2026-09-28 it carries the schedule's faded sets, "
+                                              "Plan.faded per phase and Plan.parent_faded, which "
+                                              "the loop's join _faded_ids hands FAB.manage as "
+                                              "`faded` (Q-FAB-18)"),
     ("stream",    "DATA",  "draw_stream",     "(areas, plan, epoch=Snapshot.epoch on a resume and 0 "
                                               "otherwise, seed=RUN.seed) -- THE RUN'S FIRST EPOCH's "
                                               "draw (it was epoch=0 unconditionally until "
@@ -970,7 +974,12 @@ LOOP_ORDER = (
                                       "step_windows=clock.step; flush_loss is the MEAN of the "
                                       "flush losses since the previous pass, computed by the loop "
                                       "(FAB_DEPTH_EPS is declared on the SMOOTHED flush loss, and "
-                                      "one flush's loss is noise at that threshold). WORLD's growth pass used to ride "
+                                      "one flush's loss is noise at that threshold); faded "
+                                      "(2026-09-28, Q-FAB-18) is _faded_ids at this window's "
+                                      "first byte -- Plan.faded for its phase and "
+                                      "Plan.parent_faded, as spine/derive.py::area_id numbers -- "
+                                      "which the pass counts its removals against, and at "
+                                      "FAB_FADED_CULL='defer' defers them by. WORLD's growth pass used to ride "
                                       "this same one answer without saying so; that row is now "
                                       "deferred, and if it returns it must either be written INSIDE "
                                       "this answer, in the shape the management block above uses, "
@@ -1261,6 +1270,10 @@ LOOP_ORDER = (
                                       "cap it differences is the one this row produces"),
     ("B", "FAB",   "observe/grow_check", "per_window_loss and flush_loss from LM.lm_loss's two "
                                       "returns; out from FAB.forward; domain_id from DOM.observe; "
+                                      "area_id (2026-09-28, Q-FAB-18) is _window_areas's one id "
+                                      "per window -- its first token's area off "
+                                      "Segmentation.labels, as a spine/derive.py::area_id -- "
+                                      "which observe books into the area_use book; "
                                       "step_windows=clock.step; soft_cap from CAP.caps; "
                                       "memory_pressure from MEM.census, which is a CADENCED "
                                       "producer feeding a per-flush required argument; signature "
@@ -1290,7 +1303,10 @@ LOOP_ORDER = (
                                       "that join on 2026-09-27, as _logits_fn"),
     ("B", "MEM",   "write/maintain",  "key_fn=LM.encode bound by _key_fn; contexts and tokens are "
                                       "the flush's x and y at _flush_bounds; positions are TRUE "
-                                      "BYTE OFFSETS from Segmentation.byte_pos; sources from "
+                                      "BYTE OFFSETS from Segmentation.byte_pos; areas (2026-09-28, "
+                                      "Q-MEM-16) is _window_areas's one area id per POSITION, each "
+                                      "input token's beside its offset, which write stores in the "
+                                      "`area` column MEM.census counts occupancy by; sources from "
                                       "DOM.observe; owners from FAB.forward; surprise is "
                                       "1 - the model's probability of the true next token, formed "
                                       "by this file from LM.decode's logits and y (:7497-7498) -- "
@@ -1617,7 +1633,10 @@ LOOP_ORDER = (
                                       "where the two ungated gates inside MEM.maintain (mem.probe, "
                                       "mem.rekey -- no ledger key) and the other five mem.* gates "
                                       "reach the report, rendered in three states beside the "
-                                      "row"),
+                                      "row. Its StoreCensus.by_area is printed there BY NAME, "
+                                      "the root holding the names MEM never sees: "
+                                      "store.occupancy.<area> for every area of the run and "
+                                      "store.occupancy_unknown (2026-09-28, Q-MEM-16)"),
     ("R", "DOM",   "census",          "() -- the partition's did-it-fire surface, and the domain "
                                       "sizes every verdict is keyed by"),
     ("R", "LM",    "counters",        "(model)"),
@@ -2160,7 +2179,11 @@ ROW_ARGUMENTS_ELSEWHERE = {
         "PER-WINDOW MEAN of that same surprise, and the loop had been carrying the per-window LOSS "
         "under that name into FAB.forward, whose own docstring declares \'novelty: (B,) surprise "
         "from the previous step\'. "
-        "owners and positions are the loop\'s own joins, above.",
+        "owners and positions are the loop\'s own joins, above. "
+        "areas (defaulted; 2026-09-28, Q-MEM-16) is _window_areas\'s one area id per POSITION, "
+        "beside `positions`: TOK\'s Segmentation.labels read through spine/derive.py::area_id over "
+        "Stream.area_names -- a join of two packages\' records that no entry point returns, and "
+        "MEM never sees an area\'s name.",
     "LM.embed":
         "x is THE SAME CUT LM.encode takes, one row below -- see that entry, which defines it. It "
         "is named here rather than in the row because the cut has ONE definition in this file and "
@@ -4124,6 +4147,51 @@ def _phase_windows(sysm):
         counts[_phase_of(bounds, pos[start])] += 1
         start += ctx
     return counts
+
+
+def _area_ids(sysm):
+    """{area label: area id} over Stream.area_names -- spine/derive.py::area_id of each name, the
+    number FAB's area books and MEM's `area` column are keyed by (2026-09-28, register §8 3.1,
+    NEW-10 and C37; Q-FAB-18, Q-MEM-16). The stream's names are the labels its bytes carry, so every
+    label a Segmentation holds has an id here; DATA refused a collision at open_areas."""
+    from spine import derive as _dv
+    names = sysm.stream.area_names if sysm.stream is not None else sysm.areas.names
+    return {str(n): _dv.area_id(str(n)) for n in names}
+
+
+def _window_areas(sysm, pairs, ctx):
+    """A flush's area ids: (one per window, one per position), or (None, None) when the
+    segmentation carries no labels (Q-FAB-18, Q-MEM-16).
+
+    A WINDOW'S AREA IS ITS FIRST TOKEN'S, and a token's is its first byte's (tok/api.py::tokenize,
+    "a per-area score and a byte offset always agree") -- the byte the phase-start test and
+    _phase_windows place a window by. FAB.observe credits a window's routing mass to that area. A
+    POSITION'S AREA IS ITS INPUT TOKEN'S, the token whose byte offset MEM.write's `positions` records
+    (Segmentation.byte_pos[a:a + ctx]), so a stored entry's area and its recorded offset name one
+    byte. A label with no id (none can occur: the stream's labels are its area names) reads -1,
+    "unknown", which both books leave uncredited."""
+    labels = sysm.segmentation.labels
+    if labels is None:
+        return None, None
+    ids = _area_ids(sysm)
+    per_window = [ids.get(str(labels[a]), -1) for a, _b in pairs]
+    per_position = [[ids.get(str(labels[q]), -1) for q in range(a, a + ctx)] for a, _b in pairs]
+    return per_window, per_position
+
+
+def _faded_ids(sysm, byte):
+    """FAB.manage's `faded`: the area ids faded in the phase `byte` falls in -- DATA's
+    Plan.faded[k], the schedule's -- together with Plan.parent_faded, the areas a resumed parent
+    trained and this run schedules nowhere (2026-09-28, register §8 3.1, NEW-10 and C37; Q-FAB-18).
+    Plan's indices index Areas.names. A frozenset: FAB asks it membership and nothing iterates it."""
+    plan = sysm.plan
+    k = _phase_of(sysm.stream.phase_bounds, byte)
+    names = list(sysm.areas.names)
+    faded = tuple(getattr(plan, "faded", ()) or ())
+    phase = tuple(faded[k]) if k < len(faded) else ()
+    parent = tuple(getattr(plan, "parent_faded", ()) or ())
+    from spine import derive as _dv
+    return frozenset(_dv.area_id(str(names[int(i)])) for i in phase + parent)
 
 
 def _probe_notices(sysm, ev):

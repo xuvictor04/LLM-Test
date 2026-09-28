@@ -20,14 +20,16 @@ unconditionally while the shipped default was the looped path, which is how "479
 
 RECORD TYPES RETURNED (P4 defines them):
   Population     A, B, cent, n_live, depth_now, and the books born/use/uage/dom_of/ef/es/comp/
-                 contrib/births/rescued/parent/mutscale, the growth machine, the counter ledger
-                 and the package RNG stream
+                 contrib/births/rescued/parent/mutscale/area_use, the growth machine, the counter
+                 ledger and the package RNG stream
   FabricOut      logits or hidden, expert_ids, weights, per_expert_logits, aux_loss, gates,
                  row_events
   RowEvents      the (A, B) banks and the rows moved / cleared / re-born since the last training
                  pass, which the root hands to OPT.remap_rows (Q-FAB-13)
   ContribReport  per-expert contribution, distinct_values, positive, negative, degenerate
-  ManageReport   cull_fail, cull_util, spared_*, rescued, deepened, cull_gate arithmetic
+  ManageReport   cull_fail, cull_util, spared_*, rescued, deepened, cull_gate arithmetic, and the
+                 faded-area removals and deferrals (culled_faded_area, merged_faded_area,
+                 faded_unknown, cull_faded_deferred, merge_faded_deferred)
   GrowReport     asked vs grown, per trigger; declined_cap, declined_newfrac, lineage counts, and
                  the blackout state (open/closed and the windows left) the root joins into
                  CAP.observe's `blackout` boolean
@@ -307,6 +309,15 @@ class ManageReport:
     cull_gate: str = ""
     manage_every: int = 0
     manage_period_flushes: object = None
+    # THIS PASS'S FADED-AREA REMOVALS AND DEFERRALS (2026-09-28, Q-FAB-18), under the ledger's own
+    # names. All 0 when the pass was handed no faded set, which the ledger tells apart from a pass
+    # that removed nothing faded (its keys are ABSENT there); the deferral pair can move only at
+    # FAB_FADED_CULL='defer'.
+    culled_faded_area: int = 0
+    merged_faded_area: int = 0
+    faded_unknown: int = 0
+    cull_faded_deferred: int = 0
+    merge_faded_deferred: int = 0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -403,7 +414,7 @@ class Population:
     # comp_protect spare compares against; the old tree kept it on the assembler (:6932).
     __slots__ = ("A", "B", "cent", "n_live", "cap", "depth_now", "born", "use", "uage", "dom_of",
                  "ef", "es", "comp", "contrib", "births", "rescued", "parent", "mutscale",
-                 "growth", "comp_glob",
+                 "area_use", "growth", "comp_glob",
                  "modules", "counters", "rng", "on", "hop_arm", "gates", "halt_b",
                  "ident", "ident_live", "ident_step", "ident_graph", "halt_ema", "marks",
                  "learn_window", "pass_gates", "row_events")
@@ -445,6 +456,19 @@ class Population:
         self.rescued = 0
         self.parent = [-1] * cap
         self.mutscale = [1.0] * cap
+        # THE AREA BOOK: per expert, {area id: routing mass credited from windows of that area}
+        # (2026-09-28, register §8 3.1, NEW-10 and C37; Q-FAB-18). ONE DICT PER EXPERT, for dom_of's
+        # reason one line up -- the consumer needs the WHOLE distribution (its argmax is the expert's
+        # most-served area) and the ids are spine/derive.py::area_id's 31-bit numbers, which no
+        # dense (cap, n_areas) tensor could be indexed by without a second table mapping them. MASS
+        # AND NOT SELECTIONS, because `use` is the tree's measure of how much of a window the router
+        # spent on an expert (observe's use/uage split), and "most-served" is that question asked
+        # per area. Empty is "no area was ever booked", which FAB.manage counts as fab.faded_unknown
+        # rather than guessing: a founder no window has reached, and every expert of a population
+        # restored from a checkpoint written before the book existed. Nothing in the forward pass
+        # reads it. FAB.manage reads it to COUNT its removals, and to DECIDE them only at
+        # FAB_FADED_CULL='defer'; at the shipped 'as_is' no decision in this package reads it.
+        self.area_use = [dict() for _ in range(cap)]
         # THE GROWTH MACHINE: WATCH -> BURST -> RECOVER, and the two clocks that keep the common
         # event from silencing the rare one. `last` is the spacing clock BOTH legs set; `last_regr`
         # is the REGRESSION's OWN, and it exists because sharing one let a routine stall 772 windows
@@ -667,10 +691,10 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
     carried the identical defect (.rework/audits/sweep_fabric.json): one forward pass, aux_loss nan,
     the composed objective nan, 17-19 of 23 gradient-carrying tensors non-finite, and for four of
     them pop.cent PERMANENTLY non-finite -- a population that correcting the lever afterwards cannot
-    recover. The rule is now over EVERY float lever the package declares (43 of the 82), enumerated
+    recover. The rule is now over EVERY float lever the package declares (43 of the 83), enumerated
     from the declarations through spine/lever.py::Config.keys and ::Config.lever so no second list
     exists to go stale, with the 26 int and 12 bool levers refused earlier by
-    spine/lever.py::Lever.coerce and the one str lever by its own `choices=`.
+    spine/lever.py::Lever.coerce and the two str levers by their own `choices=`.
     THE SECOND IS A FLOOR OF ONE ON SIX COUNTS -- FAB_N0, FAB_SLOTS, FAB_RANK, FAB_DK, FAB_EMB_HID
     and FAB_HOPS -- and no finiteness rule could ever have reached it: all six are finite ints that
     pass every type check, and FAB_RANK=0 builds experts with no parameters and a nan loss, FAB_DK=0
@@ -824,9 +848,10 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
     # THE INT LEVERS ARE NOT IN THIS SWEEP AND ARE NOT EXEMPT EITHER: spine/lever.py::Lever.coerce
     # resolves an int lever as `int(float(raw))` and refuses nan (ValueError) and +/-inf
     # (OverflowError) by the lever's own owned name before any Config exists, so a second check here
-    # would be an untrippable guard. Bools coerce every spelling and the one str lever (hop_mode)
-    # carries `choices=` plus the NotBuilt refusal above. That accounts for all 82 declarations:
-    # 43 float here, 26 int and 12 bool in coerce, 1 str in choices.
+    # would be an untrippable guard. Bools coerce every spelling and the two str levers carry
+    # `choices=` -- hop_mode with the NotBuilt refusal above, and faded_cull (2026-09-28, Q-FAB-18),
+    # whose two values are both built. That accounts for all 83 declarations: 43 float here, 26 int
+    # and 12 bool in coerce, 2 str in choices.
     _nonfinite = []
     for _field in fab.keys():
         if _field.startswith("d_"):
@@ -1911,6 +1936,9 @@ def _claim_slot(pop, slot, step_n, *, parent=-1, mutscale=1.0):
     pop.dom_of[slot] = set()
     pop.parent[slot] = int(parent)
     pop.mutscale[slot] = float(mutscale)
+    # A NEWBORN HAS SERVED NO AREA (2026-09-28, Q-FAB-18): a recycled slot must not hand it the dead
+    # expert's area book, which would file its first cull under the dead expert's area.
+    pop.area_use[slot] = {}
     pop.n_live = slot + 1
     pop.births += 1
     # THE SLOT'S OPTIMIZER ROWS BELONG TO NOBODY YET: a recycled slot still holds the moments of
@@ -1931,7 +1959,10 @@ def _claim_slot(pop, slot, step_n, *, parent=-1, mutscale=1.0):
 # IT IS A LIST OF NAMES AND NOT A LOOP OVER __slots__, because __slots__ also holds `cap`,
 # `n_live`, the module dict, the RNG and four cache fields, and a renumbering that walked all of
 # them would swap the population's size with an expert's birthday.
-_BOOKS = ("born", "use", "uage", "dom_of", "ef", "es", "comp", "contrib", "parent", "mutscale")
+# `area_use` JOINED ON 2026-09-28 (Q-FAB-18), with the book it names: a cull that renumbered every
+# book but this one would file the survivor's area history under the victim's slot.
+_BOOKS = ("born", "use", "uage", "dom_of", "ef", "es", "comp", "contrib", "parent", "mutscale",
+          "area_use")
 
 
 def _drain_row_events(pop):
@@ -1979,6 +2010,9 @@ def _remove(pop, slot):
     pop.dom_of[last] = set()
     pop.parent[last] = -1
     pop.mutscale[last] = 1.0
+    # A FRESH DICT AND NOT .clear(): the swap above handed THIS dict object to `slot`, so clearing it
+    # in place would empty the survivor's book (2026-09-28, Q-FAB-18).
+    pop.area_use[last] = {}
     pop.n_live = last
     pop.ident = pop.ident_graph = pop.ident_step = None
     pop.ident_live = -1
@@ -2049,7 +2083,32 @@ def _merge_into(pop, a, b, rank):
     pop.use[a] = float(pop.use[a]) + float(pop.use[b])
     pop.uage[a] = int(pop.uage[a]) + int(pop.uage[b])
     pop.dom_of[a] = set(pop.dom_of[a]) | set(pop.dom_of[b])
+    # THE AREA BOOKS SUM, as `use` does one line up (2026-09-28, Q-FAB-18): the survivor now carries
+    # the mass both experts served, so its most-served area is read off the merged history. A NEW
+    # dict, built in ascending area-id order, so the survivor's book does not depend on which of the
+    # two was touched first.
+    _both = dict(pop.area_use[a])
+    for _k, _v in pop.area_use[b].items():
+        _both[_k] = float(_both.get(_k, 0.0)) + float(_v)
+    pop.area_use[a] = {k: _both[k] for k in sorted(_both)}
     return resid
+
+
+def _faded_kind(pop, i, faded):
+    """Is expert `i`'s most-served area in `faded`? -> "faded", "live" or "unknown" (Q-FAB-18).
+
+    MOST-SERVED IS THE ARGMAX OF ITS AREA BOOK, the routing mass FAB.observe credited per area, and a
+    tie goes to the SMALLEST area id -- a rule on the numbers, never on a dict's insertion order,
+    which a checkpoint round trip does not promise to keep. "unknown" is an EMPTY book: no window
+    with a known area ever routed to this expert, which is what a population restored from a
+    checkpoint written before the book existed holds, and it is counted as its own outcome rather
+    than filed as live or as faded.
+    """
+    book = pop.area_use[i]
+    if not book:
+        return "unknown"
+    top = min(book, key=lambda k: (-float(book[k]), int(k)))
+    return "faded" if int(top) in faded else "live"
 
 
 def _spawn_check(pop, query, spawn_mult, spawn_floor, step_n):
@@ -3154,7 +3213,7 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
         row_events=_drain_row_events(pop) if learn else None)
 
 
-def observe(fab: Config, pop, out, *, per_window_loss, domain_id):
+def observe(fab: Config, pop, out, *, per_window_loss, domain_id, area_id=None):
     """Book the outcome of one forward pass against the experts that produced it.
 
     per_window_loss: (B,) cross-entropy per window, from LM.lm_loss. Updates, FOR EVERY WINDOW IN
@@ -3178,6 +3237,16 @@ def observe(fab: Config, pop, out, *, per_window_loss, domain_id):
     another window's domain: measured at OPT_BATCH_WINDOWS=4 over 240 windows, 21 of 60 flushes
     spanned more than one domain and every one of them was booked under one. A scalar is still accepted and is the
     same id for every row, which is exact at OPT_BATCH_WINDOWS=1.
+
+    area_id: None (the default: no area book is touched), one int for the whole batch, or ONE ID
+    PER WINDOW in domain_id's shapes (2026-09-28, register §8 3.1, NEW-10 and C37; Q-FAB-18). The
+    id is spine/derive.py::area_id of the DATA area the window's first token came from, which the
+    root reads off Segmentation.labels; FAB never sees the name. Each computed expert's
+    `area_use[e][area]` is credited the same routing mass `use` is, so an expert's most-served area
+    is the argmax of its book -- the question FAB.manage asks of every expert it removes. A negative
+    id is "this window's area is unknown" and credits nothing. A DOMAIN IS NOT AN AREA and neither
+    stands in for the other: `dom_of` is DOM's learned partition, which merges, splits and culls,
+    while an area is a corpus the schedule fades by name.
 
     THE SPLIT IS A BEHAVIOUR CHANGE WITH NO MEASUREMENT BEHIND IT: grace=48 was set against a clock
     that ticked once per window, and crediting chain_k experts per hop over `hops` hops makes it
@@ -3246,6 +3315,12 @@ def observe(fab: Config, pop, out, *, per_window_loss, domain_id):
         distinction arriving one entry point in.
       fab.comp_glob -- the population competence EMA itself, so the comp_protect spare's threshold
         is on the ledger beside the per-expert numbers it will be compared against.
+    AND ONE MORE SINCE 2026-09-28 (Q-FAB-18):
+      fab.area_windows -- the windows whose area this function booked into `area_use`. ABSENT
+        until a routed call is handed an area_id (so on the two unrouted arms, where no expert is
+        computed, and for a caller that never passes one), PRESENT from then on: a population whose
+        books are empty because nothing fed them reads differently from one fed only windows of
+        unknown area (negative ids), which leave it at 0.
     """
     fab = fab.owned_by("FAB")
     counters = pop.counters
@@ -3311,6 +3386,24 @@ def observe(fab: Config, pop, out, *, per_window_loss, domain_id):
             f"FAB.observe: domain_id carries {len(dom_rows)} id(s) and FabricOut.weights has "
             f"{rows} row(s). One id per window, or one int for the whole batch -- a partial list "
             f"would affiliate the rows past its end with nothing and report them affiliated.")
+    # ONE AREA ID PER ROW, UNDER THE SAME RULE (2026-09-28, Q-FAB-18), or None and no area book is
+    # touched. Refused on a length mismatch for domain_id's reason: a partial list would book the
+    # rows past its end under no area and report the books complete.
+    area_rows = None
+    if area_id is not None:
+        if isinstance(area_id, torch.Tensor):
+            area_rows = [int(a) for a in area_id.reshape(-1).tolist()]
+        elif isinstance(area_id, (list, tuple)):
+            area_rows = [int(a) for a in area_id]
+        else:
+            area_rows = [int(area_id)] * rows
+        if len(area_rows) != rows:
+            raise ValueError(
+                f"FAB.observe: area_id carries {len(area_rows)} id(s) and FabricOut.weights has "
+                f"{rows} row(s). One id per window, or one int for the whole batch -- a partial "
+                f"list would book the rows past its end under no area and report the books "
+                f"complete.")
+        counters.setdefault("fab.area_windows", 0)
 
     # THE COMPUTED SET, AND WHY IT IS RECONSTRUCTED RATHER THAN READ. See the LEVERS READ note
     # above: the per-hop selections do not leave `forward`, `weights` is their renormalised sum, and
@@ -3375,9 +3468,17 @@ def observe(fab: Config, pop, out, *, per_window_loss, domain_id):
             # line is an AttributeError -- the field the frozen docstring specified the write
             # against could not have held it. THIS ROW'S id, not the batch's (see domain_id above).
             pop.dom_of[e].add(dom_rows[r])
+            # THE AREA BOOK, CREDITED THE MASS `use` WAS (2026-09-28, Q-FAB-18): this row's area,
+            # when the root handed one and it is known. Read by FAB.manage and by nothing that
+            # trains.
+            if area_rows is not None and area_rows[r] >= 0:
+                _book = pop.area_use[e]
+                _book[area_rows[r]] = float(_book.get(area_rows[r], 0.0)) + float(m)
             used.add(e)
             if pop.uage[e] >= grace:
                 past.add(e)
+    if area_rows is not None:
+        _bump(counters, "fab.area_windows", sum(1 for a in area_rows if a >= 0))
 
     _bump(counters, "fab.observed_windows", rows)
     counters["fab.experts_with_use"] = len(used)
@@ -3496,7 +3597,7 @@ def _depth_gate(pop, *, depth0, hops, patience, stage_max, manage_every, step_n=
                         f"{tail}{note}"))
 
 
-def manage(fab: Config, pop, *, step_windows, flush_loss=None):
+def manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None):
     """The selection pass: failure cull, utilization cull, three spares, rescue, staged depth.
 
     ORDER AND GATING, each with its own reason:
@@ -3520,6 +3621,7 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
          be widened to hold the exact sum (`load_state_dict` below: rank is an INNER dimension),
          so the truncation is forced and the RESIDUAL is the honest report of what it cost.
          WHAT MERGES: use[a] += use[b]; uage[a] += uage[b]; dom_of[a] |= dom_of[b];
+         area_use[a] += area_use[b], area by area (2026-09-28, Q-FAB-18);
          cent[a] = normalize(cent_a + cent_b); then remove(b) through the ONE declared renumbering
          list. NOTHING IN MEM MOVES AND NO MEM ENTRY POINT IS MINTED -- the escalation's premise
          that "memory ownership is expert_id % n_own, so merging changes which owner block holds
@@ -3588,6 +3690,22 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
          is declared BITS_PER_BYTE and is compared against a cross-entropy in NATS PER TOKEN (:2529
          against :7317). The repair is owed at the COMPARISON, not at the declaration, and the
          report prints the unit it was compared in.
+      7. FADED AREAS (2026-09-28, register §8 3.1, NEW-10 and C37; Q-FAB-18), on every pass the
+         root hands `faded` -- the area ids DATA's schedule has faded at this window's phase, plus
+         the areas a resumed parent trained and this run schedules nowhere. Every expert the merge
+         absorbs and every expert either cull removes is read against its area book
+         (Population.area_use) AFTER the pass has chosen it: fab.merged_faded_area and
+         fab.culled_faded_area count the removals whose most-served area is faded, and
+         fab.faded_unknown the removals whose book is empty, so a count of 0 over empty books is
+         not read as 0 over read ones. At FAB_FADED_CULL='as_is' (shipped) no decision reads a
+         book, so the pass removes what it removed before the books existed. At 'defer' a removal
+         the book names faded is SKIPPED -- the pair is not merged, the expert is not culled -- and
+         counted as an event (fab.merge_faded_deferred, fab.cull_faded_deferred), and THE DEFERRED
+         EXPERT KEEPS ITS SLOT IN THE UTILIZATION CULL'S BUDGET: the ranked walk stops at `budget`
+         victims-or-deferrals, so it never culls a live-area expert in a deferred one's place. The
+         failure cull has no budget, and a deferral there removes one expert fewer. An empty book is
+         not faded and is removed at either value. `faded=None` (a caller that hands no set) reads
+         nothing and leaves every key of this step ABSENT.
 
     THREE STATES, NOT TWO, FOR EVERY GATE ON THIS PASS (Q-FAB-5, RESOLVED 2026-09-02).
     `fabric.cull_eligible` reports `unreachable` -- never "armed but 0" -- when the eligible set is
@@ -3607,7 +3725,7 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
 
     LEVERS READ: grace, cull_frac, pressure, slots, comp_protect, err_fast, err_slow,
                  shift_tol, fail_tol, rescue, mut_big, manage_every, depth0, depth_eps,
-                 depth_patience, depth_stage_max, hops, merge_dist, on, norm_only
+                 depth_patience, depth_stage_max, hops, merge_dist, on, norm_only, faded_cull
     WIRES READ: d_manage_period (recorded on the report beside manage_every, so the WINDOW cadence
                 this function is called on and the FLUSH cadence `contribution` is called on are
                 visible side by side and a cadence that never coincides reads as a zero rather than
@@ -3633,7 +3751,14 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
                  fab.merge_armed_passes (the passes whose per-pass merge gate was reachable: a
                  past-grace expert at entry and FAB_MERGE_DIST > 0), and the two merge gates --
                  fab.merged_last_pass (this pass's verdict) and fab.merged (the ledger's, over
-                 fab.merged and fab.merge_armed_passes)
+                 fab.merged and fab.merge_armed_passes),
+                 step 7 (2026-09-28, Q-FAB-18) -- fab.culled_faded_area, fab.merged_faded_area
+                 and fab.faded_unknown (CUMULATIVE; PRESENT-and-0 from the first pass handed a
+                 faded set, ABSENT while none was), fab.faded_areas_last_pass (a gauge: how many
+                 areas this pass's set held, 0 in a first phase), and at FAB_FADED_CULL='defer'
+                 only fab.cull_faded_deferred and fab.merge_faded_deferred (EVENTS: an expert
+                 deferred again on a later pass counts again) beside fab.faded_deferred_experts (a
+                 gauge: the distinct experts this pass deferred), all three ABSENT at 'as_is'
     """
     fab = fab.owned_by("FAB")
     period = fab.d_manage_period     # WIRE READ HERE -- both cadences reported side by side
@@ -3648,6 +3773,7 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
     depth_patience = int(fab.depth_patience)
     depth_stage_max = int(fab.depth_stage_max)
     merge_dist = float(fab.merge_dist)
+    faded_cull = str(fab.faded_cull)
     rank = int(pop.B.shape[1])
     counters, where = pop.counters, "FAB.manage"
     step = U.Windows(step_windows)
@@ -3683,6 +3809,40 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
     _bump(counters, "fab.manage_passes")
     counters["fab.manage_period_flushes"] = int(period)
     counters["fab.manage_every_windows"] = manage_every
+
+    # ---- 7's STATE, SET UP BEFORE ANY STEP DECIDES (2026-09-28, Q-FAB-18) ----------------------
+    # `fset` is the faded set as ids, None when the caller handed none -- and then nothing below
+    # reads a book and no key of this step exists. `defer` is the one arm on which a book DECIDES.
+    # SEEDED HERE, BEFORE THE STEPS, for the rule seeded above: a pass handed a set that removes
+    # nothing faded reads 0, not ABSENT. The deferral pair only at 'defer'; at 'as_is' it cannot
+    # move and stays ABSENT. `deferred` holds this pass's deferred experts by CURRENT slot and is
+    # renumbered as the removals below move experts, so the gauge counts experts, not events.
+    fset = None if faded is None else frozenset(int(a) for a in faded)
+    defer = fset is not None and faded_cull == "defer"
+    culled_faded = merged_faded = faded_unknown = cull_deferred = merge_deferred = 0
+    deferred, deferred_gone = set(), [0]
+    if fset is not None:
+        for _k in ("fab.culled_faded_area", "fab.merged_faded_area", "fab.faded_unknown"):
+            counters.setdefault(_k, 0)
+        counters["fab.faded_areas_last_pass"] = len(fset)
+        if defer:
+            for _k in ("fab.cull_faded_deferred", "fab.merge_faded_deferred"):
+                counters.setdefault(_k, 0)
+
+    def _follow(slot, moved):
+        """Keep `deferred` on the same experts across one _remove(slot) that moved `moved` into it.
+
+        A deferred expert can itself be removed later on the same pass, once its book has changed:
+        deferred as a merge's absorbee, it can survive a later pair, take that pair's mass and stop
+        reading faded, and then be absorbed by the scan or culled like any live-area expert. Books
+        change nowhere else in a pass. It was deferred, so it stays in the gauge's count
+        (`deferred_gone`), and it leaves the set, whose slot now holds whoever moved in."""
+        if slot in deferred:
+            deferred.discard(slot)
+            deferred_gone[0] += 1
+        if moved is not None and moved in deferred:
+            deferred.discard(moved)
+            deferred.add(slot)
 
     n_live = int(pop.n_live)
     # ELIGIBLE IS PAST-GRACE, AND EVERY RANKING AND BUDGET ON THIS PASS IS SIZED ON IT. The old
@@ -3732,15 +3892,28 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
             if int(pop.uage[b]) < grace:
                 declined_grace += 1
                 continue
+            # 7. THE PASS HAS CHOSEN `b`; ITS BOOK IS READ NOW, before _merge_into and before any
+            # removal, so it is the absorbed expert's own history (Q-FAB-18). At 'as_is' the read
+            # decides nothing and is only counted, after the merge; at 'defer' a faded `b` is not
+            # merged, and the pair's other expert stays free for the rest of the scan.
+            kind = None if fset is None else _faded_kind(pop, b, fset)
+            if defer and kind == "faded":
+                merge_deferred += 1
+                deferred.add(b)
+                continue
             resid = _merge_into(pop, a, b, rank)
             residuals.append(resid)
             absorbed.add(b)
             merged += 1
+            if kind == "faded":
+                merged_faded += 1
+            elif kind == "unknown":
+                faded_unknown += 1
         # THE REMOVALS HAPPEN AFTER THE WHOLE SCAN AND IN DESCENDING SLOT ORDER, because _remove
         # renumbers by swap-with-last: removing a low slot first would move a later victim's id out
         # from under the list this loop is walking.
         for b in sorted(absorbed, reverse=True):
-            _remove(pop, b)
+            _follow(b, _remove(pop, b))
         n_live = int(pop.n_live)
     if merged:
         _bump(counters, "fab.merged", merged)
@@ -3799,9 +3972,21 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
                     # is here so the day contribution lands both cull paths honour it.
                     spared_contrib += 1
                 else:
+                    # 7. CHOSEN, THEN READ (Q-FAB-18): counted at 'as_is', and at 'defer' a
+                    # faded-area expert stays. This cull has no budget, so a deferral here is one
+                    # removal fewer and nobody else's.
+                    kind = None if fset is None else _faded_kind(pop, i, fset)
+                    if defer and kind == "faded":
+                        cull_deferred += 1
+                        deferred.add(i)
+                        continue
+                    if kind == "faded":
+                        culled_faded += 1
+                    elif kind == "unknown":
+                        faded_unknown += 1
                     failing.append(i)
         for i in sorted(failing, reverse=True):
-            _remove(pop, i)
+            _follow(i, _remove(pop, i))
             cull_fail += 1
         n_live = int(pop.n_live)
         eligible = [i for i in range(n_live) if int(pop.uage[i]) >= grace]
@@ -3838,8 +4023,13 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
         budget = int(cull_frac * n_elig)
         ranked = sorted(eligible, key=lambda i: float(pop.use[i]))
         victims = []
+        # A DEFERRED VICTIM HOLDS ITS BUDGET SLOT (2026-09-28, Q-FAB-18): `held` counts them against
+        # the budget beside `victims`, so at 'defer' the walk stops where 'as_is' would have and
+        # never goes on to cull the next-least-used live-area expert in a deferred one's place.
+        # At 'as_is' it stays 0 and the walk is the one it was.
+        held = 0
         for i in ranked:
-            if len(victims) >= budget:
+            if len(victims) + held >= budget:
                 break
             # THE THREE SPARES, EACH ITS OWN COUNTER BECAUSE EACH IS A DIFFERENT REASON TO SURVIVE.
             if float(pop.contrib[i]) > 0.0:
@@ -3860,9 +4050,21 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
             if float(pop.ef[i]) - float(pop.es[i]) > shift_tol:
                 spared_shift += 1
                 continue
+            # 7. CHOSEN, THEN READ (Q-FAB-18) -- after the three spares, so a spared expert is
+            # never counted as deferred and a deferral is only ever a victim the walk had named.
+            kind = None if fset is None else _faded_kind(pop, i, fset)
+            if defer and kind == "faded":
+                held += 1
+                cull_deferred += 1
+                deferred.add(i)
+                continue
+            if kind == "faded":
+                culled_faded += 1
+            elif kind == "unknown":
+                faded_unknown += 1
             victims.append(i)
         for i in sorted(victims, reverse=True):
-            _remove(pop, i)
+            _follow(i, _remove(pop, i))
             cull_util += 1
         n_live = int(pop.n_live)
 
@@ -3937,6 +4139,19 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
                  ("fab.spared_shift", spared_shift), ("fab.rescued", rescued)):
         if v:
             _bump(counters, k, v)
+    # 7's LEDGER (2026-09-28, Q-FAB-18): the pass's faded-area removals, empty-book removals and, at
+    # 'defer', its deferral events and the distinct experts they fell on (a gauge, this pass's).
+    if fset is not None:
+        for k, v in (("fab.culled_faded_area", culled_faded),
+                     ("fab.merged_faded_area", merged_faded), ("fab.faded_unknown", faded_unknown)):
+            if v:
+                _bump(counters, k, v)
+        if defer:
+            for k, v in (("fab.cull_faded_deferred", cull_deferred),
+                         ("fab.merge_faded_deferred", merge_deferred)):
+                if v:
+                    _bump(counters, k, v)
+            counters["fab.faded_deferred_experts"] = len(deferred) + deferred_gone[0]
 
     # ---- THREE STATES, NOT TWO, FOR EVERY GATE ON THIS PASS (Q-FAB-5) ---------------------------
     # `fabric.cull_eligible` and `fab.merged` report UNREACHABLE -- never "armed but 0" -- when the
@@ -4046,7 +4261,10 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
         merge_declined_residual=declined_resid, cull_fail=cull_fail, cull_util=cull_util,
         spared_contrib=spared_contrib, spared_comp=spared_comp, spared_shift=spared_shift,
         rescued=rescued, deepened=deepened, eligible=n_elig_entry, cull_gate=gate_str,
-        manage_every=manage_every, manage_period_flushes=period)
+        manage_every=manage_every, manage_period_flushes=period,
+        culled_faded_area=culled_faded, merged_faded_area=merged_faded,
+        faded_unknown=faded_unknown, cull_faded_deferred=cull_deferred,
+        merge_faded_deferred=merge_deferred)
 
 
 # ==================================================================================================
@@ -5258,6 +5476,11 @@ def state_dict(fab: Config, pop):
             "ef": list(pop.ef), "es": list(pop.es), "comp": list(pop.comp),
             "contrib": list(pop.contrib), "parent": list(pop.parent),
             "mutscale": list(pop.mutscale),
+            # THE AREA BOOK (2026-09-28, Q-FAB-18), one list of [area id, mass] pairs per slot in
+            # ascending id, for dom_of's reason: inspectable without unpickling, and in an order
+            # that does not depend on which area reached an expert first. It is earned history
+            # like `use`, so a resume that dropped it would file every later removal as unknown.
+            "area_use": [[[int(k), float(d[k])] for k in sorted(d)] for d in pop.area_use],
         },
         # THE GROWTH MACHINE AND THE POPULATION COMPETENCE EMA, SAVED AND NOT RE-EARNED. Both are
         # EARNED STATE in the sense capacity/api.py::new_valve gives the phrase for its lifted cap:
@@ -5387,6 +5610,13 @@ def load_state_dict(fab: Config, pop, sd, *, sidecar):
     if books.get("dom_of") is not None:
         for i, ids in enumerate(books["dom_of"]):
             pop.dom_of[i] = set(ids)
+    # A CHECKPOINT WRITTEN BEFORE THE AREA BOOK EXISTED CARRIES NONE (2026-09-28, Q-FAB-18), and its
+    # experts keep the empty books `build` gave them: "no area was ever booked", which FAB.manage
+    # counts as fab.faded_unknown until windows fill them. Nothing that trains reads the book, so
+    # such a resume continues exactly.
+    if books.get("area_use") is not None:
+        for i, pairs in enumerate(books["area_use"]):
+            pop.area_use[i] = {int(k): float(v) for k, v in pairs}
     for field in ("n_live", "depth_now", "births", "rescued"):
         if sd.get(field) is not None:
             setattr(pop, field, int(sd[field]))

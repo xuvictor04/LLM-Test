@@ -996,6 +996,17 @@ def smoke():
         raise AssertionError("readings_in accepted a bare int span")
     except UnitError:
         pass
+    #
+    # THE AREA ID (2026-09-28, Q-FAB-18 and Q-MEM-16). No shipped ancestor to replay: the old tree
+    # booked nothing by area. The properties: crc32 of the label's UTF-8 bytes with the top bit
+    # cleared -- 'eng''s crc32 is 2582995467, above 2**31, so the mask is what keeps a real id off
+    # MEM's -1 in an int32 column -- a function of the label alone, and the four shipped areas land
+    # on four ids. tests/test_faded.py F2 pins the collision refusal these ids are checked by.
+    assert derive.area_id("eng") == 435511819 == 2582995467 & 0x7fffffff
+    assert derive.area_id("py") == 1195352721 and derive.area_id("num") == 1547939694
+    assert derive.area_id("c") == 112844655
+    assert len({derive.area_id(n) for n in ("eng", "py", "num", "c")}) == 4
+    assert all(0 <= derive.area_id(n) < 2 ** 31 for n in ("eng", "py", "num", "c", "01_rust"))
 
 
 def main():

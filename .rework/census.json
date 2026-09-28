@@ -5572,6 +5572,24 @@
      "OPT_LR_RESTART_DAMP",
      "EVAL_RETENTION_EVERY"
     ]
+   },
+   {
+    "old_name": "(amendment: FAB_FADED_CULL)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "FAB",
+    "new_name": "FAB_FADED_CULL",
+    "unit": "name",
+    "purpose": "What FAB.manage does with a cull or merge whose removed expert mostly served a FADED area -- one the schedule had live in an earlier phase and not in this one (DATA's Plan.faded), or one a resumed parent trained and this run schedules nowhere (Plan.parent_faded). 'as_is' (the default): the pass removes what it chose and counts it in fab.culled_faded_area / fab.merged_faded_area; no decision reads an area book. 'defer': such a removal is skipped and counted as an event (fab.cull_faded_deferred, fab.merge_faded_deferred) beside a gauge of the distinct experts deferred, and a deferred utilization-cull victim keeps its budget slot, so no live-area expert is culled in its place.",
+    "reason": "AMENDMENT, 2026-09-28, register \u00a78 3.1 (NEW-10, C37, CONTRACT-Q-FAB-5), ruled in docs/04_CONTRACT.md Q-FAB-18. There is no ancestor knob: the old tree culled and merged whatever its ranking named and never asked which area an expert served -- there was no book to ask it with. IT DOES NOT CHANGE THE 328. WHY: at the owner's shape cull and merge are reached (481-1,002 experts past grace, 203-810 cull_fail and 336-648 merges per run) while FAB.contribution, the signal that should spare a useful expert, is not built; C37 rules that the continue preset defers faded-area culls and merges until it is, with training runs unchanged and the deferral an E2 arm, so the switch must exist before E2 can run it. BUILT 'as_is', which is today's pass bit for bit; 'contrib' joins the choices with FAB.contribution (\u00a78 3.5).",
+    "couples_with": [
+     "FAB_CULL_FRAC",
+     "FAB_MERGE_DIST",
+     "FAB_GRACE",
+     "FAB_MANAGE_EVERY",
+     "DATA_PHASE_SCHED",
+     "FAB_SLOTS"
+    ]
    }
   ]
  }

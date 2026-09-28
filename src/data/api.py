@@ -20,7 +20,8 @@ RECORD TYPES RETURNED (P4 defines them; they are DATA's objects and other packag
 them as arguments, which is not an import and O10 does not refuse it):
   Areas   names, bodies, holdout, holdout_bytes, bytes_present, bytes_taken, cursors, rng_holdout,
           counters, gates, parent_names
-  Plan    protocol, schedule, phase_bounds, per_area_draw, exposure, gates, counters
+  Plan    protocol, schedule, phase_bounds, per_area_draw, exposure, gates, counters, faded,
+          parent_faded
   Stream  bytes, labels, splice_starts, area_changes, phase_bounds, area_names, per_area_drawn,
           epoch, stream_id, draws, counters, gates
 """
@@ -267,9 +268,11 @@ def open_areas(dat: Config, *, seed: int):
                  data.area_open (one per area; unreachable on source=synthetic),
                  data.area_nested (one per areas entry containing "/" -- 0 is the shipped default
                  and means every area came from train/, which is a STATEMENT and not silence),
-                 data.area_path_refused, data.area_label_collision (both exit at startup, so N>0
-                 is never seen in a completed run; declared so the refusal is a named mechanism
-                 rather than an assertion),
+                 data.area_path_refused, data.area_label_collision, data.area_id_collision (two
+                 labels on one spine/derive.py::area_id, the key FAB's area books and MEM's area
+                 column book by, 2026-09-28; all three exit at startup, so N>0 is never seen in a
+                 completed run; declared so the refusal is a named mechanism rather than an
+                 assertion),
                  data.corpus_cap_trip (fired N / armed but 0, prints taken vs present per area),
                  data.holdout_block (prints offset+size AND the rng key per area; UNREACHABLE on
                  source=synthetic at DATA_SYNTH_HOLDOUT=0, and the real arm's gate at 1),
@@ -327,7 +330,8 @@ def open_areas(dat: Config, *, seed: int):
     # says must be a startup refusal naming the lever. Neither check below touches disk, so hoisting
     # them above the branch changes nothing about what they refuse, only which arm can reach an
     # unchecked rng_for call.
-    by_label, by_key = {}, {}
+    by_label, by_key, by_id = {}, {}, {}
+    from spine import derive as _derive
     for entry, label in zip(entries, labels):
         if label in by_label:
             raise CorpusError(
@@ -341,8 +345,24 @@ def open_areas(dat: Config, *, seed: int):
                 f"labels {by_key[key][0]!r} and {label!r} both normalise to the rng key "
                 f"{key!r}, so they would draw their held-out (or, on DATA_SOURCE=synthetic, their "
                 f"generator) blocks from ONE stream. Rename one DATA_AREAS entry.")
+        # THE AREA ID IS THE THIRD NAME A LABEL IS LOOKED UP UNDER, AND ITS COLLISION IS THE SAME
+        # REFUSAL (2026-09-28, register §8 3.1; docs/04_CONTRACT.md Q-FAB-18). FAB's per-expert area
+        # books and MEM's per-entry `area` column key each area by spine/derive.py::area_id -- crc32
+        # of the label, 31 bits -- because neither package may see a name and both books cross a
+        # resume. Two labels on one id would be booked as one area: the faded-area counts and the
+        # occupancy rows would file one corpus's experts and entries under the other's name. A
+        # crc32 collision between two real labels is rare, and rarity is the wrong reason to let a
+        # report merge two areas in silence.
+        aid = _derive.area_id(label)
+        if aid in by_id:
+            raise CorpusError(
+                f"labels {by_id[aid][0]!r} and {label!r} both hash to the area id {aid} "
+                f"(spine/derive.py::area_id, crc32 of the label masked to 31 bits), so FAB's area "
+                f"books and MEM's area column would book them as ONE area. Rename one DATA_AREAS "
+                f"entry.")
         by_label[label] = entry
         by_key[key] = (label, entry)
+        by_id[aid] = (label, entry)
 
     raw = {}                       # label -> bytes, before the held-out block is removed
     present, taken, sources = {}, {}, {}
@@ -857,6 +877,19 @@ class Plan:
     (data.phase_name_resolved -- 0 is the honest statement "every entry was an index", not silence).
     Added because the audit found the last of these computed and then discarded with no field to
     land in (n_by_name was incremented and never read again anywhere in this file).
+
+    `faded` AND `parent_faded` ARE THE SCHEDULE'S STATEMENT OF WHICH AREAS HAVE FADED (2026-09-28,
+    register §8 3.1, NEW-10 and C37; docs/04_CONTRACT.md Q-FAB-18), in the same index space as
+    `schedule`. `faded[k]` is every area live in some phase before k and not live in phase k -- at
+    derive.phase_schedule(4) over four areas, [(), (0,), (0,), (0, 1)] -- sorted by index, which is
+    Plan order. `parent_faded` is every area this run declares that the resumed checkpoint's record
+    names (Areas.parent_names) and that is live in NO phase of this run's schedule: the areas a
+    child inherits and never trains, faded from its first window -- () on a fresh run and whenever
+    the child schedules every parent area. Both are known at startup because the schedule is, and
+    both are READINGS OF THE SCHEDULE WITHIN ONE EPOCH: an area only a previous epoch's later phases
+    trained is not in phase 0's set when the schedule restarts, and a parent area the child
+    schedules later is not faded before its phase -- Q-FAB-18 records both as what the rule does not
+    see. FAB.manage is handed the union at each pass, as area ids.
     """
     protocol: str
     schedule: tuple
@@ -865,6 +898,8 @@ class Plan:
     exposure: dict
     gates: tuple
     counters: dict = dataclasses.field(default_factory=dict)
+    faded: tuple = ()
+    parent_faded: tuple = ()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -993,6 +1028,13 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
                             the byte/token boundary is crossed, and it is crossed with the MEASURED
                             bytes/token handed in, never with an estimate (ISSUES P1-H16).
 
+    THE FADED SETS (2026-09-28, register §8 3.1, NEW-10 and C37; docs/04_CONTRACT.md Q-FAB-18).
+    Plan.faded[k] is every area live in a phase before k and not live in phase k; Plan.parent_faded
+    is every area the resumed checkpoint recorded (Areas.parent_names, filled by
+    restore_stream_state before this call) that no phase of this schedule makes live. Both are
+    index tuples in Plan order, computed here because the schedule is; the root hands their union to
+    FAB.manage at each pass as area ids. Neither moves a byte of the stream.
+
     RECEIVES: epochs <- RUN.epochs; win_tokens <- LM.ctx; bytes_per_token <- TOK, measured by
     derive.bytes_per_token after build_vocabulary. All three are arguments: bytes_per_token cannot
     be a wire (measured after freeze, the reason assemble.NOT_WIRES gives for the SIG width).
@@ -1004,7 +1046,11 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
     DID IT FIRE: data.phase_resolved, data.protocol_named (the recognised protocol, printed by
                  name -- one of the four, never blank), data.phase_name_resolved (entries given as
                  a NAME rather than an index; 0 means every entry was an index, which is the
-                 shipped spelling and a statement rather than silence),
+                 shipped spelling and a statement rather than silence), data.phase_faded (a
+                 READING: per phase, the names of the areas faded in it -- [[], ['eng'], ['eng'],
+                 ['eng', 'py']] at the shipped four areas), data.parent_faded (a READING, present
+                 only where a parent record was restored and ABSENT on a fresh run: the recorded
+                 areas no phase of this run makes live),
                  Gate data.exposure_max, Gate data.exposure_skew -- EXACT under the shipped
                  DATA_DRAW="planned" and a PREDICTION under "uniform", where the run trains on a
                  random draw from the scheduled split that deviated by up to 47.9% per area over
@@ -1281,9 +1327,36 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
     counters = {"data.phase_resolved": len(schedule), "data.protocol_named": protocol,
                 "data.phase_name_resolved": n_by_name}
 
+    # THE FADED SETS, READ OFF THE SCHEDULE AT STARTUP (2026-09-28, register §8 3.1, NEW-10 and C37;
+    # docs/04_CONTRACT.md Q-FAB-18). An area has FADED in phase k when some phase before k had it
+    # live and phase k does not: the set FAB.manage counts culls and merges of experts against, and
+    # the set §8 3.3's 'replay' draw will give its share to. Accumulated phase by phase, so an area
+    # that fades, returns and fades again is faded exactly in the phases it is absent from after it
+    # was first live. Sorted by index, which is Plan order, so no reader iterates a set.
+    _seen, _faded = set(), []
+    for live in schedule:
+        _faded.append(tuple(sorted(_seen - set(live))))
+        _seen |= set(live)
+    faded = tuple(_faded)
+    # AND THE PARENT'S: an area this run declares, which the resumed checkpoint's record names
+    # (Areas.parent_names, filled by restore_stream_state one row above this one), and which NO
+    # phase of this schedule makes live -- a pure-add child's parent areas, faded from its first
+    # window. A recorded area this run does not declare cannot reach here: restore_stream_state
+    # refuses it.
+    _parent = {str(n) for n in (getattr(areas, "parent_names", None) or ())}
+    parent_faded = tuple(i for i, n in enumerate(names) if n in _parent and i not in _seen)
+    # BOTH ARE PRINTED BY NAME, as READINGS. data.phase_faded on every run (phase 0's is always
+    # empty, and a stationary or pure-add schedule's are all empty, which is a statement about the
+    # schedule and not silence); data.parent_faded only where there is a parent record to read, so
+    # a fresh run leaves it ABSENT rather than printing an empty list that would read "a parent was
+    # checked and nothing it trained was left out".
+    counters["data.phase_faded"] = [[names[i] for i in f] for f in faded]
+    if _parent:
+        counters["data.parent_faded"] = [names[i] for i in parent_faded]
+
     return Plan(protocol=protocol, schedule=schedule, phase_bounds=bounds,
                 per_area_draw=per_area_draw, exposure=exposure, gates=tuple(gates),
-                counters=counters)
+                counters=counters, faded=faded, parent_faded=parent_faded)
 
 
 def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
