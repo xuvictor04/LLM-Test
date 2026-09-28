@@ -437,7 +437,10 @@ ASSEMBLY_ORDER = (
                                               "re-refused by WORLD.load_into and FAB.load_state_dict"),
     ("plan",      "DATA",  "data_plan",       "(epochs=RUN.epochs, win_tokens=LM.ctx, "
                                               "bytes_per_token=Vocabulary.bytes_per_token) -- the "
-                                              "exposure gates, before a single step runs",
+                                              "exposure gates, before a single step runs, and "
+                                              "since 2026-09-28 the split each phase is laid in "
+                                              "(Q-DATA-10), which under DATA_DRAW=replay gives each "
+                                              "phase with a faded area its fixed rehearsal share",
                                               "plan -- the Plan both DATA.draw_stream rows take as "
                                               "their second positional. Plan carries NO length: "
                                               "the run's extent is MEASURED off the segmentation "
@@ -445,7 +448,10 @@ ASSEMBLY_ORDER = (
                                               "2026-09-28 it carries the schedule's faded sets, "
                                               "Plan.faded per phase and Plan.parent_faded, which "
                                               "the loop's join _faded_ids hands FAB.manage as "
-                                              "`faded` (Q-FAB-18)"),
+                                              "`faded` (Q-FAB-18), and the per-phase split both "
+                                              "draw_stream rows lay and gauge, Plan.shares, with "
+                                              "Plan.replay_faded naming the phases the 'replay' "
+                                              "law lays by deficit (Q-DATA-10)"),
     ("stream",    "DATA",  "draw_stream",     "(areas, plan, epoch=Snapshot.epoch on a resume and 0 "
                                               "otherwise, seed=RUN.seed) -- THE RUN'S FIRST EPOCH's "
                                               "draw (it was epoch=0 unconditionally until "
@@ -2766,7 +2772,10 @@ def compose(environ=None, *, restored=None):
                 f"DATA_SYNTH_HOLDOUT={int(bool(data.synth_holdout))} "
                 f"DATA_STREAM_BYTES={int(data.stream_bytes)} DATA_SEG_MIN={int(data.seg_min)} "
                 f"DATA_SEG_MAX={int(data.seg_max)} DATA_SEG_CONTIG={int(bool(data.seg_contig))} "
-                f"DATA_DRAW={data.draw} DATA_RESAMPLE={int(bool(data.resample))} "
+                f"DATA_DRAW={data.draw} DATA_REPLAY_SHARE={float(data.replay_share)} "
+                f"DATA_REPLAY_NEWEST={float(data.replay_newest)} "
+                f"DATA_REHEARSE_PARENT={int(bool(data.rehearse_parent))} "
+                f"DATA_RESAMPLE={int(bool(data.resample))} "
                 f"DATA_PHASE_SCHED={data.phase_sched!r} DATA_PHASES={int(data.phases)} "
                 f"DATA_PHASE_LIVE={int(data.phase_live)}. Resume with the parent's values, or at an "
                 f"epoch boundary, where the child draws its epoch fresh."

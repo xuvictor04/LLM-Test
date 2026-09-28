@@ -29,6 +29,7 @@ here was never asked, and no counter in any report can say so on its own.
 
 | lever | what it turns off |
 |---|---|
+| `DATA_REHEARSE_PARENT` | At DATA_DRAW=replay, count the areas the resumed lineage drew and this schedule makes live in no phase as faded from window 0, so the draw rehearses them; no effect under 'planned' or 'uniform'. |
 | `DATA_RESAMPLE` | Redraw a fresh stream from the areas at the start of every epoch instead of replaying the same bytes. |
 | `DATA_SEG_CONTIG` | Read each area in order instead of seeking to a random offset every segment, so the only boundaries left are the text's own. |
 | `DATA_SYNTH_HOLDOUT` | Hold out a block per area on DATA_SOURCE=synthetic, under the real sources' law: min(DATA_HOLDOUT_FRAC x body, DATA_VAL_CAP) bytes, a seeded contiguous block removed from the body. Off, the synthetic source holds nothing out. |
@@ -43,7 +44,7 @@ here was never asked, and no counter in any report can say so on its own.
 | `RUN_PROFILE` | Per-component wall-clock attribution of the training step, rendered at the end of the run and in the throughput summary. |
 | `WORLD_FEEDBACK` | Condition the base LM on the forecast (h += world_proj(forecast)) instead of leaving the world model as an unused side head. |
 
-13 levers ship False.
+14 levers ship False.
 
 **Numeric levers that ship 0.** Zero is this tree's documented OFF sentinel in most of these places
 and a legitimate value in some, so the help text is quoted rather than summarised. `spine/lever.py`
@@ -59,6 +60,7 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `CKPT_BEST_KEEP` | count | How many recent local lows in held-out bits/byte to retain as rotating .best1..bestN checkpoints, on top of the single global .best. |
 | `CKPT_EVERY` | Windows | How often a mid-run checkpoint is written, in windows elapsed since the last one; 0 disables periodic saving, leaving the final save and SIGUSR1. |
 | `DATA_PHASE_LIVE` | count | How many areas are live in each phase of the GENERATED schedule; 0 derives it from the area count. |
+| `DATA_REPLAY_NEWEST` | fraction 0..1 | Share of each faded phase's bytes the 'replay' draw gives the newest-arrived live area, the other live areas splitting what is left evenly; 0 is off. Read only at DATA_DRAW=replay. |
 | `EVAL_RETENTION_EVERY` | Windows | Windows between in-run retention readings on the pinned held-out windows (0 = the probe is off: nothing is pinned, read or consumed). |
 | `FAB_EC_W` | fraction 0..1 | Expert-choice deficit bonus: nudge routing toward experts under their share, by construction rather than by a loss. |
 | `FAB_HOP_SUP` | fraction 0..1 | Weight on per-hop deep supervision: a cross-entropy at every hop, not only at the end of the walk. |
@@ -80,13 +82,13 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `TOK_MINT_PMIN` | probability | Minimum p(b\|a) for a merge to be accepted as a unit rather than a frequent collision across a boundary; 0 mints on frequency alone. |
 | `TOK_PROBATION_USES` | count | How many appearances a newly minted token must earn before it keeps its place in the match table; below it the merge is undone. |
 
-25 numeric levers ship 0.
+26 numeric levers ship 0.
 
 ---
 
 ## 2. Every lever, by package
 
-273 levers across 13 packages.
+276 levers across 13 packages.
 
 
 ### CAP (7 levers)
@@ -111,14 +113,14 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `CKPT_EVERY` | `0` | Windows |  | How often a mid-run checkpoint is written, in windows elapsed since the last one; 0 disables periodic saving, leaving the final save and SIGUSR1. |
 | `CKPT_RESUME` | `''` | path |  | Checkpoint to continue training from -- a run directory or a .pt file; empty starts from scratch. |
 
-### DATA (19 levers)
+### DATA (22 levers)
 
 | lever | default | unit | accepts | what it is |
 |---|---|---|---|---|
 | `DATA_AREAS` | `'eng,py,num,c'` | name |  | The corpora to stream, in order; their names label every per-area score in the report and across the run boundary. |
 | `DATA_CORPUS_CAP` | `2000000` | bytes |  | Bytes read from disk per area before any holdout split or stream draw; the ceiling on how much of a corpus this run can see. |
 | `DATA_DIR` | `'data'` | path |  | Root of the corpus tree; an area with no '/' is read from DATA_DIR/train/<area>/*, and an area containing '/' is joined under DATA_DIR verbatim (DATA_AREAS="eng,continual/01_rust"). |
-| `DATA_DRAW` | `'planned'` | name | choices `'planned'`, `'uniform'` | How a phase's bytes are allocated across its live areas: 'planned' gives each area its scheduled share and randomises only the order and the offsets; 'uniform' picks an area independently per segment. |
+| `DATA_DRAW` | `'planned'` | name | choices `'planned'`, `'uniform'`, `'replay'` | How a phase's bytes are allocated across its areas: 'planned' gives each live area its scheduled share, 'uniform' picks an area per segment, and 'replay' also gives each faded area a fixed share. |
 | `DATA_EXPOSURE_MAX` | `2.0` | count |  | Whole-run repetition multiple (bytes drawn x epochs / bytes on disk) above which the data plan is flagged before training starts. |
 | `DATA_EXPOSURE_SKEW` | `3.0` | count |  | Max/min exposure ratio across areas above which the data plan is flagged as imbalanced. |
 | `DATA_HOLDOUT_FRAC` | `0.05` | fraction 0..1 | domain (0.0, 1.0) | Fraction of each area held out and never sampled into the training stream. |
@@ -126,6 +128,9 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `DATA_PHASE_LIVE` | `0` | count |  | How many areas are live in each phase of the GENERATED schedule; 0 derives it from the area count. |
 | `DATA_PHASE_SCHED` | `''` | name |  | Explicit phase schedule, pipe-separated phases of comma-separated area indices OR area names ("0\|0,1\|0,1\|1", "eng\|eng\|rust\|rust"); empty generates a rehearsed sliding window from `phases` and... |
 | `DATA_PHASES` | `4` | count |  | How many phases the generated sliding-window schedule has, when no explicit schedule is given. |
+| `DATA_REHEARSE_PARENT` | `False` | on/off |  | At DATA_DRAW=replay, count the areas the resumed lineage drew and this schedule makes live in no phase as faded from window 0, so the draw rehearses them; no effect under 'planned' or 'uniform'. |
+| `DATA_REPLAY_NEWEST` | `0.0` | fraction 0..1 | domain (0.0, 1.0) | Share of each faded phase's bytes the 'replay' draw gives the newest-arrived live area, the other live areas splitting what is left evenly; 0 is off. |
+| `DATA_REPLAY_SHARE` | `0.27` | fraction 0..1 | domain (0.0, 1.0) | Share of each phase's bytes the 'replay' draw gives the areas faded in that phase, split evenly among them; read only at DATA_DRAW=replay. |
 | `DATA_RESAMPLE` | `False` | on/off |  | Redraw a fresh stream from the areas at the start of every epoch instead of replaying the same bytes. |
 | `DATA_SEG_CONTIG` | `False` | on/off |  | Read each area in order instead of seeking to a random offset every segment, so the only boundaries left are the text's own. |
 | `DATA_SEG_MAX` | `1800` | bytes |  | Longest spliced segment drawn from one area before the stream switches. |

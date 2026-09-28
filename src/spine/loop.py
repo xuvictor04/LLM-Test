@@ -2385,6 +2385,15 @@ def _report(sysm, elapsed_s, ctx):
         if getattr(sysm.areas, "gates", ()) else "no Areas gates: the record carries none")
     out["DATA(plan.counters)"] = (dict(sysm.plan.counters) if getattr(sysm.plan, "counters", None)
                                   else "no Plan counters: the plan carries none")
+    # THE PLAN'S GATES, THROUGH THE SHARED RENDERER (2026-09-28, register §8 3.3; Q-DATA-10). run.py
+    # prints them before the first window, as the exposure gates always were, but that line gives a
+    # gate's reason only when it FIRED -- so the UNREACHABLE sentence of data.replay (naming
+    # DATA_DRAW) and of data.rehearse_parent (the lever off, no effect under 'planned', a fresh run)
+    # reached no reader, nor did data.exposure_skew's at one area. Here every Plan gate reads in
+    # G4's three states with its arithmetic and reason, as the Areas and Stream gates beside it do.
+    out["DATA(plan.gates)"] = (
+        {f"gate:{k}": v for k, v in _gate.three_state(sysm.plan.gates).items()}
+        if getattr(sysm.plan, "gates", ()) else "no Plan gates: the plan carries none")
     # DATA'S STREAM GATES, READ OFF sysm.stream AT R AND NOT OFF A REFERENCE TAKEN AT COMPOSE: stage
     # E redraws the stream on every epoch roll, and a cached one would report epoch 0's draw.
     # data/api.py::Stream declares `gates` the DID-IT-FIRE surface for data.contig_wrap and

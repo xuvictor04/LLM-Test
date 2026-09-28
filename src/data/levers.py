@@ -38,7 +38,7 @@ they arrive from THREE families, which is the whole argument for owning by prefi
      2 rows from the `misc` family      -- n_processes and val_cap, both mis-tagged, and the survey's
                                            so-config record says so outright for both.
 
-This file emits 19 levers:
+This file emits 22 levers:
 
     11  rows with verdict rename
   +  6  rows with verdict keep
@@ -48,8 +48,12 @@ This file emits 19 levers:
   +  1  amendment: DATA_SYNTH_HOLDOUT, minted 2026-09-27 under Proposal 04's SR0 (register 04-Q5,
          Proposal 05 §8 3.1; docs/04_CONTRACT.md Q-DATA-9). No ancestor either: the old synthetic
          generator held nothing out and had no switch over it.
+  +  3  amendments: DATA_REPLAY_SHARE, DATA_REPLAY_NEWEST and DATA_REHEARSE_PARENT, minted
+         2026-09-28 with DATA_DRAW's 'replay' law (Proposal 04 §1 item 2; register 04-Q1, 04-Q4, O9
+         and O16, Proposal 05 §8 3.3; docs/04_CONTRACT.md Q-DATA-10). No ancestors: the old tree had
+         no rehearsal law and no parent record to rehearse from.
   -------
-    19  Lever declarations, all reachable as DATA_<FIELD>
+    22  Lever declarations, all reachable as DATA_<FIELD>
 
 Not emitted, by verdict: 1 merge, 0 drop, 0 promote-to-wire.
   MERGED (folds into a lever this file DOES declare, so it is not an unresolved merge):
@@ -626,12 +630,23 @@ class DATALevers(LeverSet):
     # cost is the spine's for every bool and not a choice made here: any string outside
     # ("0", "", "off", "no", "none", "false") reads as True, so DATA_RESAMPLE=flase is silently on.
 
-    draw = Lever("planned", "How a phase's bytes are allocated across its live areas: 'planned' "
-                            "gives each area its scheduled share and randomises only the order and "
-                            "the offsets; 'uniform' picks an area independently per segment.",
-                 U.NAME, choices=("planned", "uniform"))
+    draw = Lever("planned", "How a phase's bytes are allocated across its areas: 'planned' gives "
+                            "each live area its scheduled share, 'uniform' picks an area per "
+                            "segment, and 'replay' also gives each faded area a fixed share. Under "
+                            "'planned' only the order and the offsets are random; under 'replay' a "
+                            "phase with a faded area gives them DATA_REPLAY_SHARE of its bytes, "
+                            "spread through the phase, and every other phase is 'planned'.",
+                 U.NAME, choices=("planned", "uniform", "replay"))
     # AMENDMENT, 2026-09-02, ruled by the owner under ISSUES P1-H58. NO ANCESTOR KNOB: the old tree had
     # one law, `_r.choice(act)` per segment, and no switch over it.
+    # 'replay' JOINED THE CHOICES 2026-09-28 (Proposal 04 §1 item 2 and SR0; register 04-Q1, O16,
+    # Proposal 05 §8 3.3; docs/04_CONTRACT.md Q-DATA-10), BUILT OFF. It is the hand-set rehearsal
+    # control the self-regulated draw has to beat: each phase with a faded area gives
+    # `replay_share` of its bytes to its faded areas, split evenly, and the rest to its live areas,
+    # laid by DEFICIT (at each segment, the area furthest behind its target share of the phase's
+    # bytes so far, ties in Plan order) and truncated to the area's per-phase target, so the
+    # realised split is the planned one exactly. 'retention', the self-regulated draw, is SR2's and
+    # is not a choice until it is built.
     # THE MEASUREMENT THAT MADE IT A LEVER. DATA.data_plan computes `per_area_draw` by distributing
     # stream_bytes across the schedule and tests exposure_max / exposure_skew against it, under a
     # docstring saying it computes what the run "will actually" be exposed to. Under the old law
@@ -646,13 +661,76 @@ class DATALevers(LeverSet):
     # WHY "planned" IS THE DEFAULT AND NOT THE OTHER WAY ROUND. It is the only value under which the
     # startup gate is EXACT, and a startup gate is the only thing that can refuse a bad configuration
     # BEFORE it spends the GPU time. Defaulting to the law that makes the guard approximate would keep
-    # the instrument and throw away the guarantee.
+    # the instrument and throw away the guarantee. (2026-09-28: 'replay' is exact the same way -- it
+    # truncates every segment to its area's per-phase target as 'planned' does -- and it is built OFF.
+    # 'planned' stays the default by the owner's D8 until a GPU reading says otherwise: register O16,
+    # §8 5.3's 'replay' 0.27 against 'planned' pair, whose confirming reading goes to the owner.)
     # WHAT "uniform" IS FOR, because it is kept and not dropped: it is the law every recorded result in
     # this project was taken under, so it is the arm that reproduces them. The owner's standing rule is
     # that a mechanism kept for future use is kept with a switch.
-    # THE PAIRED INSTRUMENT is Stream.per_area_drawn beside Plan.per_area_draw: under 'planned' they
-    # agree to within one segment per area, and under 'uniform' the difference is the error bar on
-    # every exposure number the run reports. The gates say which law produced them.
+    # THE PAIRED INSTRUMENT is Stream.per_area_drawn beside Plan.per_area_draw: under 'planned' and
+    # 'replay' they agree EXACTLY, per area (this line said "to within one segment per area" until
+    # 2026-09-28, which the planned law's truncation to each area's budget had already made an
+    # understatement), and under 'uniform' the difference is the error bar on every exposure number
+    # the run reports. The gates say which law produced them. Since 2026-09-28 the same pair is also
+    # printed PER PHASE under every law, as Stream.counters' share gauges
+    # (data.share.p<k>.<area>.planned / .realised, in permille of the phase).
+
+    replay_share = Lever(0.27, "Share of each phase's bytes the 'replay' draw gives the areas faded in "
+                               "that phase, split evenly among them; read only at DATA_DRAW=replay.",
+                         U.FRACTION, domain=(0.0, 1.0))
+    # CENSUS AMENDMENT, 2026-09-28 (Proposal 04 §1 item 2; register 04-Q1 and O16, Proposal 05 §8 3.3;
+    # docs/04_CONTRACT.md Q-DATA-10). No ancestor: the old tree had no rehearsal law at all.
+    # THE FADED SET IS DATA's OWN, known at startup: Plan.faded[k], every area live in an earlier
+    # phase and not in phase k (Q-FAB-18), and -- at `rehearse_parent` -- Plan.parent_faded from
+    # window 0. A phase with no faded area is laid by the 'planned' law, verbatim, and this share is
+    # not read for it. THE BYTES ARE EXACT, NOT EXPECTED: data_plan rounds `replay_share` x the
+    # phase's span to whole bytes (half to even, on the decimal the operator wrote, so 0.27 is 27/100
+    # and not its binary neighbour), splits them evenly with the remainder on the first in Plan
+    # order, and draw_stream truncates each segment to its area's per-phase target, so the realised
+    # split is the planned one byte for byte and the exposure gates stay exact (04 §1 item 2).
+    # 0.27 IS A TOY VALUE AND PROVISIONAL (register NEW-19): it matches the self-regulated arms'
+    # measured last-phase rehearsal share on the d3 toy, and 0.2 was measured worse there; the E1
+    # secondary reads 0.15 / 0.27 / 0.40 if 'replay' ever becomes a default (04-6-UNMEASURED (h)).
+    # DOMAIN (0.0, 1.0): a share of a phase's bytes. 1.0 gives a faded phase wholly to its faded
+    # areas; `replay_share` + `replay_newest` above 1 is refused at data_plan by name, because no
+    # phase can give away more bytes than it has.
+
+    replay_newest = Lever(0.0, "Share of each faded phase's bytes the 'replay' draw gives the "
+                               "newest-arrived live area, the other live areas splitting what is "
+                               "left evenly; 0 is off. Read only at DATA_DRAW=replay.",
+                          U.FRACTION, domain=(0.0, 1.0))
+    # CENSUS AMENDMENT, 2026-09-28 (Proposal 04 §1 item 2 and R-3; register 04-Q1 note (d);
+    # docs/04_CONTRACT.md Q-DATA-10). No ancestor. It is the critic's `replay_late` control exactly:
+    # at 0.34 over five live areas the newest takes 0.34 of a faded phase and each of the other four
+    # (1 - 0.27 - 0.34) / 4 = 0.0975. It exists because the self-regulated draw's newest-area gain
+    # was measured to be EXPOSURE, and a hand-set boost reproduced it (04 §2 row 8), so E1 needs the
+    # boost as an arm of its own. OFF at 0 (04's table), and 0.34 is an E1 arm value, not a default.
+    # "NEWEST-ARRIVED" IS READ OFF THIS RUN'S SCHEDULE: among the phase's live areas, the one whose
+    # first live phase is latest, ties to the last in Plan order (an add-an-area run appends its new
+    # area, Q-DATA-9). A faded phase whose only live area is the newest gives it the whole live
+    # remainder, 1 - `replay_share`, and the boost moves nothing there. Applied only in phases the
+    # 'replay' law lays; a phase with no faded area is 'planned' and reads no share.
+
+    rehearse_parent = Lever(False, "At DATA_DRAW=replay, count the areas the resumed lineage drew and "
+                                   "this schedule makes live in no phase as faded from window 0, so "
+                                   "the draw rehearses them; no effect under 'planned' or 'uniform'.",
+                            U.FLAG)
+    # CENSUS AMENDMENT, 2026-09-28 (register 04-Q4 and O9, Proposal 05 §8 3.3; docs/04_CONTRACT.md
+    # Q-DATA-10). No ancestor: the old tree had no parent record to read. Without it a pure-add
+    # child has nothing faded -- its own schedule never had the parent's areas live -- so no draw
+    # can protect what the parent learned (04-Q4). The set is Plan.parent_faded, which Q-FAB-18
+    # reads off Areas.drawn: an area this run declares, that the lineage's streams drew, and that no
+    # phase of this schedule makes live. A DECLARED AREA IS NOT A DRAWN ONE, so an area a parent
+    # declared and never trained is not rehearsed. BUILT OFF, AND OFF IN EVERY TRAINING AND
+    # MEASUREMENT RUN (O9: D2 stands, pure-add is the unprotected measurement arm); the unbuilt
+    # continue preset carries True with 'replay' 0.27, provisional until §8 5.3. The area's body is
+    # this run's, as every declared area's is (its corpus on disk, or its generated text on the
+    # synthetic source); a recorded parent area this run does not declare is refused at
+    # restore_stream_state, because the replay reservoir that would carry it in the checkpoint
+    # (NEW-06, register §8 4.5) is not built.
+    # A BOOL, WITH THE BOOL BRANCH'S KNOWN HAZARD (see `resample`): DATA_REHEARSE_PARENT=flase reads as
+    # on.
 
     corpus_cap = Lever(2000000, "Bytes read from disk per area before any holdout split or stream "
                                 "draw; the ceiling on how much of a corpus this run can see.", U.BYTES)

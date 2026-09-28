@@ -5590,6 +5590,55 @@
      "DATA_PHASE_SCHED",
      "FAB_SLOTS"
     ]
+   },
+   {
+    "old_name": "(amendment: DATA_REPLAY_SHARE)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_REPLAY_SHARE",
+    "unit": "fraction 0..1",
+    "purpose": "Under DATA_DRAW='replay', the share of each phase's bytes given to the areas faded in that phase -- DATA's Plan.faded, plus Plan.parent_faded from window 0 at DATA_REHEARSE_PARENT=1 -- split evenly among them; the phase's live areas share the rest. data_plan rounds it to whole bytes per phase on the decimal the lever holds, and draw_stream lays such a phase by deficit (the area furthest behind its target share of the bytes laid so far, ties in Plan order) and truncates every segment to its area's target, so the realised split is the planned one byte for byte and the exposure gates stay exact. A phase with no faded area is laid by the 'planned' law and reads no share. Read only under 'replay'; DATA_REPLAY_SHARE + DATA_REPLAY_NEWEST above 1 is refused.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 2 (the fixed-rehearsal control) and register 04-Q1, O16 and \u00a78 3.3, ruled in docs/04_CONTRACT.md Q-DATA-10. There is no ancestor knob: the old tree had no rehearsal law. IT DOES NOT CHANGE THE 328. WHY: 'replay' is the control the self-regulated draw must beat and the literature's goal-B baseline, and on the d3 toy it beat 'planned' at 5 of 5 seeds -- a hypothesis that puts the GPU 'replay' 0.27 against 'planned' pair first among the draw tests (\u00a78 5.3). 0.27 matches the self-regulated arms' measured last-phase rehearsal share on the toy and is PROVISIONAL (NEW-19) until a GPU reading. BUILT OFF: DATA_DRAW stays 'planned' (D8, O16), so no default run reads the lever.",
+    "couples_with": [
+     "DATA_DRAW",
+     "DATA_REPLAY_NEWEST",
+     "DATA_REHEARSE_PARENT",
+     "DATA_PHASE_SCHED",
+     "DATA_STREAM_BYTES"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_REPLAY_NEWEST)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_REPLAY_NEWEST",
+    "unit": "fraction 0..1",
+    "purpose": "Under DATA_DRAW='replay', the share of each faded phase's bytes given to the newest-arrived live area -- the one whose first live phase in this run's schedule is latest, ties to the last in Plan order -- the other live areas splitting what DATA_REPLAY_SHARE and this leave, evenly. 0 (the default) is OFF. A faded phase whose only live area is the newest gives it the whole live remainder. Read only under 'replay'.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 2 and R-3 (register 04-Q1 note (d)), ruled in docs/04_CONTRACT.md Q-DATA-10. There is no ancestor knob. IT DOES NOT CHANGE THE 328. WHY: the self-regulated draw's newest-area gain was measured to be exposure, and a hand-set boost reproduced it -- the critic's replay_late control, 0.34 to the newest and (1 - 0.27 - 0.34) / 4 = 0.0975 to each of the other four live areas -- so E1 needs the boost as an arm of its own. OFF at 0; 0.34 is an E1 arm value, not a default.",
+    "couples_with": [
+     "DATA_DRAW",
+     "DATA_REPLAY_SHARE",
+     "DATA_PHASE_SCHED"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_REHEARSE_PARENT)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_REHEARSE_PARENT",
+    "unit": "on/off",
+    "purpose": "Under DATA_DRAW='replay', the areas the resumed lineage's streams drew (Areas.drawn) that this run declares and makes live in no phase -- a pure-add child's parent areas, Plan.parent_faded -- count as faded from window 0, so every phase gives them DATA_REPLAY_SHARE. No effect under 'planned' or 'uniform', and none on a fresh run. A recorded parent area this run does not declare stays refused at the resume: the replay reservoir that would carry it in the checkpoint (NEW-06) is not built.",
+    "reason": "AMENDMENT, 2026-09-28, register 04-Q4 and O9 (\u00a78 3.3), ruled in docs/04_CONTRACT.md Q-DATA-10. There is no ancestor knob: the old tree had no parent record to rehearse from. IT DOES NOT CHANGE THE 328. WHY: without it a pure-add child has nothing faded -- its own schedule never had the parent's areas live -- so no draw can protect what the parent learned. BUILT OFF, and OFF in every training and measurement run (O9: D2 stands, pure-add is the unprotected measurement arm); the unbuilt continue preset carries it on with 'replay' 0.27, provisional until \u00a78 5.3.",
+    "couples_with": [
+     "DATA_DRAW",
+     "DATA_REPLAY_SHARE",
+     "DATA_AREAS",
+     "DATA_PHASE_SCHED",
+     "CKPT_RESUME"
+    ]
    }
   ]
  }

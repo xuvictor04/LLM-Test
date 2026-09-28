@@ -21,7 +21,7 @@ them as arguments, which is not an import and O10 does not refuse it):
   Areas   names, bodies, holdout, holdout_bytes, bytes_present, bytes_taken, cursors, rng_holdout,
           counters, gates, parent_names, drawn
   Plan    protocol, schedule, phase_bounds, per_area_draw, exposure, gates, counters, faded,
-          parent_faded
+          parent_faded, shares, replay_faded
   Stream  bytes, labels, splice_starts, area_changes, phase_bounds, area_names, per_area_drawn,
           epoch, stream_id, draws, counters, gates
 """
@@ -30,6 +30,7 @@ import hashlib
 import math
 import os
 import weakref
+from fractions import Fraction
 
 from spine.lever import Config, LeverError
 from spine import rng as _rng
@@ -913,6 +914,19 @@ class Plan:
     epoch's later phases trained is not in phase 0's set when the schedule restarts, and a parent
     area the child schedules later is not faded before its phase -- Q-FAB-18 records both as what
     the rule does not see. FAB.manage is handed the union at each pass, as area ids.
+
+    `shares` IS THE SPLIT THE DRAW LAYS, PER PHASE, UNDER EVERY LAW (2026-09-28, register §8 3.3;
+    docs/04_CONTRACT.md Q-DATA-10): one tuple per phase of (area index, bytes) pairs in Plan order,
+    each phase's summing to its span. Under 'planned' and 'uniform', and in every phase 'replay'
+    does not lay, it is the scheduled split -- the phase's bytes over its live areas, the remainder
+    on the first live areas -- which draw_stream's planned budget recomputes by the same rule; under
+    'replay', a phase with a faded area carries the replay law's targets. `per_area_draw` is its sum
+    over the phases, and draw_stream prints it beside what each phase drew (the share gauges).
+    `replay_faded` is, per phase, the areas the 'replay' law gives DATA_REPLAY_SHARE to: `faded[k]`,
+    plus `parent_faded` at DATA_REHEARSE_PARENT=1 -- () in every phase under 'planned' and 'uniform',
+    and a phase whose tuple is empty is laid by the planned law. Both are known at startup, move no
+    byte by themselves and are not checkpointed: a resume recomputes them from the same schedule and
+    record.
     """
     protocol: str
     schedule: tuple
@@ -923,6 +937,8 @@ class Plan:
     counters: dict = dataclasses.field(default_factory=dict)
     faded: tuple = ()
     parent_faded: tuple = ()
+    shares: tuple = ()
+    replay_faded: tuple = ()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -949,7 +965,10 @@ class Stream:
     record in this tree that can say UNREACHABLE and carry the reason. `data.segment` is a reading in
     `counters` instead: it counts the segments THESE BYTES are spliced from, which is as true of a
     replayed Stream as of the draw that produced it, and wrapping a reading in a Gate prints "armed,
-    did not fire" for a number that never had a condition to meet.
+    did not fire" for a number that never had a condition to meet. So are SR0's per-phase share
+    gauges (2026-09-28, register §8 3.3; docs/04_CONTRACT.md Q-DATA-10), under every law:
+    `data.share.p<k>.<area>.planned` and `.realised`, the area's bytes in phase k as Plan.shares
+    planned them and as these bytes hold them, each in permille of the phase's span.
 
     A REPLAY RE-STATES THE GATES AND KEEPS THE COUNTERS, and that split is the whole point of having
     both fields. The bytes are the first draw's and so is every reading about them; but "did THIS
@@ -1059,13 +1078,37 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
     index tuples in Plan order, computed here because the schedule is; the root hands their union to
     FAB.manage at each pass as area ids. Neither moves a byte of the stream.
 
+    THE SPLIT EACH PHASE IS LAID IN, Plan.shares, UNDER EVERY LAW (2026-09-28, register §8 3.3;
+    docs/04_CONTRACT.md Q-DATA-10): per phase, (area index, bytes) pairs summing to the phase's
+    span. Under 'planned' and 'uniform' it is the scheduled split above, per phase, and
+    Plan.per_area_draw is its sum over the phases, exactly as before it existed.
+    THE 'replay' LAW (Proposal 04 §1 item 2; register 04-Q1, 04-Q4, O9, O16), BUILT OFF. A phase k
+    with a faded area -- Plan.faded[k], plus Plan.parent_faded from window 0 at dat.rehearse_parent,
+    the pair in Plan.replay_faded[k] -- gives round(dat.replay_share x span) bytes to its faded
+    areas, split evenly; at dat.replay_newest > 0 the newest-arrived live area (the latest first
+    live phase, ties to the last in Plan order) takes round((replay_share + replay_newest) x span)
+    minus that; the other live areas split the rest evenly. Every rounding is half to even on the
+    DECIMAL the lever holds (Fraction(repr(value)): 0.07 of a 150-byte phase is 10.5 and rounds to
+    10, where the float product 10.500000000000002 rounds to 11) and every remainder falls on the
+    first areas in Plan order, so the targets are integers that sum to the span and a hand can
+    recompute them. A phase with no faded area is 'planned' and reads neither share. replay_share +
+    replay_newest above 1 is refused by name: no phase can give away more bytes than it has.
+    Plan.per_area_draw is then the replay targets' sum, and because draw_stream truncates every
+    segment to its area's target, the two exposure gates stay EXACT under 'replay' (04 §1 item 2) --
+    the caveat names it so. A faded phase whose only live area is the newest gives it the whole live
+    remainder: the boost has no other live area to take bytes from. dat.rehearse_parent has NO
+    EFFECT under 'planned' or 'uniform' (04-Q4), and Plan.parent_faded is the same reading either
+    way: FAB's count reads it whatever the law.
+
     RECEIVES: epochs <- RUN.epochs; win_tokens <- LM.ctx; bytes_per_token <- TOK, measured by
     derive.bytes_per_token after build_vocabulary. All three are arguments: bytes_per_token cannot
     be a wire (measured after freeze, the reason assemble.NOT_WIRES gives for the SIG width).
     RETURNS: Plan.
 
     LEVERS READ: phase_sched, phases, phase_live, stream_bytes, seg_min, seg_max, exposure_max,
-                 exposure_skew, draw
+                 exposure_skew, draw, replay_share, replay_newest (both only under 'replay'),
+                 rehearse_parent (under every law, for its Gate's reason; it moves bytes only under
+                 'replay')
     WIRES READ: none
     DID IT FIRE: data.phase_resolved, data.protocol_named (the recognised protocol, printed by
                  name -- one of the four, never blank), data.phase_name_resolved (entries given as
@@ -1076,11 +1119,27 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
                  only where a parent record was restored and ABSENT on a fresh run: the areas the
                  lineage drew that no phase of this run makes live),
                  Gate data.exposure_max, Gate data.exposure_skew -- EXACT under the shipped
-                 DATA_DRAW="planned" and a PREDICTION under "uniform", where the run trains on a
-                 random draw from the scheduled split that deviated by up to 47.9% per area over
-                 eight seeds. The caveat rides on the gate's `reason` and not on its name, so a
-                 report can be grepped across both arms (ISSUES P1-H58, ruled),
-                 Gate data.splice_window
+                 DATA_DRAW="planned" and under "replay" (2026-09-28), and a PREDICTION under
+                 "uniform", where the run trains on a random draw from the scheduled split that
+                 deviated by up to 47.9% per area over eight seeds. The caveat rides on the gate's
+                 `reason` and not on its name, so a report can be grepped across every arm (ISSUES
+                 P1-H58, ruled),
+                 Gate data.splice_window,
+                 data.replay.fixed_phases (the phases the 'replay' law lays: a faded area and a
+                 nonzero span), data.replay.bytes (the bytes per epoch it gives faded areas) --
+                 both ABSENT unless DATA_DRAW=replay, and 0 there when no phase has a faded area --
+                 and data.replay.newest_boosted (the faded phases whose newest-arrived live area took
+                 DATA_REPLAY_NEWEST beside another live area; ABSENT unless DATA_DRAW=replay with
+                 DATA_REPLAY_NEWEST above 0, where the boost is armed), Gate data.replay
+                 (UNREACHABLE naming DATA_DRAW under 'planned' and 'uniform'; its value the fixed
+                 phases, against the phase count), data.rehearse_parent.areas (the parent areas the
+                 draw rehearses from window 0; ABSENT unless DATA_DRAW=replay at
+                 DATA_REHEARSE_PARENT=1 on a resume, the one configuration that arms it), Gate
+                 data.rehearse_parent (UNREACHABLE at DATA_REHEARSE_PARENT=0, under 'planned' or
+                 'uniform' where it has no effect, and on a fresh run, which has no parent record;
+                 its value the rehearsed areas, against the lineage's drawn areas this run declares)
+                 -- all six added 2026-09-28 (Q-DATA-10), and both Gates printed at R in the
+                 root's DATA(plan.gates) row
     """
     dat = dat.owned_by("DATA")
 
@@ -1114,7 +1173,9 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
     # value under which the startup gate is EXACT, and a startup gate is the only thing that can
     # refuse a bad configuration BEFORE it spends the GPU time." A bound that no value can cross
     # gives back exactly what D8 paid for -- the gate becomes untestable again, and this time the
-    # report says "armed" rather than carrying a caveat.
+    # report says "armed" rather than carrying a caveat. (Since 2026-09-28 'replay' is exact the same
+    # way, Q-DATA-10, so the refusal protects it too; it is built OFF, and 'planned' stays the
+    # default by D8 and register O16.)
     #
     # WHAT IS NOT REFUSED, AND IT IS MEASURED RATHER THAN ASSUMED. -inf AND 0 ARE LEFT ALONE ON BOTH
     # LEVERS. They are the "flag every plan" configuration, and on both the arithmetic and the
@@ -1171,7 +1232,8 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
             f"DATA_DRAW defaults to 'planned' because, in data/levers.py::DATALevers's own words, "
             f"that 'is the only value under which the startup gate is EXACT, and a startup gate is "
             f"the only thing that can refuse a bad configuration BEFORE it spends the GPU time' -- a "
-            f"bound nothing can cross hands that back. NEITHER LEVER DECLARES A NON-FINITE MEANING: "
+            f"bound nothing can cross hands that back ('replay', built OFF on 2026-09-28, is exact "
+            f"the same way, and the bound guards it too). NEITHER LEVER DECLARES A NON-FINITE MEANING: "
             f"data/levers.py::DATALevers says only 'above which the data plan is flagged' for "
             f"exposure_max and 'above which the data plan is flagged as imbalanced' for "
             f"exposure_skew, and there is no inf branch anywhere in this file. WHAT IS STILL "
@@ -1256,14 +1318,108 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
     bounds = tuple((round(k * total / n_phases), round((k + 1) * total / n_phases))
                    for k in range(n_phases))
 
-    per_area_draw = {n: 0 for n in names}
+    # THE FADED SETS, READ OFF THE SCHEDULE AT STARTUP (2026-09-28, register §8 3.1, NEW-10 and C37;
+    # docs/04_CONTRACT.md Q-FAB-18). An area has FADED in phase k when some phase before k had it
+    # live and phase k does not: the set FAB.manage counts culls and merges of experts against, and
+    # the set §8 3.3's 'replay' draw gives its share to (below). Accumulated phase by phase, so an
+    # area that fades, returns and fades again is faded exactly in the phases it is absent from after
+    # it was first live. Sorted by index, which is Plan order, so no reader iterates a set. (Computed
+    # before the split since 2026-09-28, Q-DATA-10: the 'replay' targets are cut from it.)
+    _seen, _faded = set(), []
+    for live in schedule:
+        _faded.append(tuple(sorted(_seen - set(live))))
+        _seen |= set(live)
+    faded = tuple(_faded)
+    # AND THE LINEAGE'S: an area this run declares, which the resumed lineage's streams DREW from
+    # (Areas.drawn, filled by restore_stream_state one row above this one), and which NO phase of
+    # this schedule makes live -- a pure-add child's parent areas, faded from its first window. A
+    # DECLARED AREA IS NOT A DRAWN ONE (Q-FAB-18's review): this read Areas.parent_names, every area
+    # the record declares, so a parent over "eng,py" that scheduled eng alone left py faded in its
+    # continuing child -- whose schedule is the parent's -- and that child's passes were handed a
+    # set the uninterrupted run's never were. This run's own draws come after this call, and each is
+    # of an area some phase of this schedule makes live, so they could not enter it either way. A
+    # recorded area this run does not declare cannot reach here: restore_stream_state refuses it.
+    _parent = {str(n) for n in (getattr(areas, "drawn", None) or ())}
+    parent_faded = tuple(i for i, n in enumerate(names) if n in _parent and i not in _seen)
+
+    # THE SPLIT EACH PHASE IS LAID IN, Plan.shares, UNDER EVERY LAW (2026-09-28, register §8 3.3;
+    # docs/04_CONTRACT.md Q-DATA-10). The scheduled split first, phase by phase, by the one rule
+    # draw_stream's planned budget recomputes: the phase's bytes split evenly among its live areas,
+    # with the remainder on the first, so the per-area bytes sum to the phase span exactly. It was
+    # summed straight into per_area_draw until this date; per_area_draw is now its sum over the
+    # phases, the same numbers in the same key order, so under 'planned' and 'uniform' nothing
+    # this function returns moved.
+    law = str(dat.draw)
+    cuts = []
     for (lo, hi), live in zip(bounds, schedule):
         span = hi - lo
+        cut = {}
         for j, idx in enumerate(live):
-            # The phase's bytes split evenly among its live areas, with the remainder on the first
-            # so the per-area totals sum to the phase span exactly.
-            share = span // len(live) + (1 if j < span % len(live) else 0)
-            per_area_draw[names[idx]] += share
+            cut[idx] = cut.get(idx, 0) + span // len(live) + (1 if j < span % len(live) else 0)
+        cuts.append(cut)
+
+    # THE 'replay' LAW (Proposal 04 §1 item 2; register 04-Q1, 04-Q4, O9, O16), BUILT OFF. Each
+    # phase with a faded area -- Plan.faded[k], and Plan.parent_faded from window 0 at
+    # DATA_REHEARSE_PARENT=1 -- is re-cut: DATA_REPLAY_SHARE of its bytes to those areas, split
+    # evenly, DATA_REPLAY_NEWEST to the newest-arrived live area where set, the rest evenly over the
+    # other live areas (_replay_cut). A phase with no faded area keeps the scheduled split above and
+    # draw_stream lays it by the planned law, verbatim. THE TWO SHARES ARE READ ONLY UNDER 'replay'
+    # -- here, and by its caveat and Gate below -- so under 'planned' and 'uniform' neither is read
+    # and the cut above is the whole of the split.
+    # rehearse_parent is read under every law, for its Gate below: it has NO EFFECT but under
+    # 'replay' (04-Q4), and Plan.parent_faded is the same reading either way, because FAB's
+    # faded-area count reads it whatever the law.
+    rehearse = bool(dat.rehearse_parent)
+    replay_faded = tuple(() for _ in schedule)
+    n_fixed = n_boosted = faded_bytes = 0
+    if law == "replay":
+        share, newest_share = _exact_share(dat.replay_share), _exact_share(dat.replay_newest)
+        if share + newest_share > 1:
+            # REFUSED BY NAME, BEFORE A BYTE IS CUT. A phase cannot give its faded areas and its
+            # newest area more than all of its bytes, and a clamp would lay a split nobody asked for
+            # while the banner printed the one they did.
+            raise LeverError(
+                f"DATA: DATA_REPLAY_SHARE={float(dat.replay_share)} and "
+                f"DATA_REPLAY_NEWEST={float(dat.replay_newest)} sum to {float(share + newest_share)}, "
+                f"above 1. Under DATA_DRAW=replay each phase with a faded area gives the first to its "
+                f"faded areas and the second to its newest-arrived live area, and the other live "
+                f"areas split what is left, so the two together are at most the whole phase. Lower "
+                f"one of them (04 section 1 item 2's control is 0.27 with 0.34, leaving 0.39 for the "
+                f"other live areas).")
+        # PARENT AREAS ARE FADED FROM WINDOW 0 at DATA_REHEARSE_PARENT=1 (04-Q4, O9). They are live in
+        # no phase, so no phase's own faded set holds them and the two never overlap.
+        from_parent = parent_faded if rehearse else ()
+        replay_faded = tuple(tuple(sorted(set(f) | set(from_parent))) for f in faded)
+        # WHO ARRIVED LAST: each area's first live phase, read off this run's schedule. Ties go to the
+        # last area in Plan order -- an add-an-area run appends its new area (Q-DATA-9) -- and
+        # max() over the phase's live TUPLE with an explicit key is the whole rule: no set, no dict
+        # order.
+        first = {}
+        for k, live in enumerate(schedule):
+            for i in live:
+                first.setdefault(i, k)
+        for k, ((lo, hi), live) in enumerate(zip(bounds, schedule)):
+            if not replay_faded[k]:
+                continue
+            span = hi - lo
+            newest = max(live, key=lambda i: (first[i], i))
+            # THE BOOST NEEDS ANOTHER LIVE AREA TO TAKE BYTES FROM. A phase whose only live area is
+            # the newest gives it the whole live remainder, 1 - DATA_REPLAY_SHARE, whatever the boost.
+            boost = newest_share > 0 and len(live) > 1
+            cuts[k] = _replay_cut(span, replay_faded[k], live, newest if boost else None, share,
+                                  newest_share)
+            faded_bytes += sum(cuts[k][i] for i in replay_faded[k])
+            if span > 0:
+                n_fixed += 1
+                n_boosted += 1 if boost else 0
+    # (area index, bytes) pairs in Plan order, per phase: the record's form, which a reader walks in
+    # one order whatever order the cut was built in.
+    shares = tuple(tuple(sorted(cut.items())) for cut in cuts)
+
+    per_area_draw = {n: 0 for n in names}
+    for cut in shares:
+        for idx, n_bytes in cut:
+            per_area_draw[names[idx]] += n_bytes
 
     # A WHOLE-RUN QUANTITY, WHICH IS THE POINT. 60 MB of English beside 8 MB of Python draws 2 MB
     # from each per epoch -- quiet -- while over 8 epochs the added area is seen 2.1x and the
@@ -1284,14 +1440,25 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
     #              about the wrong number -- in the guard against P3-H22, where an added area seen
     #              2.1x while the original was 28% sampled made "adding py cost eng X b/B"
     #              indistinguishable from "py was memorised and eng was skimmed".
-    # ONE GATE NAME UNDER BOTH LAWS. A report whose keys change with the configuration cannot be
+    #   replay  -> (2026-09-28, Q-DATA-10) draw_stream truncates every segment to its area's replay
+    #              target, so `per_area_draw` -- the targets' sum -- IS what the run trains on, and the
+    #              gate is a MEASUREMENT again, as 04 section 1 item 2 requires.
+    # ONE GATE NAME UNDER EVERY LAW. A report whose keys change with the configuration cannot be
     # grepped across arms, which costs more than the caveat it would save, so the caveat rides on
     # the gate's own `reason` -- which spine/gate.py prints on every arm for exactly this case.
-    law = str(dat.draw)
-    caveat = "" if law == "planned" else (
-        "DATA_DRAW=uniform: this is the SCHEDULED split and the run trains on a random draw from "
-        "it (measured deviation up to 47.9% per area), so read it as a prediction and read "
-        "Stream.per_area_drawn for what happened.")
+    if law == "planned":
+        caveat = ""
+    elif law == "uniform":
+        caveat = (
+            "DATA_DRAW=uniform: this is the SCHEDULED split and the run trains on a random draw from "
+            "it (measured deviation up to 47.9% per area), so read it as a prediction and read "
+            "Stream.per_area_drawn for what happened.")
+    else:
+        caveat = (
+            f"DATA_DRAW=replay: this split is EXACT, as under 'planned' -- the replay law's per-phase "
+            f"targets (Plan.shares), DATA_REPLAY_SHARE={float(dat.replay_share)} of each phase with "
+            f"a faded area to its faded areas, and draw_stream truncates every segment to its "
+            f"area's target, so Stream.per_area_drawn equals it byte for byte.")
     # COMPUTED AT ONE AREA TOO. Both old reads sat inside `if DATA_MODE == "real" and NP > 1`, so
     # the check was unavailable on exactly the single-area goal-A configuration where accidental
     # repetition is easiest to reach (ISSUES P1-L21).
@@ -1329,7 +1496,9 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
     # Stated here rather than left implicit, the way exposure_max/exposure_skew's `caveat` already
     # states the same law's effect on THOSE two gates: a "did not fire" reading near 8.0 is
     # optimistic under either law and MORE optimistic under the shipped one, and should be
-    # corroborated by inspecting the actual Stream draw rather than trusted alone.
+    # corroborated by inspecting the actual Stream draw rather than trusted alone. UNDER 'replay'
+    # (2026-09-28) the same truncation runs to each area's replay target, and a faded area's
+    # smaller target cuts its segments shorter still, so the sentence is added there.
     splice_caveat = (
         "data.splice_window is a STARTUP PREDICTION from the declared seg_min/seg_max mean, never "
         "measured from the actual draw (data_plan runs before a single byte is drawn). Under "
@@ -1339,8 +1508,76 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
         "'armed, did not fire' here read true on 8/8 seeds while the realized windows-per-segment "
         "was already below 8.0 on all 8; the gap widens with phase count. A reading near the "
         "threshold should be corroborated against the actual Stream draw, not trusted alone.")
+    if law == "replay":
+        splice_caveat += (
+            " DATA_DRAW=replay truncates the same way, each segment to its area's replay target, and "
+            "a faded area's smaller target cuts its segments shorter still.")
     gates.append(Gate("data.splice_window", windows_per_segment < 8.0,
                       round(windows_per_segment, 3), 8.0, reason=splice_caveat))
+
+    # THE 'replay' LAW'S OWN GATE (2026-09-28, Q-DATA-10). UNREACHABLE under the two laws that lay
+    # no fixed rehearsal share, naming the lever; under 'replay' its value is the phases the law
+    # lays against the phase count, and armed-but-zero is the schedule with no faded phase, which
+    # 'replay' lays as 'planned' throughout.
+    if law != "replay":
+        gates.append(Gate(
+            "data.replay", False, None, n_phases, reachable=False,
+            reason=f"DATA_DRAW={law}: the fixed-rehearsal law lays no phase on this configuration, so "
+                   f"'phases laid under it' is not a number this run has; DATA_DRAW=replay gives each "
+                   f"phase with a faded area a fixed DATA_REPLAY_SHARE of its bytes for its faded "
+                   f"areas (Proposal 04 section 1 item 2, built OFF)"))
+    else:
+        laid = "; ".join(
+            f"phase {k}: {', '.join(names[i] for i in replay_faded[k])} "
+            f"{sum(cuts[k][i] for i in replay_faded[k])} of {bounds[k][1] - bounds[k][0]} bytes"
+            for k in range(n_phases) if replay_faded[k])
+        boosted = (f", DATA_REPLAY_NEWEST={float(dat.replay_newest)} to its newest-arrived live area "
+                   f"in {n_boosted} of them" if float(dat.replay_newest) > 0 else "")
+        gates.append(Gate(
+            "data.replay", n_fixed > 0, n_fixed, n_phases,
+            reason=(f"DATA_REPLAY_SHARE={float(dat.replay_share)} of each phase with a faded area goes "
+                    f"to its faded areas{boosted}, laid by deficit and truncated to each area's "
+                    f"target -- {laid}" if n_fixed else
+                    "no phase of this schedule has a faded area (every area live in an earlier "
+                    "phase is live again, and no parent area is rehearsed), so every phase is laid "
+                    "by the planned law, byte for byte as DATA_DRAW=planned lays it")))
+
+    # THE PARENT'S AREAS (2026-09-28, register 04-Q4 and O9; Q-DATA-10). Three arms cannot rehearse
+    # one, each its own sentence: the lever off (every training and measurement run), a law with no
+    # rehearsal share (04-Q4: no effect under 'planned'), and a fresh run, which has no parent record.
+    # Armed, the value is the areas made faded from window 0 against the lineage's drawn areas this
+    # run declares, and armed-but-zero is a child that schedules every one of them.
+    lineage = [i for i, n in enumerate(names) if n in _parent]
+    has_parent = bool(getattr(areas, "parent_names", None))
+    if not rehearse:
+        gates.append(Gate(
+            "data.rehearse_parent", False, None, len(lineage), reachable=False,
+            reason="DATA_REHEARSE_PARENT=0 (the shipped value, and the value of every training and "
+                   "measurement run, register O9): no area of a resumed lineage is made faded from "
+                   "window 0, so none is rehearsed; at 1 with DATA_DRAW=replay the lineage's drawn "
+                   "areas this schedule never makes live share each phase's DATA_REPLAY_SHARE"))
+    elif law != "replay":
+        gates.append(Gate(
+            "data.rehearse_parent", False, None, len(lineage), reachable=False,
+            reason=f"DATA_REHEARSE_PARENT=1 has no effect under DATA_DRAW={law} (register 04-Q4): "
+                   f"only the 'replay' law gives faded areas a share of a phase, so a parent area "
+                   f"this schedule never makes live draws no byte; DATA_DRAW=replay rehearses it"))
+    elif not has_parent:
+        gates.append(Gate(
+            "data.rehearse_parent", False, None, len(lineage), reachable=False,
+            reason="no parent record: a fresh run, whose areas carry no lineage, so there is no "
+                   "parent area to rehearse; a run resumed from a checkpoint (CKPT_RESUME) reads "
+                   "the areas its lineage drew off the record"))
+    else:
+        gates.append(Gate(
+            "data.rehearse_parent", len(parent_faded) > 0, len(parent_faded), len(lineage),
+            reason=(f"DATA_DRAW=replay at DATA_REHEARSE_PARENT=1: "
+                    f"{', '.join(names[i] for i in parent_faded)} -- drawn by the lineage and live in "
+                    f"no phase of this schedule -- faded from window 0, sharing "
+                    f"DATA_REPLAY_SHARE={float(dat.replay_share)} of every phase" if parent_faded else
+                    f"every area the lineage drew that this run declares "
+                    f"({', '.join(names[i] for i in lineage) or 'none'}) is live in some phase of "
+                    f"this schedule, so none is faded from window 0")))
 
     # PHASE_NAME_RESOLVED, CARRIED OUT RATHER THAN COMPUTED AND DISCARDED (audit finding, confirmed
     # live: n_by_name was incremented above and never read again anywhere in this file -- Plan had
@@ -1351,40 +1588,73 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
     counters = {"data.phase_resolved": len(schedule), "data.protocol_named": protocol,
                 "data.phase_name_resolved": n_by_name}
 
-    # THE FADED SETS, READ OFF THE SCHEDULE AT STARTUP (2026-09-28, register §8 3.1, NEW-10 and C37;
-    # docs/04_CONTRACT.md Q-FAB-18). An area has FADED in phase k when some phase before k had it
-    # live and phase k does not: the set FAB.manage counts culls and merges of experts against, and
-    # the set §8 3.3's 'replay' draw will give its share to. Accumulated phase by phase, so an area
-    # that fades, returns and fades again is faded exactly in the phases it is absent from after it
-    # was first live. Sorted by index, which is Plan order, so no reader iterates a set.
-    _seen, _faded = set(), []
-    for live in schedule:
-        _faded.append(tuple(sorted(_seen - set(live))))
-        _seen |= set(live)
-    faded = tuple(_faded)
-    # AND THE LINEAGE'S: an area this run declares, which the resumed lineage's streams DREW from
-    # (Areas.drawn, filled by restore_stream_state one row above this one), and which NO phase of
-    # this schedule makes live -- a pure-add child's parent areas, faded from its first window. A
-    # DECLARED AREA IS NOT A DRAWN ONE (Q-FAB-18's review): this read Areas.parent_names, every area
-    # the record declares, so a parent over "eng,py" that scheduled eng alone left py faded in its
-    # continuing child -- whose schedule is the parent's -- and that child's passes were handed a
-    # set the uninterrupted run's never were. This run's own draws come after this call, and each is
-    # of an area some phase of this schedule makes live, so they could not enter it either way. A
-    # recorded area this run does not declare cannot reach here: restore_stream_state refuses it.
-    _parent = {str(n) for n in (getattr(areas, "drawn", None) or ())}
-    parent_faded = tuple(i for i, n in enumerate(names) if n in _parent and i not in _seen)
-    # BOTH ARE PRINTED BY NAME, as READINGS. data.phase_faded on every run (phase 0's is always
-    # empty, and a stationary or pure-add schedule's are all empty, which is a statement about the
-    # schedule and not silence); data.parent_faded only where there is a parent record to read, so
-    # a fresh run leaves it ABSENT rather than printing an empty list that would read "a parent was
-    # checked and nothing it trained was left out".
+    # BOTH FADED SETS ARE PRINTED BY NAME, as READINGS. data.phase_faded on every run (phase 0's is
+    # always empty, and a stationary or pure-add schedule's are all empty, which is a statement about
+    # the schedule and not silence); data.parent_faded only where there is a parent record to read,
+    # so a fresh run leaves it ABSENT rather than printing an empty list that would read "a parent
+    # was checked and nothing it trained was left out".
     counters["data.phase_faded"] = [[names[i] for i in f] for f in faded]
     if getattr(areas, "parent_names", None):
         counters["data.parent_faded"] = [names[i] for i in parent_faded]
+    # THE 'replay' LAW'S COUNTS, ABSENT WHERE IT CANNOT RUN (2026-09-28, Q-DATA-10). The phases it
+    # lays and the bytes per epoch it gives faded areas are PRESENT at DATA_DRAW=replay -- 0 where no
+    # phase has a faded area -- and ABSENT under 'planned' and 'uniform'. The newest-area boost is
+    # armed only at DATA_REPLAY_NEWEST above 0 (04's table: OFF at 0), so its count is ABSENT at 0 as
+    # well, and 0 where it is armed and no faded phase had another live area to take bytes from.
+    if law == "replay":
+        counters["data.replay.fixed_phases"] = n_fixed
+        counters["data.replay.bytes"] = faded_bytes
+        if float(dat.replay_newest) > 0:
+            counters["data.replay.newest_boosted"] = n_boosted
+        # THE PARENT'S COUNT, armed only on a resume at DATA_REHEARSE_PARENT=1 -- the configuration
+        # its Gate reads reachable on -- and ABSENT everywhere else.
+        if rehearse and has_parent:
+            counters["data.rehearse_parent.areas"] = len(parent_faded)
 
     return Plan(protocol=protocol, schedule=schedule, phase_bounds=bounds,
                 per_area_draw=per_area_draw, exposure=exposure, gates=tuple(gates),
-                counters=counters, faded=faded, parent_faded=parent_faded)
+                counters=counters, faded=faded, parent_faded=parent_faded, shares=shares,
+                replay_faded=replay_faded)
+
+
+def _exact_share(value):
+    """A DATA share lever as the exact DECIMAL it was written as: Fraction(repr(float(value))).
+
+    UNIT: fraction in, Fraction out. WHY NOT THE FLOAT (2026-09-28, Q-DATA-10): the 'replay' targets
+    are round(share x span) bytes, rounded half to even, and a float's last bit decides a tie --
+    0.07 of a 150-byte phase is 10.5, which rounds to 10, while the float product
+    10.500000000000002 rounds to 11. repr() is the shortest decimal that round-trips, so it is the
+    value the operator wrote (DATA_REPLAY_SHARE=0.27 is 27/100), and every target is then a number a
+    hand can recompute. The lever's domain (0.0, 1.0) has already refused nan and the infinities.
+    """
+    return Fraction(repr(float(value)))
+
+
+def _replay_cut(span, faded, live, newest, share, newest_share):
+    """One faded phase's targets under 'replay': {area index: bytes}, summing to `span` exactly.
+
+    UNIT: span = bytes; share, newest_share = exact fractions of the span (_exact_share); out =
+    bytes per area. The faded areas get round(share x span), split evenly with the remainder on the
+    first in `faded`'s order (Plan order); `newest`, when given, gets round((share + newest_share) x
+    span) minus that; the other live areas, in Plan order, split what is left evenly the same way.
+    `newest` is None when the boost is off or has no other live area to take bytes from, and then
+    every live area splits the live remainder. Rounding is monotone and share + newest_share is at
+    most 1 (data_plan refuses above), so no target is negative and the three parts are the span.
+    """
+    cut = {}
+    to_faded = round(share * span)
+    for j, i in enumerate(faded):
+        cut[i] = to_faded // len(faded) + (1 if j < to_faded % len(faded) else 0)
+    rest = sorted(live)
+    to_live = span - to_faded
+    if newest is not None:
+        to_newest = round((share + newest_share) * span) - to_faded
+        cut[newest] = to_newest
+        rest = [i for i in rest if i != newest]
+        to_live -= to_newest
+    for j, i in enumerate(rest):
+        cut[i] = to_live // len(rest) + (1 if j < to_live % len(rest) else 0)
+    return cut
 
 
 def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
@@ -1403,12 +1673,27 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
         shipped defaults, about 4% of them, down to ~171 bytes). Both are the price of the realized
         split matching the scheduled one, and they are stated here rather than discovered.
       "uniform" -- uniformly among all the phase's live areas, every segment a full
-        randint(seg_min, seg_max). This is the law every recorded result was taken under. dat.seg_contig=False seeks to a random offset inside
-    the area body each segment; True reads the body in order from a cursor that PERSISTS ACROSS
-    EPOCHS, so an English-only run has only the text's own boundaries rather than discontinuities
-    we manufacture every 8-20 KB (self_organize.py:1291-1298 -- eng_only reported 71 domains partly
-    by counting our own seek points). The default is False and is a LITERAL, not a computed
-    default: the shipped `1 if NP == 1 else 0` resolved to 0 on both shipped configurations.
+        randint(seg_min, seg_max). This is the law every recorded result was taken under.
+      "replay" (2026-09-28, register §8 3.3; docs/04_CONTRACT.md Q-DATA-10; built OFF) -- a phase
+        whose Plan.replay_faded entry is EMPTY is laid by the planned law above, verbatim, so a
+        schedule with no faded phase draws exactly what "planned" draws and phase 0 of any schedule
+        without parent rehearsal is byte-identical to it. A phase with a faded area is laid by
+        DEFICIT against its Plan.shares targets (Proposal 04 section 1 item 2): each segment goes to
+        the area with the largest target x (phase bytes laid so far) - span x (its bytes laid so
+        far) -- the scaled form of "target share x phase bytes so far - realised", in integers --
+        among the areas with target left, the first in Plan order on a tie, and it is truncated to
+        that area's remaining target as "planned" truncates to its budget. So the realised split
+        is the planned one byte for byte, the rehearsal bytes are spread through the phase rather
+        than front-loaded (the uniform-among-budgets pick of "planned" would lay a small faded
+        budget early), and the choice takes no draw: segment lengths and offsets come from the
+        same data.stream.e<epoch> stream and nothing iterates a set or a dict's hash order, so
+        the stream is the same under every PYTHONHASHSEED (04's minor m1).
+    dat.seg_contig=False seeks to a random offset inside the area body each segment; True reads the
+    body in order from a cursor that PERSISTS ACROSS EPOCHS, so an English-only run has only the
+    text's own boundaries rather than discontinuities we manufacture every 8-20 KB
+    (self_organize.py:1291-1298 -- eng_only reported 71 domains partly by counting our own seek
+    points). The default is False and is a LITERAL, not a computed default: the shipped
+    `1 if NP == 1 else 0` resolved to 0 on both shipped configurations.
 
     THE PHASE FILL IS EXACT: phase k covers [round(k*B/P), round((k+1)*B/P)) and the final segment
     of a phase is TRUNCATED to the bound rather than overshooting it by a whole 700-1800 byte
@@ -1448,6 +1733,14 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
                  data.segment (a READING in `counters`: how many segments these bytes are spliced
                  from -- as true of a replayed Stream as of the draw that made it, so it is not a
                  gate),
+                 data.share.p<k>.<area>.planned and .realised (READINGS in `counters`, under every
+                 law, 2026-09-28, Q-DATA-10: SR0's per-phase share gauges, the area's bytes in phase
+                 k as Plan.shares planned them and as these bytes hold them, in permille of the
+                 phase's span, rounded half up, for every area the phase makes live, gives a target
+                 or drew from; a phase of no bytes has no share to read and prints none. Equal under
+                 "planned" and "replay" by construction, and under "uniform" the difference is the
+                 draw's error bar, per phase. A reading about the bytes, so the resample-off
+                 replay below carries them over with data.segment),
                  Gate data.contig_wrap (unreachable at seg_contig=False, with the gate arithmetic:
                  a random-offset seek is bounded by the body it reads and there is no cursor to
                  wrap, so 0 there is not a count),
@@ -1566,14 +1859,26 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
     #     this project was taken under, and it is kept for exactly that reason -- but under it the
     #     realized split is a DRAW from the scheduled one, and the worst per-area deviation measured
     #     over eight seeds at the shipped defaults was 47.9%.
+    #   replay (2026-09-28, Q-DATA-10; built OFF) lays each phase Plan.replay_faded names by DEFICIT
+    #     against the phase's Plan.shares targets, and every other phase by the planned law,
+    #     verbatim. Each phase is laid by ONE of three branches, its `mode`; 'planned' and 'uniform'
+    #     name their own mode in every phase, so the two laws run the statements, and take the
+    #     draws, they took before 'replay' existed.
     law = str(dat.draw)
-    for (lo, hi), live in zip(plan.phase_bounds, plan.schedule):
+    fixed_by_phase = tuple(plan.replay_faded) if law == "replay" else ()
+    # SR0's SHARE GAUGES (2026-09-28, Q-DATA-10), under every law: per phase, per area, the bytes
+    # Plan.shares planned beside the bytes these segments laid, in permille of the phase. Readings
+    # tallied from the chunks below; nothing here draws, and no branch reads them.
+    gauges = {}
+    for k, ((lo, hi), live) in enumerate(zip(plan.phase_bounds, plan.schedule)):
         # THE PLANNED LAW'S REMAINING BUDGET, per area, in the same shares data_plan computed. It is
         # recomputed here from the phase span rather than read off Plan.per_area_draw because that
         # field is the WHOLE-RUN total across every phase an area appears in; taking a phase's share
         # out of a whole-run total is the kind of arithmetic that silently drifts. Both use the same
         # rule -- floor division with the remainder on the first live areas -- so the two agree by
-        # construction and not by coincidence.
+        # construction and not by coincidence. (Since 2026-09-28 Plan.shares states each phase's
+        # split directly, by that rule; the budget is still recomputed here, so the planned law runs
+        # the statements it ran before, and tests/test_draw.py holds the two equal.)
         #
         # ACCUMULATED, NOT ASSIGNED, AND THE FIRST VERSION ASSIGNED (found by the H58 review). A phase
         # whose live list repeats an index -- schedule ((2, 0, 0, 1),) -- gave area 0 two shares in
@@ -1586,6 +1891,16 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
         budget = {}
         for j, idx in enumerate(live):
             budget[idx] = budget.get(idx, 0) + span // len(live) + (1 if j < span % len(live) else 0)
+        # THE PHASE'S LAW. Under 'replay', a phase with a faded area is laid by deficit and every
+        # other phase by the planned law; the other two laws are their own mode in every phase.
+        fixed = fixed_by_phase[k] if k < len(fixed_by_phase) else ()
+        mode = "deficit" if fixed else ("planned" if law == "replay" else law)
+        # THE PLANNED BYTES, per area, as Plan.shares states them -- the deficit law's targets, and
+        # every law's gauge. A Plan built without shares (none is: data_plan fills them under every
+        # law) falls back to this phase's scheduled budget, the same rule, taken before the loop
+        # spends it.
+        target = dict(plan.shares[k]) if k < len(plan.shares) else dict(budget)
+        got = {}
         if len(out) < hi:
             # data.phase_entered, COUNTED AT THE ONE LINE THAT DECIDES IT. The `while` below runs
             # its body if and only if this is true, so this is the phase's entry and not a proxy for
@@ -1593,7 +1908,7 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
             # drift the gate below is armed against (ISSUES P1-L22).
             n_phase_entered += 1
         while len(out) < hi:
-            if law == "planned":
+            if mode == "planned":
                 # Uniform among the areas that still have budget, so the ORDER is random and the
                 # SHARES are not. An area drops out of the choice when its budget is spent.
                 avail = [i for i in live if budget[i] > 0]
@@ -1604,6 +1919,31 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
                     avail = list(live)
                     budget[avail[0]] = hi - len(out)
                 idx = avail[stream.randrange(len(avail))] if len(avail) > 1 else avail[0]
+            elif mode == "deficit":
+                # THE AREA FURTHEST BEHIND ITS TARGET SHARE OF THE BYTES LAID SO FAR (04 section 1
+                # item 2): target x laid - span x got is span x (target share x phase bytes so far -
+                # realised), kept in integers so no float decides an order. Only an area with target
+                # left may be chosen -- a spent area's deficit is negative, and an area whose target
+                # rounded to 0 would tie at 0 and be handed a zero-byte segment. Ties go to the
+                # first in Plan order, the order Plan.shares walks, and no rng draw is taken.
+                laid = len(out) - lo
+                idx, best = None, None
+                for i, t in plan.shares[k]:
+                    g = got.get(i, 0)
+                    if g >= t:
+                        continue
+                    lag = t * laid - span * g
+                    if best is None or lag > best:
+                        idx, best = i, lag
+                if idx is None:
+                    # UNREACHABLE BY CONSTRUCTION, and a refusal rather than a hang: data_plan's
+                    # targets sum to the phase span, so while the phase is short some area has
+                    # target left. A Plan whose shares do not is a Plan this draw cannot lay.
+                    raise CorpusError(
+                        f"DATA_DRAW=replay: phase {k} holds {len(out) - lo} of its {span} bytes and "
+                        f"no area has target left in Plan.shares {plan.shares[k]!r}, whose targets "
+                        f"must sum to the phase span. The Plan was not built by data_plan for this "
+                        f"configuration.")
             else:
                 idx = live[stream.randrange(len(live))] if len(live) > 1 else live[0]
             label = names[idx]
@@ -1618,11 +1958,16 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
             # describe. The floor is not a silent clamp of the operator's number: seg_min is refused
             # at startup below, and this line only guarantees progress for a bound that got here.
             want = max(1, want)
-            if law == "planned":
+            if mode == "planned":
                 # AND TRUNCATED TO THIS AREA'S REMAINING SHARE, which is what makes the realized
                 # split equal the scheduled one. A segment that overran its area's budget would put
                 # the difference on whichever area happened to be drawn next.
                 want = min(want, budget[idx])
+            elif mode == "deficit":
+                # THE SAME TRUNCATION, TO THE AREA'S REMAINING REPLAY TARGET (the critic's finding on
+                # the draft: a deficit rule that truncated only at the phase bound realised each
+                # area's bytes to within a segment, and the startup gates were exact no longer).
+                want = min(want, target[idx] - got.get(idx, 0))
             if contig:
                 # THE CURSOR PERSISTS ACROSS EPOCHS, so an English-only run has only the text's own
                 # boundaries rather than discontinuities we manufacture every 8-20 KB. eng_only
@@ -1657,8 +2002,17 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
             out += chunk
             labels.extend([label] * len(chunk))
             per_area[label] += len(chunk)
-            if law == "planned":
+            got[idx] = got.get(idx, 0) + len(chunk)
+            if mode == "planned":
                 budget[idx] -= len(chunk)
+        # THE PHASE'S GAUGES, in Plan order, for every area the phase makes live, gives a target or
+        # drew from. Permille of the span, rounded half up in integers; a phase of no bytes has no
+        # share to read and prints none, which is not a 0.
+        if span > 0:
+            for i, name in enumerate(names):
+                if i in live or target.get(i, 0) or got.get(i, 0):
+                    gauges[f"data.share.p{k}.{name}.planned"] = _permille(target.get(i, 0), span)
+                    gauges[f"data.share.p{k}.{name}.realised"] = _permille(got.get(i, 0), span)
 
     # THE LINEAGE'S DRAWN AREAS, IN PLACE (2026-09-28, Q-FAB-18's review): every area this draw took
     # a byte from, appended in Plan order where Areas.drawn does not hold it yet. stream_state
@@ -1682,8 +2036,10 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
     # A READING, NOT A GATE, and the docstring above says so in as many words: how many segments
     # these bytes are spliced from. It is a property of the BYTES, so it is still true when this
     # Stream is handed back for a later epoch under DATA_RESAMPLE=0 -- which is why the replay arm
-    # carries `counters` over unchanged and re-states only the gates.
+    # carries `counters` over unchanged and re-states only the gates. The share gauges are readings
+    # about the same bytes (2026-09-28, Q-DATA-10) and ride with it.
     counters = {"data.segment": n_seg}
+    counters.update(gauges)
 
     gates = []
     if n_seg:
@@ -1769,6 +2125,13 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
         key = id(areas)
         _REPLAY[key] = (weakref.ref(areas, lambda _ref, key=key: _REPLAY.pop(key, None)), st)
     return st
+
+
+def _permille(part, whole):
+    """`part` bytes of a `whole`-byte phase in permille, rounded half up, in integers: the unit of
+    draw_stream's share gauges (2026-09-28, Q-DATA-10). UNIT: bytes, bytes -> permille. `whole` is
+    a phase's span and is above 0 wherever this is called: a phase of no bytes prints no gauge."""
+    return (2000 * int(part) + int(whole)) // (2 * int(whole))
 
 
 def _replay_gates(dat, plan, cached, epoch):
@@ -2077,10 +2440,19 @@ def restore_stream_state(dat: Config, areas, state):
             # this run cannot score, so its ACROSS THE RUN BOUNDARY number has no counterpart. It is
             # counted separately from an arrival because "an area arrived" and "an area vanished"
             # are two different statements and only one of them is an experiment.
+            # AND IT STAYS REFUSED UNDER PARENT REHEARSAL (2026-09-28, register 04-Q4 and NEW-06;
+            # Q-DATA-10). DATA_REHEARSE_PARENT draws a parent area from its body, which this run
+            # reads only for an area it declares; the route that would carry one without its corpus
+            # -- NEW-06's replay reservoir in the checkpoint, register §8 4.5 -- is not built, and
+            # the message says so, so the operator is not left to look for it.
             areas.counters["data.area_vanished"] = areas.counters.get("data.area_vanished", 0) + 1
             _refuse(f"DATA: the checkpoint recorded area {name!r} and this run does not have it. "
                     f"The parent trained on text this run cannot score, so its across-the-boundary "
-                    f"number has no counterpart. Restore the area, or start a new run.")
+                    f"number has no counterpart. Restore the area, or start a new run. A parent "
+                    f"area is rehearsed (DATA_REHEARSE_PARENT, DATA_DRAW=replay) only from a body "
+                    f"this run reads, so declare it in DATA_AREAS with its corpus in place: the "
+                    f"replay reservoir that would carry it in the checkpoint when the corpus is gone "
+                    f"(register NEW-06, Proposal 05 section 8 row 4.5) is not built in this tree.")
         was, now = recorded[name], {
             "offset": int((areas.rng_holdout.get(name) or {}).get("offset", 0)),
             "size": int(areas.holdout_bytes.get(name, 0)),
