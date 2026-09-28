@@ -846,8 +846,9 @@ signature, on any path; `sig.encode_width_mismatch` must be 0 and a nonzero valu
 `load_state_dict` · `encoder_parameters` · `encoder_embedding`.
 
 **Wires read:** none. **Receives:** `width_units` (from `derive.signature_width_bytes`, computed
-once by the root — at a declared context widening from the PARENT's `LM_CTX`, so a widened child's
-encoder keeps the width it was trained at, Q-LM-15), `alphabet_size`, the unit stream,
+once by the root — from the `LM_CTX` the lineage's SIG was built at, `System.sig_ctx`, which
+`payload['LOOP']['sig_ctx']` carries across a widened lineage, so its encoder keeps the width it was
+trained at at every later resume, Q-LM-15 and its review), `alphabet_size`, the unit stream,
 `seen_units`, **`OptState.encoder`** — the
 encoder AdamW built by OPT, addressable by name as of 2026-09-02 (Q-OPT-7), where the whole
 `OptState` crossed before — `windows_since_boundary` ← DOM, `reservoir` ← DOM.
@@ -1051,8 +1052,12 @@ differs per field. **A missing field is a refusal, not a skip** — the comparis
 manifest's key set, so `if recorded and recorded != live` is not writable here. **One rule is
 conditional since 2026-09-28 (Q-LM-15):** `lm.ctx` and `lm.pos_max` are EXACT at the shipped
 `LM_CTX_WIDEN=0` and MAY_WIDEN at 1 — the live run's rule is the one applied, and the recording's
-own is never read — and the root reads `check_geometry`'s `GeometryReport.widened` for one field, an
-`lm.ctx` it widened, which is a declared widening.
+own is never read — and the root reads `check_geometry`'s `GeometryReport` for one field, `lm.ctx`:
+one it widened is a declared widening, and its recorded value is SIG's context wherever the
+checkpoint's `LOOP` carries no `sig_ctx` (Q-LM-15's review). **An EXACT refusal says what the rule
+decides** — "so it may not move at all: this run admits no prefix of it" — and the field's why says
+the rest; it said every EXACT field "is an inner dimension and no prefix of it is valid" until
+Q-LM-15's review, which `lm.ctx`'s why, admitting a larger `LM_CTX` at 1, denied beside it.
 **The suffix applies to the whole snapshot**, tokenizer bytes included (M46).
 **So does the one kept generation** (2026-09-26): `ckpt.pt<suffix>.prev`'s vocabulary is
 `<base><suffix>.prev.dyntok.json`, rotated by TOK, which owns the file, inside `save_vocabulary`.
@@ -1850,7 +1855,9 @@ widening: a larger `LM_CTX` passes, a smaller one is refused, and `lm.pos_max` t
 because it is the local wire from it (it printed the environment name `LM_POS_MAX`, which nothing
 reads, and prints `LM_CTX (LM.d_pos_max)` now, the name `LM.load_state` already used). The rule
 applied is the live run's; the recording's own rule is carried and never read. The root binds the
-`GeometryReport` for one field — an `lm.ctx` in `widened` — and nothing else in it.
+`GeometryReport` for one field, `lm.ctx` — whether it is in `widened`, and its recorded value, which
+is SIG's context wherever the checkpoint's `LOOP` carries no `sig_ctx` (Q-LM-15's review) — and
+nothing else in it.
 
 **The one quantity that genuinely needs a live object is `world.n`.** `WORLD.geometry(world, w)` is
 the only `geometry()` in the tree and is correctly placed on the **save** side, where a built world
@@ -8565,14 +8572,16 @@ parent trained at 256.
   (transformer only) there is no table: every layer's attention takes one float mask,
   −m_h × (i − j) for a key j at or before the query i and −inf after it, one (L, L) slab per head
   repeated over the batch in the (batch × heads) order `nn.MultiheadAttention` indexes a 3-D mask by,
-  with `is_causal=False` because that flag promises the plain causal mask. The slopes m_h are the
-  ALiBi paper's (Press, Smith and Lewis, "Train Short, Test Long", ICLR 2022): 1/2 .. 1/256 at the
-  shipped `LM_HEADS=8`, and for a head count that is not a power of two the paper's interleave; a
-  NON-PERSISTENT buffer (`alibi_slopes`) derived from `LM_HEADS`, so it is not checkpoint state. At
-  'none' (GRU only) nothing is added: the recurrence is the only order signal, and it is the old
-  tree's own GRU — `MiniLM` built no table (`self_organize.py:1546-1561`), while `TinyTransformer`
-  built a learned one clamped at 512 — so on the GRU arm §8 5.8's (A) also reads the scheme this tree
-  added against the one it replaced. `_param_estimate` counts the table only at 'learned'.
+  with `is_causal=False` because that flag promises the plain causal mask, and the layers run with
+  torch's MHA fast path held off, which reads a float mask as bool (the review, below). The slopes
+  m_h are the ALiBi paper's (Press, Smith and Lewis, "Train Short, Test Long", ICLR 2022): 1/2 ..
+  1/256 at the shipped `LM_HEADS=8`, and for a head count that is not a power of two the paper's
+  interleave; a NON-PERSISTENT buffer (`alibi_slopes`) derived from `LM_HEADS`, so it is not
+  checkpoint state. At 'none' (GRU only) nothing is added: the recurrence is the only order signal,
+  and it is the old tree's own GRU — `MiniLM` built no table (`self_organize.py:1546-1561`), while
+  `TinyTransformer` built a learned one clamped at 512 — so on the GRU arm §8 5.8's (A) also reads
+  the scheme this tree added against the one it replaced. `_param_estimate` counts the table only at
+  'learned'.
 * **The wrong arm's value is refused by name at `LM.resolve`**, before any tensor, with both names:
   'alibi' on the GRU (no attention to bias) and 'none' on the transformer (a position-free causal
   transformer is an arm O17 did not name). `choices=` cannot state a relation between two levers;
@@ -8587,33 +8596,38 @@ parent trained at 256.
   at 1 and EXACT at 0; `lm.pos_max` takes `lm.ctx`'s rule and why, because it is the local wire from
   `ctx` and an EXACT one would refuse the move `lm.ctx` admitted, and it now prints `LM_CTX
   (LM.d_pos_max)` — the name `LM.load_state` already used — where it printed `LM_POS_MAX`, a name
-  nothing reads (never reached: the gate compares `lm.ctx` first). The rule applied is the live run's;
-  a recording's is never read. `lm.ctx`'s why names `LM_CTX_WIDEN`, so the gate's refusal at 0 tells
-  the operator the lever exists. (2) The root binds `check_geometry`'s `GeometryReport` for one field:
-  an `lm.ctx` in `widened` is a declared widening, `System.ctx_widening` = (the parent's `LM_CTX`,
-  this run's). (3) `LM.load_state`, reading `ctx_widen`, admits a LARGER `ctx`/`pos_max` and refuses a
-  smaller one, and fits `pos.weight` **by prefix, matched by name** before the vocabulary rule (whose
-  dim-0 test would take the table for a vocabulary tensor wherever `LM_CTX` equals
-  `LM_VOCAB_SLOTS`): rows [0, parent) are the parent's, and every appended row keeps the
-  initialisation this build drew for it — what a run built wide would have held there before its
-  first step. At 'alibi' and 'none' nothing is appended. No other LM tensor depends on the context,
-  so on any window of the parent's width or less the child computes exactly what the parent did.
-  (4) `OPT.load_state` pads the table's moments with zeros by its existing dim-0 rule
-  (`opt/api.py::_pad_moments`, Q-OPT-8) — `opt.ckpt.moments_widened` 1 — which is the moment state
-  a row that has never been trained holds. (5) **SIG keeps the parent's width**: `_signature_width`
-  takes the recorded `lm.ctx` at a declared widening, which with the parent's adopted bytes/token
-  (Q-TOK-13) is the parent's number exactly — the encoder was trained at it and SIG's restore refuses
-  any other. (6) The retention probe re-pins its parent's windows from `LOOP.eval`'s geometry, as it
-  does at any resume (Q-EVAL-12), so reads across the widening pair on the same bytes. (7) WORLD's
-  `load_into` keeps this build's `world.ctx_tokens` rather than the parent's, which would report a
-  width the child does not run at (a WORLD edit this ruling needed: until a context could move
-  across a resume the two were always equal). (8) **A widening across a continuing mid-epoch resume
-  is refused by name** at the `segment` stage, before the log's replay and before the hold-out and
-  digest checks: the saved cursor and epoch length count windows of the parent's width. A widening
-  is an epoch-boundary operation — the final save of a finished run, or `run.py --max-windows` at the
-  epoch's end — where the child cuts its epoch fresh at its own width. (A resume that replays its
-  epoch from window 0, off a checkpoint older than the segmentation log, is not refused: it is not a
-  continuation.)
+  nothing reads (never reached: the gate compares `lm.ctx` first). The rule applied is the live
+  run's; a recording's is never read. `lm.ctx`'s why names `LM_CTX_WIDEN`, so the gate's refusal at
+  0 tells the operator the lever exists. (2) The root binds `check_geometry`'s `GeometryReport` for
+  one field, `lm.ctx`: one in `widened` is a declared widening, `System.ctx_widening` = (the
+  parent's `LM_CTX`, this run's), and its recorded value is SIG's context where the checkpoint
+  carries none (5, as the review corrected it). (3) `LM.load_state`, reading `ctx_widen`, admits a
+  LARGER `ctx`/`pos_max` and refuses a smaller one, and fits `pos.weight` **by prefix, matched by
+  name** before the vocabulary rule (whose dim-0 test would take the table for a vocabulary tensor
+  wherever `LM_CTX` equals `LM_VOCAB_SLOTS`): rows [0, parent) are the parent's, and every appended
+  row keeps the initialisation this build drew for it — what a run built wide would have held there
+  before its first step. At 'alibi' and 'none' nothing is appended. No other LM tensor depends on
+  the context, so on any window of the parent's width or less the child computes exactly what the
+  parent did. (4) `OPT.load_state` pads the table's moments with zeros by its existing dim-0 rule
+  (`opt/api.py::_pad_moments`, Q-OPT-8) — `opt.ckpt.moments_widened` 1 — which is the moment state a
+  row that has never been trained holds. (5) **SIG keeps the width its encoder was trained at,
+  across the lineage**: `_signature_width` takes `System.sig_ctx`, the `LM_CTX` the lineage's SIG
+  was built at — this run's on a fresh run; on a resume `payload['LOOP']['sig_ctx']`, which a run
+  writes wherever a widening has moved it off its own `LM_CTX`, or else the recorded `lm.ctx` — and
+  with the adopted bytes/token (Q-TOK-13) that is the parent's number exactly: the encoder was
+  trained at it and SIG's restore refuses any other. (Until the review it took the recorded `lm.ctx`
+  only at the resume that widened, which nothing checkpointed, so every later resume of a widened
+  lineage was refused by SIG.) (6) The retention probe re-pins its parent's windows from
+  `LOOP.eval`'s geometry, as it does at any resume (Q-EVAL-12), so reads across the widening pair on
+  the same bytes. (7) WORLD's `load_into` keeps this build's `world.ctx_tokens` rather than the
+  parent's, which would report a width the child does not run at (a WORLD edit this ruling needed:
+  until a context could move across a resume the two were always equal). (8) **A widening across a
+  continuing mid-epoch resume is refused by name** at the `segment` stage, before the log's replay
+  and before the hold-out and digest checks: the saved cursor and epoch length count windows of the
+  parent's width. A widening is an epoch-boundary operation — the final save of a finished run, or
+  `run.py --max-windows` at the epoch's end — where the child cuts its epoch fresh at its own width.
+  (A resume that replays its epoch from window 0, off a checkpoint older than the segmentation log,
+  is not refused: it is not a continuation.)
 * **The cadence-rescaling known answer, `spine/derive.py::windows_at_ctx(period, old_ctx,
   new_ctx)`.** A window is `LM_CTX` tokens, so after 64 → 128 every lever counted in windows spans
   twice the text. The function is the one named conversion (O11): `period` × `old_ctx` / `new_ctx`
@@ -8650,42 +8664,45 @@ parent trained at 256.
   refusal code); an unreadable path exits 1.
 * **Counters.** `lm.pos.scheme` is a NAMED gauge, a sentence in LM's tally (the `world.built`
   precedent), written by `build_model`: 'learned: context-locked (O17: no passed widening route)' at
-  'learned', '<scheme>: extrapolating, not yet designable (O17: no passed widening route)' at 'alibi'
-  and 'none', and '<scheme>: a context-widening route has passed on GPU (O17,
+  'learned', '<scheme>: extrapolating, not yet designable (O17: no passed widening route)' at
+  'alibi' and 'none', and '<scheme>: a context-widening route has passed on GPU (O17,
   PASSED_WIDENING_ROUTES)' once one is entered. It is this process's: `load_state` does not restore
   it over the build's own. Not an integer, so it is in no integer channel a test reads.
-  `lm.pos.alibi_applied` counts every `encode` call that built the ALiBi mask, eval calls included as
-  `lm.encode.calls` counts them — equal to it on `LM_ARCH=transformer LM_POS='alibi'` and ABSENT on
-  every other arm. `lm.ckpt.ctx_widened` is THIS restore's reading — 1 when it admitted a larger
-  context, 0 when the context stood still — PRESENT on every restore at `LM_CTX_WIDEN=1` and ABSENT at
-  0, where no widening can be admitted (the finding that asked for PRESENT-and-0 on any resume at 1,
-  and not ABSENT, is kept); never taken from a parent's ledger. `lm.ckpt.rows_widened` still counts
-  VOCABULARY tensors only; the table's widening is named in the `LoadReport`'s reason.
+  `lm.pos.alibi_applied` counts every `encode` call that built the ALiBi mask, eval calls included
+  as `lm.encode.calls` counts them — equal to it on `LM_ARCH=transformer LM_POS='alibi'` and ABSENT
+  on every other arm; each of those calls runs its layers with the fast path held off, so it is also
+  the count of calls the hold covered (the review). `lm.ckpt.ctx_widened` is THIS restore's reading
+  — 1 when it admitted a larger context, 0 when the context stood still — PRESENT on every restore
+  at `LM_CTX_WIDEN=1` and ABSENT at 0, where no widening can be admitted (the finding that asked for
+  PRESENT-and-0 on any resume at 1, and not ABSENT, is kept); never taken from a parent's ledger.
+  `lm.ckpt.rows_widened` still counts VOCABULARY tensors only; the table's widening is named in the
+  `LoadReport`'s reason.
 
 **What a CPU run establishes, and what it cannot.** `tests/test_position.py` Q1-Q7, CPU, operation
-only. Q1: on both arms with FAB, SIG and MEM on, a parent at `LM_CTX=64` stopped at its epoch boundary
-(232 windows of `E1`'s 20,000-byte stream) and a child resumed from it at `LM_CTX=128
-LM_CTX_WIDEN=1` give the same LM-level loss (`LM.lm_loss` of `LM.decode(LM.encode(x))`) on windows of
-64, 17 and 1 tokens at three offsets — **bitwise**, so within the register's 1e-6; the child's table
-is the parent's 64 rows and the 64 a fresh `LM_CTX=128` build draws, and its moments the parent's and
-64 rows of zeros; SIG's width stays the parent's 87 units (a fresh 128 run would take 175); the child's
-start read, through both closures and so through SIG, DOM, FAB and MEM, is the unwidened boundary
-resume's window for window; `lm.ckpt.ctx_widened` 1 against ABSENT; the child trains windows of 128;
+only. Q1: on both arms with FAB, SIG and MEM on, a parent at `LM_CTX=64` stopped at its epoch
+boundary (232 windows of `E1`'s 20,000-byte stream) and a child resumed from it at `LM_CTX=128
+LM_CTX_WIDEN=1` give the same LM-level loss (`LM.lm_loss` of `LM.decode(LM.encode(x))`) on windows
+of 64, 17 and 1 tokens at three offsets — **bitwise**, so within the register's 1e-6; the child's
+table is the parent's 64 rows and the 64 a fresh `LM_CTX=128` build draws, and its moments the
+parent's and 64 rows of zeros; SIG's width stays the parent's 87 units (a fresh 128 run would take
+175); the child's start read, through both closures and so through SIG, DOM, FAB and MEM, is the
+unwidened boundary resume's window for window; `lm.ckpt.ctx_widened` 1 against ABSENT; the child
+trains its epoch at 128 and then resumes, widens again and continues exactly (the review, below);
 one notice lists all 27 Windows-unit levers. Q2: without the lever the gate refuses naming `LM_CTX`,
 the EXACT rule and `LM_CTX_WIDEN`; a smaller context is refused at 1; a widening across a continuing
 resume is refused at the `segment` stage; a continuing resume at 1 that widens nothing continues
 exactly with the gauge 0; and `LM.load_state`'s two answers driven directly, alone and beside a
-vocabulary widening (both in one restore at 1, the vocabulary alone at 0). Q3: the grid. Q4:
-'alibi' and 'none' build with no table, run 120 windows finite, continue exactly from 60, and are
-causal on the built model; ALiBi's slopes and mask have their known answers. Q5: both wrong-arm
-refusals, a scheme change refused, and a record without the field resuming as 'learned' exactly and
-refused at any other scheme. Q6: the designation refused on all three schemes and on a legacy record,
-both switches working, and the tool exiting 2 having written nothing, 1 on a missing path, and 0
-with one record when the refusal is off. Q7: B1, and a checkpoint written by 494936d — the tree
-before the lever, run from a clean copy of its `src/` — whose first 30 losses are this tree's and
-which continues here exactly. **None of it says whether a widened parent learns its new positions
-without losing its old ones, or which scheme a long-lived parent should carry**: those are §8 5.8's
-arms on GPU, and nothing here enters a route.
+vocabulary widening (both in one restore at 1, the vocabulary alone at 0). Q3: the grid. Q4: 'alibi'
+and 'none' build with no table, run 120 windows finite, continue exactly from 60, and are causal on
+the built model in its training pass and its eval pass, the two equal (the review, below); ALiBi's
+slopes and mask have their known answers. Q5: both wrong-arm refusals, a scheme change refused, and
+a record without the field resuming as 'learned' exactly and refused at any other scheme. Q6: the
+designation refused on all three schemes and on a legacy record, both switches working, and the tool
+exiting 2 having written nothing, 1 on a missing path, and 0 with one record when the refusal is
+off. Q7: B1, and a checkpoint written by 494936d — the tree before the lever, run from a clean copy
+of its `src/` — whose first 30 losses are this tree's and which continues here exactly. **None of it
+says whether a widened parent learns its new positions without losing its old ones, or which scheme
+a long-lived parent should carry**: those are §8 5.8's arms on GPU, and nothing here enters a route.
 
 **What does not move at the default.** At `LM_POS='learned'` `_LM` and `encode` run the statements
 they ran, in order, with the same draws; at `LM_CTX_WIDEN=0` the manifest's `lm.ctx` is EXACT as
@@ -8694,6 +8711,100 @@ default run carries are text: `lm.pos.scheme`, a sentence and not an integer, in
 row; `pos` in LM's checkpointed geometry; and the manifest's `lm.ctx`/`lm.pos_max` why and
 `lm.pos_max`'s printed name, which the gate prints only on a refusal. B1, B3, B3r, B5, B6 and B6r
 reproduce their fixtures with no new integer counter line.
+
+**AMENDED 2026-09-28 — THE REVIEW OF THIS RULING.** Three findings, each driven on the tree before
+it (842b8e8; CPU, operation only) and each repaired; the ALiBi bullet, the widening bullet's (2) and
+(5), the counters bullet and the CPU paragraph above, the SIG section's `width_units`, the report
+sentences of the CKPT section and of §3.9, and `System.ctx_widening`'s comment are corrected in
+place. Run against that tree's `src/`, the new Q1 lineage stops at the grandchild's build, SIG
+refusing it (87 against 175); with that part cut, the three reworded Q2 checks and Q4's four checks
+of the 'alibi' eval pass fail there, and every check beside them passes — Q4's causality in both
+passes among them (the training pass was right, and self-only attention is causal too) and every
+'none' check (the GRU has no fast path).
+* **At 'alibi' every eval pass computed another function.** `encode` hands each
+  `nn.TransformerEncoderLayer` one float (batch × heads, L, L) mask with `is_causal=False`, and a
+  layer in eval mode whose parameters need no grad takes torch's fast path,
+  `torch._transformer_encoder_layer_fwd`, whose masked softmax reads a non-bool mask as bool: every
+  nonzero entry masked. ALiBi's bias is nonzero for every earlier key, so each position attended to
+  itself alone. That is every `no_grad` pass: the retention probe's cadence, phase-start,
+  resume-start and boundary reads, `EVAL.generate`, `FAB.contribution`'s baseline and the memory-on
+  closure's queries, which run the model in eval, and MEM's key writes, which run it in train mode
+  with the last layer `encode` runs put in eval. Training — grad on, the Python path — was right, so
+  every reading scored a function no step trained. Driven at 842b8e8 (a built transformer at
+  'alibi', `LM_HEADS=8`, `LM_DROPOUT=0`): max|dh| 7.35 between one model's train-mode pass and its
+  eval pass under `no_grad`, 0.0 between that eval pass and the same layers run with `mask != 0` as
+  a bool mask, and 0.0 between train mode and eval mode with grad on; a 100-window probed run
+  switched to the Python path moved every one of its ten readings (the last memory-off read 6.2588 →
+  6.1398, memory-on 6.6489 → 6.5444) and none of its losses; MEM's stored keys sat 0.106 off the
+  grad-on pass's (minimum cosine 0.951). Q4's causality check ran on the eval pass, so it checked
+  self-only attention, which is causal too. **Ruled:** at 'alibi' `encode` runs its layer loop with
+  `torch.backends.mha.set_fastpath_enabled(False)`, lowered only where it was up and put back in a
+  `finally` — torch's flag is process-wide — and nothing else moves. A gradient pass takes the
+  Python path whatever the flag, so no gradient pass moves; every `no_grad` pass is now the function
+  training trains. The finding's other remedy, computing the biased attention by hand, was not
+  taken: it is a second implementation of torch's layer to keep equal to the first. **'learned'
+  keeps the fast path:** its 0/−inf mask read as bool is the same causal cut, and its eval pass
+  differs from its train-mode pass by the two kernels' rounding alone (max|dh| 2.4e-6 on a freshly
+  built model) — left as it stands, since holding it off would move every reading a default run
+  takes. `lm.pos.alibi_applied` counts the calls the hold covers. Q4 now checks, on both
+  extrapolating values, causality in the training pass and the eval pass alike and the eval pass
+  under `no_grad` equal to the train-mode pass bitwise at `LM_DROPOUT=0`; and at 'alibi' that the
+  eval pass is not self-only attention (max|dh| 52.0 on the 120-window model), that MEM's stored
+  keys are the grad-on pass's bitwise, and that a 40-window probed run reads the same with the fast
+  path off for the whole run — four readings through both closures, window for window, and every
+  loss.
+* **After one declared widening the lineage could not be resumed again.** `_signature_width` took
+  the parent's `LM_CTX` only when THIS resume's gate widened `lm.ctx`, through
+  `System.ctx_widening`, which is not checkpointed. The widened child's checkpoint records SIG at
+  the parent's width and `lm.ctx` at the child's, so every later resume at the child's own `LM_CTX`
+  resolved SIG at that `LM_CTX`, and `SIG.load_state_dict` refused it naming only `width_units`: the
+  child's epoch-boundary checkpoint at `LM_CTX_WIDEN` 0 or 1, and at 256 for a second widening — §8
+  5.8 (B)'s 128 → 256 from a widened parent — all "written at 87 and this run resolves 175" on
+  `E1`'s workload, and its mid-epoch save 96 against 192 on a shorter one, while the control lineage
+  64 → 64 → 64 resumed at every step. `System.ctx_widening`'s comment said the opposite ("a child of
+  this run records this run's LM_CTX, and widens from it or not"). **Ruled:** the lineage carries
+  SIG's context. `System.sig_ctx` is the `LM_CTX` the lineage's SIG was built at: this run's on a
+  fresh run; on a resume `payload['LOOP']['sig_ctx']` where the checkpoint carries it, and otherwise
+  the recorded `lm.ctx` — read off the gate's report, whose one field stays `lm.ctx`. The
+  `signature` stage builds SIG at `signature_width_bytes(sig_ctx, the adopted bytes/token)` on every
+  resume, not only the one that widens, and the C row's `LOOP` block writes `sig_ctx` wherever a
+  widening has moved it off the run's own `LM_CTX`: an unwidened lineage writes the payload it wrote
+  before, and a checkpoint without the key is one whose SIG was built at its recorded `lm.ctx` —
+  every checkpoint before this ruling, and every unwidened one after. It is the root's record under
+  the root's key, not a manifest field (R11) and not SIG's (SIG holds a width, not the context it
+  came from). `ctx_widening` is read at the `segment` stage and for the notice only, and the notice
+  names the width's `LM_CTX`. A checkpoint of a widened lineage without the key — as 842b8e8 wrote
+  them — is refused by SIG by name, never guessed. Q1 now checks, on both arms: the parent's
+  checkpoint carries no `sig_ctx` and the widened child's 64; the child, having trained its whole
+  epoch at 128 (113 windows), resumes at its own `LM_CTX=128` from its boundary with SIG at the
+  lineage's 87 units, the grandchild's start read equal to the child's R read window for window
+  through both closures; a twin saved 10 windows into the child's epoch continues exactly, loss for
+  loss; and the child widens again, 128 → 256, the LM-level loss bitwise the child's on windows of
+  128, 17 and 1 tokens, the table the child's 128 rows and 128 a fresh 256 build draws, SIG at 87
+  and the start read the unwidened grandchild's. And on the GRU arm the stripped key is refused by
+  SIG, 87 recorded and 175 resolved. `E1` runs three epochs for it: the parent stops at the first
+  boundary, the child at the second.
+* **A moved context's refusal contradicted itself.** `LM.load_state`'s refusal of a moved
+  `ctx`/`pos_max` kept the generic "The tensors do not fit and no prefix of them means anything."
+  and then said `LM_CTX_WIDEN=1` admits a larger context, the table keeping the parent's rows — a
+  prefix that means something. **Ruled:** for those two fields the generic clause is replaced — at
+  0, "A larger context is a valid prefix only under LM_CTX_WIDEN=1, which admits it at an
+  epoch-boundary resume, the learned table keeping the parent's rows; a smaller one never is."; at
+  1, "LM_CTX_WIDEN=1 admits a larger context only: a smaller one is never a valid prefix." — and
+  every other field keeps it. **The same contradiction stood at the gate**, the refusal an operator
+  meets first (at `LM_CTX_WIDEN=0` it stops the move before `LM.load_state` runs):
+  `CKPT.check_geometry` said every EXACT field "is an inner dimension and no prefix of it is valid",
+  and `lm.ctx`'s why beside it said a larger `LM_CTX` is admitted at 1, the table keeping the
+  parent's rows. Its EXACT sentence now says what the rule decides, "so it may not move at all: this
+  run admits no prefix of it.", and the field's why says the rest (`fab.rank`'s and `fab.dk`'s say
+  "an inner dimension; no prefix valid" themselves). Q2 checks both refusals' words at both lever
+  values, and a moved `LM_WIDTH` keeping `LM.load_state`'s generic clause.
+
+**What the review changes at the default:** nothing a run trains on or counts. At 'learned' `encode`
+runs the statements it ran — the hold is not taken — and an unwidened lineage's `sig_ctx` is its
+`LM_CTX`, so SIG's width is the number it was and no checkpoint gains a key. The one text a default
+run can print that moved is an EXACT field's gate refusal. B1, B3, B3r, B5, B6 and B6r reproduce
+their fixtures with the same new-counter lists as 842b8e8's tree.
 
 ## 6. What `tests/test_contract.py` checks
 

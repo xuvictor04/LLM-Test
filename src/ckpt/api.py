@@ -1126,9 +1126,15 @@ def check_geometry(ckpt: Config, snapshot, geometry):
         raise GeometryRefusal(
             f"{env_name}: the checkpoint was written at {field}={was!r} and this run resolves "
             f"{value!r}. The rule for this field is {rule}"
+            # THE RULE'S OWN FACT, AND THE FIELD'S `why` SAYS THE REST (2026-09-28, Q-LM-15's
+            # review). The EXACT half said every such field "is an inner dimension and no prefix of
+            # it is valid", which a conditional rule made false in print: lm.ctx is EXACT at
+            # LM_CTX_WIDEN=0, and its why says a larger LM_CTX IS admitted at 1, the learned table
+            # keeping the parent's rows -- a prefix that means something. What the rule decides is
+            # what THIS run admits; a why that is about an inner dimension (fab.rank's, fab.dk's)
+            # says so itself.
             + (", so it may grow but not shrink." if rule == "MAY_WIDEN" else
-               ", so it may not move at all -- it is an inner dimension and no prefix of it is "
-               "valid.")
+               ", so it may not move at all: this run admits no prefix of it.")
             + f" ({why}) Resume with the saved value, or start a new run.")
     # A FIELD THE CHECKPOINT CARRIES AND THE MANIFEST DOES NOT NAME IS REPORTED, NOT IGNORED. That
     # is H22 from the other end: six world fields were recorded and exactly one was read, and

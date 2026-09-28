@@ -540,7 +540,16 @@ def _payload(sysm):
                  # every save; only where there is one, so a run the probe never armed writes the
                  # payload it wrote before the probe existed.
                  **({"eval": sysm.eval_carried}
-                    if getattr(sysm, "eval_carried", None) is not None else {})},
+                    if getattr(sysm, "eval_carried", None) is not None else {}),
+                 # THE LM_CTX SIG's WIDTH WAS DERIVED FROM (2026-09-28, Q-LM-15's review), which a
+                 # declared widening leaves behind: every later resume of the lineage builds SIG
+                 # there (spine/compose.py, System.sig_ctx), or SIG's restore refuses the width
+                 # its own LM_CTX resolves. Only where a widening moved it off this run's LM_CTX,
+                 # so an unwidened lineage writes the payload it wrote before -- and a checkpoint
+                 # without the key reads as its recorded lm.ctx, which is then the same number.
+                 **({"sig_ctx": int(sysm.sig_ctx)}
+                    if getattr(sysm, "sig_ctx", None) is not None
+                    and int(sysm.sig_ctx) != int(sysm.geometry.ctx) else {})},
         # RUN'S STATE, THROUGH RUN'S OWN ENTRY POINTS (2026-09-24, Q-RUN-9 and Q-RUN-10). Nothing of
         # RUN crossed the boundary except the two numbers CKPT.save records itself (step, epoch), so
         # every cadenced gate re-seeded at the resumed step and fired a period late, and a resume

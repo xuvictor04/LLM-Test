@@ -262,13 +262,15 @@ def build(sig: Config, *, width_units, alphabet_size, device, generator):
     """Construct the signature encoder and FREEZE THE ONE WINDOW WIDTH FOR THE RUN.
 
     `width_units` is the answer of derive.signature_width_bytes(LM.ctx, measured bytes_per_token),
-    computed ONCE by the composition root and handed here. It is NOT a lever and NOT a wire:
-    assemble.NOT_WIRES rejects it because bytes_per_token is MEASURED on a corpus the tokenizer has
-    not seen when build() freezes, and a Config that can still be written after startup is a Config
-    the report cannot claim the run used. This function records it on SigState and every later call
-    in this package reads it FROM THERE; there is no second place a width can come from and no
-    recompute as the vocabulary grows. Under space="bytes" it is a byte count; under
-    space="tokens" a token count.
+    computed ONCE by the composition root and handed here -- across a widened lineage at the LM_CTX
+    its SIG was first built at, which the root carries (spine/compose.py::_signature_width,
+    docs/04_CONTRACT.md Q-LM-15), so a resume hands the width the encoder trained at. It is NOT a
+    lever and NOT a wire: assemble.NOT_WIRES rejects it because bytes_per_token is MEASURED on a
+    corpus the tokenizer has not seen when build() freezes, and a Config that can still be written
+    after startup is a Config the report cannot claim the run used. This function records it on
+    SigState and every later call in this package reads it FROM THERE; there is no second place a
+    width can come from and no recompute as the vocabulary grows. Under space="bytes" it is a byte
+    count; under space="tokens" a token count.
 
     `alphabet_size` is the encoder embedding's row count: 256 under space="bytes", LM.vocab_slots
     under space="tokens". It is an ARGUMENT, not a read of LM. Under space="tokens" it is sized at

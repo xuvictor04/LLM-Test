@@ -20,21 +20,37 @@ is refused by name without a passing route, and its switch works".
       SIG keeps the parent's width, the child's start read (both closures, through SIG, DOM, FAB and
       MEM) is the unwidened boundary resume's window for window, OPT pads the one widened tensor's
       moments, WORLD reports the width it runs at, lm.ckpt.ctx_widened reads 1 (ABSENT on the
-      unwidened child), the child trains at 128, and the startup notice lists every Windows-unit lever
-      with its rescaled value.
+      unwidened child), the child trains its epoch at 128, and the startup notice lists every
+      Windows-unit lever with its rescaled value.
+      AND THE WIDENED LINEAGE GOES ON RESUMING (Q-LM-15's review; at 842b8e8 every later resume of it
+      was refused by SIG): the child's checkpoint carries SIG's context as LOOP.sig_ctx (an unwidened
+      one carries none); the child resumes at its own LM_CTX=128 from its epoch boundary, the
+      grandchild's start read being the child's R read; it continues exactly from a mid-epoch save;
+      and it widens again, 128 -> 256, with the same identity on windows of 128 tokens or fewer and
+      SIG still at the lineage's width. Stripped of the key, its checkpoint is refused by SIG by
+      name, never guessed.
   Q2  THE REFUSALS: a larger LM_CTX without the lever, and a smaller one with it, at the geometry gate
       by name; a widening across a continuing mid-epoch resume at the `segment` stage, by name. A
       continuing resume at LM_CTX_WIDEN=1 that widens nothing continues exactly, lm.ckpt.ctx_widened
       PRESENT and 0. LM.load_state's own two answers, driven directly: refused naming the lever at 0,
-      fitted by prefix at 1 -- and beside a vocabulary widening, alone at 0 and together at 1.
+      fitted by prefix at 1 -- and beside a vocabulary widening, alone at 0 and together at 1. A moved
+      context's refusal says a larger one is a valid prefix only under the lever and a smaller one
+      never, at the gate as in LM.load_state, where it said no prefix meant anything until Q-LM-15's
+      review; every other field keeps its clause.
   Q3  THE CADENCE-RESCALING KNOWN ANSWER, spine/derive.py::windows_at_ctx: at 64 -> 128, 1000 -> 500,
       333 -> 167, 1 -> 1 and 0 -> 0; a negative period, a non-Windows period and a width that is not a
       positive int are refused.
   Q4  THE EXTRAPOLATING VALUES: LM_ARCH=transformer LM_POS='alibi' and LM_ARCH=gru LM_POS='none' build
       with no position table, run 120 windows finite, and a continuing resume at 60 reproduces the
       uninterrupted run's last 60 losses exactly. ALiBi's slopes are the paper's, its mask is the
-      distance bias with the causal cut, a later token changes no earlier position's hidden state, and
-      lm.pos.alibi_applied counts every encode call on that arm and is ABSENT on the others.
+      distance bias with the causal cut, and lm.pos.alibi_applied counts every encode call on that arm
+      and is ABSENT on the others. EVERY PASS IS THE FUNCTION TRAINING TRAINS (Q-LM-15's review; at
+      842b8e8 torch's MHA fast path read ALiBi's float mask as bool in every no_grad eval pass, which
+      then scored self-only attention): at LM_DROPOUT=0 an eval pass under no_grad equals the
+      train-mode pass bitwise on both values, and at 'alibi' it is not self-only attention; a later
+      token changes no earlier position's hidden state in either pass; MEM's stored keys are the
+      training function's; and a probed run reads the same, window for window, with the fast path off
+      for the whole run.
   Q5  THE SCHEME ACROSS A RESUME: 'alibi' on the GRU and 'none' on the transformer are refused by name
       at LM.resolve; a checkpoint written at 'learned' is refused by name at LM_POS='none'; a checkpoint
       whose LM geometry carries no scheme (every one written before the lever) resumes as 'learned' and
@@ -79,17 +95,21 @@ from spine import assemble                                         # noqa: E402
 from spine import derive                                           # noqa: E402
 from spine import units as U                                       # noqa: E402
 from spine.compose import compose, RefusedRun, _windows_in_epoch   # noqa: E402
+from spine.compose import _key_fn                                  # noqa: E402
 from ckpt import api as ckpt_api                                   # noqa: E402
 from lm import api as lm_api                                       # noqa: E402
+from memory import api as mem_api                                  # noqa: E402
 import designate_parent as dp                                      # noqa: E402
 
 FAILS = []
 # tests/test_continuation.py's small base: a tenth-size fabric keeps each compose to a few seconds.
 BASE = {"DATA_STREAM_BYTES": "60000", "SIG_WARMUP": "20", "FAB_N0": "256", "FAB_SLOTS": "512"}
-# THE WIDENING WORKLOAD: a short two-epoch stream at LM_CTX=64 with the retention probe armed, so a
-# parent stops at its epoch boundary with pinned windows its children re-pin. At 20000 bytes each area
-# is generated at 10,000 and 30% holds out 3,000, whose halves hold a 65-byte window behind its prefix.
-E1 = {"DATA_STREAM_BYTES": "20000", "RUN_EPOCHS": "2", "DATA_RESAMPLE": "1", "DATA_SYNTH_HOLDOUT": "1",
+# THE WIDENING WORKLOAD: a short stream at LM_CTX=64 with the retention probe armed, so a parent stops
+# at its epoch boundary with pinned windows its children re-pin. At 20000 bytes each area is generated
+# at 10,000 and 30% holds out 3,000, whose halves hold a 65-byte window behind its prefix. THREE EPOCHS
+# SINCE Q-LM-15's REVIEW: the parent stops at the first boundary, the widened child at its own (the
+# second), and the lineage's next resumes -- at the child's width and widened again -- have a third.
+E1 = {"DATA_STREAM_BYTES": "20000", "RUN_EPOCHS": "3", "DATA_RESAMPLE": "1", "DATA_SYNTH_HOLDOUT": "1",
       "DATA_HOLDOUT_FRAC": "0.3", "EVAL_RETENTION_EVERY": "20", "EVAL_GENERATE": "0", "LM_CTX": "64"}
 # THE TREE BEFORE THE LEVER: register §8 3.5's review, the commit this build was made on.
 PRE_LEVER = "494936d"
@@ -142,6 +162,24 @@ def per_window(rd):
     """{area: (control values, report values)} of one HoldoutReading."""
     return {a: (list(row.get("control") or ()), list(row.get("report") or ()))
             for a, row in rd.areas.items()}
+
+
+def same_reads(a, b):
+    """Two lists of HoldoutReadings the same, reading for reading: closure, every window, the mean."""
+    return (len(a) == len(b) and len(a) > 0
+            and all(x.closure == y.closure and per_window(x) == per_window(y)
+                    and x.control_mean.value == y.control_mean.value for x, y in zip(a, b)))
+
+
+def of_kind(result, readings, kind):
+    """The readings of one kind ('resume', 'boundary', ...) out of a run's spied readings."""
+    return [rd for e, rd in zip(result.probe_series, readings) if e["kind"] == kind]
+
+
+def snapshot(path):
+    """The Snapshot CKPT.load reads at CKPT_RESUME=path, as a resume reads it."""
+    _lever._reopen_assembly()
+    return ckpt_api.load(assemble.build(environ={"CKPT_RESUME": path})[0]["CKPT"])
 
 
 def lm_level(sysm, x, y):
@@ -245,7 +283,12 @@ try:
             _st = w.optimizer.base.state_dict()["state"]
             w_mom = ({k: v.detach().clone() for k, v in _st[_pos_i[0]].items() if torch.is_tensor(v)}
                      if _pos_i and _pos_i[0] in _st else {})
-            rw = loop.run(w, max_windows=1, progress=False)
+            # THE CHILD TRAINS ITS WHOLE EPOCH AT 128 AND STOPS AT ITS OWN BOUNDARY, the lineage's
+            # next resume point (Q-LM-15's review; it trained one window until then).
+            n_ep_w = int(_windows_in_epoch(w))
+            w_wie = int(w.clock.counters()["windows_in_epoch"])
+            w_len = (len(w.segmentation.ids) - 1) // 128
+            rw = loop.run(w, max_windows=n_ep_w, progress=False)
         check(f"Q1 {arch}: the parent stopped at its epoch boundary ({n_ep} windows at LM_CTX=64, clock at "
               f"epoch 1 in_epoch 0) with the retention probe pinned",
               rp.windows == n_ep and int(clk["epoch"]) == 1 and int(clk["in_epoch"]) == 0
@@ -298,17 +341,119 @@ try:
         _pairs = {f"{k} {v} -> {int(derive.windows_at_ctx(U.Windows(v), 64, 128))}"
                   for k, v in _levers.items()}
         check(f"Q1 {arch}: lm.ckpt.ctx_widened reads 1 on the widened child and is ABSENT on the unwidened "
-              f"one; the child trains at 128 (its epoch counts (len - 1) // 128 windows); and one startup "
-              f"notice lists all {len(_levers)} Windows-unit levers beside windows_at_ctx's value, "
-              f"applying none",
-              w_widened == 1 and u_widened == "ABSENT" and rw.windows_here == 1
-              and math.isfinite(rw.loss_curve[0])
-              and int(w.clock.counters()["windows_in_epoch"]) == (len(w.segmentation.ids) - 1) // 128
+              f"one; the child trains its whole epoch at 128 ({n_ep_w} windows, (len - 1) // 128), every "
+              f"loss finite; and one startup notice lists all {len(_levers)} Windows-unit levers beside "
+              f"windows_at_ctx's value, applying none",
+              w_widened == 1 and u_widened == "ABSENT" and rw.windows_here == n_ep_w
+              and all(math.isfinite(v) for v in rw.loss_curve)
+              and w_wie == w_len == n_ep_w
               and len(_note) == 1 and all(s in _note[0] for s in _pairs)
               and "FAB_MANAGE_EVERY 500 -> 250" in _note[0]
               and int(w.configs["FAB"].manage_every) == 500 and len(_levers) >= 27,
               f"ctx_widened {w_widened} / {u_widened}, notices {len(_note)}, levers {len(_levers)}")
-        del p, u, w
+
+        # -----------------------------------------------------------------------------------------
+        # THE WIDENED LINEAGE GOES ON RESUMING (Q-LM-15's review). At 842b8e8 every resume of the
+        # widened child was refused by SIG -- 87 units recorded, 175 resolved, at its boundary, its
+        # mid-epoch save and a second widening alike -- because the root took the parent's LM_CTX for
+        # SIG only at the resume that widened, and that was not checkpointed. SIG's context now
+        # crosses in LOOP.sig_ctx.
+        # -----------------------------------------------------------------------------------------
+        wck = w.clock.counters()
+        psnap, wsnap = snapshot(f"{TMP}/q1{arch}"), snapshot(f"{TMP}/q1{arch}w")
+        _bw = of_kind(rw, rd_w, "boundary")
+        with spy_readings() as rd_g:
+            g = build(CKPT_RESUME=f"{TMP}/q1{arch}w", CKPT_DIR=f"{TMP}/q1{arch}g",
+                      **dict(env, LM_CTX="128"))
+            g_widened = lm_api._COUNTS.get("lm.ckpt.ctx_widened", "ABSENT")
+            rg = loop.run(g, max_windows=3, progress=False)
+        _kg = of_kind(rg, rd_g, "resume")
+        check(f"Q1 {arch}: THE WIDENED CHILD RESUMES AT ITS OWN LM_CTX=128 FROM ITS EPOCH BOUNDARY -- its "
+              f"checkpoint carries SIG's context as LOOP.sig_ctx 64 where the parent's carries none, the "
+              f"grandchild builds SIG at the lineage's {p.sig.width_units} units, its start read is the "
+              f"child's R read window for window through both closures, and it trains",
+              int(wck["epoch"]) == 2 and int(wck["in_epoch"]) == 0
+              and (wsnap.payload.get("LOOP") or {}).get("sig_ctx") == 64
+              and "sig_ctx" not in (psnap.payload.get("LOOP") or {})
+              and int(u.sig_ctx) == int(w.sig_ctx) == int(g.sig_ctx) == 64
+              and int(g.sig.width_units) == int(p.sig.width_units)
+              and g.ctx_widening is None and g_widened == "ABSENT" and g.resume_pos is None
+              and len(_bw) == 2 and same_reads(_bw, _kg)
+              and rg.windows_here == 3 and all(math.isfinite(v) for v in rg.loss_curve),
+              f"epoch {wck['epoch']} in_epoch {wck['in_epoch']}, LOOP.sig_ctx "
+              f"{(wsnap.payload.get('LOOP') or {}).get('sig_ctx')}, SIG {g.sig.width_units}, reads "
+              f"{[(r.closure, r.control_mean.value) for r in _bw]} vs "
+              f"{[(r.closure, r.control_mean.value) for r in _kg]}")
+        # ... FROM A MID-EPOCH SAVE: a twin of the child, widened from the same boundary and saved 10
+        # windows into its epoch, resumed at LM_CTX=128 (nothing widens now) trains the child's
+        # windows 10-29 loss for loss.
+        w2 = build(CKPT_RESUME=f"{TMP}/q1{arch}", CKPT_DIR=f"{TMP}/q1{arch}w2", LM_CTX_WIDEN=1,
+                   **dict(env, LM_CTX="128"))
+        rw2 = loop.run(w2, max_windows=10, progress=False)
+        w3 = build(CKPT_RESUME=f"{TMP}/q1{arch}w2", CKPT_DIR=f"{TMP}/q1{arch}w3",
+                   **dict(env, LM_CTX="128"))
+        rw3 = loop.run(w3, max_windows=20, progress=False)
+        check(f"Q1 {arch}: ... AND CONTINUES EXACTLY FROM A MID-EPOCH SAVE: a twin widened from the same "
+              f"boundary and saved 10 windows into its epoch resumes at LM_CTX=128, SIG at the lineage's "
+              f"width, and trains the child's windows 10-29 loss for loss",
+              list(rw2.loss_curve) == list(rw.loss_curve[:10])
+              and w3.resume_pos == (10, n_ep_w) and int(w3.sig_ctx) == 64
+              and int(w3.sig.width_units) == int(p.sig.width_units)
+              and list(rw3.loss_curve) == list(rw.loss_curve[10:30]),
+              f"resume_pos {w3.resume_pos}, first departure "
+              f"{next((i for i, (a, b) in enumerate(zip(rw3.loss_curve, rw.loss_curve[10:30])) if a != b), None)}")
+        del w2, w3
+        # ... AND WIDENS AGAIN, 128 -> 256, FROM ITS OWN BOUNDARY (§8 5.8's arm (B) is 128 -> 256).
+        with spy_readings() as rd_gg:
+            gg = build(CKPT_RESUME=f"{TMP}/q1{arch}w", CKPT_DIR=f"{TMP}/q1{arch}gg", LM_CTX_WIDEN=1,
+                       **dict(env, LM_CTX="256"))
+            gg_widened = lm_api._COUNTS.get("lm.ckpt.ctx_widened", "ABSENT")
+            ids_w = w.segmentation.ids
+            same2, worst2 = [], 0.0
+            for L in (128, 17, 1):
+                xs = torch.tensor([ids_w[a:a + L] for a in (0, 700, 1400)])
+                ys = torch.tensor([ids_w[a + 1:a + L + 1] for a in (0, 700, 1400)])
+                a_, b_ = lm_level(w, xs, ys), lm_level(gg, xs, ys)
+                same2.append(torch.equal(a_, b_))
+                worst2 = max(worst2, float((a_ - b_).abs().max()))
+            gg_pos = gg.model.pos.weight.detach().clone()
+            rgg = loop.run(gg, max_windows=1, progress=False)
+        fresh = build(**dict(env, LM_CTX="256"))
+        _note2 = [x for x in gg.warnings if x.startswith("LM_CTX_WIDEN=1 WIDENED LM_CTX 128 -> 256")]
+        check(f"Q1 {arch}: ... AND WIDENS AGAIN, 128 -> 256, FROM ITS OWN BOUNDARY: the LM-level loss is the "
+              f"child's, bitwise, on windows of 128, 17 and 1 tokens; the table is the child's 128 rows and "
+              f"then 128 a fresh LM_CTX=256 build draws; SIG stays at the lineage's width, from LM_CTX=64, "
+              f"as the notice says; its start read is the unwidened grandchild's; lm.ckpt.ctx_widened 1",
+              all(same2) and worst2 <= 1e-6
+              and tuple(gg_pos.shape) == (256, 128)
+              and torch.equal(gg_pos[:128], w.model.pos.weight.detach())
+              and torch.equal(gg_pos[128:], fresh.model.pos.weight[128:].detach())
+              and gg.ctx_widening == (128, 256) and int(gg.sig_ctx) == 64
+              and int(gg.sig.width_units) == int(p.sig.width_units) and gg_widened == 1
+              and len(_note2) == 1 and f"({int(p.sig.width_units)} units, from LM_CTX=64" in _note2[0]
+              and same_reads(_kg, of_kind(rgg, rd_gg, "resume"))
+              and rgg.windows_here == 1 and math.isfinite(rgg.loss_curve[0]),
+              f"bitwise {same2}, max |diff| {worst2}, ctx_widening {gg.ctx_widening}, "
+              f"SIG {gg.sig.width_units}, notices {len(_note2)}")
+        del fresh
+        if arch == "gru":
+            # R12, THE STRIPPED KEY: a checkpoint of the widened lineage without LOOP.sig_ctx -- as
+            # 842b8e8's tree wrote them -- reads SIG's context as its recorded lm.ctx, 128, and SIG's
+            # restore refuses the width that resolves, by name. A context no record carries is not
+            # guessed.
+            _pl = dict(wsnap.payload)
+            _pl["LOOP"] = {k: v for k, v in dict(_pl["LOOP"]).items() if k != "sig_ctx"}
+            stripped = dataclasses.replace(wsnap, payload=_pl)
+            kind, msg = refusal_text(lambda: build(restored=stripped, CKPT_RESUME=f"{TMP}/q1{arch}w",
+                                                   **dict(env, LM_CTX="128")))
+            _at128 = int(derive.signature_width_bytes(128, float(g.vocab.bytes_per_token)))
+            check(f"Q1 gru: ... and a checkpoint of the widened lineage stripped of LOOP.sig_ctx reads SIG's "
+                  f"context as its recorded lm.ctx (128), and SIG's restore refuses it by name -- "
+                  f"{p.sig.width_units} units recorded, {_at128} resolved -- never guessed",
+                  kind == "LeverError" and "SIG resume refused on width_units" in msg
+                  and f"written at {int(p.sig.width_units)} and this run resolves {_at128}" in msg,
+                  f"{kind}: {msg[:140]}")
+        del p, u, w, g, gg
 
     # =============================================================================================
     # Q2: the refusals, and a continuing resume that widens nothing
@@ -316,9 +461,12 @@ try:
     g = parents["gru"]
     kind, msg = refusal_text(lambda: build(CKPT_RESUME=g, **dict(E1, LM_CTX="128")))
     check("Q2 a larger LM_CTX without LM_CTX_WIDEN is refused at the geometry gate, naming LM_CTX, the "
-          "EXACT rule and the lever that would admit it",
-          kind == "GeometryRefusal" and "LM_CTX" in msg and "EXACT" in msg and "LM_CTX_WIDEN" in msg,
-          f"{kind}: {msg[:160]}")
+          "EXACT rule and the lever that would admit it -- and saying what the rule decides, that this run "
+          "admits no prefix, not that none is valid (the clause every EXACT field printed until Q-LM-15's "
+          "review, which the lever's own sentence beside it denied)",
+          kind == "GeometryRefusal" and "LM_CTX" in msg and "EXACT" in msg and "LM_CTX_WIDEN" in msg
+          and "this run admits no prefix of it" in msg and "no prefix of it is valid" not in msg,
+          f"{kind}: {msg[:220]}")
     kind, msg = refusal_text(lambda: build(CKPT_RESUME=g, LM_CTX_WIDEN=1, **dict(E1, LM_CTX="32")))
     check("Q2 a SMALLER LM_CTX at LM_CTX_WIDEN=1 is refused at the gate: it may grow but not shrink",
           kind == "GeometryRefusal" and "LM_CTX" in msg and "grow but not shrink" in msg,
@@ -356,8 +504,12 @@ try:
     before = m128w.pos.weight.detach().clone()
     rep1 = lm_api.load_state(c128w["LM"], m128w, g128, blob)
     check("Q2 LM.load_state at LM_CTX_WIDEN=0 refuses a 64-row table into a 128-row model, naming LM_CTX "
-          "and the lever; at 1 it fits the table by prefix and leaves the appended rows as built",
-          rep0.refused and "LM_CTX" in rep0.reason and "LM_CTX_WIDEN=1 admits a LARGER context" in rep0.reason
+          "and the lever and saying a larger context is a valid prefix only under it -- not that no prefix "
+          "means anything, which it said beside that sentence until Q-LM-15's review; at 1 it fits the "
+          "table by prefix and leaves the appended rows as built",
+          rep0.refused and "LM_CTX" in rep0.reason
+          and "A larger context is a valid prefix only under LM_CTX_WIDEN=1" in rep0.reason
+          and "no prefix of them means anything" not in rep0.reason
           and not rep1.refused and "64 -> 128 rows" in rep1.reason
           and torch.equal(m128w.pos.weight[:64].detach(), m64.pos.weight.detach())
           and torch.equal(m128w.pos.weight[64:].detach(), before[64:])
@@ -390,6 +542,25 @@ try:
           and torch.equal(mvw.emb.weight[4096:].detach(), before_v[4096:])
           and lm_api._COUNTS.get("lm.ckpt.ctx_widened") == 1,
           f"{repv.reason[:80]} | {repvw.reason[:160]}")
+    # ... AND THE REST OF ITS ANSWERS' WORDS (Q-LM-15's review): a SMALLER context at 1 says no smaller
+    # one is ever a valid prefix, and every field that is not the context keeps the generic clause.
+    c32w, c64n = configs(LM_CTX=32, LM_CTX_WIDEN=1), configs(LM_CTX=64, LM_WIDTH=64)
+    rng.reset_issued()
+    g32 = lm_api.resolve(c32w["LM"])
+    rep32 = lm_api.load_state(c32w["LM"], lm_api.build_model(c32w["LM"], g32, device="cpu", seed=4),
+                              g32, blob)
+    rng.reset_issued()
+    gn = lm_api.resolve(c64n["LM"])
+    repn = lm_api.load_state(c64n["LM"], lm_api.build_model(c64n["LM"], gn, device="cpu", seed=4),
+                             gn, blob)
+    check("Q2 ... a smaller context at LM_CTX_WIDEN=1 is refused saying a smaller one is never a valid "
+          "prefix, and a moved LM_WIDTH keeps the generic clause: no prefix of those tensors means anything",
+          rep32.refused and rep32.reason.startswith("LM_CTX: the checkpoint was written at 64")
+          and "a smaller one is never a valid prefix" in rep32.reason
+          and "no prefix of them means anything" not in rep32.reason
+          and repn.refused and repn.reason.startswith("LM_WIDTH:")
+          and "The tensors do not fit and no prefix of them means anything." in repn.reason,
+          f"{rep32.reason[:140]} | {repn.reason[:140]}")
     del m64, m128, m128w, mv, mvw
 
     # =============================================================================================
@@ -415,17 +586,25 @@ try:
         ru = loop.run(u, max_windows=120, progress=False)
         counts = dict(lm_api._COUNTS)
         sd_keys = list(u.model.state_dict())
-        # CAUSALITY on the built model: a later token changes no earlier position's hidden state.
+        # CAUSALITY on the built model, IN BOTH PASSES THE TREE MAKES (Q-LM-15's review): the training
+        # pass (train mode, grad on) and the eval pass that the probe's closures, EVAL.generate and
+        # FAB.contribution's baseline make (eval mode, no_grad). It read the eval pass alone until the
+        # review, and at 'alibi' that pass was self-only attention -- torch's MHA fast path read the
+        # float mask as bool -- which is causal too, so the check passed on a function training never
+        # computed.
         x = torch.tensor([u.segmentation.ids[:40]])
         x2 = x.clone()
         x2[0, 25] = (int(x2[0, 25]) + 1) % int(u.vocab.size())
+        passes = {}
         was = u.model.training
-        u.model.eval()
-        with torch.no_grad():
-            h1 = lm_api.encode(u.configs["LM"], u.model, x)
-            h2 = lm_api.encode(u.configs["LM"], u.model, x2)
-            hp = lm_api.encode(u.configs["LM"], u.model, x[:, :25])
-        u.model.train(was)
+        try:
+            for mode in ("train", "eval"):
+                u.model.train(mode == "train")
+                with (torch.enable_grad() if mode == "train" else torch.no_grad()):
+                    passes[mode] = [lm_api.encode(u.configs["LM"], u.model, t).detach()
+                                    for t in (x, x2, x[:, :25])]
+        finally:
+            u.model.train(was)
         p = build(CKPT_DIR=f"{TMP}/q4{pos}", **env)
         loop.run(p, max_windows=60, progress=False)
         c = build(CKPT_RESUME=f"{TMP}/q4{pos}", CKPT_DIR=f"{TMP}/q4{pos}c", **env)
@@ -436,11 +615,18 @@ try:
               and len(ru.loss_curve) == 120 and all(math.isfinite(v) for v in ru.loss_curve)
               and u.geometry.pos == pos,
               f"losses {ru.loss_curve[0]:.4f} -> {ru.loss_curve[-1]:.4f}")
-        check(f"Q4 {pos!r}: a later token changes no earlier position's hidden state, and a prefix's hidden "
-              f"states are the full window's",
-              torch.equal(h1[:, :25], h2[:, :25]) and not torch.equal(h1[:, 25:], h2[:, 25:])
-              and torch.allclose(hp, h1[:, :25], atol=1e-5, rtol=0),
-              f"prefix max |diff| {float((hp - h1[:, :25]).abs().max()):.2e}")
+        check(f"Q4 {pos!r}: in the training pass and the eval pass alike, a later token changes no earlier "
+              f"position's hidden state, and a prefix's hidden states are the full window's",
+              len(passes) == 2
+              and all(torch.equal(h1[:, :25], h2[:, :25]) and not torch.equal(h1[:, 25:], h2[:, 25:])
+                      and torch.allclose(hp, h1[:, :25], atol=1e-5, rtol=0)
+                      for h1, h2, hp in passes.values()),
+              "prefix max |diff| " + ", ".join(f"{k} {float((v[2] - v[0][:, :25]).abs().max()):.2e}"
+                                               for k, v in passes.items()))
+        check(f"Q4 {pos!r}: THE EVAL PASS IS THE FUNCTION TRAINING TRAINS -- at LM_DROPOUT=0 the eval pass "
+              f"under no_grad equals the train-mode pass on the same weights, bitwise",
+              float(u.geometry.dropout) == 0.0 and torch.equal(passes["train"][0], passes["eval"][0]),
+              f"max |diff| {float((passes['train'][0] - passes['eval'][0]).abs().max()):.2e}")
         check(f"Q4 {pos!r}: a continuing resume at window 60 trains the uninterrupted run's last 60 losses "
               f"exactly", c.resume_pos is not None and list(rc.loss_curve) == list(ru.loss_curve[60:120]),
               f"first departure "
@@ -451,6 +637,68 @@ try:
                   hasattr(u.model, "alibi_slopes") and "alibi_slopes" not in sd_keys
                   and counts.get("lm.pos.alibi_applied") == counts.get("lm.encode.calls") > 0,
                   f"{counts.get('lm.pos.alibi_applied')} vs {counts.get('lm.encode.calls')}")
+            # ... AND THE EVAL PASS IS NOT SELF-ONLY ATTENTION, the function it computed at 842b8e8:
+            # torch's fast path read the float mask as bool, masking every nonzero entry -- every key
+            # but the query's own. Here, the same layers on the Python path with that bool mask.
+            m = u.model
+            was = m.training
+            try:
+                m.eval()
+                with torch.enable_grad():          # the Python path takes the mask it is handed
+                    hb = m.drop(m.emb(x))
+                    bmask = lm_api._alibi_mask(m.alibi_slopes, int(x.shape[0]), int(x.shape[1]), hb) != 0
+                    for layer in m.body.layers:
+                        hb = layer(hb, src_mask=bmask, is_causal=False)
+                self_only = hb.detach()
+            finally:
+                m.train(was)
+            gap = float((passes["eval"][0] - self_only).abs().max())
+            check("Q4 'alibi': ... and it is not self-only attention -- what an eval pass computed at 842b8e8, "
+                  "torch's MHA fast path reading the float mask as bool -- by a margin no rounding makes",
+                  gap > 1e-2, f"max |diff| {gap:.3f}")
+            # MEM's STORED KEYS ARE THE TRAINING FUNCTION'S. A training flush's keys come through
+            # MEM._encode_keys: LM.encode under no_grad with the model in train mode and the last
+            # layer it runs put in eval, which is the fast path's condition for that layer. At 842b8e8
+            # they sat 0.106 off the grad-on pass's.
+            kd, kw = int(u.configs["MEM"].key_depth), int(u.configs["MEM"].key_win)
+            rows = torch.tensor([u.segmentation.ids[i:i + kw] for i in range(0, 800, 8)])
+            key_fn = _key_fn(u)
+            was = u.model.training
+            try:
+                u.model.train()
+                stored = mem_api._encode_keys(key_fn, rows, kd)
+                with torch.enable_grad():
+                    trained = torch.nn.functional.normalize(
+                        key_fn(rows, n_layers=(kd if kd > 0 else None))[:, -1].detach().float(), dim=-1)
+            finally:
+                u.model.train(was)
+            check("Q4 'alibi': MEM's stored keys are the training function's, bitwise -- MEM._encode_keys "
+                  "(no_grad, the model in train mode, its last layer in eval) against the same rows through "
+                  "the grad-on pass",
+                  tuple(stored.shape) == (100, int(u.geometry.width)) and torch.equal(stored, trained),
+                  f"max |diff| {float((stored - trained).abs().max()):.2e}")
+            # A PROBED RUN READS THE SAME WITH TORCH's FAST PATH OFF FOR THE WHOLE RUN: every reading
+            # through both closures, window for window, and every loss. At 842b8e8 every reading moved
+            # and no loss did (the fast path touches only no_grad passes).
+            envp = dict(E1, LM_ARCH="transformer", LM_POS="alibi")
+            with spy_readings() as rd_on:
+                on = build(**envp)
+                r_on = loop.run(on, max_windows=40, progress=False)
+            _fast = torch.backends.mha.get_fastpath_enabled()
+            torch.backends.mha.set_fastpath_enabled(False)
+            try:
+                with spy_readings() as rd_off:
+                    off = build(**envp)
+                    r_off = loop.run(off, max_windows=40, progress=False)
+            finally:
+                torch.backends.mha.set_fastpath_enabled(_fast)
+            check("Q4 'alibi': a probed run reads the same with torch's MHA fast path switched off for the "
+                  "whole run -- every reading through both closures, window for window, and every loss",
+                  len(rd_on) >= 3 and {rd.closure for rd in rd_on} == {"memory-off", "memory-on"}
+                  and same_reads(rd_on, rd_off) and list(r_on.loss_curve) == list(r_off.loss_curve),
+                  f"{len(rd_on)} readings, the last {[(r.closure, r.control_mean.value) for r in rd_on[-2:]]}"
+                  f" vs {[(r.closure, r.control_mean.value) for r in rd_off[-2:]]}")
+            del on, off
         else:
             check("Q4 'none': lm.pos.alibi_applied is ABSENT, and lm.pos.scheme names the scheme and O17",
                   "lm.pos.alibi_applied" not in counts

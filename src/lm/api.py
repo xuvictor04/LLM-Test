@@ -756,7 +756,10 @@ def encode(lm: Config, model, x, *, n_layers=None, extra=None):
     -inf after it, one (L, L) slab per head repeated over the batch in the (batch x heads) order
     nn.MultiheadAttention indexes a 3-D mask by, and `is_causal=False`, because is_causal is a promise
     that the mask IS the plain causal mask and this one is not. The -inf half is the same causal
-    cut, so no position ever reads its future on any scheme.
+    cut, so no position ever reads its future on any scheme. AND AT 'alibi' THE LAYERS RUN WITH
+    TORCH's MHA FAST PATH HELD OFF (Q-LM-15's review): that kernel, which a layer takes in eval mode
+    under no_grad, reads a float mask as bool, and an eval pass then scored self-only attention --
+    see the loop below. Every pass, eval or training, computes the one function training trains.
 
     LEVERS READ: ctx (ONLY on the pos-overflow refusal path, to print LM_CTX beside the actual
                  window length in the raised message -- the read is the `int(lm.ctx)` in the raised
@@ -778,7 +781,9 @@ def encode(lm: Config, model, x, *, n_layers=None, extra=None):
                  included; the eval book's own counts say how many were the probe's.
                  lm.pos.alibi_applied (2026-09-28, Q-LM-15): the calls that built the ALiBi mask,
                  every call counted as lm.encode.calls is; ABSENT on every arm but
-                 LM_ARCH=transformer LM_POS='alibi', where it equals lm.encode.calls
+                 LM_ARCH=transformer LM_POS='alibi', where it equals lm.encode.calls. Each of them
+                 ran its layers with torch's MHA fast path held off (Q-LM-15's review), so it is
+                 also the count of calls the hold covered
     """
     lm = lm.owned_by("LM")
     _bump("lm.encode.calls")
@@ -837,32 +842,66 @@ def encode(lm: Config, model, x, *, n_layers=None, extra=None):
             # the declared counter below could never be nonzero. Measured before this fix:
             # encode(..., n_layers=1) against the full-depth call differed by max|dh|=0.0.
             _bump("lm.encode.key_path_truncated")
-        for i, layer in enumerate(model.body.layers[:n_run]):
-            if i == n_run - 1:
-                # THE LAST LAYER ACTUALLY RUN -- full stack or truncated key path alike -- computed
-                # WITHOUT ITS OWN INTERNAL DROPOUT: the attention-probability dropout inside
-                # self_attn, and the two residual dropouts (dropout1, dropout2), by toggling
-                # eval() for this one call and restoring the layer's prior mode after. nn.GRU
-                # already gives this for free -- torch documents its `dropout=` as applied "to the
-                # output of each GRU layer EXCEPT THE LAST", so the gru arm's `h, _ =
-                # model.body(h)` below was already clean -- but nn.TransformerEncoder has no such
-                # carve-out: every layer it owns drops, INCLUDING the one whose output is this
-                # function's return, and that is a fourth dropout site nobody chose. Measured
-                # before this fix: built at LM_DROPOUT=0.2, arch=transformer, set model.drop.p=0.0
-                # (silencing ONLY the embedding-dropout site) and called encode() twice in train
-                # mode on one input under no_grad -- the two returns still differed; in eval mode
-                # two calls agreed with each other and disagreed with the train-mode value, which
-                # is what proves the leak lived inside TransformerEncoderLayer's own dropout sites
-                # and not in `model.drop`. LayerNorm is unaffected by .eval()/.train(), so toggling
-                # the layer's mode for one call changes nothing but its dropout sites.
-                was_training = layer.training
-                layer.eval()
-                try:
+        # TORCH's MHA FAST PATH IS HELD OFF FOR THIS LOOP AT 'alibi', AND ONLY THERE (2026-09-28,
+        # Q-LM-15's review). The paragraph above is about nn.TransformerEncoder's nested-tensor
+        # path; each LAYER has a fast path of its own, torch._transformer_encoder_layer_fwd, which
+        # nn.TransformerEncoderLayer takes whenever it is in eval mode and no parameter it holds
+        # needs grad -- so on every no_grad pass through here: the retention probe's closures,
+        # EVAL.generate, FAB.contribution's baseline and the memory-on closure's queries, which run
+        # the model in eval, and MEM's key writes, which run it in train mode with the last layer
+        # put in eval below. That kernel's masked softmax reads a float src_mask AS BOOL, every
+        # nonzero entry masked. The causal mask comes through it whole -- its nonzero entries are
+        # its -inf ones, the same cut -- so 'learned' keeps the path it has always taken, and a
+        # default run is the call it was, bit for bit. ALiBi's does not: every earlier key's bias
+        # is nonzero, so each position attended to itself alone, and every eval pass scored a
+        # function training never computes. Driven at 842b8e8 on a built transformer at 'alibi'
+        # (LM_HEADS=8, LM_DROPOUT=0): max|dh| 7.35 between one model's train-mode pass and its eval
+        # pass under no_grad, 0.0 between that eval pass and self-only attention, and every
+        # retention reading of a 100-window run moved (the last memory-off read 6.2588 against
+        # 6.1398 with the fast path off) while its training losses did not; MEM's stored keys sat
+        # 0.106 off the trained function's. A gradient pass takes the Python path whatever the
+        # flag, since grad is on and the parameters need it, so the hold moves nothing a gradient
+        # pass computes; what it moves is every no_grad pass -- the readings and the stored keys --
+        # onto the function training trains: an eval pass under no_grad now equals the train-mode
+        # pass bitwise on CPU at LM_DROPOUT=0 (tests/test_position.py Q4). The flag is torch's,
+        # process-wide: it is lowered only where it was up and put back in a finally, so a caller
+        # that turned it off finds it off.
+        _hold = scheme == "alibi" and torch.backends.mha.get_fastpath_enabled()
+        if _hold:
+            torch.backends.mha.set_fastpath_enabled(False)
+        try:
+            for i, layer in enumerate(model.body.layers[:n_run]):
+                if i == n_run - 1:
+                    # THE LAST LAYER ACTUALLY RUN -- full stack or truncated key path alike --
+                    # computed WITHOUT ITS OWN INTERNAL DROPOUT: the attention-probability dropout
+                    # inside self_attn, and the two residual dropouts (dropout1, dropout2), by
+                    # toggling eval() for this one call and restoring the layer's prior mode after.
+                    # nn.GRU already gives this for free -- torch documents its `dropout=` as
+                    # applied "to the output of each GRU layer EXCEPT THE LAST", so the gru arm's
+                    # `h, _ = model.body(h)` below was already clean -- but nn.TransformerEncoder
+                    # has no such carve-out: every layer it owns drops, INCLUDING the one whose
+                    # output is this function's return, and that is a fourth dropout site nobody
+                    # chose. Measured before this fix: built at LM_DROPOUT=0.2, arch=transformer,
+                    # set model.drop.p=0.0 (silencing ONLY the embedding-dropout site) and called
+                    # encode() twice in train mode on one input under no_grad -- the two returns
+                    # still differed; in eval mode two calls agreed with each other and disagreed
+                    # with the train-mode value, which is what proves the leak lived inside
+                    # TransformerEncoderLayer's own dropout sites and not in `model.drop`.
+                    # LayerNorm is unaffected by .eval()/.train(), so toggling the layer's mode for
+                    # one call changes nothing but its dropout sites -- on the Python path; under
+                    # no_grad eval() also opens the fast path, which the hold above keeps shut at
+                    # 'alibi'.
+                    was_training = layer.training
+                    layer.eval()
+                    try:
+                        h = layer(h, src_mask=mask, is_causal=causal)
+                    finally:
+                        layer.train(was_training)
+                else:
                     h = layer(h, src_mask=mask, is_causal=causal)
-                finally:
-                    layer.train(was_training)
-            else:
-                h = layer(h, src_mask=mask, is_causal=causal)
+        finally:
+            if _hold:
+                torch.backends.mha.set_fastpath_enabled(True)
     else:
         h, _ = model.body(h)
         # n_layers IS ACCEPTED AND IGNORED HERE, ON PURPOSE -- a DECLARED GATE, not a silence.
@@ -1717,13 +1756,17 @@ def load_state(lm: Config, model, geom, saved):
                 + ("The composer's byte tables are sized by it (compose is on at "
                    f"{'the checkpoint' if saved_geom.get('compose') else 'this run'}), so they do "
                    f"not fit. " if field == "max_token_bytes" else
+                   # THE ONE MOVE THAT HAS A ROUTE IS SAID WHERE IT IS REFUSED (Q-LM-15), IN PLACE
+                   # OF THE GENERIC CLAUSE, WHICH IT CONTRADICTS (Q-LM-15's review): a larger
+                   # context's table IS a prefix that means something -- position p is still
+                   # position p -- but only under the declared widening, and a smaller one never
+                   # is. The clause stood beside this sentence until then and denied it.
+                   ("A larger context is a valid prefix only under LM_CTX_WIDEN=1, which admits "
+                    "it at an epoch-boundary resume, the learned table keeping the parent's rows; "
+                    "a smaller one never is. " if not widen else
+                    "LM_CTX_WIDEN=1 admits a larger context only: a smaller one is never a valid "
+                    "prefix. ") if field in ("ctx", "pos_max") else
                    "The tensors do not fit and no prefix of them means anything. ")
-                # THE ONE MOVE THAT HAS A ROUTE IS SAID WHERE IT IS REFUSED (Q-LM-15): a larger
-                # context is admitted at LM_CTX_WIDEN=1, a smaller one never.
-                + (("LM_CTX_WIDEN=1 admits a LARGER context at an epoch-boundary resume, the "
-                    "learned table keeping the parent's rows; a smaller one is refused either "
-                    "way. " if not widen else "LM_CTX_WIDEN=1 admits a larger context only. ")
-                   if field in ("ctx", "pos_max") else "")
                 + "Resume with the saved value, or start a new run.")
     # THE POSITION SCHEME DECIDES WHICH TENSORS EXIST (2026-09-28, Q-LM-15), so a move is refused by
     # its name here, before the missing-tensor refusal below would report the same move as a

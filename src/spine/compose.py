@@ -447,8 +447,11 @@ ASSEMBLY_ORDER = (
                                               "MAY_WIDEN only at LM_CTX_WIDEN=1 and EXACT otherwise, "
                                               "and an lm.ctx the gate WIDENED is a declared "
                                               "widening, bound on System.ctx_widening for the "
-                                              "segment and signature rows below and the startup "
-                                              "notice"),
+                                              "segment row below and the startup notice; and the "
+                                              "recorded lm.ctx is SIG's context wherever the "
+                                              "checkpoint's LOOP carries no sig_ctx, bound on "
+                                              "System.sig_ctx for the signature row (Q-LM-15's "
+                                              "review)"),
     ("plan",      "DATA",  "data_plan",       "(epochs=RUN.epochs, win_tokens=LM.ctx, "
                                               "bytes_per_token=Vocabulary.bytes_per_token) -- the "
                                               "exposure gates, before a single step runs, and "
@@ -558,11 +561,13 @@ ASSEMBLY_ORDER = (
                                               "position table by prefix"),
     ("signature", "SIG",   "build",           "(width_units=derive.signature_width_bytes(LM.ctx, "
                                               "bytes_per_token), alphabet_size, device, generator) "
-                                              "-- the ONE width, resolved once, here; at a declared "
-                                              "context widening from the PARENT's LM_CTX, the "
-                                              "recorded lm.ctx the gate widened from (Q-LM-15), "
-                                              "because the encoder was trained at that width and "
-                                              "SIG's restore refuses any other",
+                                              "-- the ONE width, resolved once, here, from "
+                                              "System.sig_ctx, the LM_CTX the lineage's SIG was "
+                                              "built at (Q-LM-15 and its review): this run's on a "
+                                              "fresh run, and on a resume LOOP.sig_ctx or else the "
+                                              "recorded lm.ctx, because a widened lineage's encoder "
+                                              "was trained at the width it started at and SIG's "
+                                              "restore refuses any other",
                                               "encode -- SIG.encode bound to the SigState by "
                                               "_sig_encode_fn, which is DOM.rekey's spelling for "
                                               "the same callable"),
@@ -2157,12 +2162,15 @@ ROW_ARGUMENTS_ELSEWHERE = {
         "make this check pass while asserting the wrong object, which is the failure mode the "
         "column exists to end.",
     "SIG.build":
-        "width_units is _signature_width(lm, vocab) -- derive.signature_width_bytes over LM.ctx and "
-        "the MEASURED bytes/token, resolved ONCE here and never recomputed as the vocabulary grows, "
-        "which is the C4 repair this package exists for. alphabet_size is _alphabet_size(sig, lm): "
-        "256 under space='bytes', LM.vocab_slots under 'tokens'. Neither is a row's output because "
-        "neither is any package's return value -- they are the assembly's own arithmetic over two "
-        "packages' frozen Configs, which is exactly what the root is for.",
+        "width_units is _signature_width(lm, vocab, ctx=System.sig_ctx) -- "
+        "derive.signature_width_bytes over the LM_CTX the lineage's SIG was built at (LM.ctx, but "
+        "across a widened lineage the one it started at, which LOOP.sig_ctx carries: Q-LM-15 and "
+        "its review) and the MEASURED bytes/token, resolved ONCE here and never recomputed as the "
+        "vocabulary grows, which is the C4 repair this package exists for. alphabet_size is "
+        "_alphabet_size(sig, lm): 256 under space='bytes', LM.vocab_slots under 'tokens'. Neither is "
+        "a row's output because neither is any package's return value -- they are the assembly's "
+        "own arithmetic over two packages' frozen Configs and the lineage's record, which is exactly "
+        "what the root is for.",
     "SIG.load_state_dict":
         "sidecar is _sidecar(sysm, restored, 'SIG') -- the recorded fields SIG compares its own "
         "state against, read from Snapshot.payload['SIG']['sidecar'], which sig/api.py::state_dict "
@@ -2588,10 +2596,21 @@ class System:
                  # A DECLARED CONTEXT WIDENING (2026-09-28, register §8 3.6; Q-LM-15): (the parent's
                  # LM_CTX, this run's) when the geometry gate widened lm.ctx -- which it does only at
                  # LM_CTX_WIDEN=1 -- and None everywhere else, a fresh run included. Read at the
-                 # `segment` stage (refused across a continuing mid-epoch resume), at the `signature`
-                 # stage (SIG keeps the parent's width) and for the startup notice. Not checkpointed:
-                 # a child of this run records this run's LM_CTX, and widens from it or not.
-                 "ctx_widening")
+                 # `segment` stage (refused across a continuing mid-epoch resume) and for the
+                 # startup notice. Not checkpointed: it describes THIS resume, and a child of this
+                 # run widens from this run's LM_CTX or not. (It was read at the `signature` stage
+                 # too, until Q-LM-15's review: see sig_ctx.)
+                 "ctx_widening",
+                 # THE LM_CTX SIG's WIDTH IS DERIVED FROM (2026-09-28, Q-LM-15's review): this run's
+                 # on a fresh run, and on a resume the lineage's -- LOOP.sig_ctx where the checkpoint
+                 # carries it, the recorded lm.ctx where it does not. The `signature` stage builds SIG
+                 # at signature_width_bytes(sig_ctx, the adopted bytes/token), and spine/loop.py's
+                 # _payload writes it into LOOP wherever a widening has moved it off this run's
+                 # LM_CTX. Until the review the stage took the parent's LM_CTX only at the resume
+                 # that widened, and ctx_widening is not checkpointed, so every later resume of the
+                 # widened lineage resolved SIG at its own LM_CTX and SIG's restore refused it --
+                 # the child's epoch boundary, its mid-epoch save and a second widening alike.
+                 "sig_ctx")
 
     def __init__(self, configs, wires, warnings):
         for name in self.__slots__:
@@ -2876,16 +2895,31 @@ def compose(environ=None, *, restored=None):
     sysm.stage = "gate"
     sysm.manifest = _geometry_manifest(sysm)
     sysm.ctx_widening = None
+    sysm.sig_ctx = int(lm.ctx)
     if restored is not None:
-        # THE REPORT IS READ FOR ONE FIELD (2026-09-28, register §8 3.6; Q-LM-15): an lm.ctx the gate
-        # WIDENED. That is a declared widening -- the manifest records lm.ctx MAY_WIDEN only at
-        # LM_CTX_WIDEN=1 -- and three rows below act on it: the `segment` stage refuses it across a
-        # continuing mid-epoch resume, SIG keeps the parent's width, and the root prints what it
-        # does to every windows cadence. (parent ctx, this run's ctx), or None.
+        # THE REPORT IS READ FOR ONE FIELD (2026-09-28, register §8 3.6; Q-LM-15): lm.ctx. One the
+        # gate WIDENED is a declared widening -- the manifest records lm.ctx MAY_WIDEN only at
+        # LM_CTX_WIDEN=1 -- and two rows below act on it: the `segment` stage refuses it across a
+        # continuing mid-epoch resume, and the root prints what it does to every windows cadence.
+        # (parent ctx, this run's ctx), or None.
         _gate = ckpt_api.check_geometry(ckpt, restored, sysm.manifest)
         for _field, _rule, _was, _now in _gate.widened:
             if _field == "lm.ctx":
                 sysm.ctx_widening = (int(_was), int(_now))
+        # AND ITS RECORDED VALUE IS SIG's CONTEXT WHERE THE LINEAGE CARRIES NONE (Q-LM-15's review).
+        # SIG's encoder was trained at signature_width_bytes(the LM_CTX its lineage started at, the
+        # adopted bytes/token), and SIG's restore refuses any other width. A widened run writes that
+        # LM_CTX into LOOP as `sig_ctx`, so every later resume of the lineage -- its epoch boundary,
+        # a mid-epoch save, a second widening -- builds SIG at it; a checkpoint without the key is
+        # one whose SIG was built at its own recorded lm.ctx: every one written before this ruling,
+        # and every unwidened lineage's, which writes the payload it wrote before. Read at every
+        # resume, not only at the one that widens: ctx_widening describes THIS resume and is not
+        # checkpointed, which is how a widened child's own checkpoint came to be refused by SIG at
+        # its own LM_CTX (87 units recorded, 175 resolved) until the review.
+        _sig_ctx = (saved.get("LOOP") or {}).get("sig_ctx")
+        for _field, _rule, _was, _now in _gate.checked:
+            if _field == "lm.ctx":
+                sysm.sig_ctx = int(_was) if _sig_ctx is None else int(_sig_ctx)
 
     sysm.stage = "plan"
     sysm.plan = data_api.data_plan(
@@ -3067,13 +3101,14 @@ def compose(environ=None, *, restored=None):
             sysm.warnings.append(f"LM.load_state: {sysm.lm_load.reason}.")
 
     sysm.stage = "signature"
-    # AT A DECLARED WIDENING SIG KEEPS THE PARENT'S WIDTH (2026-09-28, Q-LM-15): the encoder was
-    # trained at signature_width_bytes(the PARENT's LM_CTX, the adopted bytes/token), SIG refuses a
-    # resume whose width moved, and a routing signature is the same bytes-before-the-window question
-    # whatever the window's width.
+    # ACROSS A WIDENED LINEAGE SIG KEEPS THE WIDTH ITS ENCODER WAS TRAINED AT (2026-09-28, Q-LM-15,
+    # and its review): signature_width_bytes(sig_ctx, the adopted bytes/token), sig_ctx being the
+    # LM_CTX the lineage's SIG was built at (the `gate` stage). SIG refuses a resume whose width
+    # moved, and a routing signature is the same bytes-before-the-window question whatever the
+    # window's width. On a fresh run and on every unwidened lineage sig_ctx IS LM_CTX, so this is
+    # the width it always was.
     sysm.sig = sig_api.build(
-        sig, width_units=_signature_width(
-            lm, sysm.vocab, ctx=None if sysm.ctx_widening is None else sysm.ctx_widening[0]),
+        sig, width_units=_signature_width(lm, sysm.vocab, ctx=sysm.sig_ctx),
         alphabet_size=_alphabet_size(sig, lm),
         device=sysm.process.device, generator=sysm.streams["sig"])
     if "SIG" in saved:
@@ -3657,10 +3692,12 @@ def _signature_width(lm, vocab, ctx=None):
     `max(1, SIG_WIN)` = ONE BYTE in eval at :3919, so every eval-path routing decision in every
     report was made on a one-byte signature and nothing failed.
 
-    `ctx` IS THE PARENT's LM_CTX AT A DECLARED WIDENING, AND None EVERYWHERE ELSE (2026-09-28,
-    Q-LM-15). A widened child keeps the width its encoder was trained at: the recorded lm.ctx the
-    gate widened from, with the bytes/token build_vocabulary adopted from the parent's file, gives
-    the parent's number exactly, and SIG's own restore refuses any other.
+    `ctx` IS THE LM_CTX THE LINEAGE'S SIG WAS BUILT AT, System.sig_ctx, AND None MEANS LM.ctx
+    (2026-09-28, Q-LM-15, and its review). A widened lineage keeps the width its encoder was trained
+    at: that LM_CTX, with the bytes/token build_vocabulary adopted from the parent's file, gives the
+    parent's number exactly, and SIG's own restore refuses any other. Until the review the root
+    passed the parent's LM_CTX only at the resume that widened, and None at every later one, so a
+    widened child's own checkpoint resolved at the child's LM_CTX and was refused.
     """
     from spine import derive
     return derive.signature_width_bytes(int(lm.ctx) if ctx is None else int(ctx),
@@ -3722,13 +3759,14 @@ def _widening_notice(sysm):
                f"tokens or fewer the model computes what the parent computed. "
                if scheme == "learned" else
                f"LM_POS={scheme!r} builds no position table, so nothing is appended. ")
-            + f"SIG keeps the parent's width ({int(sysm.sig.width_units)} units), and a retention "
-              f"probe the parent pinned keeps its windows. EVERY WINDOWS-UNIT LEVER NOW COUNTS "
-              f"WINDOWS OF {new} TOKENS WHERE THE PARENT'S COUNTED {old}, so each spans more text "
-              f"than it did. The value that keeps the parent's spacing in text "
-              f"(spine/derive.py::windows_at_ctx), PRINTED AND NEVER APPLIED (N4) -- set the ones "
-              f"you want held: {listed}. The widening is register §8 5.8's route (B) on CPU, "
-              f"operation only; it is not a route that has passed (O17).")
+            + f"SIG keeps the width its encoder was trained at ({int(sysm.sig.width_units)} units, "
+              f"from LM_CTX={int(sysm.sig_ctx)}, which this run's checkpoints carry on as "
+              f"LOOP.sig_ctx), and a retention probe the parent pinned keeps its windows. EVERY "
+              f"WINDOWS-UNIT LEVER NOW COUNTS WINDOWS OF {new} TOKENS WHERE THE PARENT'S COUNTED "
+              f"{old}, so each spans more text than it did. The value that keeps the parent's "
+              f"spacing in text (spine/derive.py::windows_at_ctx), PRINTED AND NEVER APPLIED (N4) "
+              f"-- set the ones you want held: {listed}. The widening is register §8 5.8's route "
+              f"(B) on CPU, operation only; it is not a route that has passed (O17).")
 
 
 def _base_parameters(sysm):

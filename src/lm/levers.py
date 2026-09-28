@@ -653,9 +653,11 @@ class LMLevers(LeverSet):
     # and lm.pos_max as MAY_WIDEN, so a larger LM_CTX passes the gate and a smaller one is still
     # refused; lm/api.py::load_state copies the parent's rows of the learned table and leaves the
     # appended ones at this build's initialisation (OPT pads their moments with zeros, as for any
-    # dim-0 widening); and the root keeps SIG's width at the PARENT's context, because the encoder was
-    # trained at that width and SIG refuses a moved one. A continuing mid-epoch resume across a
-    # widening is refused by name: the saved cursor counts windows of the parent's width.
+    # dim-0 widening); and the root keeps SIG's width the parent's -- the context the lineage's SIG was
+    # built at, which a widened run's checkpoints carry on as LOOP.sig_ctx so that every later resume
+    # keeps it too (Q-LM-15's review) -- because the encoder was trained at that width and SIG refuses
+    # a moved one. A continuing mid-epoch resume across a widening is refused by name: the saved
+    # cursor counts windows of the parent's width.
     # IT RE-TYPES EVERY WINDOWS CADENCE, AND NOTHING RESCALES ONE FOR YOU (N4). A window is LM_CTX
     # tokens, so after 64 -> 128 every Windows-unit lever spans twice the text it did. The widening
     # resume PRINTS each one beside spine/derive.py::windows_at_ctx's value -- the same text per
