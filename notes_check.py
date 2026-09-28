@@ -129,7 +129,7 @@ def _live_markdown():
     update it every turn -- while carrying FAB_N0=3, abandoned since 2026-08-15. A stale file that tells a
     reader it is authoritative is worse than a stale file that does not, and this check could not see it.
     Everything outside archive/ is now in scope; archive/ is excluded by definition, because a frozen record
-    describing an older system is exactly what it is for. See ARCHIVE.md.
+    describing an older system is exactly what it is for. See archive/README.md.
     """
     out = []
     for fn in sorted(os.listdir(ROOT)):
@@ -170,8 +170,8 @@ if __name__ == "__main__":
         sys.exit(1)
 
     _arch = os.path.join(ROOT, "archive")
-    if os.path.isdir(_arch) and not os.path.exists(os.path.join(ROOT, "ARCHIVE.md")):
-        print("!! archive/ exists but ARCHIVE.md does not -- the frozen trees are unlabelled, which is how "
+    if os.path.isdir(_arch) and not os.path.exists(os.path.join(_arch, "README.md")):
+        print("!! archive/ exists but archive/README.md does not -- the frozen trees are unlabelled, which is how "
               "garry/self_organize.py's FAB_N0=3 got quoted as current in nine notes.")
         sys.exit(1)
 
