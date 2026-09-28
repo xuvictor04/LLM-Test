@@ -128,12 +128,14 @@ Everything matched:
     grown of about 2,355; spawning is not gated). So k1000 forgoes about 13 experts per run out of
     about 3,600 live.
   - The blackout is not the whole deficit. The act arms' `fab.grow_dev` ends at 0.21-0.33, against
-    0.13-0.20 in the k0 family, which raises the regression bar. *(Corrected 2026-09-28: the higher
-    `fab.grow_dev` is the per-token loss scale, not a higher bar. The trigger compares the loss's rise
-    over `fab.grow_slow` with z × dev in the same units, and dev/slow ends at 0.097 (k0) and 0.102
-    (k1000) here, and at 0.110 and 0.113 on 2026-09-28. The act arms' lower regression-ask rate is
-    real, and its cause is not established.)* Outside the blackout they ask for regression growth 3-5
-    times per run, against 8-17.
+    0.13-0.20 in the k0 family, which raises the regression bar. *(Corrected 2026-09-28: the trigger
+    compares the loss's rise over `fab.grow_slow` with z × dev in the same units, so the bar relative
+    to the loss is dev/slow. For k1000 the higher `fab.grow_dev` is the per-token loss scale, not a
+    higher bar: dev/slow ends at 0.102 against k0's 0.097 here, and 0.113 against 0.110 on
+    2026-09-28. For k3000 the bar is higher: dev/slow ends at 0.140 (0.137-0.143 by run, against at
+    most 0.119 in this fleet's k0 family and k1000; `results/gpu_retok_2026-09-28/verify/j_logs.out`),
+    a candidate cause of its lower regression-ask rate. k1000's lower rate has no established cause.)*
+    Outside the blackout they ask for regression growth 3-5 times per run, against 8-17.
   - `FAB_COOLDOWN` also spaces growth firings: that refused 8-26 regression asks per k1000 run and
     18-62 per k0 run. So the cooldown fleet prices the whole 400-window cooldown, not the blackout
     alone; one analyst predicts a difference within ±0.01 bits/byte.

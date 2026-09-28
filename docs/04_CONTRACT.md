@@ -5878,8 +5878,8 @@ bits/byte can be split by phase. Each is now read where its owner sees it:
   flush of several windows counts all of them and a window before the stamp never counts.
   `fab.growth_blackout_suppressed.regression` counts the regression readings the blackout refused;
   `.stall` counts every waiting check inside a blackout, before the plateau test, not refused asks
-  *(corrected 2026-09-28, the cooldown fleet read; `src/fabric/api.py`'s docstring follows after the
-  Stage 3 merge)*. ABSENT at `FAB_ON=0`, `FAB_GROW=0`
+  *(corrected 2026-09-28, the cooldown fleet read; `src/fabric/api.py`'s docstring and the comment
+  above the windows count follow after the Stage 3 merge)*. ABSENT at `FAB_ON=0`, `FAB_GROW=0`
   or `FAB_COOLDOWN` ≤ 0, where no stamp can block growth, and until the first stamp arrives, where
   the `fab.growth_blackout` Gate reads UNREACHABLE; PRESENT-and-0 is a stamp no later check inside
   its cooldown reached (corrected 2026-09-27, below: it was seeded on every check and read
