@@ -56,9 +56,11 @@ WHAT THIS FILE CANNOT SEE: whether Levels help. Competence is a control signal; 
 unit improves domain management is read on GPU (Proposal 05 U-series family (h), S5 (iii)), and an
 adverse reading there returns the lever to OFF. Everything here is an operation check.
 """
+import atexit
 import math
 import os
 import random
+import shutil
 import struct
 import sys
 import tempfile
@@ -378,6 +380,11 @@ check("L5 the report names the unit beside comp_glob",
 
 # ---- L6: the resume stamp -------------------------------------------------------------------------
 TMP = tempfile.mkdtemp(prefix="levels_")
+# THE DIRECTORY GOES AT EXIT (2026-09-29). Nothing removed it, so every run left its checkpoints in
+# /tmp: 241 MB a run before the flip, 605 MB since, where the shipped retention probe writes a .best
+# beside each CKPT_DIR and the source-reliability book's sketch rides in every checkpoint. A run that
+# is killed still leaves it.
+atexit.register(shutil.rmtree, TMP, True)
 _warned = lambda s: [w for w in s.warnings if w.startswith("DOM_LEVELS=") and "Q-DOM-5" in w]  # noqa: E731
 for _plv, _tag, _unit in ((0, "p_off", "token"), (1, "p_on", "build_token")):
     _p = build(DOM_LEVELS=_plv, CKPT_DIR=os.path.join(TMP, _tag))
