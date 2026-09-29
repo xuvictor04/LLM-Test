@@ -4,13 +4,13 @@ Updated 2026-09-29 (the Stage 3 merge: SR0 built on `sr0-build`, reviewed and me
 
 ## Where things stand
 - **Stage 3 (SR0) is built, reviewed and merged** (2026-09-29; register §8 3.1-3.7, `sr0-build`'s 22
-  commits a605b59..951c7f0 merged onto b444456): the retention probe, the synthetic held-out block, the
-  observe-mode source-reliability book, the 'replay' draw, FAB.contribution, O17's position lever and
-  SR6's copy detection, each built OFF with its review; then DATA_SYNTH_HOLDOUT on, EVAL_RETENTION_EVERY
-  1000 with a read at every phase start and DATA_TRUST 'observe' (b1d31b7, the flip). 298 levers, 151
-  entry points (10 stubs, 18 deferred). A fleet that pairs with pre-flip runs pins all three (EXP=retok
-  does); EXP=world_epoch waits on O13's two WORLD levers. No GPU test is ready: E2's held-out re-read,
-  E6 and the WORLD re-run need their scripts, the re-run O13's levers too.
+  commits a605b59..951c7f0 merged onto b444456 in edb90de): the retention probe, the synthetic held-out
+  block, the observe-mode source-reliability book, the 'replay' draw, FAB.contribution, O17's position
+  lever and SR6's copy detection, each built OFF with its review; then DATA_SYNTH_HOLDOUT on,
+  EVAL_RETENTION_EVERY 1000 with a read at every phase start and DATA_TRUST 'observe' (b1d31b7, the
+  flip). 298 levers, 151 entry points (10 stubs, 18 deferred). A fleet that pairs with pre-flip runs
+  pins all three (EXP=retok does); EXP=world_epoch waits on O13's two WORLD levers. No GPU test is
+  ready: E2's held-out re-read, E6 and the WORLD re-run need their scripts, the re-run O13's levers too.
 - **WORLD_FEEDBACK ships False** (d97779d) on the 20k-window GPU fleet: the forecast was within
   noise (docs/04_CONTRACT.md Q-WORLD-10, results/gpu_world_2026-09-24/ANALYSIS.txt). WORLD stays enabled.
 - **GPU slowdown repaired** (4feb65f): FAB.manage's scalar merge scan was n^2/2 device syncs from
@@ -234,19 +234,19 @@ Updated 2026-09-29 (the Stage 3 merge: SR0 built on `sr0-build`, reviewed and me
   relative bar); the cooldown fleet kept no checkpoint and gives §8 6.1 no parent (NEW-20, O20); the
   WORLD re-run reads its time-integrated gaps from 20% of the stream on, phase 1 reported only, its
   seeds from the measured spread (note WORLD 4, §8 6.5).
-- 2026-09-29, THE STAGE 3 MERGE (`git merge --no-ff sr0-build`; its message has the detail): conflicts
-  in gpu_world.sh, tests/test_gpu_world.py, the register and the brief, both sides kept. In the new
-  gpu_world.sh the pins and the probe's disk budget are read off the fleet's code copy ($CODE_DIR),
-  EXP=world_epoch's runs pass --probe-series to $OUT/code/run.py, and PIN_RETOK is the shipped 1000
-  (PROBE_EVERY 700 still fits: 701-721 at k1000). sr0's F18/F19 are F27/F28; main's F18-F26 keep theirs.
-  DECIDED, the flip review's open item 1: a fleet that recorded no pin (launched before the flip) gets
-  the analysing checkout's pins on its resume line, and a row says whose (F27, F7);
+- 2026-09-29, THE STAGE 3 MERGE (edb90de, `git merge --no-ff sr0-build`; its message has the detail):
+  conflicts in gpu_world.sh, tests/test_gpu_world.py, the register and the brief, both sides kept. In
+  the new gpu_world.sh the pins and the probe's disk budget are read off the fleet's code copy
+  ($CODE_DIR), EXP=world_epoch's runs pass --probe-series to $OUT/code/run.py, and PIN_RETOK is the
+  shipped 1000 (PROBE_EVERY 700 still fits: 701-721 at k1000). sr0's F18/F19 are F27/F28; main's F18-F26
+  keep theirs. DECIDED, the flip review's open item 1: a fleet that recorded no pin (launched before the
+  flip) gets the analysing checkout's pins on its resume line, and a row says whose (F27, F7);
   results/gpu_retok_2026-09-27/CHECKPOINTS.md says so for that fleet's tars. tools/gpu_launch.sh counts
-  the probe's best saves by running the script's budget block (F28), knows PROBE_EVERY, and names
-  O13's levers for EXP=world_epoch. Fixtures: none re-recorded. Every workload reproduces on the merged
-  tree (no default-cadence workload reaches window 1000, so TOK_RETOK_EVERY's move reaches none), and
-  b444456 reproduces the six pre-SR0 records unpinned. The whole suite and --mutants pass. NEXT: Phase
-  B (docs/REORGANISATION.md), the owed items under Known low items, then Stage 4.
+  the probe's best saves by running the script's budget block (F28), knows PROBE_EVERY, and names O13's
+  levers for EXP=world_epoch. Fixtures: none re-recorded. Every workload reproduces on the merged tree
+  (no default-cadence workload reaches window 1000, so TOK_RETOK_EVERY's move reaches none), and b444456
+  reproduces the six pre-SR0 records unpinned. The whole suite and --mutants pass. NEXT: Phase B
+  (docs/REORGANISATION.md), the owed items under Known low items, then Stage 4.
 0. Proposal 05 §8 orders everything: Stage 0 (owner rulings O1-O20; the fleet-archive reads; the
    k0_nuis pair; phase-traversal resizing), then Stage 1's small builds (vocab `.prev` rotation, DOM
    Levels, counters, OPT_LR_CONTINUE 'as_logged', gpu_world.sh kept checkpoints) before the owner's

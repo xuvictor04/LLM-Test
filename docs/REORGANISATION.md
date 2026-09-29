@@ -1,14 +1,14 @@
 # The file-structure reorganisation of 2026-09-28: what is done, and what moves after the Stage 3 merge
 
 **Status.** Phase A is done on `rm-predict-DC` (the commits below). **Phase B is unblocked** since the
-Stage 3 branch (`sr0-build`) merged on 2026-09-29, the whole suite green on the merge (*At the merge*,
-below). It waited for that merge because each of its steps edits files that Stage 3 also edits (B1–B2
-`docs/04_CONTRACT.md`; B3 `src/ckpt/api.py`, `src/world/levers.py`, `tests/test_assemble.py`, `docs/`
-and `.rework/CENSUS.md`; B4 `run.py`, `src/spine/compose.py`, `tests/test_census.py`,
+Stage 3 branch (`sr0-build`) merged on 2026-09-29 (edb90de), the whole suite green on the merge (*At the
+merge*, below). It waited for that merge because each of its steps edits files that Stage 3 also edits
+(B1–B2 `docs/04_CONTRACT.md`; B3 `src/ckpt/api.py`, `src/world/levers.py`, `tests/test_assemble.py`,
+`docs/` and `.rework/CENSUS.md`; B4 `run.py`, `src/spine/compose.py`, `tests/test_census.py`,
 `tests/test_ownership.py` and `docs/04_CONTRACT.md`), and editing them on both branches would make the
-merge conflict. The lines of B4's kind in files Stage 3 does not touch were fixed in Phase A instead
-(B4 lists them). This page is the plan for Phase B, with every reference it has to update, written down
-so that it is not lost. When Phase B lands, mark it done here and in the root `README.md`.
+merge conflict. The lines of B4's kind in files Stage 3 does not touch were fixed in Phase A instead (B4
+lists them). This page is the plan for Phase B, with every reference it has to update, written down so
+that it is not lost. When Phase B lands, mark it done here and in the root `README.md`.
 
 Line numbers below are at `fac6aa8` (Phase A's last move). Of the files Phase B edits, Phase A touched
 only its own (`README.md`, `archive/README.md`, `.rework/README.md`, `notes/00_INDEX.md`,

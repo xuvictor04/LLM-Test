@@ -1248,11 +1248,11 @@ card and torch (pooled across cards, descriptive only); a pre-registered seed ca
 
 ### Stage 3 — SR0 and the scored-system join (build, then CPU tests)
 
-*Merged 2026-09-29: `sr0-build`'s 22 commits (a605b59..951c7f0) onto `rm-predict-DC` at b444456, the
-fleet layer and `TOK_RETOK_EVERY` 1000. 04-Q5's pins and the probe's disk budget moved into the new
-`gpu_world.sh`, read off the fleet's code copy (`tests/test_gpu_world.py` F27 and F28, F18 and F19 on
-the branch); a fleet that recorded no pin, launched before the flip, has the analysing checkout's pins
-on its block's resume line (F27, F7); `tools/gpu_launch.sh` counts the best saves and names O13's
+*Merged 2026-09-29 in edb90de: `sr0-build`'s 22 commits (a605b59..951c7f0) onto `rm-predict-DC` at
+b444456, the fleet layer and `TOK_RETOK_EVERY` 1000. 04-Q5's pins and the probe's disk budget moved into
+the new `gpu_world.sh`, read off the fleet's code copy (`tests/test_gpu_world.py` F27 and F28, F18 and
+F19 on the branch); a fleet that recorded no pin, launched before the flip, has the analysing checkout's
+pins on its block's resume line (F27, F7); `tools/gpu_launch.sh` counts the best saves and names O13's
 levers as what EXP=world_epoch waits on. Every baseline fixture reproduces on the merged tree as
 recorded, and b444456 reproduces the pre-SR0 ones (the merge's message says how).*
 

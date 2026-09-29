@@ -4,7 +4,7 @@ The one page for the owner. Everything else — how decisions were made, the evi
 rules — is in the repo for reference (`docs/proposals/05_DECISIONS.md`, `docs/04_CONTRACT.md`,
 `results/`, `notes/AGENT_STATE.md`) and is not brought up here.
 
-Updated 2026-09-29 (the Stage 3 merge of 951c7f0 onto b444456).
+Updated 2026-09-29 (edb90de, the Stage 3 merge).
 
 ## How we work
 - **Owner:** leads and monitors, keeps the goals from drifting, adds ideas, expands the project, and
