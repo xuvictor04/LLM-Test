@@ -16,9 +16,9 @@ never changed (C3, every contribution 0). Each check below pins one promise.
        passes: FAB.contribution is never called, Population.contrib stays 0.0 and contrib_n 0 on every
        slot, the cursor stays at 0, no fab.contrib_* or eval.contrib.* key exists, Gate fab.contrib is
        UNREACHABLE naming FAB_CONTRIB=0, and the gated-call line reads UNREACHABLE. A direct call at 0
-       returns its reason and writes nothing. (The fixtures -- B1, B3, B3r, B5, B6, B6r reproducing
-       bit for bit at the defaults -- are tests/test_baseline.py's, run before every commit; they are
-       not repeated here.)
+       returns its reason and writes nothing. (The fixtures -- B1p-B6rp, the pre-SR0 records reproduced
+       bit for bit under 04-Q5's pins since the flip of 2026-09-29, and B1-B6r at the flipped defaults
+       -- are tests/test_baseline.py's, run before every commit; they are not repeated here.)
   C-2  THE PLAN'S RUN: FAB_CONTRIB=1, EVAL_RETENTION_EVERY=20, DATA_SYNTH_HOLDOUT=1, FAB_GRACE=2,
        FAB_MANAGE_EVERY=25, 200 windows. fab.contrib_distinct_values > 1; fab.contrib_measured equals
        the candidates the passes wrote, summed (and fab.holdout_applied the candidates walked);
@@ -1058,10 +1058,13 @@ def c9_neutral():
 
 
 def startup_refusals():
+    # EACH ARM NAMED (2026-09-29): the probe's cadence and the synthetic block both ship on since the
+    # flips of 04-6.2 and 04-Q5, so the probe off and the block off are asked for by name here.
     for env, stage, words in (
             ({"FAB_FADED_CULL": "contrib"}, "refuse", ("FAB_FADED_CULL='contrib'", "FAB_CONTRIB=0")),
-            ({"FAB_CONTRIB": "1"}, "refuse", ("FAB_CONTRIB=1", "EVAL_RETENTION_EVERY=0")),
-            ({"FAB_CONTRIB": "1", "EVAL_RETENTION_EVERY": "20"}, None,
+            ({"FAB_CONTRIB": "1", "EVAL_RETENTION_EVERY": "0"}, "refuse",
+             ("FAB_CONTRIB=1", "EVAL_RETENTION_EVERY=0")),
+            ({"FAB_CONTRIB": "1", "EVAL_RETENTION_EVERY": "20", "DATA_SYNTH_HOLDOUT": "0"}, None,
              ("FAB_CONTRIB=1", "nothing was pinned", "DATA_SYNTH_HOLDOUT=1"))):
         try:
             build(**env)

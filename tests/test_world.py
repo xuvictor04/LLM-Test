@@ -20,7 +20,8 @@ world_proj at all, so each of these could regress in silence:
       NONZERO gradient (a zero map with a dead gradient would be a forecast that never learns).
       Then one short loop per feedback arm: wired, world.forecasts == lm.encode.extra_applied ==
       flushes and the ratio gauges are present; at WORLD_FEEDBACK=0, world.forecast.inert == calls
-      and world.forecasts and lm.encode.extra_ratio are ABSENT.
+      and world.forecasts and lm.encode.extra_ratio are ABSENT. The loops run under 04-Q5's three
+      pins (2026-09-29): the shipped retention probe forecasts beside training, off the flush count.
   W3  load_into: a blob with the `proj_trained` field decides by the field (True restores the saved
       tensor, False re-zeroes it) EVEN WHEN the counters say otherwise; a blob that predates the
       field falls back to `world.forecasts` in its counters; world.proj_zeroed_on_load counts across
@@ -150,9 +151,19 @@ def w2_forecast_noop_and_learns(sysm):
           f"|dL/dW| {gn:.6g}")
 
 
+# 04-Q5's PIN RULE ON W2's LOOP (2026-09-29). Its equalities are per flush -- world.forecasts,
+# lm.encode.extra_applied, world.forecast.calls and .inert each equal to the flushes -- and since the
+# flip the shipped retention probe and its generation call WORLD.forecast beside training (Q-EVAL-12's
+# exact accounting moves world.forecast.calls and .inert by their forwards, tests/test_probe.py P2).
+# So the loop runs under the three values that restore the tree the equalities were written on
+# (tests/test_baseline.py's PRE_SR0_PINS, imported).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from test_baseline import PRE_SR0_PINS                            # noqa: E402
+
+
 def _loop_counts(**env):
     lm_api._COUNTS.clear()   # LM's tally is process-global; each arm here stands for its own run
-    sysm = build(**env)
+    sysm = build(**PRE_SR0_PINS, **env)
     res = loop.run(sysm, max_windows=LOOP_WINDOWS, progress=False)
     lc = lm_api.counters(sysm.configs["LM"], sysm.model)
     return len(res.loss_curve), dict(sysm.world.counters), lc
@@ -292,7 +303,11 @@ def w4_population_refusal():
     # the geometry gate first -- world.nmax is EXACT -- by name.
     tmp = tempfile.mkdtemp(prefix="w4_m43_")
     try:
-        env = {"FAB_N0": 256, "FAB_SLOTS": 512, "SIG_WARMUP": 20}
+        # GENERATION OFF (2026-09-29): since 04-6.2's flip the shipped retention probe generates after
+        # the parent's final save, which this check reads nothing of and which costs about a minute on
+        # the CPU; a CPU suite that tests no EVAL sets it off (docs/04_CONTRACT.md Q-EVAL-12's dated
+        # note).
+        env = {"FAB_N0": 256, "FAB_SLOTS": 512, "SIG_WARMUP": 20, "EVAL_GENERATE": 0}
         lm_api._COUNTS.clear()
         loop.run(build(CKPT_DIR=tmp + "/p", **env), max_windows=4, progress=False)
         before = _tree_hash(tmp)

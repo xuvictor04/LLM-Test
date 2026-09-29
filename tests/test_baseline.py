@@ -1,28 +1,43 @@
-"""BASELINE FIXTURES: six recorded run.py workloads, so "bit-identical when the new mechanism is off"
-is checked against recorded runs rather than asserted against nothing.
+"""BASELINE FIXTURES: thirteen recorded run.py workloads, so "bit-identical when the new mechanism is
+off" is checked against recorded runs rather than asserted against nothing.
 
 WHY THIS FILE EXISTS (Proposal 03 §0 R7, 03b S0b). tests/test_determinism.py measures the machine's noise
 floor between two runs of the SAME tree; it holds no record of an earlier tree. Every stage of 03b
 (S0b's mid-epoch act first) promises that a default run with the new mechanism disarmed reproduces the
 tree it started from. That promise needs a stored trace from the base commit.
 
-THE SIX WORKLOADS (the WORKLOADS table below). B1 was the only one until 2026-09-27. The other five
-were recorded at ae70638, before any edit of the register's §8 Stage 3 (docs/proposals/05_DECISIONS.md),
-because Stage 3 edits the manage pass, the draw, the epoch roll, both resume paths and the held-out
-carve, and B1 reaches none of them:
+THE WORKLOADS (the WORKLOADS table below): six shapes, each held three ways since 2026-09-29.
+  B1 ... B6r   the six shapes at the SHIPPED DEFAULTS, recorded at the commit after 444ecca -- the one
+               that flipped register 04-Q5's, 04-6.2's and 04-6.3's defaults (DATA_SYNTH_HOLDOUT on,
+               EVAL_RETENTION_EVERY 1000 with a read at every phase start, DATA_TRUST 'observe';
+               DEFAULT BEHAVIOUR CHANGES 1-3). Every synthetic stream changed there, and each default
+               run now also reads the pinned held-out windows, generates after its final save and keeps
+               the source-reliability book. Those records are the flipped tree's own runs, recorded
+               when it was committed: a change after it is held to them.
+  B1p ... B6rp THE SAME SIX, EACH UNDER PRE_SR0_PINS, AGAINST THE RECORD MADE BEFORE THE FLIP (the files
+               *_pre_sr0.json, the six fixtures as they stood, moved unchanged): "the pinned tree is
+               the previous tree", 04-Q5's pin rule, made a test. See PINS below.
+  B5u          B5 UNPINNED against B5's pre-SR0 record, on its losses and on every counter outside P1's
+               exempt set (P1_EXEMPT, its table `exempt`): on the real source nothing a run trains on
+               moved at the flip, and what the reading beside training moves is that set.
+B1 was the only shape until 2026-09-27. The other five were recorded at ae70638, before any edit of the
+register's §8 Stage 3 (docs/proposals/05_DECISIONS.md), because Stage 3 edits the manage pass, the draw,
+the epoch roll, both resume paths and the held-out carve, and B1 reaches none of them:
   B1   `run.py --max-windows 80` at DATA_STREAM_BYTES=120000, the shipped defaults otherwise. Recorded
-       at d32e2ce and unchanged since. WHAT B1 CANNOT SEE: in 80 windows it reaches no FAB manage pass
-       (FAB_MANAGE_EVERY=500), no mid-epoch act (TOK_RETOK_EVERY=3000), no resume and no epoch roll,
-       and on the synthetic source there is no held-out block to carve (data/api.py::open_areas holds
-       nothing out there). A change to the cull, the act, the roll, either resume path or the held-out
-       carve passes B1 untested. NOR DO B3, B3r OR B5 SEE THE ROLL OR A BOUNDARY RESUME: B1, B3, B3r
-       and B5 all run at the shipped RUN_EPOCHS=1, where spine/loop.py::run's stage E is unreachable
-       (it tests `finished` before `rolled`, and a one-epoch run's only roll is the one that finishes
-       it), and B3r resumes mid-epoch. B6 and B6r are the two that do.
-  B3   one full epoch, 314 windows, at tests/test_continuation.py's BASE plus FAB_MANAGE_EVERY=50
-       FAB_GRACE=2 TOK_GROW_EVERY=30 TOK_RETOK_EVERY=150: six manage passes past a short grace, a mint
-       burst due every 30 windows, mid-epoch acts at windows 151 and 301, and a store that fills,
-       folds and rekeys (manage-, act- and MEM-heavy).
+       at d32e2ce, pre-SR0, and unchanged until 2026-09-29's flip. WHAT B1 CANNOT SEE: in 80 windows it
+       reaches no FAB manage pass (FAB_MANAGE_EVERY=500), no mid-epoch act (TOK_RETOK_EVERY=3000), no
+       resume and no epoch roll; and before the flip, on the synthetic source, there was no held-out
+       block to carve (data/api.py::open_areas held nothing out there at DATA_SYNTH_HOLDOUT=0, as B1p
+       still does). A change to the cull, the act, the roll or either resume path passes B1 untested.
+       NOR DO B3, B3r OR B5 SEE THE ROLL OR A BOUNDARY RESUME: B1, B3, B3r and B5 all run at the
+       shipped RUN_EPOCHS=1, where spine/loop.py::run's stage E is unreachable (it tests `finished`
+       before `rolled`, and a one-epoch run's only roll is the one that finishes it), and B3r resumes
+       mid-epoch. B6 and B6r are the two that do.
+  B3   one full epoch -- 312 windows at the shipped defaults, 314 under the pins (B3p) -- at
+       tests/test_continuation.py's BASE plus FAB_MANAGE_EVERY=50 FAB_GRACE=2 TOK_GROW_EVERY=30
+       TOK_RETOK_EVERY=150: six manage passes past a short grace, a mint burst due every 30 windows,
+       mid-epoch acts at windows 151 and 301, and a store that fills, folds and rekeys (manage-, act-
+       and MEM-heavy).
   B3r  B3 saved at window 170 -- after the first act, between the manage passes at 151 and 201 -- and
        continued by a second process with CKPT_RESUME: the continuing mid-epoch resume
        (spine/compose.py's seg-log replay, its loop_carried restore and its rebuilt-length check). Two
@@ -46,9 +61,9 @@ carve, and B1 reaches none of them:
        1, no shift stamp), and it repeats none of the roll's deliveries: fab.shift_notifications and
        opt.shift.notifications read 1 in B6 and 0 in the child, FAB's growth blackout covers B6's 104
        windows of epoch 1 and never opens in the child, and store.n_resegment_events is 1 in B6 and
-       ABSENT in the child. The child's first loss is 5.2424 where B6's at window 104 is 5.2342.
-       Recorded, not repaired; the contract already calls a resume from an epoch-boundary checkpoint
-       "not continuing" (Q-OPT-12).
+       ABSENT in the child. The child's first loss is 5.2424 where B6's at window 104 is 5.2342 (B6rp's
+       record; at the flipped defaults, 6.18328 against 6.18349). Recorded, not repaired; the contract
+       already calls a resume from an epoch-boundary checkpoint "not continuing" (Q-OPT-12).
 
 WHAT IS STORED, per leg of a workload, at RUN_DEVICE=cpu and one thread:
   - the per-flush loss curve, as exact float reprs (a trace, compared exactly: same machine, same build);
@@ -62,6 +77,8 @@ WHAT IS STORED, per leg of a workload, at RUN_DEVICE=cpu and one thread:
 The float curve is compared exactly because the reference is this machine's own earlier run of the
 same workload; test_determinism records that this machine reproduces a seeded run bit for bit, and B3,
 B3r, B5, B6 and B6r each reproduced their records in fresh processes, twice, before they were committed.
+The six records made at the flip were reproduced by a full invocation, and by 444ecca's tree -- the tree
+before the flip -- run with the three flipped levers set explicitly, on every loss and every counter.
 Each leg's final clock (RUN.RunClock.counters) is read for the resume pairs' derived checks and is
 neither recorded nor compared.
 
@@ -124,6 +141,8 @@ Run from the repository root:
     python3 tests/test_baseline.py --record B3      (re)write the named workloads' fixtures (every
                                                     workload's but a pinned or kept one's when none
                                                     is named); commit each with the commit it names
+                                                    (HEAD, or "the commit after" HEAD when src/ or
+                                                    run.py differ from it: the record's own commit)
     python3 tests/test_baseline.py --mutants        the planted failures above
 Exit 0 = matched (or unverifiable on this machine, printed as such); 1 = a difference, named.
 """
@@ -151,11 +170,27 @@ B3R_SAVE_AT = 170
 # BASE on a third of its stream for two epochs, the second resampled: RUN.startup_refusals refuses
 # RUN_EPOCHS > 1 without DATA_RESAMPLE, because the second epoch would replay the first.
 _B6 = dict(COMMON, **dict(_BASE, DATA_STREAM_BYTES="20000"), RUN_EPOCHS="2", DATA_RESAMPLE="1")
-# EPOCH 0's LENGTH AT _B6, IN WINDOWS: its segmentation holds 13,417 ids and LM_CTX is 128, so
-# (13417 - 1) // 128 (compose.py::_windows_in_epoch). B6r's parent stops there, its derived check reads
-# the parent's clock to confirm that the stop is the boundary, and --mutants' roll plant must first
-# differ there.
+# EPOCH 0's LENGTH AT _B6, IN WINDOWS: its segmentation holds 13,369 ids at the shipped defaults and
+# 13,417 under the pre-SR0 pins (the synthetic held-out block, on since 2026-09-29, takes 5% of each
+# generated body, so the stream's bytes and its cuts moved), and LM_CTX is 128, so (13369 - 1) // 128
+# and (13417 - 1) // 128 are both 104 (compose.py::_windows_in_epoch). B6r's and B6rp's parents stop
+# there, each derived check reads the parent's clock to confirm that the stop is the boundary, and
+# --mutants' roll plant must first differ there. Where a later flip moves one of the two, the table
+# names two boundaries, and the check says which moved.
 B6_EPOCH0 = 104
+# 04-Q5's PIN RULE, WRITTEN AS PINS (see PINS above): the three levers whose defaults flipped on
+# 2026-09-29 (DEFAULT BEHAVIOUR CHANGES 1-3), at the values that restore the tree before them. The
+# register adds DATA_DRAW='planned' to the rule "if that flips"; it has not, so it is not pinned.
+PRE_SR0_PINS = {"DATA_SYNTH_HOLDOUT": "0", "EVAL_RETENTION_EVERY": "0", "DATA_TRUST": "off"}
+# THE COUNTERS A READING BESIDE TRAINING MOVES, and nothing else may: tests/test_probe.py's EXEMPT, P1's
+# exempt set (Q-EVAL-12's exact-accounting amendment), which the probe's reads and its generation move
+# by exactly their own book's counts. B5u is compared under it. A copy, because importing test_probe.py
+# runs it; its P2 holds the two equal. The observe-mode book moves no counter it did not mint (SR3's
+# bit-identity, tests/test_trust.py T1), so data.trust.* is new, not exempt; and CKPT's Retention book
+# (P1's exempt row) is printed in no line this file parses.
+P1_EXEMPT = ("eval.*", "tok.segment_remap", "lm.embed.*", "lm.encode.calls",
+             "lm.encode.key_path_truncated", "lm.decode.calls", "lm.mask.*", "sig.encode_calls",
+             "sig.encode_windows", "world.forecast.calls", "world.forecast.inert", "fab.eval_passes")
 # A WORKLOAD IS ONE OR MORE run.py LEGS, run in order, each (name, environment, arguments). `{tmp}` in an
 # environment value is the workload's temporary directory, shared by its legs (the parent's checkpoint
 # is the child's CKPT_RESUME, and TOK's vocabulary file sits beside the checkpoint directory) and
@@ -190,6 +225,26 @@ WORKLOADS = {
                      ("child", dict(_B6, CKPT_RESUME="{tmp}/p", CKPT_DIR="{tmp}/c"), ())),
             "resume": {"of": "B6", "at": B6_EPOCH0, "kind": "boundary"}},
 }
+# THE PRE-SR0 RECORDS (2026-09-29, the flips of 04-Q5, 04-6.2 and 04-6.3). The six fixtures above were
+# recorded before those defaults moved -- B1's at d32e2ce, the rest at ae70638, before any Stage-3 edit
+# -- and they moved, unchanged, to *_pre_sr0.json. Each is held to this tree as its workload's legs and
+# environment under PRE_SR0_PINS: "the pinned tree is the previous tree" (register 04-Q5's pin rule,
+# SR0's "DATA_SYNTH_HOLDOUT=0 with the probe off is bit-exact against HEAD") made a test. B3rp's and
+# B6rp's derived checks hold them to B3p and B6p. --record refuses every one of them.
+for _name in ("B1", "B3", "B3r", "B5", "B6", "B6r"):
+    _w = WORKLOADS[_name]
+    WORKLOADS[_name + "p"] = dict(
+        _w, fixture=_w["fixture"][:-len(".json")] + "_pre_sr0.json", pins=dict(PRE_SR0_PINS),
+        what=_w["what"] + " (pre-SR0)",
+        **({"resume": dict(_w["resume"], of=_w["resume"]["of"] + "p")} if "resume" in _w else {}))
+# B5u: B5 UNPINNED -- the real source at the shipped defaults, probe, generation and book on -- against
+# B5's PRE-SR0 record, on its losses and on every counter outside P1_EXEMPT: the flips promise that no
+# number a real-source run trains on moves. The real source carves its held-out block under either
+# DATA_SYNTH_HOLDOUT, so nothing it trains on moved; what moved is the reading beside training, and
+# P1's exempt set is exactly that. Its record is an earlier tree's, so the table marks it `kept`.
+WORKLOADS["B5u"] = dict(WORKLOADS["B5"], fixture=WORKLOADS["B5p"]["fixture"], kept=True,
+                        exempt=P1_EXEMPT, what="DATA_SOURCE=real, 200 windows, unpinned, on the pre-SR0 "
+                                               "record outside P1's exempt set")
 # THE PLANTED SOURCE CHANGES --mutants makes, for the two paths the widening reached that no lever
 # reaches: each moves one draw's seed by one. `old` must occur exactly once in `file`.
 PLANT_ROLL = {"what": "the roll's draw seed + 1", "file": "src/spine/loop.py",
@@ -224,11 +279,18 @@ def machine_key():
 
 
 def commit():
+    """What a record is OF: HEAD's short sha -- or, where src/ or run.py differ from HEAD, "the commit
+    after <sha>". A record made on uncommitted code records the tree its own commit will hold, not
+    HEAD's (2026-09-29: the six records of the flip were the first made so, and naming HEAD would have
+    labelled the flipped tree's runs with the tree before the flip)."""
     try:
-        return subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True,
-                              text=True, check=True).stdout.strip()
+        sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True,
+                             text=True, check=True).stdout.strip()
+        dirty = subprocess.run(["git", "diff", "--quiet", "HEAD", "--", "src", "run.py"], cwd=ROOT,
+                               capture_output=True).returncode != 0
     except (OSError, subprocess.CalledProcessError):
         return "unknown"
+    return f"the commit after {sha}" if dirty else sha
 
 
 def clock_of(stdout):

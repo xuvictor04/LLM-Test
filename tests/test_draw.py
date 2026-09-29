@@ -11,18 +11,21 @@ GPU draw tests, §8 5.3). It is built OFF, so the first promise is that the ship
 drew; the second is that 'replay' realises exactly what it plans, spread through each phase, the same
 under every hash seed; the third is that a resume sees the same plan its parent drew under. Each check
 below pins one of those. CPU establishes operation only: whether rehearsal protects anything is the
-GPU pair's to say.
+GPU pair's to say. EVERY BUILD HERE CARRIES 04-Q5's THREE PINS (DATA_SYNTH_HOLDOUT=0,
+EVAL_RETENTION_EVERY=0, DATA_TRUST=off) since 2026-09-29's flip: the known answers below were drawn on
+the tree before it, and the synthetic held-out block, on since, draws every synthetic stream from a
+body 5% shorter.
 
   D1  'planned' AND 'uniform' ARE THE LAWS THEY WERE: the stream on eight shapes (the shipped
-      defaults, seed 1, 'uniform', DATA_SEG_CONTIG=1, an explicit schedule, the real source at
-      'planned' and at 'uniform', and an epoch-1 redraw) hashes to the digest recorded at c872121,
-      the tree before 'replay' existed; Plan.per_area_draw is the pre-change formula on six
+      defaults under the pins, seed 1, 'uniform', DATA_SEG_CONTIG=1, an explicit schedule, the real
+      source at 'planned' and at 'uniform', and an epoch-1 redraw) hashes to the digest recorded at
+      c872121, the tree before 'replay' existed; Plan.per_area_draw is the pre-change formula on six
       schedules, and Plan.shares is draw_stream's planned budget phase by phase; DATA_REHEARSE_PARENT=1
       under 'planned' and 'uniform' on a parent record leaves the Plan and the stream unchanged and its
       Gate says why; 'replay' on a schedule with no faded phase draws the planned stream byte for
       byte; under 'planned' every new count is ABSENT and both new Gates read UNREACHABLE naming the
-      lever. (B1, B3, B3r, B5, B6 and B6r -- the shipped runs are the tree before this, bit for bit --
-      are tests/test_baseline.py's, run before every commit.)
+      lever. (B1p, B3p, B3rp, B5p, B6p and B6rp -- the runs under the pins are the tree before this,
+      bit for bit -- and the flipped B1-B6r are tests/test_baseline.py's, run before every commit.)
   D2  REALISATION: on the generated four-area schedule the faded phases' targets are the hand-computed
       8100 / 10950 / 10950 and 4050 / 4050 / 10950 / 10950 bytes; every phase's realised bytes per area
       equal its targets exactly, so Plan.per_area_draw == Stream.per_area_drawn and the exposure gates
@@ -108,9 +111,17 @@ from data import api as data_api                                   # noqa: E402
 FAILS = []
 DATA_DIR = os.path.join(os.path.abspath(_ROOT), "data")
 TMP = tempfile.mkdtemp(prefix="draw_")
+# 04-Q5's PIN RULE, ON EVERY BUILD HERE (2026-09-29). This file's known answers were drawn on the tree
+# before the flip -- PRE's digests at c872121, D2's hand-computed targets, the D5-D9 shapes -- and the
+# synthetic held-out block, on since then, draws every synthetic stream from a body 5% shorter. So
+# every build and every Config here carries the three values that restore that tree
+# (tests/test_baseline.py's PRE_SR0_PINS, imported); the flipped streams
+# are test_baseline.py's B1-B6r and tests/test_holdout.py's.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from test_baseline import PRE_SR0_PINS                            # noqa: E402
 # tests/test_continuation.py's small base at B6's 20,000-byte stream: 104 windows, four phases of 26.
-BASE = {"DATA_STREAM_BYTES": "20000", "SIG_WARMUP": "20", "FAB_N0": "256", "FAB_SLOTS": "512",
-        "DATA_DIR": DATA_DIR}
+BASE = dict({"DATA_STREAM_BYTES": "20000", "SIG_WARMUP": "20", "FAB_N0": "256", "FAB_SLOTS": "512",
+             "DATA_DIR": DATA_DIR}, **PRE_SR0_PINS)
 TWO = {"DATA_AREAS": "eng,py", "DATA_N_PROCESSES": "2"}
 
 # THE STREAM ON EIGHT SHAPES AT c872121, the tree before 'replay' existed: sha256 over the bytes and
@@ -148,7 +159,7 @@ def cfg(**env):
     """DATA's Config under `env` (DATA_DIR pinned), from assemble.build over a dict, never os.environ."""
     _lever._reopen_assembly()
     rng.reset_issued()
-    e = {"RUN_SEED": "0", "RUN_DEVICE": "cpu", "DATA_DIR": DATA_DIR}
+    e = dict({"RUN_SEED": "0", "RUN_DEVICE": "cpu", "DATA_DIR": DATA_DIR}, **PRE_SR0_PINS)
     e.update({k: str(v) for k, v in env.items()})
     cfgs, _w, warnings = assemble.build(e)
     if warnings:
@@ -383,6 +394,7 @@ from data import api as data_api
 env = {"RUN_SEED": "0", "RUN_DEVICE": "cpu", "DATA_AREAS": "eng,py,num,c,rust",
        "DATA_N_PROCESSES": "5", "DATA_PHASE_SCHED": "py,num|num,c,rust|c,rust|rust",
        "DATA_DRAW": "replay", "DATA_REPLAY_NEWEST": "0.2", "DATA_REHEARSE_PARENT": "1"}
+env.update(PINS)
 d = assemble.build(env)[0]["DATA"]
 areas = data_api.open_areas(d, seed=0)
 areas.parent_names[:] = ["eng"]
@@ -400,7 +412,8 @@ def d3_hash_seeds():
     outs = {}
     for seed in ("0", "1", "random", "random"):
         env = dict(os.environ, PYTHONHASHSEED=seed, OMP_NUM_THREADS="1", MKL_NUM_THREADS="1")
-        r = subprocess.run([sys.executable, "-c", f"SRC = {SRC!r}\n" + _D3], cwd=TMP, env=env,
+        r = subprocess.run([sys.executable, "-c", f"SRC = {SRC!r}\nPINS = {PRE_SR0_PINS!r}\n" + _D3],
+                           cwd=TMP, env=env,
                            capture_output=True, text=True, timeout=600)
         outs.setdefault(seed, []).append(r.stdout.strip() if r.returncode == 0 else
                                          f"exit {r.returncode}: {r.stderr.strip()[-300:]}")

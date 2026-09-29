@@ -70,8 +70,9 @@ defer and not substitute. Each check below pins one of those promises.
       (store.occupancy_unknown > 0) and the removals of experts whose books were not refilled
       counting as fab.faded_unknown.
 
-B1, B3, B3r, B5, B6 and B6r -- the default runs are the tree before this, bit for bit -- are
-tests/test_baseline.py's, run before every commit; they are not repeated here.
+B1p, B3p, B3rp, B5p, B6p and B6rp -- the runs under 04-Q5's pins, the tree before this, bit for bit,
+since the default flips of 2026-09-29 -- and the flipped B1-B6r are tests/test_baseline.py's, run before
+every commit; they are not repeated here.
 
 WHAT THIS FILE CANNOT SEE: whether deferring faded-area culls protects anything a held-out reading
 can measure. That is E2's arm on GPU (§8 6.3), read through the retention probe. Everything here is
@@ -109,8 +110,11 @@ TMP = tempfile.mkdtemp(prefix="faded_")
 # tests/test_continuation.py's small base, and tests/test_baseline.py's B3 on top of it: a manage pass
 # every 50 windows past a grace of two selections, so the passes reach culls and merges in all four
 # phases, with the mint and the act B3 carries.
+# GENERATION OFF (2026-09-29): since 04-6.2's flip the shipped retention probe generates after every
+# run's final save, which this file checks nothing of and which costs about a minute a run on the
+# CPU; a CPU suite that tests no EVAL sets it off (docs/04_CONTRACT.md Q-EVAL-12's dated note).
 BASE = {"DATA_STREAM_BYTES": "60000", "SIG_WARMUP": "20", "FAB_N0": "256", "FAB_SLOTS": "512",
-        "DATA_DIR": DATA_DIR}
+        "DATA_DIR": DATA_DIR, "EVAL_GENERATE": "0"}
 B3 = {"FAB_MANAGE_EVERY": "50", "FAB_GRACE": "2", "TOK_GROW_EVERY": "30", "TOK_RETOK_EVERY": "150"}
 AREAS = ["eng", "py", "num", "c"]
 # The FAB unit populations: tests/test_fabric_internals.py's widths.

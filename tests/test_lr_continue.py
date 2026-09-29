@@ -661,7 +661,11 @@ def l12(nolog, logged):
 
 
 # ---- L7: through the composition root, at a real epoch boundary ---------------------------------
-BASE = {"DATA_STREAM_BYTES": "60000", "SIG_WARMUP": "20", "FAB_N0": "256", "FAB_SLOTS": "512"}
+# GENERATION OFF (2026-09-29): since 04-6.2's flip the shipped retention probe generates after every
+# run's final save, which this file checks nothing of and which costs about a minute a run on the
+# CPU; a CPU suite that tests no EVAL sets it off (docs/04_CONTRACT.md Q-EVAL-12's dated note).
+BASE = {"DATA_STREAM_BYTES": "60000", "SIG_WARMUP": "20", "FAB_N0": "256", "FAB_SLOTS": "512",
+        "EVAL_GENERATE": "0"}
 
 
 def build(restored=None, **env):

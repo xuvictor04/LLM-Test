@@ -1324,11 +1324,12 @@ def cadence_audit(run: Config, *, run_windows, periods):
     refuses any other kind at both ends.
 
     IT COVERS EIGHT GATES SINCE 2026-09-28 ('data.trust', DATA.trust_period, reported DISARMED at
-    the shipped DATA_TRUST='off' -- the one key whose line the root rewords, spine/compose.py::
-    _trust_audit, since Q-DATA-11's review: DATA_TRUST arms that book and no period does, and at
-    'observe' the loop passes it beside its gate at each epoch's end and a stop's tail, so the two
-    sentences below, written for a gate that is its cadence alone, were wrong about it), SEVEN FROM
-    2026-09-27 ('retention', EVAL.retention_period, reported DISARMED at the shipped 0), AND SIX,
+    DATA_TRUST='off', the shipped value until 04-6.3's flip on 2026-09-29 -- the one key whose line
+    the root rewords, spine/compose.py::_trust_audit, since Q-DATA-11's review: DATA_TRUST arms that
+    book and no period does, and at 'observe' the loop passes it beside its gate at each epoch's end
+    and a stop's tail, so the two sentences below, written for a gate that is its cadence alone, were
+    wrong about it), SEVEN FROM 2026-09-27 ('retention', EVAL.retention_period, reported DISARMED at
+    0, the shipped value until 04-6.2's flip on 2026-09-29), AND SIX,
     NOT FIVE, FROM 2026-09-02. The sixth is 'progress', whose period is this module's
     PROGRESS_WINDOWS constant (Q-RUN-1). It is deliberately 100 Windows so that it FIRES at the
     shipped defaults and never joins the list above: a progress/ETA meter that prints zero times is

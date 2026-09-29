@@ -74,6 +74,11 @@ parent's exact stream and continue. Each check below pins one promise of that pa
 
 WHAT THIS FILE CANNOT SEE: whether live retokenization helps a long run. That is the owner-scale
 ship-rule measurement 03b S0b names (prequential bits/byte, 3 paired seeds).
+
+EVERY BUILD HERE CARRIES 04-Q5's THREE PINS (DATA_SYNTH_HOLDOUT=0, EVAL_RETENTION_EVERY=0,
+DATA_TRUST=off) since 2026-09-29's flip: the windows above were chosen on the stream drawn before it,
+and S10 counts every save, where the shipped probe adds a best save at each new best. The flipped
+defaults' continuation is tests/test_baseline.py's B3r, on this file's shape.
 """
 import json
 import os
@@ -99,9 +104,20 @@ from opt import api as opt_api                                     # noqa: E402
 from tok import api as tok_api                                     # noqa: E402
 
 FAILS = []
+# 04-Q5's PIN RULE, ON EVERY BUILD HERE (2026-09-29). The windows below were chosen on the stream the
+# tree drew before the flip -- the first mint near window 120, the saves that bracket it, S11's act at
+# 121 -- and S10 counts every save a lineage makes, where the shipped probe now adds a best save at
+# each new best with CKPT_DIR set. So BASE carries the three values that restore the tree these known
+# answers were written on (tests/test_baseline.py's PRE_SR0_PINS, imported).
+# A continuation at the flipped defaults is test_baseline.py's B3r, on this BASE's shape; the three
+# mechanisms' own continuations are tests/test_holdout.py's H6 (the block, on this file's 'plain' and
+# 'mint_then_act'), tests/test_probe.py's P3 and P12 (the probe) and tests/test_trust.py's T5 (the book).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from test_baseline import PRE_SR0_PINS                            # noqa: E402
 # The resume tests' small base: a tenth-size fabric keeps each compose to a few seconds. Minting first
 # fires near window 120 here, so the act cases below save around it.
-BASE = {"DATA_STREAM_BYTES": "60000", "SIG_WARMUP": "20", "FAB_N0": "256", "FAB_SLOTS": "512"}
+BASE = dict({"DATA_STREAM_BYTES": "60000", "SIG_WARMUP": "20", "FAB_N0": "256", "FAB_SLOTS": "512"},
+            **PRE_SR0_PINS)
 
 
 def check(name, ok, detail=""):

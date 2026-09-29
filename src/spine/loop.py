@@ -35,9 +35,11 @@ cannot vanish from the report and a `_CALLS` entry the table does not list raise
 `RunResult.gated` IS THE SECOND LIST AND IT EXISTS BECAUSE A CALL SITE IS NOT A CALL. Three rows
 stand behind events (Due.mint, Due.probation) and one behind "the optimizer actually stepped", and
 since 2026-09-27 and 2026-09-28 the retention probe's and the source-reliability book's stand behind
-their arm tests; at the shipped TOK_PROBATION_USES=0, EVAL_RETENTION_EVERY=0 and DATA_TRUST='off'
-none of those three is even asked, so six of the twenty-seven have a call site that CANNOT RUN (two
-of twenty-two until 2026-09-27). One A row joined them on 2026-09-28: FAB.contribution, inside the
+their arm tests; at TOK_PROBATION_USES=0, EVAL_RETENTION_EVERY=0 and DATA_TRUST='off' none of those
+three is even asked, so six of the twenty-seven have a call site that CANNOT RUN (two of twenty-two
+until 2026-09-27) -- and at the shipped defaults since the flips of 2026-09-29, where the probe
+(EVAL_RETENTION_EVERY=1000) and the book (DATA_TRUST='observe') are on, two: probation's, at the
+shipped TOK_PROBATION_USES=0. One A row joined them on 2026-09-28: FAB.contribution, inside the
 fab.manage answer behind FAB_CONTRIB, which ships 0 (Q-FAB-19). Reporting only the first list would
 say this run judged probation when nothing did -- the same overstatement, one layer in.
 `_gate_report` reads the three states (fired N / armed but 0 / unreachable) off the counter each
@@ -1273,7 +1275,8 @@ def run(sysm, *, max_windows=None, progress=True):
     # ---- THE SOURCE-RELIABILITY BOOK (2026-09-28, Proposal 04 SR3, Q-DATA-11) -------------------
     # ARMED AT DATA_TRUST != 'off' ONLY, and the arm test comes before Cadences.due('data.trust',
     # ...), so at 'off' the gate is never asked, DATA.claims_observe is never called and no
-    # data.trust.* key exists: a default run is this driver before the book. `_trust_lo` is the
+    # data.trust.* key exists: a run at 'off' is this driver before the book ('observe' ships since
+    # 04-6.3's flip, 2026-09-29, so a default run keeps it). `_trust_lo` is the
     # book's cursor as this driver carries it -- the first unit of this epoch's segmentation no pass
     # has read -- and `_trust_hi` the end of the ids the windows cut so far (the last cut window's
     # own end, bounds[1]): a pass reads ids[lo:hi], and DATA refuses one that neither continues its
@@ -2516,8 +2519,8 @@ _R_MISSING = (
     "EVAL.curve_probe, EVAL.null_excess and four P6 instruments (coherence, verdicts, "
     "wrongness_probe, verification_fit) are deferred (spine/compose.py::DEFERRED_ENTRY_POINTS). "
     "The retention probe's rows are EVAL(holdout), EVAL(blowup) and EVAL(generate), built "
-    "2026-09-27 and off at EVAL_RETENTION_EVERY=0; until then this line read 'EVAL.*: the whole "
-    "package is deferred'.",
+    "2026-09-27, off at EVAL_RETENTION_EVERY=0 and on at the shipped 1000 since 2026-09-29; until "
+    "then this line read 'EVAL.*: the whole package is deferred'.",
 )
 
 # THE ELEVEN SAVE COUNTS AND THE R ROWS THAT PRINT THEM (2026-09-27, build 1.6's review; Q-CKPT-4).

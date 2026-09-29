@@ -416,15 +416,28 @@ class EVALLevers(LeverSet):
     # twelve days, unnoticed, because nothing exercised the synthetic path.
 
     retention_every = Lever(
-        0, "Windows between in-run retention readings on the pinned held-out windows (0 = the probe "
-           "is off: nothing is pinned, read or consumed).", U.Windows)
+        1000, "DEFAULT BEHAVIOUR CHANGE 2 (register 04-6.2, 1000 since 2026-09-29): windows between "
+              "in-run retention readings on the pinned held-out windows, beside a reading at the first "
+              "window of every phase (0 = the probe is off: nothing is pinned, read or consumed).",
+        U.Windows)
     # CENSUS AMENDMENT, 2026-09-27 (Proposal 04 SR0 and NEW-03, docs/04_CONTRACT.md Q-EVAL-12), with
     # NO ANCESTOR: the old tree measured held-out text only at the end of a run (holdout_bpb), never on
     # a cadence, so there is no knob to rename. BUILT 0, AND 0 IS THE WHOLE SUBSYSTEM OFF -- no ProbeSet
     # is pinned, no stream is minted, no reading is taken, CKPT.Retention.consider is never called and
-    # no generation runs -- so a default run is this tree before the probe existed, bit for bit. The
-    # register's 04-6.2 value (1000, plus a read at the first window of every phase) lands at its C9
-    # flip, last and alone.
+    # no generation runs -- so a run at 0 is this tree before the probe existed, bit for bit. The
+    # register's 04-6.2 value (1000, plus a read at the first window of every phase) SHIPS SINCE
+    # 2026-09-29, the flip landing last and alone after SR0's bit-identity (tests/test_probe.py P1;
+    # Q-EVAL-12's dated note), and it is the interim value until E6 picks (§8 6.2): each
+    # pre-registration also writes its cap as a number (04-6.2), never computed at run time (N4). A
+    # run that pairs with one from before the change pins 0 (04-Q5's pin rule).
+    # WHAT A DEFAULT RUN READS AT 1000: a phase-start read at the first window of every phase, the
+    # cadence where a run reaches it (a shipped-default run of 506-937 windows never does, so
+    # eval.holdout.cadence_reads reads PRESENT-and-0), the run-boundary read at R through both
+    # closures, and generation after the final save; and the root prints its two startup notices,
+    # above 160 and a phase projected below five readings. On the CPU the generation dominates: 16
+    # continuations of 200 tokens made tests/test_baseline.py's 80-window B1 about five times longer
+    # (143 s against 27 s, 2026-09-28, one thread; operation only). EVAL_GENERATE=0 drops it, and a
+    # CPU suite that tests no EVAL sets that, or this lever to 0.
     # UNIT IS Windows, the same clock curve_every counts: the gate is Cadences.due('retention',
     # EVAL.retention_period(ev), clock), evaluated once per window after the flush, and the phase-start
     # read is an EVENT (the first window of each phase), not a period. A NEGATIVE IS REFUSED by

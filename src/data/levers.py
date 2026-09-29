@@ -508,10 +508,12 @@ class DATALevers(LeverSet):
     # so claim nothing" (:1189-1190). A measurement whose validity depends on a file that may be absent
     # is not a measurement the report can stand behind.
 
-    synth_holdout = Lever(False, "Hold out a block per area on DATA_SOURCE=synthetic, under the real "
-                                 "sources' law: min(DATA_HOLDOUT_FRAC x body, DATA_VAL_CAP) bytes, a "
-                                 "seeded contiguous block removed from the body. Off, the synthetic "
-                                 "source holds nothing out.", U.FLAG)
+    synth_holdout = Lever(True, "DEFAULT BEHAVIOUR CHANGE 1 (register 04-Q5, on since 2026-09-29): hold "
+                                "out a block per area on DATA_SOURCE=synthetic, under the real sources' "
+                                "law: min(DATA_HOLDOUT_FRAC x body, DATA_VAL_CAP) bytes, a seeded "
+                                "contiguous block removed from the body. Off, the synthetic source holds "
+                                "nothing out, as it did before; a run that pairs with one from before "
+                                "the change pins it to 0.", U.FLAG)
     # CENSUS AMENDMENT, 2026-09-27 (Proposal 04's SR0, register 04-Q5, Proposal 05 §8 3.1; ruled in
     # docs/04_CONTRACT.md Q-DATA-9). No ancestor: the old synthetic generator held nothing out and had
     # no switch over it, so there is no (family, old_name) key and N2 is satisfied by an amendment row.
@@ -522,11 +524,15 @@ class DATALevers(LeverSet):
     # 0-byte refusal. The judge's variant (generate the held-out text from a separate rng child and
     # leave the body whole, so the stream does not move) was rejected in SR0: it is a second holdout
     # law, and its block is a continuation drawn after the body rather than a sample of it.
-    # BUILT OFF, AND 04-Q5 RULES IT ON. At 1 every synthetic area trains on a body a block shorter,
-    # so the stream every default run draws changes and no run before the change pairs with one after
-    # it; the flip therefore lands last and alone, after SR0's bit-identity (§8 3.1), and pending
-    # fleets that pair with earlier runs pin it to 0 (04-Q5's pin rule). At 0 the synthetic branch runs
-    # the statements it ran before this lever existed, in order, and mints no data.holdout child.
+    # BUILT OFF, AND 04-Q5 RULES IT ON: ON SINCE 2026-09-29, THE STAGE'S LAST COMMIT AND ITS ONLY
+    # DEFAULT CHANGE BESIDE THE PROBE'S AND THE BOOK'S (Q-DATA-9's dated note). At 1 every synthetic
+    # area trains on a body a block shorter, so the stream every default run draws changed there and
+    # no run before the change pairs with one after it; the flip therefore landed last and alone,
+    # after SR0's bit-identity (§8 3.1), and a fleet that pairs with earlier runs pins it to 0 beside
+    # EVAL_RETENTION_EVERY=0 and DATA_TRUST=off (04-Q5's pin rule: gpu_world.sh's EXP=retok and its
+    # resume line carry the three; tests/test_baseline.py holds the pre-change records to this tree
+    # under them). At 0 the synthetic branch runs the statements it ran before this lever existed, in
+    # order, and mints no data.holdout child.
     # THE RESUME RULE (restore_stream_state). A checkpoint whose record for an area is key None and
     # size 0 -- what a synthetic run at 0 writes -- is ADMITTED against a synthetic block now, counted
     # per area in data.holdout_admitted; the parent trained on those bytes, so an admitted block is
@@ -542,7 +548,8 @@ class DATALevers(LeverSet):
     # DATA_STREAM_BYTES with DATA_N_PROCESSES -- and the admission holds only where both are the
     # parent's. restore_stream_state refuses every other move by name, and the record carries each
     # block's digest, so a text that moved under agreeing offset, size and key is refused too.
-    # A BOOL, WITH THE BOOL BRANCH'S KNOWN HAZARD (see `resample`): DATA_SYNTH_HOLDOUT=flase reads as on.
+    # A BOOL, WITH THE BOOL BRANCH'S KNOWN HAZARD (see `resample`): DATA_SYNTH_HOLDOUT=flase reads as on,
+    # which at the shipped True is the default, so a misspelt pin to 0 is silent -- spell it 0.
 
     val_cap = Lever(4000000, "Maximum bytes of held-out tail kept per area.", U.BYTES)
     # Census: VAL_CAP -> DATA_VAL_CAP, mis-tagged misc, and the row the adversarial reviewer cites by
@@ -787,19 +794,24 @@ class DATALevers(LeverSet):
     # them, and nothing has measured them on real text -- E3 (register §8 6.2) is that measurement.
     # ==============================================================================================
 
-    trust = Lever("off", "The source-reliability book: 'off' keeps none; 'observe' reads every source's "
-                         "claims, votes, and reports each source's reliability and trust while "
-                         "changing nothing the run trains on; 'loss' and 'loss+draw' would weight the "
-                         "loss (and the draw) by that trust and are declared, NOT BUILT.",
+    trust = Lever("observe", "DEFAULT BEHAVIOUR CHANGE 3 (register 04-6.3, 'observe' since 2026-09-29): "
+                             "the source-reliability book, 'observe' reading every source's claims, "
+                             "voting, and reporting each source's reliability and trust while changing "
+                             "nothing the run trains on; 'off' keeps none; 'loss' and 'loss+draw' would "
+                             "weight the loss (and the draw) by that trust and are declared, NOT BUILT.",
                   U.NAME, choices=("off", "observe", "loss", "loss+draw"))
     # CENSUS AMENDMENT, 2026-09-28 (Proposal 04 §1 item 8 and SR3; register 04-6.3, §8 3.4;
     # docs/04_CONTRACT.md Q-DATA-11). BUILT 'off', AND 'off' IS THE WHOLE BOOK ABSENT: DATA.new_focus
     # allocates nothing, the loop's arm test withholds every DATA.claims_observe call before the
-    # 'data.trust' gate is asked, and no data.trust.* key exists -- so a default run trains as this
+    # 'data.trust' gate is asked, and no data.trust.* key exists -- so a run at 'off' trains as this
     # tree before the book did, bit for bit (SR3's bit-identity, tests/test_trust.py); what it
     # prints beside -- the DATA(trust) row, the ledger key, the cadence audit's one startup line --
     # is Q-DATA-11's "What the default changes". 04-6.3 rules 'observe' ON after that bit-identity,
-    # and the flip lands last and alone.
+    # and the flip landed last and alone: 'observe' SHIPS SINCE 2026-09-29 (Q-DATA-11's dated note).
+    # What a default run pays for it: the book's passes (6-7% of wall on the toy, owed at the owner's
+    # shape under E3's 2% rule, §8 6.2) and, in every checkpoint, the int32 sketch -- DATA_TRUST_SKETCH
+    # buckets, 16.8 MB at 4194301. Training numbers are unchanged (SR3's bit-identity). A run that pairs
+    # with one from before the change pins 'off' beside DATA_SYNTH_HOLDOUT=0 (04-Q5's pin rule).
     # 'loss' AND 'loss+draw' ARE REFUSED AT STARTUP WITH spine/gate.py::NotBuilt (OPT_LR_CONTINUE=
     # 'regulated' is the precedent): each needs DATA.token_weights and LM.lm_loss(token_weights=),
     # which this tree does not build, and 04-6.3's standing rules forbid either as a default before

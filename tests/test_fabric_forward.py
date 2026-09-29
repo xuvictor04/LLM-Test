@@ -51,7 +51,10 @@ from spine.compose import compose                                  # noqa: E402
 from fabric import api as fab_api                                  # noqa: E402
 
 FAILS = []
-BASE = {"DATA_STREAM_BYTES": "60000", "SIG_WARMUP": "20"}
+# GENERATION OFF (2026-09-29): since 04-6.2's flip the shipped retention probe generates after every
+# run's final save, which this file checks nothing of and which costs about a minute a run on the
+# CPU; a CPU suite that tests no EVAL sets it off (docs/04_CONTRACT.md Q-EVAL-12's dated note).
+BASE = {"DATA_STREAM_BYTES": "60000", "SIG_WARMUP": "20", "EVAL_GENERATE": "0"}
 
 
 def check(name, ok, detail=""):

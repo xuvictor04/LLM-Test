@@ -11,14 +11,15 @@ as the instrument under it.
 
 WHICH OF THESE ARE LIVE AT WHICH PHASE, STATED RATHER THAN IMPLIED. At P3 exactly one function
 below was called by the composition root: curve_period, because the loop needs a cadence slot.
-SINCE 2026-09-27 (Proposal 04 SR0 and NEW-03, Q-EVAL-12) THE RETENTION PROBE IS BUILT, OFF at the
-shipped EVAL_RETENTION_EVERY=0: pin_holdout at the root's 'probe' row, retention_period in its
-cadence mapping, holdout_probe at stage B, at R and at a resume's start, blowup after each B
-reading, and generate after the final save. curve_probe and null_excess are still P5, and four of
-the five instruments at the bottom are P6. THEY ARE DECLARED HERE ANYWAY, and that is a deliberate
-choice this contract records: an instrument declared with a signature has a named reader for its
-levers, so `EVAL_COH_LEN` is a knob whose consumer is written down rather than one of the 57
-armed-but-inert records. What P6 owns is the BODY, not the interface.
+SINCE 2026-09-27 (Proposal 04 SR0 and NEW-03, Q-EVAL-12) THE RETENTION PROBE IS BUILT -- off at
+EVAL_RETENTION_EVERY=0, and ON at the shipped 1000 since 04-6.2's flip on 2026-09-29: pin_holdout
+at the root's 'probe' row, retention_period in its cadence mapping, holdout_probe at stage B, at R
+and at a resume's start, blowup after each B reading, and generate after the final save.
+curve_probe and null_excess are still P5, and four of the five instruments at the bottom are P6.
+THEY ARE DECLARED HERE ANYWAY, and that is a deliberate choice this contract records: an
+instrument declared with a signature has a named reader for its levers, so `EVAL_COH_LEN` is a
+knob whose consumer is written down rather than one of the 57 armed-but-inert records. What P6
+owns is the BODY, not the interface.
 
 THE SIX STUB MARKERS BELOW SAY P5/P6 WHILE THE OTHER TWELVE PACKAGES SAY P4, AND THEY STAY THAT
 WAY. RE-CHECKED 2026-09-04 AND THE RULING STILL HOLDS: .rework/ISSUES.md P2-H11 rules that the
@@ -450,9 +451,9 @@ def pin_holdout(ev: Config, *, blocks, seed, window_bytes, prefix_bytes):
     recorded in LOOP.eval, so a child re-pins the SAME windows even where its own LM.ctx differs.
 
     OFF MEANS NOTHING PINNED AND NOTHING DRAWN: at EVAL_RETENTION_EVERY=0 (the build default until
-    the register's C9 flip) or with no area holding a block (DATA_SYNTH_HOLDOUT=0 on the synthetic
-    source), the ProbeSet is empty, carries the reason, and no stream is minted -- so rng.issued()
-    reads exactly as it did before this entry point existed.
+    04-6.2's flip on 2026-09-29) or with no area holding a block (DATA_SYNTH_HOLDOUT=0 on the
+    synthetic source), the ProbeSet is empty, carries the reason, and no stream is minted -- so
+    rng.issued() reads exactly as it did before this entry point existed.
 
     AND A BLOCK WITH NO ROOM IS NO BLOCK (2026-09-27, Q-EVAL-12's review). A half shorter than
     prefix_bytes + window_bytes can hold no window: it draws nothing and mints no stream, an area

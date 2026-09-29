@@ -18,11 +18,18 @@ Updated 2026-09-27 (e8628e4).
 
 ## Goals check
 - **B — keep learning after training, without risking too much (first priority).** Not there yet:
-  the tree has no post-training learning mode, and forgetting cannot be measured during a run until
-  the retention probe is built (the next build stage, SR0). Rollback now works one generation back.
-  The path: small builds (all six built and reviewed) → the retokenization fleet → SR0 (probe, best checkpoint) →
+  the tree has no post-training learning mode, and the retention probe that measures forgetting
+  during a run is built (SR0, below) but has not yet been read on GPU. Rollback now works one
+  generation back.
+  The path: small builds (all six built and reviewed) → the retokenization fleet → SR0 (probe, best checkpoint; built) →
   the continue preset (chained learning sessions with a gate) → GPU tests of forgetting and
   plasticity.
+- **SR0 is built and its three defaults are on (2026-09-29, the commit after 444ecca).** Synthetic
+  training streams change at that commit (each area holds out a block), and every run now also reads
+  the held-out probe and keeps the source-reliability book, neither of which changes what it trains
+  on. A fleet started on an earlier commit is not pulled mid-fleet; the retok block and its resume
+  line carry the three settings that keep it comparable with earlier runs; and the whole-epoch WORLD
+  re-run now waits only on O13's two WORLD settings.
 - **A — universal-capable.** Kept open: media and modality work is designed (Proposals 01-03b) and
   waits behind B, as the priority says.
 - **The unreliability belief.** Honoured as a hypothesis: it decides which experiments run first;

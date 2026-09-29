@@ -1184,9 +1184,11 @@ def new_retention(ckpt: Config, *, restored=None):
     WIRES READ: none
     DID IT FIRE: Retention.counters() -> (probes_seen, new_bests, rotations, slots_used,
                  saves_refused, inert_reason). `inert_reason` is populated when best_keep > 0 and
-                 saving is off, and when NO CURVE VALUE HAS EVER ARRIVED -- which at the shipped
-                 EVAL_RETENTION_EVERY=0 is always, and must read as armed-but-inert rather than as
-                 zero local lows. saves_refused (2026-09-27, Q-CKPT-6) counts best and bestN saves
+                 saving is off, and when NO CURVE VALUE HAS EVER ARRIVED -- which at
+                 EVAL_RETENTION_EVERY=0 (the shipped value until 04-6.2's flip on 2026-09-29) is
+                 always, and must read as armed-but-inert rather than as zero local lows; at the
+                 shipped 1000 a run's first phase-start reading is its first value.
+                 saves_refused (2026-09-27, Q-CKPT-6) counts best and bestN saves
                  CKPT.save refused, as Retention.note_saved heard them.
 
     TWO OBLIGATIONS THE FROZEN SIGNATURES CANNOT MEET, WRITTEN DOWN RATHER THAN FAKED.
@@ -1390,10 +1392,12 @@ class Retention:
         held-out windows, read memory-off at every EVAL_RETENTION_EVERY windows and at the first
         window of every phase -- and the loop acts on the BestAction: _carry(), then CKPT.save with
         reason 'best' (suffix '.best') or 'bestN' ('.best<slot>'), then note_saved with what the
-        save returned. AT EVAL_RETENTION_EVERY=0, THE SHIPPED VALUE UNTIL THE REGISTER'S C9 FLIP,
-        NOTHING CALLS THIS, and counters() says so rather than printing a bare zero ("no curve
-        value has ever arrived"). EVAL.curve_probe stays deferred as a SCOPE deferral; the
-        retention probe is the reading this policy consumes.
+        save returned. AT EVAL_RETENTION_EVERY=0 -- THE SHIPPED VALUE UNTIL 04-6.2's FLIP ON
+        2026-09-29, 1000 SINCE -- NOTHING CALLS THIS, and counters() says so rather than printing a
+        bare zero ("no curve value has ever arrived"). At the shipped 1000 every phase-start reading
+        feeds it, so a default run with CKPT_DIR set writes a .best at its first reading.
+        EVAL.curve_probe stays deferred as a SCOPE deferral; the retention probe is the reading this
+        policy consumes.
 
         `step` MUST BE units.Windows AND A BARE int IS REFUSED. docs/04_CONTRACT.md's producer
         table says this argument IS RunClock.step, which train/api.py::RunClock carries as a

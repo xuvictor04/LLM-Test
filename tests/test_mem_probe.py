@@ -37,7 +37,12 @@ from spine.compose import compose, _key_fn                         # noqa: E402
 from memory import api as mem_api                                  # noqa: E402
 
 FAILS = []
-BASE = {"DATA_STREAM_BYTES": "120000"}
+# THE RETENTION PROBE OFF (2026-09-29): since 04-6.2's flip the shipped probe reads the store through
+# its memory-on closure at R, and its generation reads it once per token, each a MEM.read call M1's
+# spy would count as the in-package probe's -- measured, 1,667 reads beside the probe's 4 fires and
+# query shapes of the eval windows' lengths. Reads are not wanted here, so the probe is off
+# (docs/04_CONTRACT.md Q-EVAL-12's dated note), which takes its generation with it.
+BASE = {"DATA_STREAM_BYTES": "120000", "EVAL_RETENTION_EVERY": "0"}
 _STALE = ("no producer", "passes probe_contexts=None", "passes None")
 
 

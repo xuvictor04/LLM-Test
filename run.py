@@ -279,13 +279,14 @@ def main(argv=None):
     print(f"=== {len(result.skipped)} MECHANISM(S) ON LOOP_ORDER HAVE NO CALL SITE AT ALL:")
     for s in result.skipped:
         print(f"      - {s}")
-    # AND THE GATED ONES, SEPARATELY, BECAUSE "IT HAS A CALL SITE" IS NOT "IT RAN". Six of the
+    # AND THE GATED ONES, SEPARATELY, BECAUSE "IT HAS A CALL SITE" IS NOT "IT RAN". Two of the
     # twenty-seven B rows' calls stand behind events that are UNREACHABLE at the shipped defaults --
-    # TOK_PROBATION_USES=0 turns the whole probation family off, EVAL_RETENTION_EVERY=0 the retention
-    # probe and DATA_TRUST='off' the source-reliability book (this said "three of the twenty-two"
-    # until 2026-09-28) -- so a report that printed "0 not called" and stopped would
-    # say this run judged probation when nothing did. That is the same overstatement the skipped
-    # list itself was written to repair, one layer in.
+    # TOK_PROBATION_USES=0 turns the whole probation family off -- and four more wherever
+    # EVAL_RETENTION_EVERY=0 turns the retention probe off and DATA_TRUST='off' the
+    # source-reliability book, which both shipped until 2026-09-29's flips (this said "six" from
+    # 2026-09-28 until the flips, and "three of the twenty-two" before it) -- so a report that
+    # printed "0 not called" and stopped would say this run judged probation when nothing did. That
+    # is the same overstatement the skipped list itself was written to repair, one layer in.
     print("=== GATED CALL SITES (a call site is not a call):")
     for g in result.gated:
         print(f"      - {g}")

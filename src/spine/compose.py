@@ -1798,8 +1798,9 @@ LOOP_ORDER = (
     ("R", "CKPT",  "Retention.counters", "() -- probes_seen, new_bests, rotations, slots_used, "
                                       "saves_refused and inert_reason, which is the one surface "
                                       "that can say 'no curve value has ever arrived' instead of "
-                                      "'zero local lows'. At the shipped EVAL_RETENTION_EVERY=0 "
-                                      "that is exactly what it must say"),
+                                      "'zero local lows'. At EVAL_RETENTION_EVERY=0, the shipped "
+                                      "value until 04-6.2's flip (2026-09-29), that is exactly "
+                                      "what it must say"),
     ("R", "RUN",   "bench_summary",   "(clock, elapsed_s=the root's own wall clock across the run -- "
                                       "RunMode.timing.spans() is per-span and is not a run total, "
                                       "so this one is the root's to take and nothing returns it; "
@@ -1872,12 +1873,12 @@ LOOP_ORDER = (
 # WHAT THIS COSTS, SAID PLAINLY, because a deferral that hides its cost is the shape it replaces:
 # with these unrowed the run has no capacity valve (nothing lifts a cap), no WORLD growth, no
 # learning-curve probe at EVAL_CURVE_EVERY and no wrongness sweep. The retention probe that closed
-# five of them is BUILT OFF (EVAL_RETENTION_EVERY=0), so at the shipped defaults the best-model save
-# and the restart damping still read their inert reasons until the register's C9 flip; and the
-# per-expert contribution that left on 2026-09-28 is BUILT OFF too (FAB_CONTRIB=0), so a default run
-# still has no measured contribution and no informed contrib > 0 spare. The deferral does not remove
-# a mechanism, it stops the tables claiming one, and it names the producer each mechanism is waiting
-# on.
+# five of them was BUILT OFF (EVAL_RETENTION_EVERY=0) and ships ON since 04-6.2's flip (2026-09-29),
+# so at the shipped defaults the best-model save is fed at every phase start while the restart
+# damping still reads its inert reason (OPT_DAMP_SOURCE='off'); and the per-expert contribution
+# that left on 2026-09-28 is BUILT OFF too (FAB_CONTRIB=0), so a default run still has no measured
+# contribution and no informed contrib > 0 spare. The deferral does not remove a mechanism, it stops
+# the tables claiming one, and it names the producer each mechanism is waiting on.
 DEFERRED_ENTRY_POINTS = {
     # THE TWO Population ACCESSORS AND FOUR OF Vocabulary'S FIVE. They arrived with their records in
     # P4's FAB and TOK slices, one increment before the rows that call them, for the same reason
@@ -3127,8 +3128,8 @@ def compose(environ=None, *, restored=None):
     # PARENT'S GEOMETRY, which LOOP.eval records, so a child whose LM.ctx or SIG width differs still
     # reads the parent's windows; a pre-probe checkpoint carries none and pins at this run's.
     # AT EVAL_RETENTION_EVERY=0 THE ProbeSet IS EMPTY, NO STREAM IS MINTED AND THE BOOK STAYS EMPTY
-    # -- every eval.* key ABSENT, this tree's "unreachable" -- so a default run is this tree before
-    # the probe, bit for bit.
+    # -- every eval.* key ABSENT, this tree's "unreachable" -- so a run at 0 is this tree before the
+    # probe, bit for bit (a default run was, until 04-6.2's flip to 1000 on 2026-09-29).
     sysm.stage = "probe"
     _ev_saved = ((saved.get("LOOP") or {}).get("eval") if restored is not None else None) or None
     _geo = (_ev_saved or {}).get("geometry")
@@ -4663,8 +4664,9 @@ def _trust_audit(sysm, lines, *, run_windows, periods):
     The arm test and both passes are spine/loop.py's, so the line for this key is the root's. It
     replaces RUN's, found by the key RUN opens each of its lines with; a run in which the gate can
     fire gets no line, as before, and the mapping RUN audits is the one new_cadences was given --
-    this is a rewording of one line, not a second audit. The default run's 'off' line is a warning
-    Q-DATA-11 lists among what the default changes."""
+    this is a rewording of one line, not a second audit. The default run's 'off' line was a warning
+    Q-DATA-11 lists among what the default changes, until 04-6.3's flip (2026-09-29): at the shipped
+    'observe' a run long enough for one DATA_TRUST_EVERY period gets no line for this key."""
     key = "data.trust"
     tag = f"cadence audit: {key!r} "
     if key not in periods or not any(str(ln).startswith(tag) for ln in lines):

@@ -388,8 +388,10 @@ def check_i9_shift_warm_rewarms_n_steps():
     from spine.compose import compose
     lever._reopen_assembly()
     rng.reset_issued()
+    # GENERATION OFF (2026-09-29): the shipped retention probe generates after the final save since
+    # 04-6.2's flip, which this check reads nothing of (docs/04_CONTRACT.md Q-EVAL-12's dated note).
     sysm = compose(environ={"DATA_STREAM_BYTES": "12000", "RUN_EPOCHS": "2", "DATA_RESAMPLE": "1",
-                            "OPT_LR_SHIFT_WARM": "1"})
+                            "OPT_LR_SHIFT_WARM": "1", "EVAL_GENERATE": "0"})
     res = loop.run(sysm, max_windows=10 ** 6, progress=False)
     c = sysm.optimizer.counters
     got = (int(c.get("opt.shift.notifications", -1)), int(c.get("opt.lr.shift_warm_applied", -1)))

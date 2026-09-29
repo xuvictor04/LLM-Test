@@ -60,10 +60,11 @@ is refused by name without a passing route, and its switch works".
       refusal was off; a route entered as passed admits that (arch, pos) and no other. The tool,
       tools/designate_parent.py, exits 2 on the refusal and writes nothing, exits 1 on a path with no
       checkpoint, and on an admission writes one record saying which switch admitted it.
-  Q7  'learned' IS THE TREE BEFORE THE LEVER: tests/test_baseline.py's B1 reproduces its fixture, and a
-      checkpoint written by the tree before LM_POS existed (494936d, run from a clean copy of its src/)
-      trains the same first 30 losses as this tree and continues here exactly. UNVERIFIABLE -- printed,
-      not failed -- where that commit is not in the repository.
+  Q7  'learned' IS THE TREE BEFORE THE LEVER: tests/test_baseline.py's B1p reproduces the record made
+      before it, and a checkpoint written by the tree before LM_POS existed (494936d, run from a clean
+      copy of its src/) trains the same first 30 losses as this tree and continues here exactly. Since
+      2026-09-29 both run under 04-Q5's three pins: 494936d is the tree before the default flips too.
+      UNVERIFIABLE -- printed, not failed -- where that commit is not in the repository.
 
 WHAT THIS FILE CANNOT SEE: whether any of it works. CPU runs establish operation only: which scheme a
 long-lived parent should carry, and whether a widened parent learns its new positions without losing
@@ -103,7 +104,11 @@ import designate_parent as dp                                      # noqa: E402
 
 FAILS = []
 # tests/test_continuation.py's small base: a tenth-size fabric keeps each compose to a few seconds.
-BASE = {"DATA_STREAM_BYTES": "60000", "SIG_WARMUP": "20", "FAB_N0": "256", "FAB_SLOTS": "512"}
+# GENERATION OFF (2026-09-29): since 04-6.2's flip the shipped retention probe generates after every
+# run's final save, which this file checks nothing of and which costs about a minute a run on the
+# CPU; a CPU suite that tests no EVAL sets it off (docs/04_CONTRACT.md Q-EVAL-12's dated note).
+BASE = {"DATA_STREAM_BYTES": "60000", "SIG_WARMUP": "20", "FAB_N0": "256", "FAB_SLOTS": "512",
+        "EVAL_GENERATE": "0"}
 # THE WIDENING WORKLOAD: a short stream at LM_CTX=64 with the retention probe armed, so a parent stops
 # at its epoch boundary with pinned windows its children re-pin. At 20000 bytes each area is generated
 # at 10,000 and 30% holds out 3,000, whose halves hold a 65-byte window behind its prefix. THREE EPOCHS
@@ -113,6 +118,12 @@ E1 = {"DATA_STREAM_BYTES": "20000", "RUN_EPOCHS": "3", "DATA_RESAMPLE": "1", "DA
       "DATA_HOLDOUT_FRAC": "0.3", "EVAL_RETENTION_EVERY": "20", "EVAL_GENERATE": "0", "LM_CTX": "64"}
 # THE TREE BEFORE THE LEVER: register §8 3.5's review, the commit this build was made on.
 PRE_LEVER = "494936d"
+# 04-Q5's PINS (2026-09-29): 494936d is also the tree before the three default flips, so Q7 compares this
+# tree with it, and resumes its mid-epoch checkpoint, under the values that restore that tree
+# (tests/test_baseline.py's PRE_SR0_PINS, imported). Unpinned, that checkpoint --
+# written at DATA_SYNTH_HOLDOUT=0 -- is refused by name on a continuing resume (tests/test_holdout.py H9).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from test_baseline import PRE_SR0_PINS                            # noqa: E402
 TMP = tempfile.mkdtemp(prefix="position_")
 
 
@@ -824,10 +835,11 @@ try:
     # Q7: 'learned' is the tree before the lever
     # =============================================================================================
     _env = dict(os.environ, OMP_NUM_THREADS="1", MKL_NUM_THREADS="1")
-    b1 = subprocess.run([sys.executable, os.path.join("tests", "test_baseline.py"), "B1"],
+    b1 = subprocess.run([sys.executable, os.path.join("tests", "test_baseline.py"), "B1p"],
                         cwd=os.path.abspath(_ROOT), env=_env, capture_output=True, text=True)
-    check("Q7 B1 reproduces its fixture at the shipped defaults (tests/test_baseline.py)",
-          b1.returncode == 0 and any(ln.startswith("PASS  B1") for ln in b1.stdout.splitlines()),
+    check("Q7 B1p reproduces the record made before LM_POS existed, under 04-Q5's pins "
+          "(tests/test_baseline.py; B1 itself was re-recorded at the flip, after the lever)",
+          b1.returncode == 0 and any(ln.startswith("PASS  B1p") for ln in b1.stdout.splitlines()),
           (b1.stdout + b1.stderr)[-300:] if b1.returncode else "")
     have = subprocess.run(["git", "-C", os.path.abspath(_ROOT), "cat-file", "-e",
                            PRE_LEVER + "^{commit}"], capture_output=True)
@@ -843,22 +855,22 @@ try:
             tf.extractall(old)
         # A CLEAN ENVIRONMENT: the levers this file sets and nothing a caller's shell exports.
         oenv = {"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", ""),
-                "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1", **BASE,
+                "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1", **BASE, **PRE_SR0_PINS,
                 "CKPT_DIR": os.path.join(TMP, "q7h")}
         curve = os.path.join(TMP, "q7h_curve.json")
         orun = subprocess.run([sys.executable, "run.py", "--max-windows", "30", "--quiet",
                                "--loss-curve", curve], cwd=old, env=oenv, capture_output=True, text=True)
         head_curve = json.load(open(curve)) if orun.returncode == 0 else []
-        ref = build()
+        ref = build(**PRE_SR0_PINS)
         rr = loop.run(ref, max_windows=60, progress=False)
         _lever._reopen_assembly()
         hsnap = ckpt_api.load(assemble.build(environ={"CKPT_RESUME": os.path.join(TMP, "q7h")})[0]["CKPT"])
-        hc = build(CKPT_RESUME=os.path.join(TMP, "q7h"), CKPT_DIR=os.path.join(TMP, "q7c"))
+        hc = build(CKPT_RESUME=os.path.join(TMP, "q7h"), CKPT_DIR=os.path.join(TMP, "q7c"), **PRE_SR0_PINS)
         scheme = lm_api._COUNTS.get("lm.pos.scheme")
         rh = loop.run(hc, max_windows=30, progress=False)
         check(f"Q7 the tree before LM_POS ({PRE_LEVER}) trains the same first 30 losses as this tree at the "
-              f"shipped defaults, and its mid-epoch checkpoint -- whose LM geometry records no scheme -- "
-              f"continues here exactly as 'learned'",
+              f"shipped defaults under 04-Q5's pins, and its mid-epoch checkpoint -- whose LM geometry "
+              f"records no scheme -- continues here exactly as 'learned'",
               orun.returncode == 0 and head_curve == list(rr.loss_curve[:30])
               and "pos" not in hsnap.payload["LM"]["geometry"] and hc.resume_pos is not None
               and not hc.refusals and not hc.lm_load.refused

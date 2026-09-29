@@ -601,7 +601,8 @@ and the record's drawn areas, and the stream digest (Q-DATA-9) refuses a continu
 draw changed.
 
 **The source-reliability book, `trust='observe'` (2026-09-28, Q-DATA-11; register §8 3.4, 04-6.3),
-built OFF: `'off'` is the default until 04-6.3's flip, which lands last and alone.** Proposal 04 §1
+built OFF and flipped ON: `'observe'` is the default since 04-6.3's flip, which landed last and alone
+(2026-09-29, Q-DATA-11's dated note; DEFAULT BEHAVIOUR CHANGE 3).** Proposal 04 §1
 item 8's book, in observe mode only. `Areas.sources` names, per area, the file each run of its
 carved body came from (per-file boundaries `_read_area` already walks; a synthetic area is one
 source), and `draw_stream` carries them into `Stream.sources`/`Stream.source_names`, run-length,
@@ -642,8 +643,9 @@ run trains on, and no actuation is built (§8 5.12 decides SR6 on GPU; O5's lock
 **The synthetic source's held-out law is a lever (2026-09-27, Q-DATA-9).** At `synth_holdout=True`
 `open_areas` runs the real sources' carve on each generated body **verbatim** — size, per-area child
 stream, removal, seam, overlap, val-cap tally, and the 0-byte refusal (whose message then names
-`DATA_SYNTH_HOLDOUT` too). At `False`, the build default until 04-Q5's flip, it holds nothing out,
-as before, and the OFF record's `why` names `DATA_SYNTH_HOLDOUT=0`. **The resume admits one move:** a
+`DATA_SYNTH_HOLDOUT` too). At `False`, the build default until 04-Q5's flip (2026-09-29: `True` ships
+since, Q-DATA-9's dated note), it holds nothing out, as before, and the OFF record's `why` names
+`DATA_SYNTH_HOLDOUT=0`. **The resume admits one move:** a
 record of key None and size 0 against a synthetic block now (a real one is a change of source and
 stays refused), counted **per area** in `data.holdout_admitted` (a four-area parent admits 4), each
 admitted area's `seg_contig` cursor mapped onto the carved body (below the block unchanged, past it
@@ -1295,7 +1297,8 @@ entry instead — the ledger stays at **19 of 25, 23 declared couplings**.
 Everything that measures the run and nothing that changes it.
 
 `curve_period` (P3) · `retention_period`, `pin_holdout`, `holdout_probe`, `blowup`, `generate`
-(the retention probe, built 2026-09-27 and off at `EVAL_RETENTION_EVERY=0` — **Q-EVAL-12**) ·
+(the retention probe, built 2026-09-27, off at `EVAL_RETENTION_EVERY=0` and on at the shipped 1000
+since 04-6.2's flip, 2026-09-29 — **Q-EVAL-12**) ·
 `curve_probe`, `null_excess` (P5) · `coherence`, `verdicts`, `wrongness_probe`,
 `verification_fit` (P6).
 
@@ -1557,8 +1560,8 @@ Every periodic row names a period a package **declares**, evaluated through
 | `fab.manage` | `FAB.manage_period(fab)` ← `FAB.manage_every` | FAB |
 | `dom.rekey` | **`MEM.rekey_period(mem)`** ← `MEM.rekey_every` | MEM — delivered by the spine, with the `SIG.mode == "learned"` arm also evaluated here, because the old line made *two foreign reads in one line* (`:6688-6689`) |
 | `ckpt` | `CKPT.save_period(ck)` ← `CKPT.every` | CKPT |
-| `retention` | `EVAL.retention_period(ev)` ← `EVAL.retention_every` | EVAL — the retention probe, since 2026-09-27 (Q-EVAL-12); its arm test is asked first, so at the shipped 0 the key reads `checks == 0` |
-| `data.trust` | `DATA.trust_period(dat)` ← `DATA.trust_every` at `DATA_TRUST='observe'`, **0** at `'off'` | DATA — the source-reliability book, since 2026-09-28 (Q-DATA-11); its arm test (`DATA_TRUST != 'off'`) is asked first, so at the shipped `'off'` the key reads `checks == 0` at period 0, which the audit reports DISARMED — **in the root's line for the key** (`compose.py::_trust_audit`, Q-DATA-11's review), naming `DATA_TRUST='observe'` as the arm, where RUN's own advice, a period of 1 or more, arms nothing. At `'observe'` the book also passes on the window that rolls each epoch and at a stop's tail, so a period of 0, or one the run is too short for, is reported with those passes |
+| `retention` | `EVAL.retention_period(ev)` ← `EVAL.retention_every` | EVAL — the retention probe, since 2026-09-27 (Q-EVAL-12); its arm test is asked first, so at 0 — the shipped value until 04-6.2's flip, 2026-09-29 — the key reads `checks == 0`; at the shipped 1000 it is asked every window and a shipped-default run (506-937 windows) reads fires 0, its reads the phase starts' |
+| `data.trust` | `DATA.trust_period(dat)` ← `DATA.trust_every` at `DATA_TRUST='observe'`, **0** at `'off'` | DATA — the source-reliability book, since 2026-09-28 (Q-DATA-11); its arm test (`DATA_TRUST != 'off'`) is asked first, so at `'off'` — the shipped value until 04-6.3's flip, 2026-09-29 — the key reads `checks == 0` at period 0, which the audit reports DISARMED — **in the root's line for the key** (`compose.py::_trust_audit`, Q-DATA-11's review), naming `DATA_TRUST='observe'` as the arm, where RUN's own advice, a period of 1 or more, arms nothing. At `'observe'` the book also passes on the window that rolls each epoch and at a stop's tail, so a period of 0, or one the run is too short for, is reported with those passes |
 | `progress` | `RUN.PROGRESS_WINDOWS`, a module constant written `units.Windows` | RUN — the progress/ETA line (Q-RUN-1); no lever and no row of its own |
 | MEM's probe/rekey | `MEM.probe_every`, `MEM.rekey_every`, compared inside `maintain` against a Windows `now` | MEM — **NOT ledger gates**, see below |
 
@@ -1641,8 +1644,9 @@ deferral records that when it returns it must either be written inside that answ
 block uses, or take a key of its own.)
 
 Everything else that fires is **event-driven and says so**: `Retention.consider` (a retention
-reading's control mean arrived, finite — which at the shipped `EVAL_RETENTION_EVERY=0` it never
-does), `SIG.train_step` (`cadence_due` said yes),
+reading's control mean arrived, finite — which at `EVAL_RETENTION_EVERY=0`, the shipped value until
+04-6.2's flip on 2026-09-29, it never does, and at the shipped 1000 does at every phase start),
+`SIG.train_step` (`cadence_due` said yes),
 `TOK.judge_probation` (`Due.probation`), `DOM.on_retokenize` (the epoch roll's re-segmentation at a
 moved match table — Q-DOM-2), and the whole `C`
 stage (a save site). **`SIG.cadence_due` is the one periodic gate that cannot go through
@@ -1703,9 +1707,10 @@ built OFF, so at the shipped `FAB_CONTRIB=0` nothing is measured, `FAB.manage` r
 (Q-FAB-19's review) and the spare rule is still uninformed. This paragraph also listed no best-model
 save, no restart damping and no memory retrieval until 2026-09-27: the retention probe (Q-EVAL-12)
 supplies the first and the reading the second judges on, and the memory-on closure is the report
-path's retrieval — built OFF, so at the shipped `EVAL_RETENTION_EVERY=0`
-`Retention.counters().inert_reason` still reports "no curve value has ever arrived" and
-`OPT_DAMP_SOURCE='off'` keeps the damping unjudged. The in-package read probe reached `MEM.read`
+path's retrieval — built OFF, so at `EVAL_RETENTION_EVERY=0` (the shipped value until 04-6.2's flip
+on 2026-09-29) `Retention.counters().inert_reason` still reports "no curve value has ever arrived";
+at the shipped 1000 the phase-start reads feed it, and `OPT_DAMP_SOURCE='off'` keeps the damping
+unjudged. The in-package read probe reached `MEM.read`
 from 2026-09-21, Q-MEM-9.)* **All of that was already inert**: the rows named calls whose arguments
 nothing supplies. The deferral does not remove a mechanism, it stops the tables claiming one, and it
 names the producer each is waiting on.
@@ -4056,7 +4061,9 @@ model, PAR, MPS and NCPU. `EXP=world_epoch` is the WORLD re-run's shape (registe
 whole WINDOWS x 189-byte epoch with the window cap out of reach, "RAN OUT OF STREAM" replaced by a
 window-cap flag, and `TOK_RETOK_EVERY` and `DATA_DRAW` pinned; it refuses to launch before SR0.
 `EXP=world`'s analysis of this fleet's archive is byte-identical to the script's before the change
-(`tests/test_gpu_world.py` F11).
+(`tests/test_gpu_world.py` F11). *(Since 2026-09-29, Q-DATA-9's dated note: SR0 is built, so
+`EXP=world_epoch` also pins `DATA_SYNTH_HOLDOUT=1` and `EVAL_RETENTION_EVERY=700` and writes each
+run's reading series, and its refusal now waits on O13's two WORLD levers, the fifth arm's.)*
 
 **`WORLD_FEEDBACK` stayed `True` pending the GPU experiment in `sweep_world.sh`** (history, as written before the run) (5 seeds per arm,
 paired by seed, mean of loss_curve differences over the last half; flip the default if the gain is
@@ -6295,7 +6302,7 @@ shape the unit decides spares, which the default shape never let it do. That is 
 counters fire, and the arms separate where the spare is consulted. It says nothing about which arm
 manages domains better. The end losses (1.947 ON, 2.039 OFF) are one seed on CPU.
 
-### Q-DATA-9 — the synthetic source's held-out block, its one resume admission, and the stream a continuing resume replays — **RESOLVED 2026-09-27 (Proposal 05 §8 3.1; register 04-Q5; Proposal 04 §1 item 7 and SR0): `DATA_SYNTH_HOLDOUT`, BUILT `False` — 04-Q5 RULES IT ON, AND THE FLIP LANDS LAST AND ALONE; ONE RESUME ADMISSION, COUNTED PER AREA; A CONTINUING MID-EPOCH RESUME REFUSED ACROSS IT AND ACROSS A REDRAWN STREAM (A DIGEST IN `seg_log`); `Areas.parent_names`; `derive.stream_key`; DATA's ROWS AT R. ⚠ ONE NEW LEVER, A CENSUS AMENDMENT. NO SIGNATURE MOVES, NO WIRE**
+### Q-DATA-9 — the synthetic source's held-out block, its one resume admission, and the stream a continuing resume replays — **RESOLVED 2026-09-27 (Proposal 05 §8 3.1; register 04-Q5; Proposal 04 §1 item 7 and SR0): `DATA_SYNTH_HOLDOUT`, BUILT `False` — 04-Q5 RULES IT ON, AND THE FLIP LANDS LAST AND ALONE; ONE RESUME ADMISSION, COUNTED PER AREA; A CONTINUING MID-EPOCH RESUME REFUSED ACROSS IT AND ACROSS A REDRAWN STREAM (A DIGEST IN `seg_log`); `Areas.parent_names`; `derive.stream_key`; DATA's ROWS AT R. ⚠ ONE NEW LEVER, A CENSUS AMENDMENT. NO SIGNATURE MOVES, NO WIRE. ⚠ FLIPPED ON 2026-09-29, LAST AND ALONE: DEFAULT BEHAVIOUR CHANGE 1, WITH 04-Q5's PIN RULE BUILT**
 **What was asked.** The synthetic source held nothing out (`open_areas` set `n_hold = 0` on it), so
 no held-out number could be read on the shipped default source: not SR0's retention probe, not E1's
 primary reading, not the focusbed readings goal B is decided on. 04-Q5 rules `DATA_SYNTH_HOLDOUT`
@@ -6507,6 +6514,48 @@ refusing that parent at 400,000, and a real corpus with one byte changed inside 
 byte changed in the training body restores); a digest-stripped record compared as before; a
 doctored digest refused. H5: the pair ABSENT on the shipped continuation. H8 (new): every DATA stub's `LEVERS READ:`
 names exactly the levers its body reads, through the helpers it hands `dat` to.
+
+**THE FLIP, 2026-09-29 (register 04-Q5; §8 3.1's owed flip, in the commit after 444ecca, last and alone
+with 04-6.2's and 04-6.3's, Q-EVAL-12's and Q-DATA-11's dated notes) — `DATA_SYNTH_HOLDOUT` SHIPS
+`True`: DEFAULT BEHAVIOUR CHANGE 1.** The lever's help says so, and `docs/05_DEFAULTS.md` no longer
+lists it among the levers that ship False. (i) *What moves.* Every synthetic-source stream: each
+generated body is a block shorter (3,000 of 60,000 bytes at the shipped four areas), so the drawn bytes,
+the segmentation and every loss a default run trains, from its first flush on, differ from the tree before.
+B6's epoch 0 still holds 104 windows (13,369 ids against 13,417). On a real source nothing moves:
+`tests/test_baseline.py`'s B5u, the real source unpinned against the record made before the flip,
+reproduces its 200 losses and every counter outside P1's exempt set (Q-EVAL-12). At the default the two
+gates take the real arm, `data.holdout_block` firing 4 of 4, and a resume seeds the admission pair. (ii)
+*An older checkpoint.* A synthetic checkpoint written at 0 is admitted at an epoch-boundary resume,
+counted per area, and a continuing mid-epoch resume of it is refused by name — the retok fleet's kept k0
+copies are that shape. `tests/test_holdout.py` H9 drives one: k0's periodic save at window 41, written
+under the three pins below with its log's digest stripped, is refused at the `segment` stage at the new
+defaults and continues exactly under the pins, warning once. (iii) *04-Q5's pin rule, as built.* The
+pins are `DATA_SYNTH_HOLDOUT=0 EVAL_RETENTION_EVERY=0 DATA_TRUST=off`, the three flipped levers at the
+values that restore the tree before them; `DATA_DRAW='planned'` joins them "if that flips", and it has
+not. `gpu_world.sh`'s EXP=retok sets them on every run it launches — smoke, fleet and rerun — and on its
+block's resume line, each only where the tree declares its lever (read off `src/` at launch, as the
+Levels label is, so a checkout from before a flip gets no name the typo net prints UNREAD for), and
+SUMMARY.txt and the block print them (`tests/test_gpu_world.py` F18). The WORLD re-run is not such a
+fleet: EXP=world_epoch pins `DATA_SYNTH_HOLDOUT=1` and `EVAL_RETENTION_EVERY=700` (04-6.2's cap for its
+shape, written as a number: the script's `PROBE_EVERY`), writes each run's reading series (`run.py
+--probe-series`), and its guard now waits only on O13's two WORLD levers for its five arms (F9). A fleet
+started on an earlier commit is not pulled mid-fleet. (iv) *The baseline net.* The six records made
+before Stage 3 — B1's at d32e2ce, the rest at ae70638 — moved unchanged to `*_pre_sr0.json` and are held
+to this tree as B1p-B6rp under the three pins, which run and are never recorded or compared: every one
+reproduces, B3rp continuing B3p exactly and B6rp's parent stopping at B6p's boundary — "the pinned tree
+is the previous tree", as a test. `--record` refuses those six and B5u. B1-B6r were re-recorded at the
+commit that flips them (the record names it "the commit after 444ecca": a record made on uncommitted
+`src/` or `run.py` is its own commit's), and each equals 444ecca's tree run with the three levers set
+explicitly, on every loss and every integer counter; unpinned B3r continues B3 exactly and B6r's parent
+stops at B6's boundary. (v) *The suites.* One whose known answers were drawn on the stream before the
+flip, or which holds per-flush equalities the probe's reads would move, pins the three:
+`tests/test_draw.py` (D1's digests at c872121), `tests/test_continuation.py` (its save windows and S10's
+save counts), `tests/test_world.py`'s W2 loops and `tests/test_position.py`'s Q7 (494936d, the tree
+before `LM_POS`, is the tree before the flips too, and its mid-epoch checkpoint is written at 0). The
+suites of the three levers themselves name the arm each check reads — `tests/test_holdout.py` 0 unless a
+check sets 1, `tests/test_probe.py` the probe and the block off unless set, `tests/test_trust.py` 'off'
+unless set — and read the shipped value by assembling without the lever (H2, P1, T7). **What CPU
+establishes:** operation only.
 
 ### Q-RUN-11 — a resume drew epoch 0's stream whatever epoch it resumed in — **RESOLVED 2026-09-24: THE `stream` ROW DRAWS `Snapshot.epoch`**
 The `stream` row passed `epoch=0` unconditionally. Driven at `RUN_EPOCHS=2 DATA_RESAMPLE=1`: the
@@ -6933,7 +6982,7 @@ on existing rulings:** gate `fab.on` at `FAB_ON=0` (ruled a switch read false, `
 `fab.lr_own` at `FAB_LR_OWN=False` ("an ARMED arm that chose not to scale", `own_lr_scale`) and
 `fab.growth_armed` at `FAB_GROW=0`, whose `grow_check` family is seeded on that arm the same way.
 
-### Q-EVAL-12 — the retention probe: what it reads, through which closure, at which routing clock, and who consumes its readings — **RESOLVED 2026-09-27 (Proposal 04 SR0 and NEW-03; register §8 3.1/3.2): BUILT OFF AT `EVAL_RETENTION_EVERY=0`. TWO NEW LEVERS, BOTH CENSUS AMENDMENTS; `EVAL.holdout_probe` MOVES; `EVAL.pin_holdout`, `EVAL.retention_period` AND `EVAL.blowup` ARE NEW; `_logits_fn`'s TWO CLOSURES ARE WRITTEN. NO WIRE**
+### Q-EVAL-12 — the retention probe: what it reads, through which closure, at which routing clock, and who consumes its readings — **RESOLVED 2026-09-27 (Proposal 04 SR0 and NEW-03; register §8 3.1/3.2): BUILT OFF AT `EVAL_RETENTION_EVERY=0`. TWO NEW LEVERS, BOTH CENSUS AMENDMENTS; `EVAL.holdout_probe` MOVES; `EVAL.pin_holdout`, `EVAL.retention_period` AND `EVAL.blowup` ARE NEW; `_logits_fn`'s TWO CLOSURES ARE WRITTEN. NO WIRE. ⚠ FLIPPED TO 1000 WITH PHASE-START READS ON 2026-09-29, LAST AND ALONE: DEFAULT BEHAVIOUR CHANGE 2**
 **What was asked.** Goal B is decided on held-out readings taken *during* training, and the tree
 had none: `EVAL.holdout_probe` was deferred for want of `units_by_domain` and a `logits_fn`, so
 `CKPT.Retention.consider` never heard a value, `OPT.maybe_step`'s `best_bpb` had no producer, the
@@ -7148,6 +7197,44 @@ prose are corrected where they stood:
   today" (the probe formed it); `OPT.maybe_step`'s "`best_bpb` HAS NO PRODUCER" (it is
   `System.probe_reading`, counted once per `at`); and EVAL's negative-period switch, which governs
   `EVAL_RETENTION_EVERY` as well as `EVAL_CURVE_EVERY`.
+
+**THE FLIP, 2026-09-29 (register 04-6.2; SR0's bit-identity passed; in the commit after 444ecca, last
+and alone with 04-Q5's and 04-6.3's, Q-DATA-9's and Q-DATA-11's dated notes) — `EVAL_RETENTION_EVERY`
+SHIPS 1000, WITH A READ AT THE FIRST WINDOW OF EVERY PHASE: DEFAULT BEHAVIOUR CHANGE 2.** The lever's
+help says so. At the shipped defaults a run pins both halves of every area's block (the block 04-Q5's
+flip gives the synthetic source), reads memory-off at every phase start and on the cadence where it
+reaches it — a shipped-default run of 506-937 windows never does, so `eval.holdout.cadence_reads` reads
+PRESENT-and-0 — reads its R boundary through both closures, feeds `CKPT.Retention.consider` each finite
+control mean (with `CKPT_DIR` set, a `.best` save at every new best, the first reading always one: a
+full checkpoint each, frequent early in training, which an owner fleet with `CKPT_DIR` budgets), runs
+`EVAL.blowup`, inert at 1000 (80 readings without a new best is 80,000 windows), and generates after
+the final save; OPT reads none of it at the shipped `OPT_DAMP_SOURCE='off'`. The root prints its two
+startup notices, above 160 and a phase projected below five readings, and the cadence audit's line for
+'retention'. **Nothing a run trains on moves:** P1 re-run at the new defaults — the book at its shipped
+'observe' in both arms, the block on — passes, and on the real source B5u reproduces the record made
+before the flip on every loss and every counter but P1's exempt set (`tests/test_baseline.py`), which
+moves by the reads beside training: at B5's 200 windows `lm.encode.calls` 606 → 924, `lm.decode.calls`
+400 → 844 and `sig.encode_calls` 201 → 423. 1000 is the interim value until E6 picks (§8 6.2); each
+pre-registration writes its cap as a number, never computed at run time (N4) — `gpu_world.sh`'s
+EXP=world_epoch writes 700. **What it costs, and the suites' rule.** At B1's 80 windows a CPU run took
+143 s against 27 s (2026-09-28, one thread): generation's 16 continuations of 200 tokens are most of
+it, the reads 4.7 s (`eval.holdout.seconds`). So a CPU suite that tests no EVAL sets `EVAL_GENERATE=0`
+(`tests/_state_digest.py`, `test_resume.py`, `test_resume_clock.py`, `test_fabric_forward.py`,
+`test_levels.py`, `test_lr_continue.py`, `test_tok_dom_cap.py`, `test_faded.py`, `test_position.py`,
+`test_prose_guards.py`, `test_fabric_internals.py`'s I9, `test_world.py`'s W4, and the probe-reading
+`test_holdout.py` and `test_trust.py`), and one whose counts a read would move sets
+`EVAL_RETENTION_EVERY=0`: `tests/test_mem_probe.py`, whose M1 spy counts every `MEM.read` (the
+memory-on closure's reads and generation's came to 1,667 beside the in-package probe's 4 fires), and
+`tests/test_causality.py`, whose C3 spy takes the first `FAB.forward` call for the flush's (the
+phase-start read at window 1 came first, at `OPT_BATCH_WINDOWS=2`, with `DOM.nearest`'s -1). At the
+owner's scale the register prices the stricter preset cadence (333, at k1000 and in media sessions at
+k3000) at about 7.2% more forward windows, 2.1-2.4% of wall (C03, O11), and E6 picks the densest
+cadence within 2% of wall. P15, which held B1, B3, B3r and B5 to their records at the shipped defaults
+while the probe shipped off, now holds B1p, B3p, B3rp and B5p to theirs under 04-Q5's pins: with the
+probe off the tree is the one before it. `FAB_CONTRIB=1`, refused at startup while the probe shipped
+off, composes at the shipped defaults, whose probe pins a control half in every area (Q-FAB-19's two
+refusals stand at their arms, and `tests/test_contribution.py` C-7 names those arms). **What CPU
+establishes:** operation only.
 
 ### Q-OPT-13 — where the restart damping's held-out Reading comes from — **RESOLVED 2026-09-27 (Proposal 04 NEW-03): `OPT_DAMP_SOURCE`, BUILT `'off'`; `'probe'` HANDS IT THE RETENTION PROBE'S CONTROL MEAN; `st.reading_at` CHECKPOINTED. ⚠ ONE NEW LEVER, A CENSUS AMENDMENT. NO SIGNATURE MOVES, NO WIRE**
 `OPT.maybe_step`'s `best_bpb` is the one held-out measurement that crosses back into a training
@@ -8039,7 +8126,7 @@ where it stood:
 counts and the Gates move only under 'replay', the refusal only at `DATA_REHEARSE_PARENT=1` under
 'replay', and the new record key is a list; B1, B3, B3r, B5, B6 and B6r reproduce their fixtures.
 
-### Q-DATA-11 — the source-reliability book in observe mode, and the sources it reads — **RESOLVED 2026-09-28 (Proposal 05 §8 3.4; register 04-6.3; Proposal 04 §1 item 8, §5, §6 and SR3): `DATA_TRUST` BUILT `'off'`, `'observe'` BUILT AND `'loss'`/`'loss+draw'` REFUSED WITH `NotBuilt`; THIRTEEN LEVERS OF ITS BOOK; `Areas.sources` AND `Stream.sources`; THE `Focus` RECORD THROUGH `DATA.new_focus(restored=)`, `DATA.claims_observe` AND `DATA.trust_period`; SR3's BIT-IDENTITY. ⚠ FOURTEEN NEW LEVERS, FOURTEEN CENSUS AMENDMENTS, THREE NEW ENTRY POINTS AND ONE MOVED (`DATA.stream_state(..., focus=None)`). NO WIRE, AND NO NUMBER A DEFAULT RUN TRAINS ON MOVES. `DATA_SRC_CAP` IS NOT BUILT: DEFERRED TO §8 4.7, WITH THE REGISTER'S NOTE**
+### Q-DATA-11 — the source-reliability book in observe mode, and the sources it reads — **RESOLVED 2026-09-28 (Proposal 05 §8 3.4; register 04-6.3; Proposal 04 §1 item 8, §5, §6 and SR3): `DATA_TRUST` BUILT `'off'`, `'observe'` BUILT AND `'loss'`/`'loss+draw'` REFUSED WITH `NotBuilt`; THIRTEEN LEVERS OF ITS BOOK; `Areas.sources` AND `Stream.sources`; THE `Focus` RECORD THROUGH `DATA.new_focus(restored=)`, `DATA.claims_observe` AND `DATA.trust_period`; SR3's BIT-IDENTITY. ⚠ FOURTEEN NEW LEVERS, FOURTEEN CENSUS AMENDMENTS, THREE NEW ENTRY POINTS AND ONE MOVED (`DATA.stream_state(..., focus=None)`). NO WIRE, AND NO NUMBER A DEFAULT RUN TRAINS ON MOVES. `DATA_SRC_CAP` IS NOT BUILT: DEFERRED TO §8 4.7, WITH THE REGISTER'S NOTE. ⚠ FLIPPED TO `'observe'` ON 2026-09-29, LAST AND ALONE: DEFAULT BEHAVIOUR CHANGE 3; ACTUATION STAYS OFF**
 
 **What was asked.** Proposal 04 §1 item 8: a model-free source-reliability book, observe mode only —
 claims a source makes about a key ('kv', a normalised (key, value) pair around a delimiter, the build
@@ -8317,6 +8404,24 @@ the count of startup warnings: the default's `'data.trust'` line is reworded, no
 book's reason moves only where an 'off' run resumed one, and `docs/05_DEFAULTS.md` moves one row. B1,
 B3, B3r, B5, B6 and B6r reproduce their fixtures.
 
+**THE FLIP, 2026-09-29 (register 04-6.3; SR3's bit-identity passed; in the commit after 444ecca, last
+and alone with 04-Q5's and 04-6.2's, Q-DATA-9's and Q-EVAL-12's dated notes) — `DATA_TRUST` SHIPS
+`'observe'`: DEFAULT BEHAVIOUR CHANGE 3. ACTUATION STAYS OFF.** The lever's help says so. A default run
+now allocates the book — the int32 sketch, `DATA_TRUST_SKETCH` buckets, 16.8 MB at 4194301, carried in
+every checkpoint it writes, and the LRU table — passes it every 160 windows (`DATA_TRUST_EVERY`), at
+every epoch's last window and at a stop's tail, and reports `data.trust.*`, the `DATA(trust)` row's
+gates, the `'data.trust'` ledger key armed and its pass series. **Nothing a run trains on moves:** T1
+re-run at the new defaults — 'observe' against 'off' with the synthetic block and the retention probe on
+in both arms, on synthetic, real and planted text — passes, and B5u (Q-DATA-9's note) prints the book's
+keys as new and moves no other. `'loss'` and `'loss+draw'` stay refused with `NotBuilt`, and copy
+detection stays `'off'` (Q-DATA-12). The book's thirteen values are provisional (register NEW-19's
+backlog lists them), and E3 on real text decides them (§8 6.2); its 2%-of-wall rule may lengthen
+`DATA_TRUST_EVERY` above the detection floor. What a default run pays: the book's passes, 6-7% of wall
+on the toy and owed at the owner's shape, and the sketch in every checkpoint. A fleet that pairs with
+earlier runs pins `'off'` beside the other two (04-Q5's pin rule, Q-DATA-9's note), and
+`tests/test_trust.py` names the arm each check reads, `'off'` unless it sets `'observe'` (T7 reads the
+shipped value by assembling without the lever). **What CPU establishes:** operation only.
+
 ### Q-DATA-12 — copy detection inside the source-reliability book's vote (SR6) — **RESOLVED 2026-09-28 (Proposal 05 §8 3.7; register 04-Q12, C05, O5 and §8 5.12; Proposal 04 §1 item 8's standing actuation rule (2) and SR6): `DATA_TRUST_COPY`, BUILT `'off'` — `'accu'` JUDGES EVERY PAIR OF SOURCES FOR COPYING AND DISCOUNTS A DEPENDENT PAIR'S COPY IN THE BOOK'S VOTE, OBSERVE-ONLY; §8 5.12 DECIDES IT ON GPU AND O5's LOCK HOLDS. ⚠ FOUR NEW LEVERS, FOUR CENSUS AMENDMENTS. NO SIGNATURE MOVES AND NO ENTRY POINT OR WIRE IS ADDED; NO NUMBER A RUN TRAINS ON MOVES AT ANY SETTING**
 
 **What was asked.** Proposal 04 §1 item 8's standing actuation rule (2): copy detection — "the
@@ -8478,8 +8583,10 @@ on the planted copier corpus since the review, where it is a non-zero reading; T
 third gate.
 
 **What the default changes:** nothing a run trains on and no integer counter a default run prints.
-At the shipped `DATA_TRUST='off'` the book's gates are three, so the `DATA(trust)` row prints one more
-line, `gate:data.trust.copy`, UNREACHABLE naming `DATA_TRUST='off'`; no startup warning is added.
+At `DATA_TRUST='off'`, the shipped value until 04-6.3's flip on 2026-09-29, the book's gates are three,
+so the `DATA(trust)` row prints one more line, `gate:data.trust.copy`, UNREACHABLE naming
+`DATA_TRUST='off'`; no startup warning is added. (At the shipped `'observe'` since, the line names
+`DATA_TRUST_COPY='off'`, Q-DATA-11's dated note.)
 B1, B3, B3r, B5, B6 and B6r reproduce their fixtures.
 
 **AMENDED 2026-09-28 — THE REVIEW OF THIS RULING.** Four findings, each driven on the tree before it
@@ -8537,8 +8644,8 @@ SR6-6's two timing checks fail.
   vote had a conflicted claim, within its own seconds, and exactly 0 where it had none.
 
 **What the review changes at the default:** nothing a run trains on and nothing a default run prints:
-at the shipped `DATA_TRUST='off'` no copy lever is read, and at `DATA_TRUST_COPY='off'` none of the
-three numbers is. Two lever help strings name their refused ends, so `docs/05_DEFAULTS.md` moves two
+at `DATA_TRUST='off'` (the shipped value until 04-6.3's flip on 2026-09-29) no copy lever is read, and
+at the shipped `DATA_TRUST_COPY='off'` none of the three numbers is. Two lever help strings name their refused ends, so `docs/05_DEFAULTS.md` moves two
 rows, and the census rows for `DATA_TRUST_COPY_RATE` and `_P` say the same. B1, B3, B3r, B5, B6 and
 B6r reproduce their fixtures.
 

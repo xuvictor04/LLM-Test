@@ -19,7 +19,8 @@ docs/04_CONTRACT.md). Each of these was driven on the tree before the repair:
       as a fire on EVERY window, which is what four refusals and a Gate reason said while the
       ledger beside them read fires=0. DATA.trust_period's lever refuses a negative by its declared
       domain at the first read instead (2026-09-28, Q-DATA-11), and the accessor returns the lever's
-      period at DATA_TRUST='observe' and 0 -- DISARMED -- at 'off'.
+      period at DATA_TRUST='observe' -- the shipped value since 04-6.3's flip -- and 0 -- DISARMED --
+      at 'off'.
   G4  LM.build_model WRITES THE FIVE lm.build.* GAUGES ITS DID IT FIRE LINE DECLARES; all five were
       ABSENT on both LM_ARCH arms.
   G5  NO _NONFINITE_MEASURED ENTRY CALLS A FUNCTION A STUB WHEN IT HAS A BODY (SIG.train_step and
@@ -54,7 +55,11 @@ from ckpt import api as ckpt_api                                   # noqa: E402
 from lm import api as lm_api                                       # noqa: E402
 
 FAILS = []
-BASE = {"DATA_STREAM_BYTES": "60000", "SIG_WARMUP": "20", "FAB_N0": "256", "FAB_SLOTS": "512"}
+# GENERATION OFF (2026-09-29): since 04-6.2's flip the shipped retention probe generates after every
+# run's final save, which this file checks nothing of and which costs about a minute a run on the
+# CPU; a CPU suite that tests no EVAL sets it off (docs/04_CONTRACT.md Q-EVAL-12's dated note).
+BASE = {"DATA_STREAM_BYTES": "60000", "SIG_WARMUP": "20", "FAB_N0": "256", "FAB_SLOTS": "512",
+        "EVAL_GENERATE": "0"}
 
 
 def check(name, ok, detail=""):
@@ -158,13 +163,16 @@ def g3_negative_period_text():
         check("G3 DATA_TRUST_EVERY=-1 is refused at the first read, by its declared domain, by name",
               str(e).startswith("DATA_TRUST_EVERY=-1") and "domain" in str(e), str(e)[:140])
     _got = []
-    for _env in ({"DATA_TRUST": "observe"}, {"DATA_TRUST": "observe", "DATA_TRUST_EVERY": "0"}, {}):
+    # THE SHIPPED VALUE IS 'observe' SINCE 2026-09-29 (04-6.3's flip, Q-DATA-11's dated note), so the
+    # default environment is the fourth case and 'off' is asked by name.
+    for _env in ({"DATA_TRUST": "observe"}, {"DATA_TRUST": "observe", "DATA_TRUST_EVERY": "0"},
+                 {"DATA_TRUST": "off"}, {}):
         _reopen()
         cfgs, _, _ = assemble.build(environ=_env)
         _got.append(data_api.trust_period(cfgs["DATA"]))
     check("G3 DATA.trust_period is DATA_TRUST_EVERY at 'observe' (160, and 0 when set so) and 0 -- "
-          "disarmed -- at the shipped 'off', always units.Windows",
-          [int(p) for p in _got] == [160, 0, 0]
+          "disarmed -- at 'off', always units.Windows; the shipped 'observe' reads 160",
+          [int(p) for p in _got] == [160, 0, 0, 160]
           and all(type(p).__name__ == "Windows" for p in _got), str(_got))
 
 
@@ -328,6 +336,12 @@ def g9_nonfinite():
                   "nothing", "/payload/X/w (1 of 2)" in str(e)
                   and not os.path.exists(os.path.join(d, "ckpt.pt.g9"))
                   and ckpt_api._SAVES["refused_nonfinite"] == before + 1, str(e)[:120])
+    # TOK WRITES ITS VOCABULARY BESIDE CKPT_DIR, NOT IN IT -- <dir>.dyntok.json, and since the
+    # retention probe ships on (2026-09-29), <dir>.best.dyntok.json beside the best save -- so the
+    # directory's removal leaves them in the temp root; they are this run's output and go with it.
+    for leftover in (d + ".dyntok.json", d + ".best.dyntok.json"):
+        if os.path.exists(leftover):
+            os.remove(leftover)
 
 
 def g_text():

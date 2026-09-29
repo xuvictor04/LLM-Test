@@ -5,10 +5,12 @@ with real on-disk checkpoints under a temporary directory.
 
     python3 tests/test_trust.py        # exit 0 = every check passed
 
-WHY IT EXISTS. The book is built OFF (DATA_TRUST='off') and ships ON as telemetry only after a test
-proves it is telemetry: it reads the stream's text and nothing a run trains on may move. So the first
-promise is SR3's bit-identity, and the rest pin what a claim is, what the vote does with it, where a
-pass reads, and what a checkpoint carries.
+WHY IT EXISTS. The book was built OFF (DATA_TRUST='off') and ships ON ('observe', since 2026-09-29,
+the flip landing last and alone) as telemetry only after a test proves it is telemetry: it reads the
+stream's text and nothing a run trains on may move. So the first promise is SR3's bit-identity, and the
+rest pin what a claim is, what the vote does with it, where a pass reads, and what a checkpoint
+carries. THE FILE'S ARM IS 'off' UNLESS A CHECK SETS 'observe': the checks were written while 'off'
+shipped, and each names the arm it reads; everything else runs at its shipped value but generation.
 
   S1  Areas.sources: each area's per-file boundaries, mapped onto the carved body -- checked byte by
       byte against the raw manifest on random layouts and on data/train, carve included.
@@ -51,7 +53,10 @@ pass reads, and what a checkpoint carries.
       the roll leaves the next leg reading the epoch it resumes in from its first unit and none of
       the earlier epoch's, the book short of the uninterrupted run's by exactly the units the 'off'
       leg consumed before the roll, the losses continuing exactly.
-  T7  DATA_TRUST='loss' AND 'loss+draw' ARE REFUSED WITH NotBuilt, by new_focus and through compose.
+  T7  DATA_TRUST='loss' AND 'loss+draw' ARE REFUSED WITH NotBuilt, by new_focus and through compose;
+      'off' allocates nothing; and 'observe' is the shipped value since 04-6.3's flip, a Config
+      assembled with no DATA_TRUST keeping the book on DATA_TRUST_EVERY's period, its actuation gate
+      UNREACHABLE.
   T8  data.trust.wall_s IS PRINTED AS A FLOAT, AND tests/test_baseline.py's COUNTER NEVER READS IT,
       while the integer data.trust.* lines it does read are there.
   T9  THE CADENCE AUDIT'S LINE FOR THE BOOK IS THE ROOT'S (spine/compose.py::_trust_audit,
@@ -129,8 +134,14 @@ from test_baseline import COUNTER as BASELINE_COUNTER              # noqa: E402
 FAILS = []
 DATA_DIR = os.path.join(os.path.abspath(_ROOT), "data")
 # tests/test_continuation.py's small base: a tenth-size fabric keeps each compose to a few seconds.
+# THE FILE'S ARM IS DATA_TRUST='off' UNLESS A CHECK SETS 'observe' (2026-09-29, 04-6.3's flip). The
+# checks were written while 'off' shipped and each names the arm it reads; since the flip 'observe' is
+# the shipped value, which T7 reads by assembling with no DATA_TRUST at all. Everything else runs at its
+# shipped value -- the synthetic held-out block and the retention probe among them, so T1 is SR3's
+# bit-identity at the new defaults -- except generation: it runs after the final save, reads nothing
+# the book reads, and costs about a minute a run on the CPU.
 BASE = {"DATA_STREAM_BYTES": "60000", "SIG_WARMUP": "20", "FAB_N0": "256", "FAB_SLOTS": "512",
-        "DATA_DIR": DATA_DIR}
+        "DATA_DIR": DATA_DIR, "DATA_TRUST": "off", "EVAL_GENERATE": "0"}
 # THE STATE THE BOOK ADDS, excluded by name when an ON run is compared with an OFF one.
 EXCL = ("DATA.focus", "RUN.cadences.*.data.trust")
 # THE REPORT'S INTEGER COUNTER KEYS, as tests/test_baseline.py::COUNTER reads them from run.py.
@@ -598,6 +609,23 @@ def _main(tmp):
           == [("data.trust", False), ("data.trust.actuation", False), ("data.trust.copy", False)]
           and "DATA_TRUST='off'" in off.gates[0].reason
           and off.gates[2].reason.startswith("DATA_TRUST='off'"))
+    # THE SHIPPED VALUE IS 'observe' SINCE 2026-09-29 (04-6.3's flip, DEFAULT BEHAVIOUR CHANGE 3): a
+    # Config assembled with no DATA_TRUST -- nothing of this file's arm -- keeps the book, its period
+    # is DATA_TRUST_EVERY's, and the actuation it does not build stays UNREACHABLE.
+    _lever._reopen_assembly()
+    rng.reset_issued()
+    _shipped = assemble.build(environ={k: v for k, v in BASE.items() if k != "DATA_TRUST"})[0]["DATA"]
+    _sf = D.new_focus(_shipped, None, None)
+    check("T7 the shipped value is 'observe' (04-6.3's flip): assembled with no DATA_TRUST the book is "
+          "kept, on DATA_TRUST_EVERY's period, its data.trust gate armed and data.trust.actuation "
+          "UNREACHABLE",
+          str(_shipped.trust) == "observe" and int(D.trust_period(_shipped)) == int(_shipped.trust_every)
+          == 160 and _sf.mode == "observe" and _sf.sketch is not None
+          and [(g.name, g.reachable) for g in _sf.gates][:2]
+          == [("data.trust", True), ("data.trust.actuation", False)],
+          f"trust {_shipped.trust!r}, period {int(D.trust_period(_shipped))}, "
+          f"gates {[(g.name, g.reachable) for g in _sf.gates]}")
+    del _sf
 
     # ---- T2: surface forms ---------------------------------------------------------------------------
     dkv = dat_of(DATA_TRUST="observe", DATA_TRUST_HOT=1, DATA_TRUST_SKETCH=1009)
@@ -983,7 +1011,7 @@ def _main(tmp):
                        and len(audit) == len(theirs)
                        and _trust_audit(s, theirs, run_windows=rw, periods=_periods(s)) == audit)
     off_l, off1_l = seen["off"][0], seen["off1"][0]
-    check("T9 at the shipped 'off' the audit's one 'data.trust' line is the root's: DISARMED by "
+    check("T9 at 'off' (the file's arm) the audit's one 'data.trust' line is the root's: DISARMED by "
           "DATA_TRUST='off', DATA_TRUST='observe' named as what arms the book, never RUN's 'Set a "
           "period of 1 or more' -- and at DATA_TRUST_EVERY=1, a period that arms nothing there, the "
           "same line",

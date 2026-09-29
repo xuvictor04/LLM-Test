@@ -54,7 +54,10 @@ is pinned here, on a fleet whose every number is chosen.
   F8  THE WHOLE-EPOCH FLAGS: under EXP=world_epoch a run that read its epoch is not "RAN OUT OF
       STREAM" and one that hit the cap is "STOPPED AT THE WINDOW CAP"; EXP=world flags as it did.
   F9  THE REFUSALS: EXP=world_epoch without GO_WORLD_EPOCH=1 exits 2 having written nothing and prints
-      its sizing and pins; an unknown EXP and an unusable cadence are refused by name.
+      its sizing and pins -- since SR0's build (2026-09-29) DATA_SYNTH_HOLDOUT=1 and EVAL_RETENTION_EVERY
+      at 04-6.2's cap beside TOK_RETOK_EVERY and DATA_DRAW -- and a guard that waits on O13's two WORLD
+      levers for its five arms, saying which this tree declares; an unknown EXP, an unusable cadence and
+      an unusable PROBE_EVERY are refused by name.
   F10 A LAUNCH, WITH run.py STOOD IN: EXP=world with KEEP_CKPT off puts no CKPT_ variable and no
       --flush-bytes on any run and ends in the block and the archive; EXP=retok's default arms the
       k0 family's periodic saves and the act arms' final one, and a smoke whose k0 kept no copy stops
@@ -91,6 +94,12 @@ is pinned here, on a fleet whose every number is chosen.
       the part before at 0% and sound nothing (the split's review: every notification was charged
       there, and both alarmed at 100%), a stamp no act line places is charged a cooldown before, and
       only a log with no act window falls back to every notification x cooldown.
+  F18 04-Q5's PINS ON EVERY RETOK RUN (2026-09-29, the flip of DATA_SYNTH_HOLDOUT, EVAL_RETENTION_EVERY
+      and DATA_TRUST): every run an EXP=retok launch makes carries DATA_SYNTH_HOLDOUT=0
+      EVAL_RETENTION_EVERY=0 DATA_TRUST=off, SUMMARY.txt and the block record them, the resume line
+      carries them after EXTRA, and EXP=world carries none; on a tree that declares none of the three
+      levers, and on one that declares DATA_SYNTH_HOLDOUT alone, each run carries exactly the pins whose
+      lever the tree declares.
 """
 import glob
 import json
@@ -150,6 +159,9 @@ def block_of(stdout):
 
 # ---- a synthetic fleet --------------------------------------------------------------------------
 NEW13 = ("fab.blackout_windows", "tok.mint_wait_windows", "loop.act_seconds", "tok.bpt_tail")
+# 04-Q5's PINS AS EXP=retok SETS THEM ON A TREE THAT DECLARES ALL THREE LEVERS (2026-09-29), in the order the
+# script appends them; the resume line carries them after EXTRA, as run_job does (F10, F18).
+PINS18 = "DATA_SYNTH_HOLDOUT=0 EVAL_RETENTION_EVERY=0 DATA_TRUST=off"
 
 
 def summary(out, *, exp="retok", seeds="0 1 2", windows=20000, stream=3780000, extra="", dirty=False,
@@ -689,10 +701,20 @@ try:
     check("F9 EXP=world_epoch without GO_WORLD_EPOCH=1 exits 2 and writes nothing (OUT is not created)",
           p9.returncode == 2 and not os.path.exists(o9), f"rc {p9.returncode}")
     check("F9 ... having printed its sizing: one whole WINDOWS x 189-byte epoch, the cap at 3 x WINDOWS, "
-          "CAL_WINDOWS 600, and the TOK_RETOK_EVERY pin",
+          "CAL_WINDOWS 600, and the pins -- TOK_RETOK_EVERY and DATA_DRAW, and since SR0 (2026-09-29) its "
+          "held-out block on and the probe at 04-6.2's cap, 700",
           "DATA_STREAM_BYTES=3780000" in p9.stdout and "window cap 60000" in p9.stdout
           and "CAL_WINDOWS 600" in p9.stdout and "TOK_RETOK_EVERY=3000 pinned" in p9.stdout
-          and "DATA_DRAW=planned pinned" in p9.stdout)
+          and "DATA_DRAW=planned pinned" in p9.stdout and "DATA_SYNTH_HOLDOUT=1 pinned" in p9.stdout
+          and "EVAL_RETENTION_EVERY=700 pinned" in p9.stdout)
+    check("F9 ... and the guard waits on O13's two WORLD levers, not SR0: five arms, detached among them, "
+          "and which of the two this tree declares (neither, today)",
+          "All five arms -- fb_off, fb_on, skip, world_off and detached" in p9.stdout
+          and "WORLD_FORECAST_BOUND not declared, WORLD_INPUT_GRAD not declared" in p9.stdout
+          and "after SR0" not in p9.stdout and "(before SR0" not in p9.stdout, p9.stdout[-900:])
+    p9e = gw(EXP="world_epoch", PROBE_EVERY="7x", OUT=os.path.join(TMP, "f9e"))
+    check("F9 a PROBE_EVERY that is not a positive window count is refused by name, before anything is written",
+          p9e.returncode == 2 and "PROBE_EVERY='7x'" in p9e.stdout and not os.path.exists(os.path.join(TMP, "f9e")))
     p9b = gw(EXP="wrold", OUT=os.path.join(TMP, "f9b"))
     check("F9 an unknown EXP is refused by name, before anything is written",
           p9b.returncode == 2 and "EXP='wrold'" in p9b.stdout and not os.path.exists(os.path.join(TMP, "f9b")))
@@ -719,7 +741,9 @@ w = int(a[a.index("--max-windows") + 1]); curve = a[a.index("--loss-curve") + 1]
 tag = os.path.basename(curve)[:-5]
 with open(os.environ["STUB_BOOK"], "a") as fh:
     fh.write(json.dumps({"tag": tag, "argv": a, "ckpt": {k: v for k, v in os.environ.items() if k.startswith("CKPT_")},
-                         "retok": os.environ.get("TOK_RETOK_EVERY")}) + "\n")
+                         "retok": os.environ.get("TOK_RETOK_EVERY"),
+                         "pins": {k: os.environ.get(k) for k in ("DATA_SYNTH_HOLDOUT", "EVAL_RETENTION_EVERY",
+                                                                  "DATA_TRUST")}}) + "\n")
 n = min(w, 50)
 json.dump([2.0] * n, open(curve, "w"))
 if "--flush-bytes" in a:
@@ -825,11 +849,12 @@ if os.environ.get("STUB_SAVES") == "1" and os.environ.get("CKPT_DIR") and int(os
           and not glob.glob(os.path.join(kd10, "*.save[0-9]*")) and not glob.glob(os.path.join(kd10, "*.w50*")),
           f"rc {p10c.returncode}; {kept10.count(' coherent ')} coherent; {p10c.stderr[-300:]!r}")
     b10c = "\n".join(block_of(p10c.stdout) or [])
-    check("F10 ... the block counts them, its resume line carries RUN_SEED, RUN_DEVICE and the stream "
-          "(20 x 189 bytes), the keep directory is stamped with the launch, and SUMMARY records the tree",
+    check("F10 ... the block counts them, its resume line carries RUN_SEED, RUN_DEVICE, the stream "
+          "(20 x 189 bytes) and the fleet's pins, the keep directory is stamped with the launch, and SUMMARY "
+          "records the tree",
           "KEPT: 8 copies of 2 k0 run(s), all coherent" in b10c
           and f"resume one: CKPT_RESUME={kd10}/k0.s0.w11 CKPT_DIR=<NEW dir> OMP_NUM_THREADS=1 RUN_SEED=0 "
-              f"RUN_DEVICE=cpu DATA_STREAM_BYTES=3780 TOK_RETOK_EVERY=0 python3 run.py" in b10c
+              f"RUN_DEVICE=cpu DATA_STREAM_BYTES=3780 TOK_RETOK_EVERY=0 {PINS18} python3 run.py" in b10c
           and launch1 and open(os.path.join(kd10, ".fleet")).read().strip() == launch1
           and "=== §8 1.3 in this tree: counters fab.blackout_windows tok.mint_wait_windows loop.act_seconds "
               "tok.bpt_tail; run.py --flush-bytes yes" in s10,
@@ -1368,6 +1393,59 @@ esac
               "(upper bound by the act windows x cooldown)" in a17c and len(_al) == 2
           and f"  k1000 before -% (<= {100 * 800 / 1001:.1f}%) / after -%" in b17c,
           str(sp17c) + str(_al) + p17c.stderr[-300:])
+
+    # ---- F18: 04-Q5's pins on every retok run and on its resume line (2026-09-29) ----------------------
+    # EXP=retok's arms and nuisance margin pair with runs made before SR0's defaults flipped, so the launch
+    # sets DATA_SYNTH_HOLDOUT=0 EVAL_RETENTION_EVERY=0 DATA_TRUST=off on every run it makes -- each only
+    # where the tree declares its lever, so a checkout from before a flip gets no UNREAD name -- SUMMARY.txt
+    # and the block record the pins that ran, and the resume line carries them. F10's launches are read
+    # first; then the script, copied into a tree that declares none of the three and one that declares
+    # DATA_SYNTH_HOLDOUT alone (C1's), launches EXP=retok with the stand-in.
+    want18 = dict(p.split("=") for p in PINS18.split())
+    none18 = {k: None for k in want18}
+    rc18 = [json.loads(l) for l in open(os.path.join(TMP, "f10c_book.jsonl"))] \
+        if os.path.exists(os.path.join(TMP, "f10c_book.jsonl")) else []
+    rw18 = [json.loads(l) for l in open(book)] if os.path.exists(book) else []
+    a18 = open(os.path.join(aside, "ANALYSIS.txt")).read() if os.path.exists(os.path.join(aside, "ANALYSIS.txt")) else ""
+    check("F18 every run of an EXP=retok launch -- smoke, fleet and rerun, both seeds -- carries the three pins, "
+          "SUMMARY.txt's pins line and the block's shape line record them, and EXP=world carries none",
+          len(rc18) >= 9 and all(r["pins"] == want18 for r in rc18)
+          and {r["tag"] for r in rc18} >= {"k0.s0", "k0.s1", "k10.s0", "k20.s1", "k0_nuis.s1", "k0_rerun.s0"}
+          and "=== pins: DATA_SYNTH_HOLDOUT=0 pinned, EVAL_RETENTION_EVERY=0 pinned, DATA_TRUST=off pinned" in s10
+          and "; pins DATA_SYNTH_HOLDOUT=0 pinned, EVAL_RETENTION_EVERY=0 pinned, DATA_TRUST=off pinned" in b10c
+          and len(rw18) == 9 and all(r["pins"] == none18 for r in rw18),
+          f"{len(rc18)} retok run(s), pins {sorted({json.dumps(r['pins']) for r in rc18})[:2]}; "
+          f"{len(rw18)} world run(s), pins {sorted({json.dumps(r['pins']) for r in rw18})[:2]}")
+    check("F18 ... and ANALYSIS.txt's resume line carries them after EXTRA, as run_job sets them",
+          f"TOK_RETOK_EVERY=0 {PINS18} python3 run.py -- a NEW CKPT_DIR, never a kept copy" in a18,
+          str([l for l in a18.splitlines() if "resume one" in l]))
+    for tag18, data18, eval18, pins_want, line_want in (
+            ("declares none of the three", "    resample = Lever(False, 'x', U.FLAG)\n",
+             "    curve_every = Lever(\n        2000, 'x', U.Windows)\n", none18, "=== pins: none"),
+            ("declares DATA_SYNTH_HOLDOUT alone (C1's)",
+             "    resample = Lever(False, 'x', U.FLAG)\n    synth_holdout = Lever(False, 'x', U.FLAG)\n"
+             "    trust_rule = Lever('claims', 'x', U.NAME)\n",
+             "    curve_every = Lever(\n        2000, 'x', U.Windows)\n",
+             dict(none18, DATA_SYNTH_HOLDOUT="0"), "=== pins: DATA_SYNTH_HOLDOUT=0 pinned")):
+        t18 = os.path.join(TMP, "f18", tag18.split()[0] + str(len(data18)))
+        shutil.rmtree(t18, ignore_errors=True)
+        write(os.path.join(t18, "src", "data", "levers.py"), data18)
+        write(os.path.join(t18, "src", "eval", "levers.py"), eval18)
+        shutil.copy2(SCRIPT, os.path.join(t18, "gpu_world.sh"))
+        b18 = os.path.join(t18, "book.jsonl")
+        o18 = os.path.join(t18, "gpu_retok_out")
+        p18 = subprocess.run(["bash", os.path.join(t18, "gpu_world.sh")], cwd=t18, capture_output=True, text=True,
+                             timeout=300, env=clean_env(PATH=env10["PATH"], STUB_BOOK=b18, EXP="retok",
+                                                        KEEP_CKPT=0, DEVICE="cpu", WINDOWS=20, SEEDS="0", PAR=1,
+                                                        SMOKE_WINDOWS=5, OUT=o18))
+        r18 = [json.loads(l) for l in open(b18)] if os.path.exists(b18) else []
+        s18 = open(os.path.join(o18, "SUMMARY.txt")).read() if os.path.exists(os.path.join(o18, "SUMMARY.txt")) else ""
+        check(f"F18 a tree that {tag18}: every retok run carries exactly the pins whose lever it declares, and "
+              f"SUMMARY.txt says so ('{line_want}')",
+              p18.returncode == 0 and len(r18) == 9 and all(r["pins"] == pins_want for r in r18)
+              and line_want + "\n" in s18,
+              f"rc {p18.returncode}; {len(r18)} run(s); {sorted({json.dumps(r['pins']) for r in r18})[:2]}; "
+              f"{[l for l in s18.splitlines() if l.startswith('=== pins')]}; {p18.stderr[-300:]!r}")
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
 

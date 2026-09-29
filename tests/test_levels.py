@@ -81,7 +81,11 @@ from domains import api as dom_api                                 # noqa: E402
 FAILS = []
 # The resume tests' small base (tests/test_continuation.py's): a tenth-size fabric keeps each compose
 # to a few seconds.
-BASE = {"DATA_STREAM_BYTES": "60000", "SIG_WARMUP": "20", "FAB_N0": "256", "FAB_SLOTS": "512"}
+# GENERATION OFF (2026-09-29): since 04-6.2's flip the shipped retention probe generates after every
+# run's final save, which this file checks nothing of and which costs about a minute a run on the
+# CPU; a CPU suite that tests no EVAL sets it off (docs/04_CONTRACT.md Q-EVAL-12's dated note).
+BASE = {"DATA_STREAM_BYTES": "60000", "SIG_WARMUP": "20", "FAB_N0": "256", "FAB_SLOTS": "512",
+        "EVAL_GENERATE": "0"}
 # THE MANAGE PASS AND THE SPARE MADE REACHABLE in a short run: DOM.manage runs every 100 windows and
 # its cull only examines domains past DOM_GRACE and stale past DOM_CULL_STALE, both 500 by default.
 REACH = {"DOM_GRACE": 50, "DOM_CULL_STALE": 50, "DOM_CULL_FRAC": 0.5}

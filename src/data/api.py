@@ -207,8 +207,8 @@ def open_areas(dat: Config, *, seed: int):
     rng_for("data.synth", seed) so that two run seeds are two different synthetic corpora. Today
     they are not: make_proc is seeded by the PROCESS INDEX, so `DATA_SOURCE=synthetic` measures a
     between-seed spread with the data held constant (DEFECT D-A13). WHETHER IT HOLDS ANYTHING OUT IS
-    dat.synth_holdout's to say (2026-09-27, Q-DATA-9; 04-Q5 rules it ON, and it is built OFF until
-    the flip lands). At True each generated body goes through the real sources' held-out law below,
+    dat.synth_holdout's to say (2026-09-27, Q-DATA-9; built OFF, ruled ON by 04-Q5 and ON since
+    2026-09-29). At True each generated body goes through the real sources' held-out law below,
     VERBATIM -- the same size, the same per-area child stream, the same removal, seam, overlap, val-cap
     tally and 0-byte refusal -- because two holdout laws for two sources would make a synthetic
     block a different kind of sample from a real one. At False nothing is held out: every body is the

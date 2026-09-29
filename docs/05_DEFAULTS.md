@@ -32,7 +32,6 @@ here was never asked, and no counter in any report can say so on its own.
 | `DATA_REHEARSE_PARENT` | At DATA_DRAW=replay, count the areas the resumed lineage drew and this schedule makes live in no phase as faded from window 0, so the draw rehearses them; no effect under 'planned' or 'uniform'. |
 | `DATA_RESAMPLE` | Redraw a fresh stream from the areas at the start of every epoch instead of replaying the same bytes. |
 | `DATA_SEG_CONTIG` | Read each area in order instead of seeking to a random offset every segment, so the only boundaries left are the text's own. |
-| `DATA_SYNTH_HOLDOUT` | Hold out a block per area on DATA_SOURCE=synthetic, under the real sources' law: min(DATA_HOLDOUT_FRAC x body, DATA_VAL_CAP) bytes, a seeded contiguous block removed from the body. Off, the synthetic source holds nothing out. |
 | `FAB_CONTRIB` | Measure past-grace experts' marginal contribution on each management pass: the held-out loss without the expert minus the loss with it, folded into Population.contrib at FAB_COMP_EMA. |
 | `FAB_GROW_ON_MEM_PRESSURE` | Let the memory-pressure signal make fabric growth eligible, instead of only being printed. |
 | `FAB_LR_OWN` | Put each expert on its own cyclical learning-rate schedule, clocked from its own use count. |
@@ -46,7 +45,7 @@ here was never asked, and no counter in any report can say so on its own.
 | `RUN_PROFILE` | Per-component wall-clock attribution of the training step, rendered at the end of the run and in the throughput summary. |
 | `WORLD_FEEDBACK` | Condition the base LM on the forecast (h += world_proj(forecast)) instead of leaving the world model as an unused side head. |
 
-16 levers ship False.
+15 levers ship False.
 
 **Numeric levers that ship 0.** Zero is this tree's documented OFF sentinel in most of these places
 and a legitimate value in some, so the help text is quoted rather than summarised. `spine/lever.py`
@@ -63,7 +62,6 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `CKPT_EVERY` | Windows | How often a mid-run checkpoint is written, in windows elapsed since the last one; 0 disables periodic saving, leaving the final save and SIGUSR1. |
 | `DATA_PHASE_LIVE` | count | How many areas are live in each phase of the GENERATED schedule; 0 derives it from the area count. |
 | `DATA_REPLAY_NEWEST` | fraction 0..1 | Share of each faded phase's bytes the 'replay' draw gives the newest-arrived live area, the other live areas splitting what is left evenly; 0 is off. Read only at DATA_DRAW=replay. |
-| `EVAL_RETENTION_EVERY` | Windows | Windows between in-run retention readings on the pinned held-out windows (0 = the probe is off: nothing is pinned, read or consumed). |
 | `FAB_EC_W` | fraction 0..1 | Expert-choice deficit bonus: nudge routing toward experts under their share, by construction rather than by a loss. |
 | `FAB_HOP_SUP` | fraction 0..1 | Weight on per-hop deep supervision: a cross-entropy at every hop, not only at the end of the walk. |
 | `FAB_RESCUE` | fraction 0..1 | Give an expert about to be culled one heavy mutation and a reset use-clock instead of deleting it. |
@@ -84,7 +82,7 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `TOK_MINT_PMIN` | probability | Minimum p(b\|a) for a merge to be accepted as a unit rather than a frequent collision across a boundary; 0 mints on frequency alone. |
 | `TOK_PROBATION_USES` | count | How many appearances a newly minted token must earn before it keeps its place in the match table; below it the merge is undone. |
 
-26 numeric levers ship 0.
+25 numeric levers ship 0.
 
 ---
 
@@ -139,8 +137,8 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `DATA_SEG_MIN` | `700` | bytes |  | Shortest spliced segment drawn from one area before the stream switches. |
 | `DATA_SOURCE` | `'synthetic'` | name | choices `'real'`, `'synthetic'` | Which stream the run trains on: `real` splices the corpora under DATA_DIR, `synthetic` generates from Markov processes. |
 | `DATA_STREAM_BYTES` | `120000` | bytes |  | Bytes of stream one epoch draws from the areas. |
-| `DATA_SYNTH_HOLDOUT` | `False` | on/off |  | Hold out a block per area on DATA_SOURCE=synthetic, under the real sources' law: min(DATA_HOLDOUT_FRAC x body, DATA_VAL_CAP) bytes, a seeded contiguous block removed from the body. |
-| `DATA_TRUST` | `'off'` | name | choices `'off'`, `'observe'`, `'loss'`, `'loss+draw'` | The source-reliability book: 'off' keeps none; 'observe' reads every source's claims, votes, and reports each source's reliability and trust while changing nothing the run trains on; 'loss' and 'lo... |
+| `DATA_SYNTH_HOLDOUT` | `True` | on/off |  | DEFAULT BEHAVIOUR CHANGE 1 (register 04-Q5, on since 2026-09-29): hold out a block per area on DATA_SOURCE=synthetic, under the real sources' law: min(DATA_HOLDOUT_FRAC x body, DATA_VAL_CAP) bytes, a seeded contiguous block removed from the body. |
+| `DATA_TRUST` | `'observe'` | name | choices `'off'`, `'observe'`, `'loss'`, `'loss+draw'` | DEFAULT BEHAVIOUR CHANGE 3 (register 04-6.3, 'observe' since 2026-09-29): the source-reliability book, 'observe' reading every source's claims, voting, and reporting each source's reliability and t... |
 | `DATA_TRUST_CLAIM` | `'kv'` | name | choices `'kv'`, `'ctx'` | What counts as one claim: 'kv' a normalised (key, value) pair around a DATA_TRUST_DELIMS delimiter, 'ctx' a raw DATA_TRUST_CTX-unit context and the unit after it. |
 | `DATA_TRUST_COPY` | `'off'` | name | choices `'off'`, `'accu'` | Copy detection inside the book's vote (SR6, the ACCU-COPY family): 'off' judges no pair of sources; 'accu' judges every pair sharing DATA_TRUST_MIN_EV conflicted claims for dependence and discounts a dependent pair's later-seen source in the next round of the vote. |
 | `DATA_TRUST_COPY_P` | `0.5` | fraction 0..1 | domain (0.0, 1.0) | Posterior of dependence above which a judged pair of sources is reported dependent and its later-seen source discounted; below it the pair is certified independent; 0 and 1 are refused. |
@@ -211,7 +209,7 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `EVAL_GENUINE_SIL` | `0.1` | fraction 0..1 |  | Minimum silhouette (own-centroid similarity minus nearest-other) for a genuine domain. |
 | `EVAL_HOLDOUT_WINDOWS` | `32` | count |  | Held-out windows per area for the BOUNDARY reading of the retention probe (the end of the run and a resume's start) -- half from each area's control half, half from its report half. |
 | `EVAL_NULL_DRAWS` | `5` | count |  | Permutation draws used to build the null distribution every 2-sigma verdict is judged against. |
-| `EVAL_RETENTION_EVERY` | `0` | Windows |  | Windows between in-run retention readings on the pinned held-out windows (0 = the probe is off: nothing is pinned, read or consumed). |
+| `EVAL_RETENTION_EVERY` | `1000` | Windows |  | DEFAULT BEHAVIOUR CHANGE 2 (register 04-6.2, 1000 since 2026-09-29): windows between in-run retention readings on the pinned held-out windows, beside a reading at the first window of every phase (0... |
 | `EVAL_RETENTION_N` | `6` | count | domain (1, ∞) | Held-out windows per arrived area for each in-run retention reading -- split between the area's control and report halves, the odd one to control. |
 | `EVAL_VERIFY_FIT_STEPS` | `3000` | Steps |  | Optimizer steps spent fitting the Reconstructor post hoc on the final settled store. |
 | `EVAL_WINDOWS` | `64` | count |  | Default number of windows an eval Sample draws when it does not declare its own. |

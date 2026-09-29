@@ -5,11 +5,15 @@ loop, with real on-disk checkpoints written under a temporary directory.
 
     python3 tests/test_probe.py        # exit 0 = every check passed
 
-WHY IT EXISTS. The probe is built OFF (EVAL_RETENTION_EVERY=0) and ships ON only after a test proves it is
+WHY IT EXISTS. The probe was built OFF (EVAL_RETENTION_EVERY=0) and ships ON (1000, with a read at every
+phase start, since 2026-09-29, the flip landing last and alone) only after a test proves it is
 telemetry: a reading beside training may read the model and must move nothing the run keeps. So the first
 promise is bit-identity -- the same losses, the same state, and every counter equal but the probe's own
 book and a named set that moves by exactly that book's counts -- and the rest pin what a reading is,
 where it is taken, who reads it, and what a resume does with it. Each check below pins one of them.
+THE FILE'S ARMS ARE EVAL_RETENTION_EVERY=0 AND DATA_SYNTH_HOLDOUT=0 UNLESS A CHECK SETS THEM: the checks
+were written while both shipped at 0, and each names the arm it reads; the book runs at its shipped
+'observe' throughout, so P1 is SR0's bit-identity at the new defaults.
 
   P1  BIT-IDENTITY, ON AGAINST OFF, at DATA_SYNTH_HOLDOUT=1: one full epoch at the shipped stream length
       (635 windows, EVAL_RETENTION_EVERY=50, generation on), tests/test_baseline.py's B3 shape (a full
@@ -18,15 +22,17 @@ where it is taken, who reads it, and what a resume does with it. Each check belo
       (tests/_state_digest.py) but LOOP.eval and RUN.cadences' 'retention' key; every integer counter
       equal but the exempt set; OPT's reading_at None on both (OPT_DAMP_SOURCE='off'). The ON run reads
       at every phase start, on the cadence the ledger fired (>= 10 on the full epoch), once at R through
-      both closures, and generates. THE OFF ARMS -- the shipped 0, 20 with no block, and 20 where no
-      held-out half can hold a window behind its routing prefix (DATA_STREAM_BYTES=20000) -- pin, draw,
-      read and count nothing, and every EVAL row and gate says why.
+      both closures, and generates. THE OFF ARMS -- 0, 20 with no block, and 20 where no held-out half
+      can hold a window behind its routing prefix (DATA_STREAM_BYTES=20000) -- pin, draw, read and
+      count nothing, and every EVAL row and gate says why. THE SHIPPED VALUES since the flip are 1000
+      and 1: a System composed with neither lever reads a 1000-window period and pins every area.
   P2  THE EXEMPT SET MOVES BY THE BOOK'S OWN COUNTS, EXACTLY: tok.segment_remap by eval.holdout.cuts;
       fab.eval_passes, lm.embed.*, world.forecast.calls (and .inert where the forecast is off) by the
       forwards; lm.decode.calls by the decodes; sig.encode_calls and .encode_windows by the SIG encodes;
       lm.encode.calls by the forwards plus the memory-on closure's MEM reads. A closure pass moves no
       global stream (frozen_rng, at LM_DROPOUT=0.1), puts every submodule's mode back, and a memory-on
       pass leaves the store's use/prob/last/born, its ledger and every package's digest as they were.
+      tests/test_baseline.py's P1_EXEMPT, the set B5u compares under since the flip, is this one.
   P3  THE PINNED WINDOWS AND THE ROUTING CLOCK: every build and resume pins the same windows; a
       continuing resume at a cadence reading (41) reads, at its start, what the parent's R read read --
       paired differences exactly 0 -- and its first three windows per half are the uninterrupted run's
@@ -79,7 +85,10 @@ where it is taken, who reads it, and what a resume does with it. Each check belo
       not forwarded either. PAIRING IS BY ITEM: a window skipped in one reading (non-finite, or cut to
       fewer than two ids) keeps its slot, so every other window pairs with itself -- through a reading
       restored from its carried state too.
-  P15 B1, B3, B3r and B5 reproduce at the defaults (tests/test_baseline.py, run from here).
+  P15 WITH THE PROBE OFF THE TREE IS THE ONE BEFORE IT: B1p, B3p, B3rp and B5p -- four baseline shapes
+      under 04-Q5's three pins -- reproduce the records made before the probe existed
+      (tests/test_baseline.py, run from here). Until the flip this read B1, B3, B3r and B5 at the
+      shipped defaults; since, those are the flipped tree's own records, compared before every commit.
 
 WHAT THIS FILE CANNOT SEE: whether a reading means anything. CPU runs establish operation only; the
 probe's readings, the best checkpoints it orders and the retention it reports are GPU questions.
@@ -116,12 +125,18 @@ from sig import api as sig_api                                     # noqa: E402
 from domains import api as dom_api                                 # noqa: E402
 from lm import api as lm_api                                       # noqa: E402
 import _state_digest as sd                                         # noqa: E402
+from test_baseline import P1_EXEMPT                                # noqa: E402
 
 FAILS = []
 DATA_DIR = os.path.join(os.path.abspath(_ROOT), "data")
 # tests/test_continuation.py's small base: a tenth-size fabric keeps each compose to a few seconds.
+# THE FILE'S ARMS ARE EVAL_RETENTION_EVERY=0 AND DATA_SYNTH_HOLDOUT=0 UNLESS A CHECK SETS THEM
+# (2026-09-29, 04-6.2's and 04-Q5's flips). The checks were written while both shipped at 0 and each
+# names the arm it reads -- H sets the block, and every ON run its cadence. Since the flip 1000 and 1 are
+# the shipped values, which P1's off arms read by assembling with neither. The book runs at its shipped
+# 'observe' in every run here, so P1 is SR0's bit-identity at the new defaults.
 BASE = {"DATA_STREAM_BYTES": "60000", "SIG_WARMUP": "20", "FAB_N0": "256", "FAB_SLOTS": "512",
-        "DATA_DIR": DATA_DIR}
+        "DATA_DIR": DATA_DIR, "EVAL_RETENTION_EVERY": "0", "DATA_SYNTH_HOLDOUT": "0"}
 H = {"DATA_SYNTH_HOLDOUT": "1"}
 # THE STATE THE PROBE ADDS, excluded by name when an ON run is compared with an OFF one.
 EXCL = ("LOOP.eval", "RUN.cadences.*.retention")
@@ -355,6 +370,10 @@ def pair(tag, env, every, max_windows=None, cadence_min=None, gen=True):
 
 TMP = tempfile.mkdtemp(prefix="probe_")
 try:
+    # tests/test_baseline.py's B5u compares the unpinned real source under P1_EXEMPT, a copy of EXEMPT
+    # (it cannot import this file, which runs on import), so the two are held equal here (2026-09-29).
+    check("P2 tests/test_baseline.py's P1_EXEMPT, B5u's table `exempt`, is this file's EXEMPT",
+          tuple(P1_EXEMPT) == tuple(EXEMPT), str(sorted(set(P1_EXEMPT) ^ set(EXEMPT))))
     # =============================================================================================
     # P8: EVAL.blowup against blowup_test.py's call-site rule (pure; runs first, costs nothing)
     # =============================================================================================
@@ -496,7 +515,7 @@ try:
     # shorter than the 192-byte prefix plus the 129-byte window, and the probe counted itself armed
     # with nothing pinned -- driven at EVAL_RETENTION_EVERY=10 over 40 windows, 7 readings of 0
     # windows, the 5 in-run ones booked non-finite, and the gate "fired 7 time(s)".
-    for tag, env, word in (("the shipped EVAL_RETENTION_EVERY=0", dict(H), "EVAL_RETENTION_EVERY=0"),
+    for tag, env, word in (("EVAL_RETENTION_EVERY=0", dict(H), "EVAL_RETENTION_EVERY=0"),
                            ("EVAL_RETENTION_EVERY=20 with no block (DATA_SYNTH_HOLDOUT=0)",
                             {"EVAL_RETENTION_EVERY": 20}, "DATA_SYNTH_HOLDOUT=0"),
                            ("EVAL_RETENTION_EVERY=20 whose halves cannot hold a window behind its "
@@ -533,6 +552,24 @@ try:
                                          "DATA_HOLDOUT_FRAC")),
           f"halves {_ps0.halves}; reason {_ps0.reason[:160]!r}")
     del so, ro
+    # THE SHIPPED VALUES SINCE 2026-09-29 (04-6.2's and 04-Q5's flips, DEFAULT BEHAVIOUR CHANGES 2 and
+    # 1): a System composed with neither lever set -- nothing of this file's arms -- reads a retention
+    # period of 1000 windows and pins both halves of every area's synthetic block, so the probe is armed.
+    _lever._reopen_assembly()
+    rng.reset_issued()
+    lm_api._COUNTS.clear()
+    _ss = compose(environ={k: v for k, v in BASE.items()
+                           if k not in ("EVAL_RETENTION_EVERY", "DATA_SYNTH_HOLDOUT")})
+    check("P1 the shipped values are EVAL_RETENTION_EVERY=1000 and DATA_SYNTH_HOLDOUT=1 (the flips): a "
+          "System composed with neither reads a 1000-window retention period and pins both halves of "
+          "every area's block",
+          int(eval_api.retention_period(_ss.configs["EVAL"])) == 1000
+          and _ss.configs["DATA"].synth_holdout is True
+          and sorted(_ss.probe_set.items) == ["c", "eng", "num", "py"]
+          and all(set(v) == {"control", "report"} and all(v.values()) for v in _ss.probe_set.items.values()),
+          f"period {int(eval_api.retention_period(_ss.configs['EVAL']))}, "
+          f"synth_holdout {_ss.configs['DATA'].synth_holdout!r}, items {sorted(_ss.probe_set.items)}")
+    del _ss
 
     # ---- P4 (pure): a half with no room pins nothing, draws nothing, mints nothing ---------------
     ev20p = configs(EVAL_RETENTION_EVERY=20)["EVAL"]
@@ -1283,14 +1320,19 @@ try:
     del s1a, r1a, s1b, r1b
 
     # =============================================================================================
-    # P15: the baseline workloads at the shipped defaults
+    # P15: the baseline workloads with the probe off
     # =============================================================================================
+    # SINCE THE FLIP (2026-09-29) the probe is on at the shipped defaults, so "the probe off is the tree
+    # before it" is B1p, B3p, B3rp and B5p: those four shapes under 04-Q5's three pins against the records
+    # made before the probe existed. The shipped defaults' own records, B1-B6r, are tests/test_baseline.py's,
+    # run before every commit.
     _env = dict(os.environ, OMP_NUM_THREADS="1", MKL_NUM_THREADS="1")
-    _pr15 = subprocess.run([sys.executable, os.path.join("tests", "test_baseline.py"), "B1", "B3", "B3r",
-                            "B5"], cwd=os.path.abspath(_ROOT), env=_env, capture_output=True, text=True)
+    _pr15 = subprocess.run([sys.executable, os.path.join("tests", "test_baseline.py"), "B1p", "B3p", "B3rp",
+                            "B5p"], cwd=os.path.abspath(_ROOT), env=_env, capture_output=True, text=True)
     _pass = [ln for ln in _pr15.stdout.splitlines() if ln.startswith("PASS  B")]
-    check("P15 B1, B3, B3r and B5 reproduce their fixtures at the shipped defaults (tests/test_baseline.py)",
-          _pr15.returncode == 0 and len(_pass) >= 4,
+    check("P15 B1p, B3p, B3rp and B5p reproduce the pre-SR0 records under 04-Q5's pins, B3rp continuing "
+          "B3p exactly (tests/test_baseline.py)",
+          _pr15.returncode == 0 and len(_pass) >= 5,
           (_pr15.stdout + _pr15.stderr)[-600:] if _pr15.returncode else " | ".join(x[:40] for x in _pass))
 finally:
     # EVERY CHECKPOINT AND VOCABULARY THIS FILE WROTE IS UNDER TMP: a CKPT_DIR here is TMP/<name>, and
