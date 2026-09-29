@@ -32,13 +32,13 @@
 #                   exists to prevent -- a latent that goes constant predicts itself perfectly.
 #                   Watch world.latent_std: if it falls toward 0 this arm is winning by collapsing.
 #   feedback_off    WORLD_FEEDBACK=0 at the shipped weights: the UNWIRED CONTROL. Since the
-#                   forecast got its call site (Q-WORLD-10, RESOLVED 2026-09-24) `shipped` feeds
-#                   world_proj(pop(z)) into LM.encode as `extra`, and this arm withholds it --
+#                   forecast got its call site (Q-WORLD-10, RESOLVED 2026-09-24) `feedback_on`
+#                   feeds world_proj(pop(z)) into LM.encode as `extra`, and this arm withholds it --
 #                   BIT-IDENTICAL to the tree before the call site existed (driven: the same loss
-#                   curve, max|diff| 0.0). `shipped` minus this arm prices the forecast itself;
+#                   curve, max|diff| 0.0). `feedback_on` minus this arm prices the forecast itself;
 #                   this arm minus `off` prices the world loss alone. Tripwires: here
 #                   world.forecast.inert == calls and world.forecasts / lm.encode.extra_ratio are
-#                   ABSENT; on `shipped`, world.forecasts == lm.encode.extra_applied == flushes.
+#                   ABSENT; on `feedback_on`, world.forecasts == lm.encode.extra_applied == flushes.
 #
 # WHAT IT MEASURES AND WHAT IT CANNOT. Every column below is TRAINING loss and must not be quoted as
 # bits/byte on held-out text. Until 2026-09-29 run.py printed no held-out number at all (the EVAL
@@ -53,16 +53,16 @@
 # a measured seed spread of 1.227 b/B on one arm, LARGER than the gap between any two architectures
 # ever compared in this project. TREAT A SEPARATION SMALLER THAN THE SEED SPREAD AS NOTHING.
 #
-#     bash tools/sweep_world.sh                            # 5 arms x 3 seeds
+#     bash tools/sweep_world.sh                            # 6 arms x 3 seeds
 #     SEEDS="0 1 2 3 4" WINDOWS=4000 bash tools/sweep_world.sh
-#     SEEDS="0 1 2 3 4" ONLY=shipped,feedback_off bash tools/sweep_world.sh   # Q-WORLD-10's deciding run
+#     SEEDS="0 1 2 3 4" ONLY=feedback_on,feedback_off bash tools/sweep_world.sh  # Q-WORLD-10's deciding run
 #
 # THE WORLD_FEEDBACK DECISION IS READ OFF THE PAIRED LINE, NOT THE TABLE (2026-09-24). Q-WORLD-10
 # flips the default on "5 seeds per arm, paired by seed, mean of loss_curve differences over the
-# last half"; until then this script printed only unpaired tail means against `off` and never formed
-# shipped minus feedback_off. run.py --loss-curve now writes each run's per-flush curve beside its
-# log, and the summary prints, per seed, the mean over the last half of the flushes of
-# (shipped - feedback_off), then their mean +- SE and how many seeds are negative (shipped better).
+# last half"; until then this script printed only unpaired tail means against `off`. run.py
+# --loss-curve writes each run's per-flush curve beside its log, and the summary prints, per seed,
+# the mean over the last half of the flushes of (feedback_on - feedback_off; shipped - feedback_off
+# until d97779d), then their mean +- SE and how many seeds are negative (the forecast helps).
 #     ONLY=off,shipped bash tools/sweep_world.sh
 #     cat world_out/SUMMARY.txt
 #
@@ -178,8 +178,8 @@ for name, vals in rows.items():
     print(f"  {name:<14} mean {mean:7.4f}  spread {spread:6.4f}  "
           f"seeds {' '.join(f'{v:.4f}' for v in vs)}  {delta}")
 
-# Q-WORLD-10's DECIDING STATISTIC: shipped minus feedback_off, PAIRED BY SEED, over the last half of
-# each run's per-flush loss curve. Printed only when both arms have curves for a common seed.
+# Q-WORLD-10's DECIDING STATISTIC: feedback_on minus feedback_off, PAIRED BY SEED, over the last half
+# of each run's per-flush loss curve. Printed only when both arms have curves for a common seed.
 import json, math, os
 out_dir = os.path.dirname(S) or "."
 def _curve(arm, seed):
@@ -222,4 +222,4 @@ print("A separation smaller than the within-arm spread is NOTHING. archive/notes
 print("measured seed spread of 1.227 b/B on a single arm, larger than the gap between any two")
 print("architectures ever compared in this project.")
 PY
-echo "=== wrote $S"
+echo "=== wrote $(realpath -m -- "$S")"

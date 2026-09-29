@@ -4073,7 +4073,7 @@ the number is the summary's `Q-WORLD-10: shipped - feedback_off` block: per seed
 last half of the flushes of the per-flush loss difference (from `run.py --loss-curve`), then mean ±
 SE and the count of seeds where shipped is lower. The script's arm table is **not** this statistic —
 it is an unpaired tail mean of progress lines against the first baseline arm it ran — and until
-2026-09-24 it was the only thing the script printed.
+2026-09-24 it was the only thing the script printed. *(2026-09-29: since d97779d `shipped` is the `feedback_off` run and the script pairs `feedback_on` with `feedback_off`, so the command above forms no paired line; the command is now `SEEDS="0 1 2 3 4" ONLY=feedback_on,feedback_off bash tools/sweep_world.sh`, and the number its `Q-WORLD-10: feedback_on - feedback_off` block.)*
 
 ### Q-TOK-10 — `TOK.save_vocabulary` takes no suffix, so M46 is not closed — **RESOLVED 2026-09-02: (b), OVERRULING THIS DOCUMENT'S OWN RECOMMENDATION (a). ⚠ A FROZEN SIGNATURE MOVED: `save_vocabulary(tok, vocab, *, suffix="")`**
 `CKPT.save` has a `suffix` and says *"THE SUFFIX APPLIES TO THE WHOLE SNAPSHOT"*;

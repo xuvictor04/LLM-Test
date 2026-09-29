@@ -1,6 +1,6 @@
 # Agent state — read this first after a session reset
 
-Updated 2026-09-29 (the Stage 3 merge and its review: SR0 built on `sr0-build`, reviewed and merged, its three defaults on and 04-Q5's pins carried into the new gpu_world.sh; the reorganisation's Phase B done) on `rm-predict-DC` (the only branch pushed to; no PRs unless asked).
+Updated 2026-09-29 (the Stage 3 merge and its review: SR0 built on `sr0-build`, reviewed and merged, its three defaults on and 04-Q5's pins carried into the new gpu_world.sh; the reorganisation's Phase B done and reviewed) on `rm-predict-DC` (the only branch pushed to; no PRs unless asked).
 
 ## Where things stand
 - **WORLD_FEEDBACK ships False** (d97779d) on the 20k-window GPU fleet: the forecast was within
@@ -262,6 +262,12 @@ Updated 2026-09-29 (the Stage 3 merge and its review: SR0 built on `sr0-build`, 
   tree at the root are dated. The brief has one line for both moves. The whole suite passes, and N5, N7,
   O12 and O13 count what they counted at the merge. NEXT: the owed items under Known low items, then
   Stage 4.
+- 2026-09-29, REVIEW OF PHASE B (62f67d5..86a11a5; 4 findings, each checked against the files, fixed in
+  the commit after 86a11a5): tools/sweep_world.sh prints its summary's absolute path (started elsewhere,
+  the relative one did not resolve), and gives Q-WORLD-10's run as ONLY=feedback_on,feedback_off:
+  ONLY=shipped,feedback_off has formed no paired line since d97779d made shipped the feedback_off run
+  (a dated note in the contract says so). REORGANISATION's record of 86a11a5 and of fleet_dash.sh
+  --once's exit code (0; --status exits 2) are corrected.
 0. Proposal 05 §8 orders everything: Stage 0 (owner rulings O1-O20; the fleet-archive reads; the
    k0_nuis pair; phase-traversal resizing), then Stage 1's small builds (vocab `.prev` rotation, DOM
    Levels, counters, OPT_LR_CONTINUE 'as_logged', gpu_world.sh kept checkpoints) before the owner's

@@ -87,13 +87,16 @@ checks for Phase B below describe.
 | `62f67d5` | B1–B2: `sweep_gpu.sh` and `sweep_world.sh` → `tools/`, two renames, each with one `cd` to the checkout's root after `set -u`; their usage lines, the contract's Q-WORLD-10 command, the root `README.md`'s layout and `archive/README.md`'s path table |
 | `61d106f` | B3: the 19 corpus files, `CURRENT_DEFAULTS.md` and `_evidence/` → `archive/notes/`, 66 files (64 pure renames; a dated correction appended to `00_INDEX.md`; `CURRENT_DEFAULTS.md` regenerated, one line); `notes_check.py` scans `archive/notes/` beside `notes/` (22 files, 189 lines); `docs/05_DEFAULTS.md` regenerated; every live reference on its own line; the root and `archive/` READMEs |
 | `0431282` | B4: `run.py`, `src/spine/compose.py` (its six lines rewrapped), `tests/test_census.py` (the `memory` shadow's reason, N5's docstring with a dated note, the self-test's comments), `tests/test_ownership.py` and `docs/04_CONTRACT.md`; one line in `notes/OWNER_BRIEF.md` for both moves |
-| the commit after `0431282` | this page, the root `README.md`'s Documents row and `docs/` line, and a state entry in `notes/AGENT_STATE.md`; lines B3 left over-long in `archive/README.md` and `.rework/README.md` rewrapped |
+| the commit after `0431282` | this page, the root `README.md`'s Documents row and `docs/` line, and a state entry in `notes/AGENT_STATE.md`; lines B3 left over-long in `archive/README.md` and `.rework/README.md` rewrapped; in `archive/README.md`, `notes_check.py`'s history put in the past ("checked", "wrote"), which B3 had left saying it still writes `notes/CURRENT_DEFAULTS.md` |
+| the commit after `86a11a5` | a review's fixes: `tools/sweep_world.sh` names its summary by absolute path (it runs at the checkout's root), and its usage and header give Q-WORLD-10's run as `ONLY=feedback_on,feedback_off`, its pair since d97779d (B1–B2 had carried `ONLY=shipped,feedback_off` to the new path), as does a dated note on the contract's history paragraph; on this page, the record of `86a11a5` and what `fleet_dash.sh --once` exits with; a state entry in `notes/AGENT_STATE.md` |
 
 Found beyond the lists, by the searches or beside their anchors, and fixed in the same commits:
 `notes_check.py`'s comment on "what notes/ is for", `.rework/README.md`'s sentence on where the survey's
-files are now, and `archive/README.md`'s "nine files in `notes/`". Left as they are:
-`src/spine/assemble.py`'s "notes 05_ERRORS" (the optional item; it names no path) and every line that
-names a sweep or a corpus file without a path.
+files are now, and `archive/README.md`'s "nine files in `notes/`". One more was fixed only in the commit
+after `0431282`, not in B3: `archive/README.md`'s history of `notes_check.py`, which B3 left saying it
+"still writes `notes/CURRENT_DEFAULTS.md`", just before B3's own sentence that it writes
+`archive/notes/CURRENT_DEFAULTS.md`. Left as they are: `src/spine/assemble.py`'s "notes 05_ERRORS" (the
+optional item; it names no path) and every line that names a sweep or a corpus file without a path.
 
 What was checked, on CPU (operation only): the whole suite (all 30 `tests/test_*.py`, with
 `tests/test_baseline.py --mutants` and `tests/_state_digest.py`; `test_determinism.py` last, then
@@ -107,8 +110,16 @@ exits 0, each writing only its `SUMMARY.txt` at the clone's root, and two arms o
 seed and 24 windows run to its summary there; the owner's commands' dry paths, from the clone and by path
 from elsewhere: `EXP=retok bash tools/gpu_launch.sh` (the CPU box's three FAILs; none, and a ready line,
 at `DEVICE=cpu KEEP_CKPT=0`), `bash tools/fleet_dash.sh --once` and `EXP=retok bash gpu_world.sh --status`
-(NO FLEET, exit 2 by design), and `bash tools/read_fleet_archive.sh` on the 2026-09-24 archive, whose
-block matches the committed `archive_reads.txt`. `git log --follow` reaches each moved file's history.
+(NO FLEET; `--status` exits 2 by design), and `bash tools/read_fleet_archive.sh` on the 2026-09-24
+archive, whose block matches the committed `archive_reads.txt`. `git log --follow` reaches each moved
+file's history.
+
+For the commit after `86a11a5`, the same way: the whole suite and the three tools' `--check` (N5, N7,
+O12 and O13 as above) and `notes_check.py` (22 files); on scratch clones, from a directory outside
+each, `sweep_world.sh` naming by absolute path the `SUMMARY.txt` it wrote, for the default `OUT`, a `../`
+one and an absolute one, and at one seed and 24 windows `ONLY=feedback_on,feedback_off` forming the
+paired block where `ONLY=shipped,feedback_off` forms none; `bash tools/fleet_dash.sh --once` exits 0 at
+NO FLEET, and `--status` 2.
 
 ## The owner's commands
 
