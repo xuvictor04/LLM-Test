@@ -4068,7 +4068,7 @@ run's reading series, and its refusal now waits on O13's two WORLD levers, the f
 
 **`WORLD_FEEDBACK` stayed `True` pending the GPU experiment in `sweep_world.sh`** (history, as written before the run) (5 seeds per arm,
 paired by seed, mean of loss_curve differences over the last half; flip the default if the gain is
-within noise). The command is `SEEDS="0 1 2 3 4" ONLY=shipped,feedback_off bash sweep_world.sh`, and
+within noise). The command is `SEEDS="0 1 2 3 4" ONLY=shipped,feedback_off bash tools/sweep_world.sh`, and
 the number is the summary's `Q-WORLD-10: shipped - feedback_off` block: per seed, the mean over the
 last half of the flushes of the per-flush loss difference (from `run.py --loss-curve`), then mean ±
 SE and the count of seeds where shipped is lower. The script's arm table is **not** this statistic —

@@ -31,14 +31,15 @@
 # not another sample of that one. The loss column below is for spotting a broken arm, NOT for
 # ranking geometries against each other.
 #
-#     bash sweep_gpu.sh                    # ~15-25 min on an H100
-#     WINDOWS=800 ONLY=base,xf,big bash sweep_gpu.sh
+#     bash tools/sweep_gpu.sh              # ~15-25 min on an H100
+#     WINDOWS=800 ONLY=base,xf,big bash tools/sweep_gpu.sh
 #     cat sweep_out/SUMMARY.txt
 #
 # IT WRITES NO CHECKPOINTS AND TOUCHES NOTHING IN runs/. CKPT_DIR is left unset on purpose: saving
 # is the most expensive operation in the loop and a benchmark that pays for it is measuring the
 # disk. Nothing here is a training run and none of it should be quoted as one.
 set -u
+cd "$(dirname "$0")/.." || exit 2
 
 OUT=${OUT:-sweep_out}
 WINDOWS=${WINDOWS:-400}
@@ -47,7 +48,7 @@ WINDOWS=${WINDOWS:-400}
 # a comparison of two run LENGTHS wearing the labels of two geometries.
 BYTES=${BYTES:-6000000}
 ONLY=${ONLY:-base,amp,batch8,batch32,w512,w1024l2,xf,xf_amp,big}
-# THE SECOND ROUND, OFF BY DEFAULT: ONLY=w2048l2,w1024l4,w1024l2_amp bash sweep_gpu.sh
+# THE SECOND ROUND, OFF BY DEFAULT: ONLY=w2048l2,w1024l4,w1024l2_amp bash tools/sweep_gpu.sh
 # The first round stopped at 92M parameters and 1.823 GiB of an H100's 79.2 -- 2.3% of the card --
 # with the best arm at 30.8% utilization, so the width curve was nowhere near either wall. These
 # three go further along the axis the first round found was cheap, and the third re-asks the bf16

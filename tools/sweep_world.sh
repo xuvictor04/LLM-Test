@@ -53,9 +53,9 @@
 # a measured seed spread of 1.227 b/B on one arm, LARGER than the gap between any two architectures
 # ever compared in this project. TREAT A SEPARATION SMALLER THAN THE SEED SPREAD AS NOTHING.
 #
-#     bash sweep_world.sh                                  # 5 arms x 3 seeds
-#     SEEDS="0 1 2 3 4" WINDOWS=4000 bash sweep_world.sh
-#     SEEDS="0 1 2 3 4" ONLY=shipped,feedback_off bash sweep_world.sh   # Q-WORLD-10's deciding run
+#     bash tools/sweep_world.sh                            # 5 arms x 3 seeds
+#     SEEDS="0 1 2 3 4" WINDOWS=4000 bash tools/sweep_world.sh
+#     SEEDS="0 1 2 3 4" ONLY=shipped,feedback_off bash tools/sweep_world.sh   # Q-WORLD-10's deciding run
 #
 # THE WORLD_FEEDBACK DECISION IS READ OFF THE PAIRED LINE, NOT THE TABLE (2026-09-24). Q-WORLD-10
 # flips the default on "5 seeds per arm, paired by seed, mean of loss_curve differences over the
@@ -63,11 +63,12 @@
 # shipped minus feedback_off. run.py --loss-curve now writes each run's per-flush curve beside its
 # log, and the summary prints, per seed, the mean over the last half of the flushes of
 # (shipped - feedback_off), then their mean +- SE and how many seeds are negative (shipped better).
-#     ONLY=off,shipped bash sweep_world.sh
+#     ONLY=off,shipped bash tools/sweep_world.sh
 #     cat world_out/SUMMARY.txt
 #
 # IT WRITES NO CHECKPOINTS AND TOUCHES NOTHING IN runs/. CKPT_DIR is left unset on purpose.
 set -u
+cd "$(dirname "$0")/.." || exit 2
 
 OUT=${OUT:-world_out}
 WINDOWS=${WINDOWS:-2000}
