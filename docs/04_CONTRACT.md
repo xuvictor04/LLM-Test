@@ -3217,7 +3217,7 @@ place.
 
 **What this constrains, for whoever writes the P8 entry points.** `bin/sample` calls `compose()`,
 takes `configs["EVAL"]` off the `System`, never reads the environment, and never enters the `R`
-stage. `RUN_BENCH` keeps only its throughput meaning. `prompt.py` at the repository root is the old
+stage. `RUN_BENCH` keeps only its throughput meaning. `archive/old-tree/prompt.py` is the old
 system: it is rewritten or retired, not ported — its `os.environ["BENCH"]="1"` import trick cannot
 work under the spine at all, because `from_env` is called once, inside `build()`.
 

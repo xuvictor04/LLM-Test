@@ -68,13 +68,13 @@ if __name__ == "__main__":
           f"importing torch and composing (corpus, tokenizer, stream, model) before the first window", flush=True)
 
 # THE REPOSITORY ROOT MUST NOT BE ON sys.path BEFORE src/, AND THIS IS NOT DEFENSIVENESS.
-# Python puts a script's own directory FIRST, and this repository's root still carries the frozen
-# old tree's `memory.py` -- so `import memory.levers` finds that module instead of src/memory/ and
-# dies with "No module named 'memory.levers'; 'memory' is not a package", from inside
-# spine/assemble.py, before any of this file's own code runs. Measured: that is exactly what
-# `PYTHONPATH=src python run.py` did on the first attempt.
-# THE FROZEN TREE STAYS WHERE IT IS -- it is the evidence every docstring in src/ cites by line
-# number -- so the fix is here, at the one entry point that has to coexist with it.
+# Python puts a script's own directory FIRST, and until 2026-09-28 this repository's root carried the
+# frozen old tree's `memory.py` -- so `import memory.levers` found that module instead of src/memory/
+# and died with "No module named 'memory.levers'; 'memory' is not a package", from inside
+# spine/assemble.py, before any of this file's own code ran. Measured: that is exactly what
+# `PYTHONPATH=src python run.py` did on the first attempt. The old tree is in archive/old-tree/ now,
+# and the repair stays: the root still holds data/, the tracked corpus, named like src/data -- so the
+# fix is here, at the one entry point that has to coexist with it.
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 _SRC = os.path.join(_ROOT, "src")
 sys.path[:] = [p for p in sys.path if os.path.abspath(p or ".") != _ROOT]

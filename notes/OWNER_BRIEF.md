@@ -4,7 +4,7 @@ The one page for the owner. Everything else — how decisions were made, the evi
 rules — is in the repo for reference (`docs/proposals/05_DECISIONS.md`, `docs/04_CONTRACT.md`,
 `results/`, `notes/AGENT_STATE.md`) and is not brought up here.
 
-Updated 2026-09-29 (edb90de, the Stage 3 merge).
+Updated 2026-09-29 (edb90de, the Stage 3 merge; then the paths that moved, under GPU tests).
 
 ## How we work
 - **Owner:** leads and monitors, keeps the goals from drifting, adds ideas, expands the project, and
@@ -57,6 +57,10 @@ Updated 2026-09-29 (edb90de, the Stage 3 merge).
 | 3 | Cooldown fleet | **done** 2026-09-28, 21 of 21 runs on an H100. Rebuilding every 1000 windows stays. The 400-window pause of the pool's growth requests stays; it stays by rule, whatever this test read. Cutting it to 100 showed no measurable cost to learning: growth requests rose, the pause covered 10% of the run instead of 38%, and bits/byte did not move. One baseline run started learning late; it decides nothing (`results/gpu_retok_2026-09-28/RESULTS.md`) | whether the 400-window pause of the pool's growth requests costs learning at the shipped cadence (a measured cost; the pause stays); 1000 against no rebuilding, re-read at 5 seeds |
 
 No GPU test is ready now: SR0 is built, and the tests that read it still need their scripts.
+
+Moved on 2026-09-28/29, if you run them from memory: the run.py sweeps are now `bash tools/sweep_gpu.sh`
+and `bash tools/sweep_world.sh`, and the old tree's commands start with `cd archive/old-tree`; the fleet
+commands are unchanged.
 
 ## Rulings that touch your earlier rulings (no action needed)
 The manager resolved the 20 decisions that were queued for you (register §3.3, Appendix D). These

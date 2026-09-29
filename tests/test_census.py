@@ -204,12 +204,12 @@ DEPARTURES = {
 # is not a reason; a reason names the mechanism that can stop being true.
 
 KNOWN_SHADOWS = {
-    "memory": "The old tree's ./memory.py, which self_organize.py still imports by that name, so it "
-              "cannot be moved without breaking the only system that has ever produced a result. What "
-              "keeps src/memory/ winning is ORDERING and nothing else: every entry point in this tree "
-              "does sys.path.insert(0, <root>/src) before importing, putting src ahead of the root. "
-              "`PYTHONPATH=src python3` from the root does the OPPOSITE -- PYTHONPATH lands after the "
-              "script's own directory -- and returns the legacy module.",
+    "memory": "A root memory.py: the old tree's, which self_organize.py imports by that name, until the "
+              "tree moved whole to archive/old-tree/ on 2026-09-28, and the one the self-test plants. "
+              "What keeps src/memory/ winning is ORDERING and nothing else: every entry point in this "
+              "tree does sys.path.insert(0, <root>/src) before importing, putting src ahead of the "
+              "root. `PYTHONPATH=src python3` from the root does the OPPOSITE -- PYTHONPATH lands after "
+              "the script's own directory -- and returns the root's module.",
     "data":   "The tracked corpus directory ./data/, which the owner ruled is input and stays. It has "
               "no __init__.py, so it is a NAMESPACE package, and a regular package anywhere on the path "
               "outranks a namespace package found earlier -- src/data/__init__.py wins on package kind "
@@ -404,9 +404,9 @@ def check_n5_the_shadowed_names_still_resolve_to_src(rows, env_names, wire_dsts)
     """N5 -- every name in src/ that also exists at the repository root still IMPORTS from src/.
 
     THIS IS A MEASURED FAULT, NOT A PRECAUTION, and it bit inside this session. The old system's files
-    are still at the repository root, where two of them share a name with a package in src/. The natural
-    way to run anything from the root is `PYTHONPATH=src python3 ...`, which puts the ROOT first on
-    sys.path and src after it, so under that invocation `import memory` returns the legacy 654-line
+    were at the repository root until 2026-09-28, where its memory.py shared a name with src/memory/. The
+    natural way to run anything from the root is `PYTHONPATH=src python3 ...`, which puts the ROOT first
+    on sys.path and src after it, so under that invocation `import memory` returned the legacy 654-line
     ./memory.py and not src/memory/ -- silently, with no error and the wrong module's globals.
 
     It failed loudly only by luck: the old file has no `levers` attribute, so `import memory.levers`
@@ -419,7 +419,9 @@ def check_n5_the_shadowed_names_still_resolve_to_src(rows, env_names, wire_dsts)
     The old tree still runs -- it is the only thing that has ever produced a result, and self_organize.py
     imports `memory` by that name -- so moving the file to satisfy a test would break the running system
     to make a check green. And a check that fails for a condition nobody intends to fix teaches its
-    reader to skip it, which costs more than it catches.
+    reader to skip it, which costs more than it catches. (2026-09-28: the tree moved whole, memory.py
+    with self_organize.py, to archive/old-tree/, where it still runs; N5 has found one collision since,
+    the root's data/, and still fails any new one.)
 
     SO THE CHECK IS THE MITIGATION, NOT THE COLLISION. The collision is declared below and is allowed to
     exist. What may not happen is the mitigation silently ceasing to work, so this actually IMPORTS each
@@ -704,9 +706,9 @@ def selftest():
             ROOT = tmp
             case("N5 passes when src/ wins both collisions", False,
                  check_n5_the_shadowed_names_still_resolve_to_src, rows, env, dsts)
-            # form one: a root .py that wins because it is found first. Written to shadow `memory` the
-            # way ./memory.py does, and the subprocess puts src first, so this must still PASS -- the
-            # ordering mitigation is doing its job. The FAILING form is the one below.
+            # form one: a root .py that wins because it is found first, written to shadow `memory` as
+            # the old tree's ./memory.py did in this tree until 2026-09-28; the subprocess puts src first,
+            # so this must still PASS -- the ordering mitigation is doing its job. The FAILING form is below.
             with open(os.path.join(tmp, "memory.py"), "w") as fh:
                 fh.write("LEGACY = True\n")
             case("N5 passes with the root file present but src first", False,
@@ -720,8 +722,8 @@ def selftest():
             #   src/memory/ without __init__.py, root memory.py  ->  /tmp/.../memory.py
             #   src/memory/ with    __init__.py, root memory.py  ->  /tmp/.../src/memory/__init__.py
             # It is the same mechanism KNOWN_SHADOWS["data"] names, running the other way, and it is
-            # what N5 exists to notice: one deleted file and every `import memory` in the tree silently
-            # reads the old system.
+            # what N5 exists to notice: one deleted file and every `import memory` in the planted tree
+            # silently reads its root memory.py -- in this tree, the old system, until 2026-09-28.
             os.remove(os.path.join(tmp, "src", "memory", "__init__.py"))
             case("N5 catches src losing the collision while the package is still there", True,
                  check_n5_the_shadowed_names_still_resolve_to_src, rows, env, dsts)

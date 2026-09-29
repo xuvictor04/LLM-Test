@@ -59,11 +59,11 @@ closes no loop. `python3 -c "import sys;sys.path.insert(0,'src');import spine.co
 imports cleanly.
 
 THE IMPORT HAZARD, MEASURED (ISSUES P1-C10). Running with the REPOSITORY ROOT ahead of `src` on
-sys.path makes `import memory` return the old 654-line ./memory.py, and `import data` would return
-the tracked ./data/ CORPUS DIRECTORY as a namespace package. src/data/ survives that collision only
-because src/data/__init__.py exists -- a regular package outranks a namespace portion found earlier
--- and it was confirmed present (0 bytes) before this file was written. THE ENTRY POINT MUST DO
-`sys.path.insert(0, <root>/src)`, never `PYTHONPATH=src` from the root.
+sys.path made `import memory` return the old 654-line ./memory.py (archive/old-tree/ since 2026-09-28),
+and `import data` would return the tracked ./data/ CORPUS DIRECTORY as a namespace package. src/data/
+survives that collision only because src/data/__init__.py exists -- a regular package outranks a
+namespace portion found earlier -- and it was confirmed present (0 bytes) before this file was written.
+THE ENTRY POINT MUST DO `sys.path.insert(0, <root>/src)`, never `PYTHONPATH=src` from the root.
 
 G9, THE TYPO NET. `environ` is a parameter and never a read: spine/lever.py is the only file in the
 tree that may name os.environ (check O1), and build() warns loudly when it is handed None because

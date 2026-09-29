@@ -3058,7 +3058,7 @@ def check_o13_citations_resolve(mods):
       branch -- so the check closed a path resolving to the WRONG file and left open a path
       resolving to NO file. Both were planted and both passed before the floor; both fail now, and
       the three real exemptions (compare.py::main twice and verification.py::Reconstructor.__init__,
-      root-level files this rebuild does not index) are unmoved.
+      files in archive/old-tree/ this rebuild does not index) are unmoved.
 
       QUOTATION. A citation followed, within one sentence, by a clause that is an attribution verb
       from a closed list or ENDS in one, and then a quoted span of at least four words carrying no
@@ -3161,9 +3161,9 @@ def check_o13_citations_resolve(mods):
 
         The index is the whole repository and not just src/ and tests/, because the legitimate
         exemptions really are elsewhere: `compare.py::main` and `verification.py::Reconstructor
-        .__init__` name root-level files this rebuild does not index and does not edit. Built once,
-        on the first unresolved citation, and skipped entirely on a tree that has none. runs/ is
-        excluded on the standing instruction that it is never touched, and .git for its size.
+        .__init__` name files in archive/old-tree/ this rebuild does not index and does not edit.
+        Built once, on the first unresolved citation, and skipped entirely on a tree that has none.
+        runs/ is excluded on the standing instruction that it is never touched, and .git for its size.
         """
         if not repo_paths:
             for dirpath, dirnames, filenames in os.walk(root):
