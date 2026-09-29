@@ -12,10 +12,15 @@ docs/04_CONTRACT.md). Each of these was driven on the tree before the repair:
   G2  A DECLARED-AND-NOT-BUILT ARM IS REFUSED AT STARTUP. LM_COMPOSE=1 and MEM_KEY_SRC=frozen
       composed with 0 refusals and raised NotBuilt at the first flush, after the whole warm-up.
       OPT_LR_CONTINUE='regulated' (Proposal 05 §8 1.4, Q-OPT-12) joined them on the day it was
-      declared: OPT.build refuses it, before the SIG warm-up, naming the lever and NEW-04.
+      declared: OPT.build refuses it, before the SIG warm-up, naming the lever and NEW-04. So did
+      DATA_TRUST='loss' and 'loss+draw' (Proposal 04 SR3, Q-DATA-11): DATA.new_focus refuses both at
+      the `focus` stage, before any tensor exists, each message opening with its own value.
   G3  A NEGATIVE PERIOD IS DESCRIBED AS WHAT RUN.Cadences.due DOES WITH IT -- DISARMED -- and not
       as a fire on EVERY window, which is what four refusals and a Gate reason said while the
-      ledger beside them read fires=0.
+      ledger beside them read fires=0. DATA.trust_period's lever refuses a negative by its declared
+      domain at the first read instead (2026-09-28, Q-DATA-11), and the accessor returns the lever's
+      period at DATA_TRUST='observe' -- the shipped value since 04-6.3's flip -- and 0 -- DISARMED --
+      at 'off'.
   G4  LM.build_model WRITES THE FIVE lm.build.* GAUGES ITS DID IT FIRE LINE DECLARES; all five were
       ABSENT on both LM_ARCH arms.
   G5  NO _NONFINITE_MEASURED ENTRY CALLS A FUNCTION A STUB WHEN IT HAS A BODY (SIG.train_step and
@@ -50,7 +55,11 @@ from ckpt import api as ckpt_api                                   # noqa: E402
 from lm import api as lm_api                                       # noqa: E402
 
 FAILS = []
-BASE = {"DATA_STREAM_BYTES": "60000", "SIG_WARMUP": "20", "FAB_N0": "256", "FAB_SLOTS": "512"}
+# GENERATION OFF (2026-09-29): since 04-6.2's flip the shipped retention probe generates after every
+# run's final save, which this file checks nothing of and which costs about a minute a run on the
+# CPU; a CPU suite that tests no EVAL sets it off (docs/04_CONTRACT.md Q-EVAL-12's dated note).
+BASE = {"DATA_STREAM_BYTES": "60000", "SIG_WARMUP": "20", "FAB_N0": "256", "FAB_SLOTS": "512",
+        "EVAL_GENERATE": "0"}
 
 
 def check(name, ok, detail=""):
@@ -97,7 +106,10 @@ def g1_refusal_stops_compose():
 def g2_not_built_arms_refused_at_startup():
     for env, lever in (({"LM_COMPOSE": "1"}, "LM_COMPOSE=1"),
                        ({"MEM_KEY_SRC": "frozen"}, "MEM_KEY_SRC='frozen'"),
-                       ({"OPT_LR_CONTINUE": "regulated"}, "OPT_LR_CONTINUE='regulated'")):
+                       ({"OPT_LR_CONTINUE": "regulated"}, "OPT_LR_CONTINUE='regulated'"),
+                       # THE SOURCE-RELIABILITY BOOK'S ACTUATIONS (2026-09-28, Q-DATA-11).
+                       ({"DATA_TRUST": "loss"}, "DATA_TRUST='loss'"),
+                       ({"DATA_TRUST": "loss+draw"}, "DATA_TRUST='loss+draw'")):
         try:
             build(**env)
             check(f"G2 {lever} is refused at compose", False, "compose returned")
@@ -113,7 +125,10 @@ def g3_negative_period_text():
     for env, pfx, fn in (("CKPT_EVERY", "CKPT", ckpt_api.save_period),
                          ("MEM_REKEY_EVERY", "MEM", mem_api.rekey_period),
                          ("DOM_MANAGE_EVERY", "DOM", dom_api.manage_period),
-                         ("EVAL_CURVE_EVERY", "EVAL", ev_api.curve_period)):
+                         ("EVAL_CURVE_EVERY", "EVAL", ev_api.curve_period),
+                         # THE RETENTION PROBE'S CADENCE (2026-09-27, Q-EVAL-12): the same switch,
+                         # the same sentence.
+                         ("EVAL_RETENTION_EVERY", "EVAL", ev_api.retention_period)):
         _reopen()
         cfgs, _, _ = assemble.build(environ={env: "-1"})
         try:
@@ -134,6 +149,31 @@ def g3_negative_period_text():
         ckpt_api.REFUSE_NEGATIVE_PERIOD = was
     check("G3 the ckpt.periodic_armed negative arm says DISARMED, not a checkpoint every window",
           "DISARMED" in g.reason and "a checkpoint EVERY window" not in g.reason, g.reason[:140])
+    # THE BOOK'S CADENCE (2026-09-28, Q-DATA-11): DATA_TRUST_EVERY declares domain=(0, None), so a
+    # negative never reaches DATA.trust_period -- the first read refuses it by the domain, naming the
+    # lever -- and the accessor adds no second refusal of its own (O15). It is the lever's period at
+    # 'observe' and 0, the disarmed period the cadence audit reports as such, at 'off' -- in the
+    # root's line for the key since Q-DATA-11's review (tests/test_trust.py T9 reads it).
+    from data import api as data_api
+    _reopen()
+    try:
+        assemble.build(environ={"DATA_TRUST_EVERY": "-1"})
+        check("G3 DATA_TRUST_EVERY=-1 is refused at the first read", False, "accepted")
+    except _lever.LeverError as e:
+        check("G3 DATA_TRUST_EVERY=-1 is refused at the first read, by its declared domain, by name",
+              str(e).startswith("DATA_TRUST_EVERY=-1") and "domain" in str(e), str(e)[:140])
+    _got = []
+    # THE SHIPPED VALUE IS 'observe' SINCE 2026-09-29 (04-6.3's flip, Q-DATA-11's dated note), so the
+    # default environment is the fourth case and 'off' is asked by name.
+    for _env in ({"DATA_TRUST": "observe"}, {"DATA_TRUST": "observe", "DATA_TRUST_EVERY": "0"},
+                 {"DATA_TRUST": "off"}, {}):
+        _reopen()
+        cfgs, _, _ = assemble.build(environ=_env)
+        _got.append(data_api.trust_period(cfgs["DATA"]))
+    check("G3 DATA.trust_period is DATA_TRUST_EVERY at 'observe' (160, and 0 when set so) and 0 -- "
+          "disarmed -- at 'off', always units.Windows; the shipped 'observe' reads 160",
+          [int(p) for p in _got] == [160, 0, 0, 160]
+          and all(type(p).__name__ == "Windows" for p in _got), str(_got))
 
 
 def g4_lm_build_gauges(s):
@@ -296,6 +336,12 @@ def g9_nonfinite():
                   "nothing", "/payload/X/w (1 of 2)" in str(e)
                   and not os.path.exists(os.path.join(d, "ckpt.pt.g9"))
                   and ckpt_api._SAVES["refused_nonfinite"] == before + 1, str(e)[:120])
+    # TOK WRITES ITS VOCABULARY BESIDE CKPT_DIR, NOT IN IT -- <dir>.dyntok.json, and since the
+    # retention probe ships on (2026-09-29), <dir>.best.dyntok.json beside the best save -- so the
+    # directory's removal leaves them in the temp root; they are this run's output and go with it.
+    for leftover in (d + ".dyntok.json", d + ".best.dyntok.json"):
+        if os.path.exists(leftover):
+            os.remove(leftover)
 
 
 def g_text():

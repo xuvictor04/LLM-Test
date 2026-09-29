@@ -8,7 +8,8 @@
 # another one.
 #   EXP=world        the default: Q-WORLD-10's four arms, the 2026-09-24 fleet (below)
 #   EXP=retok        03b S0b's ship rule for TOK_RETOK_EVERY, with kept checkpoints (§8 2.1)
-#   EXP=world_epoch  the whole-epoch, phase-traversing WORLD re-run: sized, and refused until SR0
+#   EXP=world_epoch  the whole-epoch, phase-traversing WORLD re-run: sized, and refused until O13's two
+#                    WORLD levers are built
 #
 # WHAT EXP=world DECIDED (2026-09-24: within noise, WORLD_FEEDBACK now ships False). Whether WORLD_FEEDBACK stays True (the forecast wired into LM.encode, world_proj
 # born zero) and, if it helps, whether the help is WORLD MODELLING or just added capacity. The
@@ -51,7 +52,7 @@
 #     ARCH_ALSO=transformer bash gpu_world.sh             # + fb_off/fb_on at LM_ARCH=transformer
 #     LONG=100000 bash gpu_world.sh                       # + one fb_on/fb_off pair (seed 0) that long
 #     PAR=12 MPS=0 FILL=0 bash gpu_world.sh               # manual parallelism, no MPS, no extra seeds
-#     KEEP_CKPT=1 bash gpu_world.sh                       # + one final checkpoint per run (below)
+#     KEEP_CKPT=1 bash gpu_world.sh                       # + each run's final and best checkpoints (below)
 #     bash gpu_world.sh --status                          # RUNNING / STALLED / FINISHED / STOPPED / DEAD,
 #                                                         # where it is and time left; changes nothing
 #     bash gpu_world.sh --stop                            # stop the running fleet; it writes its block
@@ -112,21 +113,34 @@
 # CHECKPOINTS ARE OFF BY DEFAULT AND ON AT EXP=retok (KEEP_CKPT; Proposal 05 §8 1.5, register note
 # retok fleet (1)). Saving is the most expensive operation in the loop and nothing EXP=world measures
 # needs a resume, so there CKPT_DIR stays unset unless KEEP_CKPT=1 asks for one final checkpoint per
-# run. At EXP=retok every run gets CKPT_DIR=$OUT/ckpt/<arm>.s<seed>: the act arms save once, at the
-# end (CKPT_EVERY 0); k0, k0_nuis and k0_rerun save every KEEP_EVERY windows (default: the gcd of the
-# act cadences, 1000); and k0's saves are HARD-LINKED ASIDE as $OUT/ckpt/keep/k0.s<seed>.w<step>,
-# with the vocabulary beside each as k0.s<seed>.w<step>.dyntok.json, because CKPT's ring keeps only
+# run -- AND, SINCE 04-6.2's FLIP (2026-09-29), THE RETENTION PROBE'S BEST SAVES BESIDE IT: with
+# CKPT_DIR set an armed probe writes a full checkpoint at every new best reading, the first always
+# one, as ckpt.pt.best with ckpt.pt.best.prev behind it (and CKPT_BEST_KEEP's slots), so at
+# EXP=world and EXP=world_epoch a run leaves up to three checkpoint files at the shipped settings.
+# The disk check counts them (ckpt_files, BEST_FILES) and the banner says so; EXP=retok's pins turn
+# the probe off, and its runs write none. At EXP=retok every run gets
+# CKPT_DIR=$OUT/ckpt/<arm>.s<seed>: the act arms save once, at the end (CKPT_EVERY 0); k0, k0_nuis
+# and k0_rerun save every KEEP_EVERY windows (default: the gcd of the act cadences, 1000); and k0's
+# saves are HARD-LINKED ASIDE as $OUT/ckpt/keep/k0.s<seed>.w<step>, with the vocabulary beside each
+# as k0.s<seed>.w<step>.dyntok.json, because CKPT's ring keeps only
 # ckpt.pt and ckpt.pt.prev (src/ckpt/api.py::save). A periodic save lands on the window an act of that
 # cadence fires at (j x K + 1) and leaves the run's losses bit-identical (tests/test_continuation.py
 # S11), so arm - k0 pairs a saving control with arms that save only at the end. The kept copies are
 # the spike test's maturity-matched control (register note retok fleet (4)) and parents for
 # continuations:
 #     CKPT_RESUME=gpu_retok_out/ckpt/keep/k0.s0.w3001 CKPT_DIR=<a NEW directory> OMP_NUM_THREADS=1 \
-#         RUN_SEED=0 RUN_DEVICE=cuda DATA_STREAM_BYTES=3780000 TOK_RETOK_EVERY=0 <the fleet's EXTRA> python3 run.py
+#         RUN_SEED=0 RUN_DEVICE=cuda DATA_STREAM_BYTES=3780000 TOK_RETOK_EVERY=0 <the fleet's EXTRA> \
+#         DATA_SYNTH_HOLDOUT=0 EVAL_RETENTION_EVERY=0 DATA_TRUST=off python3 run.py
 # WITH THE RUN'S OWN SEED, DEVICE AND STREAM (2026-09-27, build 1.5's review): the script sets them on
 # every run and EXTRA does not carry them, and a resume without them is refused -- the segmentation
 # rebuilt from the checkpoint's log disagrees with the parent's epoch. DATA_STREAM_BYTES is WINDOWS x
 # 189 at EXP=retok (3780000 at 20,000 windows); the block's "resume one" line prints them filled in.
+# AND WITH THE FLEET'S PINS (2026-09-29, 04-Q5's pin rule; see EXP=retok below): a kept copy was
+# written at DATA_SYNTH_HOLDOUT=0, mid-epoch, and a continuing resume onto the shipped DATA_SYNTH_HOLDOUT
+# is refused by name, because the admitted block redraws the stream the parent was reading. The block's
+# line carries the pins the fleet recorded in SUMMARY.txt, and for a fleet that recorded none -- one
+# launched before the flip, as the 2026-09-27 retok fleet was -- the pins the checkout running the
+# analysis declares (the Stage 3 merge, 2026-09-29): its runs had those features off.
 # RESUME INTO A NEW CKPT_DIR, NEVER THE KEPT ONE: a save there rotates the kept copy away, and the
 # read-only bit the index sets on kept files stops no rename. Nothing is written under runs/, and a
 # SIGUSR1 save lands in the run's own CKPT_DIR (at EXP=world by default there is none, so it saves
@@ -198,9 +212,14 @@
 # split's review, 2026-09-27: every notification was charged there, so acts after the fill read as
 # blackout before it and a pool full at window 101 alarmed on acts at 1001-1901). The verdict is labelled
 # B-provisional (note retok fleet (3)), and
-# pre-Levels when this tree lacks DOM_LEVELS or the fleet turns it off (C12). IF THIS FLEET RUNS AFTER
-# SR0, 04-Q5's pin rule applies: its margin pairs with pre-SR0 runs, so SR0's build adds
-# DATA_SYNTH_HOLDOUT=0 EVAL_RETENTION_EVERY=0 DATA_TRUST=off to every retok run here.
+# pre-Levels when this tree lacks DOM_LEVELS or the fleet turns it off (C12). 04-Q5's PIN RULE APPLIES
+# (2026-09-29): this fleet's arms and its nuisance margin pair with runs made before SR0's defaults
+# flipped (DATA_SYNTH_HOLDOUT on, EVAL_RETENTION_EVERY 1000, DATA_TRUST 'observe'), so every retok run
+# here -- smoke, calibration, fleet and rerun -- carries DATA_SYNTH_HOLDOUT=0 EVAL_RETENTION_EVERY=0
+# DATA_TRUST=off, and so does the block's resume line. Each pin is set only where this tree declares
+# its lever, read off src/ at launch as LEVELS is, so a checkout from before a flip gets no UNREAD name
+# (spine/assemble.py's typo net); the banner and SUMMARY.txt print the pins that ran. A fleet already
+# started on an earlier commit is not pulled mid-fleet: its runs pair with each other only.
 #     EXP=retok bash gpu_world.sh                         # 20,000 windows, seeds 0-2, auto-filled
 #     EXP=retok RETOK_ARMS="3000 1000 500" bash gpu_world.sh   # another cadence set
 #     EXP=retok COOLDOWN_ARM=100 bash gpu_world.sh        # + k1000_cd100 (the blackout alarm's arm)
@@ -216,12 +235,22 @@
 # the window cap out of reach and "RAN OUT OF STREAM" replaced by a window-cap flag, so every arm
 # crosses all four phases. It pins TOK_RETOK_EVERY (PIN_RETOK, 1000, the shipped cadence since the
 # 2026-09-27 retok fleet; S0b-ship: every dependent experiment pins and labels it) and
-# DATA_DRAW=planned (note WORLD 3). Its pre-registered rule reads
-# SR0's retention probe with DATA_SYNTH_HOLDOUT ON, which this tree does not declare, so it prints its
-# sizing and the pre-registration and exits 2 having written nothing, until GO_WORLD_EPOCH=1 (SR0's
-# build adds those settings to its pins and lifts the guard; before that, only an operation check).
+# DATA_DRAW=planned (note WORLD 3), and -- its pre-registered rule reads SR0's retention probe on a
+# synthetic held-out block -- DATA_SYNTH_HOLDOUT=1 and EVAL_RETENTION_EVERY=PROBE_EVERY (700: 04-6.2's
+# cap, the shortest phase's windows / 5 on the 3.78 MB shape, 701-721 at k1000 and 722-742 at k3000 in
+# the 2026-09-27 retok fleet, written as a number, never computed at run time), and every run writes
+# its reading series beside its curve (run.py --probe-series). With KEEP_CKPT=1 each run's final save
+# is joined by the probe's best saves, ckpt.pt.best and .best.prev (and CKPT_BEST_KEEP's slots), which
+# the disk check budgets (the flip's review, 2026-09-29). 04-Q5's pin rule does not apply here: the
+# arms pair only with each other, in one commit. SR0 IS BUILT (2026-09-29) AND THE GUARD STAYS,
+# RETARGETED: the re-run is five arms (fb_off, fb_on, skip, world_off and detached; §8 6.5), after
+# O13's two WORLD levers are built with CPU known answers -- the forecast bound (WORLD_FORECAST_BOUND)
+# and the input gradient (WORLD_INPUT_GRAD, whose 'detached' is the fifth arm), provisional names,
+# neither in this tree -- so it prints its sizing and the pre-registration, says which of the two this
+# tree declares, and exits 2 having written nothing, until GO_WORLD_EPOCH=1 (that build adds the fifth
+# arm and lifts the guard; before it, the four arms here run as an operation check only).
 #     EXP=world_epoch bash gpu_world.sh                   # the sizing and the pre-registration; exit 2
-#     EXP=world_epoch GO_WORLD_EPOCH=1 bash gpu_world.sh  # after SR0
+#     EXP=world_epoch GO_WORLD_EPOCH=1 bash gpu_world.sh  # an operation check, until O13's build
 #
 # EVERY FLEET ENDS IN A BLOCK TO PASTE BACK AND AN ARCHIVE TO KEEP. The GPU box has a checkout and no
 # push token (results/gpu_world_2026-09-24/ANALYSIS.txt was transcribed from its terminal by hand), so
@@ -290,7 +319,10 @@ COOLDOWN_ARM=${COOLDOWN_ARM:-}             # EXP=retok: FAB_COOLDOWN of an extra
 KEEP_CKPT=${KEEP_CKPT:-$([[ "$EXP" == retok ]] && echo 1 || echo 0)}
 KEEP_POLL=${KEEP_POLL:-1}                  # seconds between the kept-checkpoint watcher's looks
 PIN_RETOK=${PIN_RETOK:-1000}               # EXP=world_epoch: the TOK_RETOK_EVERY every run pins (the shipped one)
+PROBE_EVERY=${PROBE_EVERY:-700}            # EXP=world_epoch: the EVAL_RETENTION_EVERY every run pins (04-6.2's cap)
 GO_WORLD_EPOCH=${GO_WORLD_EPOCH:-0}
+[[ "$PROBE_EVERY" =~ ^[1-9][0-9]*$ ]] \
+  || { echo "!! PROBE_EVERY='$PROBE_EVERY' is not a positive window count (EXP=world_epoch's retention cadence). Nothing was started."; exit 2; }
 # THE eps RULE'S TWO READING-TIME SETTINGS (EXP=retok's analysis; O2, O14). They are read when the
 # analysis runs, not recorded at launch, so --analyze can read the same runs against another eps; the
 # analysis prints both.
@@ -383,7 +415,18 @@ fi
 # that decides anything names the cadence in EXTRA, where SUMMARY and the block record it (S0b-ship:
 # every dependent experiment pins and labels TOK_RETOK_EVERY). EXP=retok's arms set it themselves.
 EXP_ENV=""
-[[ "$EXP" == world_epoch ]] && EXP_ENV="TOK_RETOK_EVERY=$PIN_RETOK DATA_DRAW=planned"
+[[ "$EXP" == world_epoch ]] && EXP_ENV="TOK_RETOK_EVERY=$PIN_RETOK DATA_DRAW=planned DATA_SYNTH_HOLDOUT=1 EVAL_RETENTION_EVERY=$PROBE_EVERY"
+# 04-Q5's PIN RULE AT EXP=retok (2026-09-29): the three levers whose defaults flipped, at the values
+# that restore the tree before them -- each only where this tree declares its lever, read off the
+# fleet's code at launch as LEVELS is below. A checkout from before a flip then gets no name its lever
+# assembly prints UNREAD for (spine/assemble.py's typo net only warns, so the run would go on at the
+# default), and its default is the pinned value already. The register adds DATA_DRAW=planned "if that
+# flips"; it has not. TREE_PINS is read at any EXP: --analyze gives it to a resume line (below).
+TREE_PINS=""
+grep -qE "^ +synth_holdout = Lever\(" "$CODE_DIR/src/data/levers.py" 2>/dev/null && TREE_PINS="DATA_SYNTH_HOLDOUT=0"
+grep -qE "^ +retention_every = Lever\(" "$CODE_DIR/src/eval/levers.py" 2>/dev/null && TREE_PINS="$TREE_PINS${TREE_PINS:+ }EVAL_RETENTION_EVERY=0"
+grep -qE "^ +trust = Lever\(" "$CODE_DIR/src/data/levers.py" 2>/dev/null && TREE_PINS="$TREE_PINS${TREE_PINS:+ }DATA_TRUST=off"
+[[ "$EXP" == retok ]] && EXP_ENV="$TREE_PINS"
 # C12's LABEL, READ OFF THE TREE AND THE FLEET'S SETTINGS AT LAUNCH (so --analyze on another day
 # reports what ran, not what the checkout holds then).
 LEVELS="on (DOM_LEVELS declared, default on)"
@@ -412,15 +455,51 @@ ckpt_env() {  # name seed base-dir [smoke]
   esac
   echo "CKPT_DIR=$3/$1.s$2 CKPT_EVERY=$every"
 }
+# >>> THE BEST SAVES' BUDGET (2026-09-29, the flip's review). tests/test_gpu_world.py F28 execs this
+# block by its two marker lines, with EXP, EXTRA, EXP_ENV, WINDOWS, KEEP_EVERY and CODE_DIR set, in a
+# tree of its own.
+# THE RETENTION PROBE'S BEST SAVES ARE CHECKPOINTS TOO (register R22; docs/04_CONTRACT.md Q-EVAL-12).
+# Wherever a run's CKPT_DIR is set and its probe is armed, CKPT.Retention saves a full checkpoint at
+# every new best reading -- the first reading always one -- as ckpt.pt.best, the one before it rotated
+# onto ckpt.pt.best.prev, each with its vocabulary beside the directory; and CKPT_BEST_KEEP=N adds the
+# slots .best1 ... .bestN, each rotating onto its own .prev (src/ckpt/api.py::save): 2 + 2N files at
+# most. The probe is armed where this tree declares EVAL_RETENTION_EVERY and a run's value is above 0:
+# the last one run_job sets -- EXTRA's, then EXP_ENV's (EXP=retok's pin is 0, EXP=world_epoch's
+# PROBE_EVERY) -- else this environment's, else the lever's declared default, read off the fleet's code
+# at launch as LEVELS is. So EXP=world counts them at the shipped 1000 and EXP=world_epoch at its pin,
+# EXP=retok never, and a checkout from before 04-6.2's flip, whose default is 0, not at EXP=world
+# either. A value this cannot read is counted armed, and a probe that pins nothing writes none: at most,
+# as ckpt_files is. The count is of checkpoint files, as the ring's is; the small vocabulary files ride
+# with them.
+_setting() {  # NAME -> the value a run sees: the last NAME= in EXTRA and EXP_ENV, else the environment's
+  local v
+  v=$(echo " $EXTRA $EXP_ENV " | tr ' ' '\n' | sed -n "s/^$1=//p" | tail -1)
+  if [[ -n "$v" ]]; then echo "$v"; else printenv "$1" 2>/dev/null; fi
+}
+BEST_FILES=0
+BEST_KEEP=0
+if grep -qE "^ +retention_every = Lever\(" "$CODE_DIR/src/eval/levers.py" 2>/dev/null; then
+  _pe=$(_setting EVAL_RETENTION_EVERY)
+  [[ -n "$_pe" ]] || _pe=$(sed -n '/^ *retention_every = Lever(/{s/.*Lever( *\([0-9][0-9]*\).*/\1/p;n;s/^ *\([0-9][0-9]*\) *,.*/\1/p;}' \
+                             "$CODE_DIR/src/eval/levers.py" 2>/dev/null | head -1)
+  if ! [[ "$_pe" =~ ^[0-9]+$ ]] || (( 10#$_pe > 0 )); then
+    BEST_KEEP=$(_setting CKPT_BEST_KEEP)
+    [[ -n "$BEST_KEEP" ]] || BEST_KEEP=$(sed -n 's/^ *best_keep = Lever( *\([0-9][0-9]*\).*/\1/p' "$CODE_DIR/src/ckpt/levers.py" 2>/dev/null | head -1)
+    [[ "$BEST_KEEP" =~ ^[0-9]+$ ]] && BEST_KEEP=$(( 10#$BEST_KEEP )) || BEST_KEEP=0
+    BEST_FILES=$(( 2 + 2 * BEST_KEEP ))
+  fi
+fi
 # HOW MANY CHECKPOINT FILES A RUN LEAVES AT MOST: k0 its kept saves plus the ring's two, the rest of
-# the k0 family the ring's two, every other run its one final save.
+# the k0 family the ring's two, every other run its one final save -- each with the probe's best saves
+# beside them, BEST_FILES, 0 where no probe is armed (at EXP=retok, whose pins turn it off, always).
 ckpt_files() {  # name
   case "$1" in
-    k0) echo $(( (11 * WINDOWS + 10 * KEEP_EVERY - 1) / (10 * KEEP_EVERY) + 2 )) ;;
-    k0_nuis|k0_rerun) echo 2 ;;
-    *) echo 1 ;;
+    k0) echo $(( (11 * WINDOWS + 10 * KEEP_EVERY - 1) / (10 * KEEP_EVERY) + 2 + BEST_FILES )) ;;
+    k0_nuis|k0_rerun) echo $(( 2 + BEST_FILES )) ;;
+    *) echo $(( 1 + BEST_FILES )) ;;
   esac
 }
+# <<< THE BEST SAVES' BUDGET
 
 plan_banner() {  # the fleet's shape, as SUMMARY records it and the EXP=world_epoch guard prints it
   echo "=== $WINDOWS windows per run, DATA_STREAM_BYTES=$BYTES, seeds: $SEEDS, EXTRA='$EXTRA'"
@@ -429,6 +508,11 @@ plan_banner() {  # the fleet's shape, as SUMMARY records it and the EXP=world_ep
   if [[ "$KEEP_CKPT" == 1 && "$EXP" == retok ]]; then
     echo "=== kept checkpoints: ON, k0 family CKPT_EVERY=$KEEP_EVERY, act arms final only;" \
          "k0's saves hard-linked under $OUT/ckpt/keep"
+  elif [[ "$KEEP_CKPT" == 1 && "$BEST_FILES" -gt 0 ]]; then
+    echo "=== kept checkpoints: ON, one final checkpoint per run under $OUT/ckpt, and beside it the" \
+         "retention probe's best saves (ckpt.pt.best and .best.prev$( (( BEST_KEEP > 0 )) &&
+         echo ", and CKPT_BEST_KEEP=$BEST_KEEP's slots, each with its .prev")): up to" \
+         "$(( 1 + BEST_FILES )) checkpoint files per run, all counted in the disk check"
   elif [[ "$KEEP_CKPT" == 1 ]]; then
     echo "=== kept checkpoints: ON, one final checkpoint per run under $OUT/ckpt"
   else
@@ -548,8 +632,9 @@ for key, names in sorted(groups.items()):
 print()
 print("=== DECISION (Q-WORLD-10's rule) ===")
 if whole:
-    print("  Q-WORLD-10's rule, shown for continuity; the pre-registered re-run rule (note WORLD 4) needs "
-          "SR0's retention probe")
+    print("  Q-WORLD-10's rule, shown for continuity; the pre-registered re-run rule (note WORLD 4) reads "
+          "each run's retention-probe series (curves/<run>.probe.json), which this analysis does not read "
+          "yet; the rule is owed with the fifth arm")
 fo, sk, wo = results.get("fb_on"), results.get("skip"), results.get("world_off")
 if fo:
     lh, se, neg, n, fo_seeds = fo
@@ -607,7 +692,7 @@ PY
 # paste back -- ONE program, so the verdict the block carries is the one ANALYSIS.txt printed, never a
 # second reading of the logs.
 analyze_retok() {  # out device mps_on par ncpu
-  gw_py retok "$1" "$CTX" "$(archive_path)" "$EPS" "$RETOK_INCUMBENT"
+  GW_TREE_PINS="$TREE_PINS" gw_py retok "$1" "$CTX" "$(archive_path)" "$EPS" "$RETOK_INCUMBENT"
 }
 
 # THE BLOCK AND ITS PARTS (Proposal 05 §8 1.5). Modes: retok (the analysis above, which also writes
@@ -1684,12 +1769,28 @@ def retok(ctx_arg, archive, eps, inc_cadence):
         # run_job sets RUN_SEED, RUN_DEVICE and DATA_STREAM_BYTES on every run and EXTRA carries none of
         # them, so the line without them was refused -- on CPU at 200 windows the segmentation rebuilt
         # from the checkpoint's log held 635 windows where the parent's epoch held 199.
+        # AND THE FLEET'S PINS (2026-09-29, 04-Q5's pin rule), read off SUMMARY.txt's pins line, which
+        # records what ran: a kept copy was written under them, mid-epoch, and a continuing resume onto
+        # the shipped DATA_SYNTH_HOLDOUT is refused by name. After EXTRA, as run_job sets them.
+        # AND THIS CHECKOUT'S, WHERE THE FLEET RECORDED NONE (2026-09-29, the Stage 3 merge): a fleet
+        # launched before the flip -- the 2026-09-27 retok fleet -- recorded no pin, because its tree ran
+        # each lever's feature off or had none, which is what the pins restore. So every pin whose lever
+        # the tree running this analysis declares (TREE_PINS) joins the line, and a row names them.
         dev = cores.group(3) if cores else "cuda"
+        pinned = [p[:-len(" pinned")] for p in (sget(r"^=== pins: (.*)$") or "").split(", ")
+                  if p.endswith(" pinned")]
+        here = [p for p in os.environ.get("GW_TREE_PINS", "").split()
+                if p.split("=")[0] not in {q.split("=")[0] for q in pinned}]
         resume = (f"CKPT_RESUME={os.path.join(kd, f'k0.s{first[0]}.w{first[1]}')} CKPT_DIR=<NEW dir> "
                   f"OMP_NUM_THREADS=1 RUN_SEED={first[0]} RUN_DEVICE={dev} DATA_STREAM_BYTES={total or '?'} "
-                  f"TOK_RETOK_EVERY=0" + (f" {EXTRA}" if EXTRA.strip() else "") + " python3 run.py") if first else None
+                  f"TOK_RETOK_EVERY=0" + (f" {EXTRA}" if EXTRA.strip() else "")
+                  + "".join(f" {p}" for p in pinned + here) + " python3 run.py") if first else None
         if first:
             kept_rows.append(f"  resume one: {resume} -- a NEW CKPT_DIR, never a kept copy")
+            if here:
+                kept_rows.append(f"  (its {' '.join(here)} are this checkout's pins, which SUMMARY.txt does not "
+                                 f"record: the fleet ran before 04-Q5's flip, with those features off, and its copies "
+                                 f"continue as they ran only under them)")
         kept_short.append(f"KEPT: {nk} copies of {len(ks)} k0 run(s)"
                           + (", all coherent" if nk and not ninc else f", {ninc} INCOHERENT" if ninc else "")
                           + (", act windows covered " + ", ".join(f"{a} {h}/{n}" for a, (h, n) in cov_tot.items())
@@ -2385,19 +2486,32 @@ if [[ "${1:-}" == --stop ]]; then
   exit 0
 fi
 
-# THE WHOLE-EPOCH WORLD RE-RUN WAITS FOR SR0 ("do not run it", Proposal 05 §8 1.5): the sizing and the
-# pre-registration are printed and NOTHING is written, not even $OUT.
+# THE WHOLE-EPOCH WORLD RE-RUN WAITS FOR O13's TWO WORLD LEVERS (§8 6.5). It waited for SR0 ("do not run
+# it", Proposal 05 §8 1.5) until 2026-09-29; SR0 is built, and its settings are this experiment's pins.
+# The sizing and the pre-registration are printed, with which of the two levers this tree declares
+# (read off src/, as LEVELS is), and NOTHING is written, not even $OUT.
 if [[ "$EXP" == world_epoch && "$GO_WORLD_EPOCH" != 1 ]]; then
+  _o13=""
+  for _l in forecast_bound:WORLD_FORECAST_BOUND input_grad:WORLD_INPUT_GRAD; do
+    if grep -qE "^ +${_l%%:*} = Lever\(" "$CODE_DIR/src/world/levers.py" 2>/dev/null; then _st=declared; else _st="not declared"; fi
+    _o13="$_o13${_o13:+, }${_l#*:} $_st"
+  done
   plan_banner
-  echo "=== EXP=world_epoch IS SIZED, NOT RUN: it is the WORLD re-run pre-registered after SR0 (register"
-  echo "    note WORLD 3-4, §8 6.5). All four arms in ONE post-SR0 commit, 5 paired seeds, every run reading"
-  echo "    one whole epoch (all four phases) with TOK_RETOK_EVERY and DATA_DRAW pinned; DATA_SYNTH_HOLDOUT ON"
-  echo "    and the retention probe ON, levers this tree does not declare yet (SR0's build adds them to the"
-  echo "    pins). Rule: WORLD_FEEDBACK flips ON only if fb_on beats fb_off on the time-integrated all-area"
+  echo "=== EXP=world_epoch IS SIZED, NOT RUN: it is the WORLD re-run pre-registered for §8 6.5 (register"
+  echo "    note WORLD 3-4, O13). All five arms -- fb_off, fb_on, skip, world_off and detached -- in ONE"
+  echo "    commit, 5 paired seeds, every run reading one whole epoch (all four phases) with the pins above:"
+  echo "    TOK_RETOK_EVERY and DATA_DRAW, and SR0's DATA_SYNTH_HOLDOUT ON and retention probe ON at"
+  echo "    EVAL_RETENTION_EVERY=$PROBE_EVERY (04-6.2's cap, written as a number), each run writing its reading series."
+  echo "    Its checkpoints (KEEP_CKPT=1): each run's final save and the probe's best saves beside it --"
+  echo "    ckpt.pt.best and .best.prev$( (( BEST_KEEP > 0 )) && echo ", and CKPT_BEST_KEEP=$BEST_KEEP's slots") -- up to $(( 1 + BEST_FILES )) checkpoint files a run, all budgeted."
+  echo "    It waits for O13's two WORLD levers, built with CPU known answers before it (operation only;"
+  echo "    provisional names, 'detached' the input gradient's fifth arm): in this tree $_o13."
+  echo "    Rule: WORLD_FEEDBACK flips ON only if fb_on beats fb_off on the time-integrated all-area"
   echo "    held-out gap (one-sided paired t, alpha 0.05; end-state beside it), is not worse than eps on the"
   echo "    worst area, and no seed shows latent_std < 0.9 or extra_ratio_max > 10. Both endpoints are"
   echo "    reported, with Q-WORLD-10's last-half and full-run prequential statistic beside the rule."
-  echo "    GO_WORLD_EPOCH=1 lifts this guard (before SR0, an operation check only). Nothing was written."
+  echo "    GO_WORLD_EPOCH=1 lifts this guard (until O13's build adds the fifth arm, the four here run as an"
+  echo "    operation check only). Nothing was written."
   exit 2
 fi
 if [[ "$KEEP_CKPT" == 1 && "$OUT" =~ [[:space:]] ]]; then
@@ -2635,9 +2749,12 @@ run_job() {  # name seed windows gpu arm-env...
   local tag="$name.s$seed"
   local log="$OUT/logs/$tag.log" t0=$(date +%s)
   [[ -n "${JOB_DIR:-}" ]] && log="$JOB_DIR/$tag.log"
-  local vis=() fb=() ck="" kd="" w="" a
+  local vis=() fb=() ps=() ck="" kd="" w="" a
   [[ "$DEVICE" == cuda ]] && vis=(CUDA_VISIBLE_DEVICES="$gpu")
   [[ "$FLUSH_BYTES" == 1 ]] && fb=(--flush-bytes "${CURVE_DIR:-$OUT/curves}/$tag.bytes.json")
+  # EXP=world_epoch's RULE READS THE RETENTION PROBE (note WORLD 4): each run writes its reading series
+  # beside its curve, and the archive packs it with the curves.
+  [[ "$EXP" == world_epoch ]] && ps=(--probe-series "${CURVE_DIR:-$OUT/curves}/$tag.probe.json")
   if [[ "$KEEP_CKPT" == 1 && "$EXP" == retok && "$name" == k0 ]]; then
     for a in "$@"; do [[ "$a" == CKPT_DIR=* ]] && ck="${a#CKPT_DIR=}"; done
   fi
@@ -2660,7 +2777,7 @@ run_job() {  # name seed windows gpu arm-env...
   env "${vis[@]}" PYTHONUNBUFFERED=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 RUN_DEVICE="$DEVICE" RUN_SEED="$seed" \
       DATA_STREAM_BYTES="$BYTES" $EXTRA $EXP_ENV "$@" \
       python3 "$CODE_DIR/run.py" --max-windows "$win" --loss-curve "${CURVE_DIR:-$OUT/curves}/$tag.json" "${fb[@]}" \
-      > "$log" 2>&1 &
+      "${ps[@]}" > "$log" 2>&1 &
   rp=$!
   echo "$tag pid=$rp t0=$t0 cap=$win target=$tw" >> "${JOB_DIR:-$OUT/logs}/_started.txt"
   wait "$rp"

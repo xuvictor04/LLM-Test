@@ -39,6 +39,10 @@ because the table is the only evidence of what the old system actually did. Wher
 reached into the environment from inside its body, the parameter arrives as an argument instead; that is
 the only intended behavioural difference, and it is noted on the function.
 """
+import inspect
+import re
+import zlib
+
 from .units import Backwards, Clock, Epochs, Flushes, Steps, UnitError, Windows
 
 
@@ -758,9 +762,14 @@ def opt_steps_from_windows(run_windows, effective_batch_windows):
     stubbed to [] so the walk gets past the P4 blocker: compose(RUN_EPOCHS=-1) now ends in
     run_windows_from_epochs, at the `n_epochs.n < 0` arm, and never reaches this one; before
     2026-09-05 it reached here as Windows(-634) and this function answered Steps(1). (2) Unstubbed,
-    capacity/api.py::startup_refusals is ASSEMBLY_ORDER row 29 and raises NotImplementedError one
-    row before OPT.build at row 30, which is where opt/api.py::build makes this file's only
-    executable call to this function -- so even the first block is not the one a run meets first.
+    capacity/api.py::startup_refusals raised NotImplementedError one row before OPT.build, which is
+    where opt/api.py::build makes this file's only executable call to this function -- so even the
+    first block was not the one a run met first. (2) IS HISTORY, and this said "is ASSEMBLY_ORDER row
+    29 and raises" until Q-EVAL-12's review (2026-09-27): startup_refusals has a body, it is the 31st
+    of the 42 rows and OPT.build the 32nd (the 30th and 31st of 41 until the 'focus' row,
+    2026-09-28), and compose(environ={}) returns a System at stage 'assembled'. What a run meets
+    first today is earlier still -- measured the same day, compose(RUN_EPOCHS=-1) is a RefusedRun
+    from RUN.startup_refusals at the `refuse` stage, before any model is built.
     WHAT WOULD MAKE IT REACHABLE, stated so it is not guessed at: a caller that hands OPT.build a
     run_windows it did not get from _run_windows, or the removal of run_windows_from_epochs'
     negative arm, or a second producer of the horizon's window count. IT IS KEPT AND NOT DELETED:
@@ -1403,6 +1412,118 @@ def blowup_stale(recent, best, since_best, rise=0.5, stale=80):
     return mid > best + rise
 
 
+def windows_for_readings(period, n):
+    """How many windows `n` readings span when one is taken every `period` windows.
+
+    UNIT IN: period = Windows (a reading cadence), n = readings (count). UNIT OUT: Windows.
+
+    A NAMED CONVERSION FROM A COUNT OF READINGS TO THE WINDOW CLOCK (2026-09-27, Q-EVAL-12), for the
+    retention probe's two sentences that need one: EVAL.blowup's "the alarm waits 80 readings --
+    N windows at EVAL_RETENTION_EVERY" and the root's startup notice. Both multiply a Clock-unit
+    lever, and tests/test_ownership.py O11 refuses that arithmetic anywhere but here. The period is
+    required to BE Windows: a Flushes cadence would put the answer batch_windows-fold wrong.
+
+    A PERIOD OF 0 OR LESS GIVES Windows(0): the probe is off and no reading is ever taken, so the
+    span of n readings is not a length at all -- the caller prints the off state, not a horizon.
+    """
+    if type(period) is not Windows:
+        raise UnitError(f"windows_for_readings: period must be Windows, got {type(period).__name__}. "
+                        f"A reading cadence is compared against the window clock by Cadences.due, "
+                        f"and its span must be counted on the same clock.")
+    if period.n <= 0:
+        return Windows(0)
+    return Windows(period.n * int(n))
+
+
+def readings_in(windows, period):
+    """How many cadence readings fall in a span of `windows` windows: floor(windows / period).
+
+    UNIT IN: windows = Windows (a span), period = Windows (a reading cadence). UNIT OUT: readings
+    (count). 0 when period <= 0 -- the probe is off and nothing is read.
+
+    THE PROJECTION THE ROOT PRINTS AT STARTUP (2026-09-27, Q-EVAL-12): a phase of the data plan
+    that the cadence would read fewer than five times is said before the first window, because a
+    focus signal with two readings in a phase is not a signal. The caller adds the phase-start read
+    itself (one event per phase, not a period), so this is the cadence's share alone. A lower bound
+    and not an exact count: Cadences.due carries its remainder across phases, so a phase can gain
+    one reading the floor does not show.
+    """
+    if type(windows) is not Windows or type(period) is not Windows:
+        raise UnitError(f"readings_in: both arguments must be Windows, got "
+                        f"{type(windows).__name__} and {type(period).__name__}.")
+    if period.n <= 0:
+        return 0
+    return max(0, windows.n) // period.n
+
+
+def blowup_horizon(period):
+    """How long the divergence alarm waits before it can fire: (readings, windows) at `period`.
+
+    UNIT IN: period = Windows (the cadence the readings arrive at). UNIT OUT: (readings (count),
+    Windows).
+
+    THE READING COUNT IS blowup_stale's OWN `stale` DEFAULT, READ OFF ITS SIGNATURE, SO THE 80 LIVES
+    IN ONE PLACE. This file keeps no module constant (its header says why), so the threshold that
+    separated nine measured runs stays the keyword default on blowup_stale and every sentence about
+    the alarm's horizon asks for it here rather than restating the literal (2026-09-27, Q-EVAL-12;
+    EVAL.blowup prints it).
+    """
+    stale = int(inspect.signature(blowup_stale).parameters["stale"].default)
+    return stale, windows_for_readings(period, stale)
+
+
+# === a windows cadence at another context width ==================================================
+
+def windows_at_ctx(period, old_ctx, new_ctx):
+    """A cadence written in windows of `old_ctx` tokens, re-expressed in windows of `new_ctx` tokens:
+    the same TEXT between two firings, to the nearest whole window.
+
+    UNIT IN: period = Windows, old_ctx and new_ctx = tokens per window (counts). UNIT OUT: Windows.
+
+    THE CADENCE-RESCALING KNOWN ANSWER NEW-13 ASKED FOR (2026-09-28, register §8 3.6; NEW-13's critic:
+    "a wider context changes what every windows cadence means"; docs/04_CONTRACT.md Q-LM-15). A
+    window is LM_CTX tokens, so a widening resume at LM_CTX_WIDEN=1 (64 -> 128, say) leaves every
+    Windows-unit lever counting windows twice as long: FAB_MANAGE_EVERY=500 manages every 64,000
+    tokens where the parent managed every 32,000. The root PRINTS each Windows-unit lever beside
+    this function's value at a widening resume and APPLIES NONE (N4: a lever reading another lever
+    at run time is the L1 defect); an operator who wants the parent's spacing in text sets the
+    printed values.
+
+    THE ARITHMETIC IS period x old_ctx / new_ctx, IN INTEGERS, ROUNDED TO THE NEAREST WHOLE WINDOW
+    WITH A HALF GOING UP -- (2 x period x old_ctx + new_ctx) // (2 x new_ctx) -- so 1000 -> 500 and
+    333 -> 167 at 64 -> 128. Nearest, not truncated: the question is "the same text", and the nearest
+    window is the closest answer to it (flush_period truncates because it converts a clock that must
+    never fire LATE; this is a printed suggestion, not a clock). A POSITIVE PERIOD NEVER COMES BACK
+    0: 0 is OFF for most Windows levers (DISARMED to RUN.Cadences), and a cadence narrower in text
+    than one window is one window -- so 1 -> 1. A period of 0 is off and stays 0.
+
+    REFUSES, AS THE FAMILY DOES: a period that is not Windows (a Steps or Flushes cadence would come
+    back batch-fold wrong), a NEGATIVE period (not a short one; a negative is DISARMED, never
+    rescaled), and a context that is not a positive int -- a Clock among them, since `int()` on a
+    Clock succeeds silently (opt_steps_from_backwards records the measurement). The two widths may
+    come in either order: the root asks only for widenings, which is where a run can reach it.
+    """
+    if type(period) is not Windows:
+        raise UnitError(f"windows_at_ctx: period must be Windows, got {type(period).__name__}. A "
+                        f"window is LM_CTX tokens, so only a WINDOWS cadence changes meaning with the "
+                        f"context; a Steps or Flushes one would come back batch-fold wrong.")
+    for name, c in (("old_ctx", old_ctx), ("new_ctx", new_ctx)):
+        if isinstance(c, Clock) or type(c) is not int:
+            raise UnitError(f"windows_at_ctx: {name}={c!r} is a {type(c).__name__}. A context width "
+                            f"is TOKENS per window, a count, so it is an int and nothing else -- a "
+                            f"Clock would pass through int() silently.")
+        if c < 1:
+            raise UnitError(f"windows_at_ctx: {name}={c} -- a window holds at least one token.")
+    if period.n < 0:
+        raise UnitError(f"windows_at_ctx: period={period!r} is negative. A negative cadence is not a "
+                        f"short one -- RUN.Cadences reads it DISARMED -- and rescaling it would print "
+                        f"a number nobody could have meant.")
+    if period.n == 0:
+        return Windows(0)
+    n = (2 * period.n * old_ctx + new_ctx) // (2 * new_ctx)
+    return Windows(n if n >= 1 else 1)
+
+
 # === the continual-learning schedule shape =======================================================
 
 def phase_schedule(n_areas, n_phases=None, width=None):
@@ -1455,6 +1576,55 @@ def phase_schedule(n_areas, n_phases=None, width=None):
         lo = round(i * (n_areas - w) / max(1, p - 1))      # window slides from the first area to the last
         out.append(list(range(lo, lo + w)))
     return out
+
+
+# === the rng key an area's label becomes =========================================================
+
+def stream_key(label):
+    """The key a label becomes inside an rng child-stream name: lowercased, with every character
+    outside [a-z0-9_] replaced by "_".
+
+    UNIT IN: label = an area label (name). UNIT OUT: name.
+
+    ONE NORMALISATION FOR EVERY PACKAGE THAT KEYS A STREAM BY AN AREA'S NAME. spine/rng.py refuses
+    uppercase in a subsystem name ("Fabric" and "fabric" would be two streams for one subsystem) and
+    refuses "/" (its seed separator), and area labels are directory names that may carry both --
+    "code_OOD" today, "continual/01_rust" under Q-DATA-4's slash rule. DATA keys each area's held-out
+    block and each synthetic generator by it (data/api.py::_holdout_key delegates here), and SR0's
+    pinned probe draw keys its windows by the SAME area names (register §8 3.1, 04-Q5). The two
+    packages may not import each other (O10), so the rule lives here: two copies of it would be two
+    answers to "which stream is this area's", and an across-the-boundary comparison built on one of
+    them would silently read a different draw from the other.
+
+    WHAT IT DOES NOT DO: refuse. Two labels that normalise to one key ("rustA" and "rusta") would
+    draw from one stream; data/api.py::open_areas refuses that at startup, naming DATA_AREAS and both
+    entries, which is where the operator can act on it. Pure string work, no lever and no state.
+    """
+    return re.sub(r"[^a-z0-9_]", "_", str(label).lower())
+
+
+# === the number an area's label becomes ==========================================================
+
+def area_id(label):
+    """The integer an area's label is booked under: crc32 of its UTF-8 bytes, masked to 31 bits.
+
+    UNIT IN: label = an area label (name). UNIT OUT: id (a non-negative integer below 2**31).
+
+    ONE NUMBER PER AREA FOR EVERY PACKAGE THAT BOOKS BY AREA AND MAY NOT SEE ITS NAME (2026-09-28,
+    register §8 3.1, NEW-10 and C37; docs/04_CONTRACT.md Q-FAB-18 and Q-MEM-16). FAB's per-expert
+    area books and MEM's per-entry `area` column are keyed by it, the root maps each window's label
+    to it, and data/api.py::open_areas refuses two labels that land on one id. It is a function of
+    the LABEL ALONE, for the reason stream_key above is: both books are checkpointed, so the key must
+    mean the same area in a child whose DATA_AREAS inserted, appended or reordered areas -- a
+    position in Areas.names would not, and Python's hash() is salted per process (PYTHONHASHSEED)
+    and would not survive the process that wrote it. 31 bits and not 32 because MEM stores it in an
+    int32 column where -1 means "no area was booked", so a real id is never negative.
+
+    WHAT IT DOES NOT DO: refuse. Two labels can share a crc32; data/api.py::open_areas refuses that at
+    startup, naming both labels and the id, where the operator can rename one. Pure arithmetic on
+    bytes, no lever and no state.
+    """
+    return zlib.crc32(str(label).encode("utf-8")) & 0x7fffffff
 
 
 # === the checkpoint's base path ==================================================================

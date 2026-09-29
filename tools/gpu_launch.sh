@@ -29,7 +29,8 @@
 # quota where it is lower; OMP_NUM_THREADS, which GNU nproc reports instead of the cores, is ignored by
 # the fleet's sizing since the 2026-09-27 review: it was a WARN here that --go launched past, into a
 # fleet sized at one core); the free disk against the kept checkpoints' estimate (EXP=retok keeps k0's
-# saves: about 2 x CKPT_MB, 125 MB measured, per file); the branch and whether it is at origin's head,
+# saves, and since 2026-09-29 an armed retention probe its best saves: about 2 x CKPT_MB, 125 MB
+# measured, per file); the branch and whether it is at origin's head,
 # and a dirty tree; a fleet already RUNNING in OUT -- a FAIL, with the commands to watch or stop it --
 # or processes of an ended one still running there (runs orphaned when it was killed: a FAIL, since
 # gpu_world.sh would refuse the launch; --stop clears them); and, at DEVICE=cuda, a fleet under another
@@ -66,7 +67,7 @@ done
 # and not empty, once, quoted for the shell.
 KNOBS="EXP OUT WINDOWS SEEDS BYTES RETOK_BYTES EPOCH_BYTES SMOKE_WINDOWS EXTRA ARCH_ALSO LONG PAR MPS FILL
        MAX_SEEDS DEVICE CAL_WINDOWS LADDER RETOK_ARMS COOLDOWN_ARM KEEP_CKPT KEEP_POLL KEEP_EVERY PIN_RETOK
-       GO_WORLD_EPOCH EPS RETOK_INCUMBENT HB_EVERY ALLOW_CONCURRENT STOP_WAIT LOG WAIT_S FETCH CKPT_MB"
+       PROBE_EVERY GO_WORLD_EPOCH EPS RETOK_INCUMBENT HB_EVERY ALLOW_CONCURRENT STOP_WAIT LOG WAIT_S FETCH CKPT_MB"
 PFX=$(sed -n 's/^ *PREFIX = "\([A-Z][A-Z0-9]*\)".*/\1/p' src/*/levers.py 2>/dev/null | sort -u | paste -sd'|' -)
 shq() {  # one word for the shell: as it is when it is safe bare, else single-quoted
   if [[ "$1" =~ ^[A-Za-z0-9_./:,@%+=-]+$ ]]; then printf '%s' "$1"; else printf "'%s'" "${1//\'/\'\\\'\'}"; fi
@@ -106,7 +107,7 @@ echo "    knobs set here (a ready line carries them all): ${READYENV:-(none)}"
 case "$EXP_SET" in
   retok|world) pass "EXP=$EXP_SET" ;;
   world_epoch) if [[ "${GO_WORLD_EPOCH:-0}" == 1 ]]; then pass "EXP=world_epoch (GO_WORLD_EPOCH=1)"
-               else fail "EXP=world_epoch is sized, not run, until SR0 (gpu_world.sh refuses it)" "EXP=retok"; fi ;;
+               else fail "EXP=world_epoch is sized, not run, until O13's two WORLD levers are built (gpu_world.sh refuses it)" "EXP=retok"; fi ;;
   "") fail "EXP is not set: say which fleet (gpu_world.sh's default, world, is the decided 2026-09-24 experiment)" \
            "EXP=retok bash $(printf %q "$ROOT/tools/gpu_launch.sh")$([[ $GO == 1 ]] && echo ' --go')" ;;
   *) fail "EXP='$EXP_SET' is not an experiment gpu_world.sh runs (world, retok, world_epoch)" "EXP=retok" ;;
@@ -233,7 +234,15 @@ if [[ "$KC" == 1 && "$W" =~ ^[0-9]+$ ]]; then
     PER=$(( (11 * W + 10 * KE - 1) / (10 * KE) + 2 + 2 + $(wc -w <<< "$ARMS") + $([[ -n "${COOLDOWN_ARM:-}" ]] && echo 1 || echo 0) ))
     FILES=$(( NS * PER + 2 ))
   else
-    FILES=$(( NS * 4 + 1 ))
+    # SINCE 04-6.2's FLIP (2026-09-29) A RUN WHOSE RETENTION PROBE IS ARMED LEAVES ITS BEST SAVES BESIDE ITS
+    # FINAL ONE (ckpt.pt.best and .best.prev, and CKPT_BEST_KEEP's slots with theirs). gpu_world.sh's own
+    # budget block counts them, run here between its markers with this launch's settings -- EXTRA, this
+    # environment and, at EXP=world_epoch, its probe pin -- so the two disk checks count the same files.
+    _pp=""; [[ "$EXP_SET" == world_epoch ]] && _pp="EVAL_RETENTION_EVERY=${PROBE_EVERY:-700}"
+    BF=$(EXTRA="${EXTRA:-}" EXP_ENV="$_pp" CODE_DIR="$ROOT" WINDOWS="$W" KEEP_EVERY=1000 bash -c \
+         "$(sed -n "/^# >>> THE BEST SAVES' BUDGET/,/^# <<< THE BEST SAVES' BUDGET\$/p" gpu_world.sh)"$'\n''echo "$BEST_FILES"' 2>/dev/null)
+    [[ "$BF" =~ ^[0-9]+$ ]] || BF=0
+    FILES=$(( (NS * 4 + 1) * (1 + BF) ))
   fi
   NEED_B=$(( FILES * CKPT_MB * 2 * 1000000 ))
   G() { awk -v b="$1" 'BEGIN { printf "%.1f", b / 1e9 }'; }

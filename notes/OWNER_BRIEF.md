@@ -4,7 +4,7 @@ The one page for the owner. Everything else — how decisions were made, the evi
 rules — is in the repo for reference (`docs/proposals/05_DECISIONS.md`, `docs/04_CONTRACT.md`,
 `results/`, `notes/AGENT_STATE.md`) and is not brought up here.
 
-Updated 2026-09-28 (eade722).
+Updated 2026-09-29 (the Stage 3 merge of 951c7f0 onto b444456).
 
 ## How we work
 - **Owner:** leads and monitors, keeps the goals from drifting, adds ideas, expands the project, and
@@ -18,11 +18,13 @@ Updated 2026-09-28 (eade722).
 
 ## Goals check
 - **B — keep learning after training, without risking too much (first priority).** Not there yet:
-  the tree has no post-training learning mode, and forgetting cannot be measured during a run until
-  the retention probe is built (the next build stage, SR0). Rollback now works one generation back.
+  the tree has no post-training learning mode, and the retention probe that measures forgetting
+  during a run is built (SR0, below) but has not yet been read on GPU. Rollback now works one
+  generation back.
   The path: small builds (all six built and reviewed) → the retokenization fleet (done) → SR0 (probe, best
-  checkpoint) → the continue preset (chained learning sessions with a gate) → GPU tests of forgetting and
+  checkpoint; built) → the continue preset (chained learning sessions with a gate) → GPU tests of forgetting and
   plasticity.
+- **Stage 3 (SR0) is done: built, reviewed and merged on 2026-09-29.** Runs now measure forgetting as they train.
 - **A — universal-capable.** Kept open: media and modality work is designed (Proposals 01-03b) and
   waits behind B, as the priority says.
 - **The unreliability belief.** Honoured as a hypothesis: it decides which experiments run first;
@@ -54,7 +56,7 @@ Updated 2026-09-28 (eade722).
 | 2 | Retokenization fleet (`EXP=retok bash tools/gpu_launch.sh --go`) | **done** 2026-09-27, 13 of 13 runs. Rebuilding every 1000 windows now ships: better than every 3000, and within budget against no rebuilding phase by phase (area by area, see Major issues 2). Provisional until SR0's held-out check, which must watch older text rebuilt late in a run (`results/gpu_retok_2026-09-27/RESULTS.md`) | which re-segmentation cadence ships; post-fix GPU speed; checkpoints for the first post-training test |
 | 3 | Cooldown fleet | **done** 2026-09-28, 21 of 21 runs on an H100. Rebuilding every 1000 windows stays. The 400-window pause of the pool's growth requests stays; it stays by rule, whatever this test read. Cutting it to 100 showed no measurable cost to learning: growth requests rose, the pause covered 10% of the run instead of 38%, and bits/byte did not move. One baseline run started learning late; it decides nothing (`results/gpu_retok_2026-09-28/RESULTS.md`) | whether the 400-window pause of the pool's growth requests costs learning at the shipped cadence (a measured cost; the pause stays); 1000 against no rebuilding, re-read at 5 seeds |
 
-No GPU test is ready now: the next ones need SR0, the build under way.
+No GPU test is ready now: SR0 is built, and the tests that read it still need their scripts.
 
 ## Rulings that touch your earlier rulings (no action needed)
 The manager resolved the 20 decisions that were queued for you (register §3.3, Appendix D). These
@@ -84,7 +86,10 @@ are the ones that touch something you said; say so only if one is wrong.
   manager's note, not your words.
 - **"Nothing frozen".** A frozen codec stays a test control and never becomes the default by winning.
   Both language-model arms carry a context-locked position table, so no checkpoint is made B's
-  long-lived parent until a context-widening route passes on GPU.
+  long-lived parent until a context-widening route passes on GPU. Built 2026-09-28, all off by
+  default: the alternative position schemes and the context widening those GPU tests will compare,
+  and the refusal itself, which says so by name when anyone tries to designate a parent. Nothing is
+  designated; training runs are unchanged.
 - **03b's D-1..D-10** (the live-codec design choices of 2026-09-25) carry no quote from you, so they
   are treated as design decisions that GPU readings may revise. If you took any of them yourself,
   name it and it will stand as yours.

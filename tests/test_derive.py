@@ -970,6 +970,60 @@ def smoke():
     assert derive.blowup_stale([3.0, 4.82, 2.95], 2.0, 300) is True
     assert derive.blowup_stale([3.0, 4.82, 2.95], 2.0, 50) is False    # elevated but not yet stale
     assert derive.phase_schedule(2)[-1] != [0, 1]                 # the last phase must exclude someone
+    #
+    # THE RETENTION PROBE'S NAMED CONVERSIONS (2026-09-27, Q-EVAL-12). No shipped ancestor to replay:
+    # the old tree had no in-run probe. The properties: a span of n readings is n periods of windows,
+    # an off cadence spans nothing and reads nothing, a count of readings in a span is the floor, and
+    # the alarm's horizon is blowup_stale's OWN `stale` default -- so moving that default moves the
+    # horizon with it, and a restated 80 anywhere would be caught here as a disagreement.
+    assert derive.windows_for_readings(Windows(1000), 80) == Windows(80000)
+    assert derive.windows_for_readings(Windows(0), 80) == Windows(0)
+    assert derive.readings_in(Windows(999), Windows(160)) == 6
+    assert derive.readings_in(Windows(320), Windows(160)) == 2
+    assert derive.readings_in(Windows(500), Windows(0)) == 0
+    assert derive.blowup_horizon(Windows(160)) == (80, Windows(12800))
+    import inspect as _inspect
+    assert derive.blowup_horizon(Windows(1))[0] == \
+        _inspect.signature(derive.blowup_stale).parameters["stale"].default
+    for _bad in ((Steps(5), 3), (5, 3)):
+        try:
+            derive.windows_for_readings(*_bad)
+            raise AssertionError(f"windows_for_readings accepted {_bad!r}")
+        except UnitError:
+            pass
+    try:
+        derive.readings_in(500, Windows(160))
+        raise AssertionError("readings_in accepted a bare int span")
+    except UnitError:
+        pass
+    #
+    # THE CADENCE-RESCALING KNOWN ANSWER (2026-09-28, register §8 3.6 and NEW-13; Q-LM-15). No shipped
+    # ancestor to replay: the old tree never widened a context. The properties: the same text per
+    # period -- period x old / new -- to the nearest whole window, a half going up; a positive period
+    # never comes back 0; 0 stays 0; a negative period, a non-Windows period and a width that is not
+    # a positive int are refused. tests/test_position.py Q3 carries the grid through the run.
+    assert [int(derive.windows_at_ctx(Windows(p), 64, 128)) for p in (1000, 333, 1, 0)] == \
+        [500, 167, 1, 0]
+    assert derive.windows_at_ctx(Windows(1), 64, 1024) == Windows(1)
+    assert derive.windows_at_ctx(Windows(250), 128, 64) == Windows(500)     # a narrowing is arithmetic
+    for _bad in ((Windows(-1), 64, 128), (Steps(1000), 64, 128), (1000, 64, 128),
+                 (Windows(1000), 0, 128), (Windows(1000), 64, 128.0)):
+        try:
+            derive.windows_at_ctx(*_bad)
+            raise AssertionError(f"windows_at_ctx accepted {_bad!r}")
+        except UnitError:
+            pass
+    #
+    # THE AREA ID (2026-09-28, Q-FAB-18 and Q-MEM-16). No shipped ancestor to replay: the old tree
+    # booked nothing by area. The properties: crc32 of the label's UTF-8 bytes with the top bit
+    # cleared -- 'eng''s crc32 is 2582995467, above 2**31, so the mask is what keeps a real id off
+    # MEM's -1 in an int32 column -- a function of the label alone, and the four shipped areas land
+    # on four ids. tests/test_faded.py F2 pins the collision refusal these ids are checked by.
+    assert derive.area_id("eng") == 435511819 == 2582995467 & 0x7fffffff
+    assert derive.area_id("py") == 1195352721 and derive.area_id("num") == 1547939694
+    assert derive.area_id("c") == 112844655
+    assert len({derive.area_id(n) for n in ("eng", "py", "num", "c")}) == 4
+    assert all(0 <= derive.area_id(n) < 2 ** 31 for n in ("eng", "py", "num", "c", "01_rust"))
 
 
 def main():

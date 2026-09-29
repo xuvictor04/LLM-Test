@@ -91,14 +91,21 @@ THIS refusal to be turn-off-able, by name, in the same breath as ordering it -- 
 one in the tree that was asked for.
 
 WHERE THE FIVE REFUSALS ARE REACHABLE FROM TODAY, because "it refuses at startup" would be a claim
-about a path that does not run yet. spine/compose.py::compose halts at CAP.startup_refusals, which
-is row 29 of the 39 in spine/compose.py::ASSEMBLY_ORDER, while all five accessors are called at the
+about a path that does not run yet. spine/compose.py::compose halted at CAP.startup_refusals, then
+row 29 of the 39 in spine/compose.py::ASSEMBLY_ORDER, while all five accessors are called at the
 `cadence` row further down -- measured by running compose(environ={'DOM_MANAGE_EVERY': '-5'}) and the
 four siblings' equivalents in fresh processes on 2026-09-04, every one of which ended at
-CAP.startup_refusals and never reached an accessor. So the refusals are live for anything that calls
-an accessor (spine/compose.py::_periods, a probe, a test) and become live for the composition root
-on the day CAP.startup_refusals gets a body. That is the standing this accessor's own refusal has
-had since it shipped; the four siblings inherit it rather than introduce it.
+CAP.startup_refusals and never reached an accessor. So the refusals were live for anything that
+calls an accessor (spine/compose.py::_periods, a probe, a test) and became live for the composition
+root on the day CAP.startup_refusals got a body. That is the standing this accessor's own refusal
+has had since it shipped; the four siblings inherit it rather than introduce it. THAT DAY HAS COME
+AND THIS PARAGRAPH SAID "halts" UNTIL Q-EVAL-12's REVIEW (2026-09-27): CAP.startup_refusals has a
+body, it is the 31st of the 42 rows (the 30th of 41 until the 'focus' row, 2026-09-28), and
+compose(environ={}) returns a System at stage 'assembled'.
+Measured the same day: CKPT_EVERY, DOM_MANAGE_EVERY, MEM_REKEY_EVERY and EVAL_CURVE_EVERY at -5
+each raise their LeverError from the `cadence` row's _periods, as EVAL_RETENTION_EVERY=-5 does --
+a sixth refusal, under EVAL's switch, since Q-EVAL-12 -- while FAB_MANAGE_EVERY=-5 never reaches
+its accessor: assembly refuses it first, a UnitError out of derive.flush_period_windows.
 
 THREE SHAPES WERE WEIGHED AND TWO LOST, priced against what the tree actually has rather than
 against preference.
@@ -431,8 +438,10 @@ def save_period(ckpt: Config):
     # function while doing it -- is DISCHARGED in the same edit and is not merely dropped: that
     # sentence now reads "its declared levers" and states which two THIS accessor reads.
     # THE ACCESSOR'S WHOLE JOB is that Cadences.due REFUSES a bare int while Config hands one back
-    # for all 35 levers that declare a Clock unit (ISSUES P1-H51; recounted r4 -- exactly 35 Lever
-    # declarations across the registry carry a unit that is in spine/units.py::CLOCK_KINDS).
+    # for all 38 levers that declare a Clock unit (ISSUES P1-H51; recounted r4 -- exactly 35 Lever
+    # declarations across the registry carried a unit that is in spine/units.py::CLOCK_KINDS then,
+    # 37 did from 2026-09-27, EVAL_RETENTION_EVERY then the latest, and 38 do since 2026-09-28,
+    # DATA_TRUST_EVERY the latest).
     # Leaving it a stub kept spine.compose._periods -- and therefore
     # RUN.cadence_audit, the one statement that makes ISSUES P1-C11 visible -- unreachable
     # until P4, for no reason but symmetry with entry points that have real work to do.
@@ -594,7 +603,9 @@ def _non_finite_tensors(obj, path=""):
 def save(ckpt: Config, *, payload, geometry, step, epoch, reason, best_state=None, suffix=""):
     """Write one checkpoint generation ATOMICALLY (.tmp + os.replace, one previous generation kept).
     Returns True iff a file was written -- the caller used to assume success and printed "saved to
-    None.best".
+    None.best". That answer is `ok` to Retention.note_saved, which the root hands it after every
+    best and bestN save (2026-09-27, Q-CKPT-6), so the retention ring records files written rather
+    than saves ordered.
 
     `reason` is one of "periodic" | "sigusr1" | "best" | "bestN" | "final" and is RECORDED, so the
     log can name the route that fired rather than describing the mechanism that did nothing.
@@ -1115,9 +1126,15 @@ def check_geometry(ckpt: Config, snapshot, geometry):
         raise GeometryRefusal(
             f"{env_name}: the checkpoint was written at {field}={was!r} and this run resolves "
             f"{value!r}. The rule for this field is {rule}"
+            # THE RULE'S OWN FACT, AND THE FIELD'S `why` SAYS THE REST (2026-09-28, Q-LM-15's
+            # review). The EXACT half said every such field "is an inner dimension and no prefix of
+            # it is valid", which a conditional rule made false in print: lm.ctx is EXACT at
+            # LM_CTX_WIDEN=0, and its why says a larger LM_CTX IS admitted at 1, the learned table
+            # keeping the parent's rows -- a prefix that means something. What the rule decides is
+            # what THIS run admits; a why that is about an inner dimension (fab.rank's, fab.dk's)
+            # says so itself.
             + (", so it may grow but not shrink." if rule == "MAY_WIDEN" else
-               ", so it may not move at all -- it is an inner dimension and no prefix of it is "
-               "valid.")
+               ", so it may not move at all: this run admits no prefix of it.")
             + f" ({why}) Resume with the saved value, or start a new run.")
     # A FIELD THE CHECKPOINT CARRIES AND THE MANIFEST DOES NOT NAME IS REPORTED, NOT IGNORED. That
     # is H22 from the other end: six world fields were recorded and exactly one was read, and
@@ -1166,9 +1183,13 @@ def new_retention(ckpt: Config, *, restored=None):
                  K4 exists to catch on the other side)
     WIRES READ: none
     DID IT FIRE: Retention.counters() -> (probes_seen, new_bests, rotations, slots_used,
-                 inert_reason). `inert_reason` is populated when best_keep > 0 and saving is off,
-                 and when NO CURVE VALUE HAS EVER ARRIVED -- which at P3 is always, and must read
-                 as armed-but-inert rather than as zero local lows.
+                 saves_refused, inert_reason). `inert_reason` is populated when best_keep > 0 and
+                 saving is off, and when NO CURVE VALUE HAS EVER ARRIVED -- which at
+                 EVAL_RETENTION_EVERY=0 (the shipped value until 04-6.2's flip on 2026-09-29) is
+                 always, and must read as armed-but-inert rather than as zero local lows; at the
+                 shipped 1000 a run's first phase-start reading is its first value.
+                 saves_refused (2026-09-27, Q-CKPT-6) counts best and bestN saves
+                 CKPT.save refused, as Retention.note_saved heard them.
 
     TWO OBLIGATIONS THE FROZEN SIGNATURES CANNOT MEET, WRITTEN DOWN RATHER THAN FAKED.
 
@@ -1179,11 +1200,13 @@ def new_retention(ckpt: Config, *, restored=None):
         written. In this tree CKPT.save is a separate entry point the COMPOSITION ROOT calls
         (docs/04_CONTRACT.md section 3.2: the fan-out is rows, not calls inside CKPT.save), it
         returns True iff a file was written, and NO frozen entry point on this object takes that
-        answer back. So `best_saved` here means A SAVE WAS ORDERED and the ring records slots
-        ORDERED, not slots on disk. WHAT WOULD CLOSE IT: one more entry point on this class --
-        `Retention.note_saved(ok, slot=None)` -- called from the C rows beside CKPT.save. That is
-        a contract edit (docs/04_CONTRACT.md's ```contract block, K1, K13's entry-point count and
-        a LOOP_ORDER row), not a body fix, so it is REFERRED and not taken here.
+        answer back. So `best_saved` here meant A SAVE WAS ORDERED and the ring recorded slots
+        ORDERED, not slots on disk. CLOSED 2026-09-27 (Q-CKPT-6): Retention.note_saved(ok,
+        slot=None) is that entry point, called from the C row beside every best and bestN save
+        spine/loop.py makes on a BestAction. A refused best save sets best_saved False; a refused
+        slot save puts the slot's previous resident back and returns the pointer, so the ring
+        again records slots WRITTEN and advances only on a save that returned True -- the old
+        tree's `if _save_ckpt(...)` (:6481-6483).
     (2) THE INERT CLAUSE IS PINNED TO best_keep > 0 AND THE GAP IS ONE LEVER WIDE. At
         best_keep == 0 the single global best is equally unsaveable with CKPT_DIR off -- 0 is not
         "off", ckpt/levers.py::CKPTLevers.best_keep says 0 means exactly what BEST_TRACK=1 did, a
@@ -1191,8 +1214,8 @@ def new_retention(ckpt: Config, *, restored=None):
         outside this file, in spine/compose.py's `persist` ASSEMBLY_ORDER row and again at the
         `retention` call site, both as "best_keep > 0 AND SAVING IS OFF". Widening it here would
         make this body and the root's own prose disagree, which is the drift the order tables are
-        data to prevent. It costs nothing at P3: the second clause -- no curve value has ever
-        arrived -- populates inert_reason on every configuration anyway.
+        data to prevent. It costs nothing while the probe is off: the second clause -- no curve
+        value has ever arrived -- populates inert_reason on every configuration anyway.
 
     TWO REFUSALS, BOTH OVER THIS PACKAGE'S OWN LEVERS, AND NEITHER GETS A SWITCH. That is not an
     omission: REFUSE_NEGATIVE_PERIOD at the top of this file states in as many words that it is
@@ -1263,7 +1286,8 @@ class Retention:
     """
 
     __slots__ = ("_keep", "_tol", "_saving", "_best_bpb", "_best_step", "_best_saved",
-                 "_prev_probe", "_slots", "_ordered", "_probes_seen", "_new_bests", "_rotations")
+                 "_prev_probe", "_slots", "_ordered", "_probes_seen", "_new_bests", "_rotations",
+                 "_pending", "_saves_refused")
 
     # THE FIVE FIELDS state() WRITES AND new_retention(restored=) READS BACK, in one place, because
     # a restore that quietly accepts a blob missing one of them is M45 arriving through the repair
@@ -1288,6 +1312,13 @@ class Retention:
         self._probes_seen = 0
         self._new_bests = 0
         self._rotations = 0
+        # WHAT consider ORDERED AND note_saved HAS NOT YET ANSWERED (2026-09-27, Q-CKPT-6):
+        # {"best": bool, "slot": (slot, previous resident or None, pointer before)} or None. NOT
+        # CHECKPOINTED: consider and note_saved run in one loop step, the save between them is the
+        # one being answered, and a blob that carried a question its own write answers would be
+        # restored holding it. _STATE_FIELDS is unchanged for the reason it gives.
+        self._pending = None
+        self._saves_refused = 0
         if restored is None:
             return
         # A RESTORE THAT CANNOT BE READ IS A REFUSAL, NOT A COLD START. `restored` is
@@ -1356,14 +1387,17 @@ class Retention:
         curve (derive.blowup_stale), and gating an instrument on a checkpoint flag is what this
         rebuild exists to end.
 
-        NO CALLER EXISTS AND THIS BODY DOES NOT CREATE ONE. spine/compose.py's
-        DEFERRED_ENTRY_POINTS names this entry point "P5, WITH EVAL.curve_probe": nothing in the
-        tree produces `curve_bpb`, because eval/api.py::curve_probe is itself deferred for want of
-        units_by_domain and logits_fn. The deferral is about the ROW, not the body -- and writing
-        the body is what lets counters() tell "armed and no probe has ever arrived" from "probes
-        arrived and none qualified", which is the exact statement that same table demands
-        ("Retention.counters() must report inert_reason='no curve value has ever arrived' rather
-        than a bare zero").
+        THE CALLER, SINCE 2026-09-27 (Q-EVAL-12, Q-CKPT-6): spine/loop.py's held-out retention
+        probe. `curve_bpb` is the CONTROL-half mean of EVAL.holdout_probe's reading -- the pinned
+        held-out windows, read memory-off at every EVAL_RETENTION_EVERY windows and at the first
+        window of every phase -- and the loop acts on the BestAction: _carry(), then CKPT.save with
+        reason 'best' (suffix '.best') or 'bestN' ('.best<slot>'), then note_saved with what the
+        save returned. AT EVAL_RETENTION_EVERY=0 -- THE SHIPPED VALUE UNTIL 04-6.2's FLIP ON
+        2026-09-29, 1000 SINCE -- NOTHING CALLS THIS, and counters() says so rather than printing a
+        bare zero ("no curve value has ever arrived"). At the shipped 1000 every phase-start reading
+        feeds it, so a default run with CKPT_DIR set writes a .best at its first reading.
+        EVAL.curve_probe stays deferred as a SCOPE deferral; the retention probe is the reading this
+        policy consumes.
 
         `step` MUST BE units.Windows AND A BARE int IS REFUSED. docs/04_CONTRACT.md's producer
         table says this argument IS RunClock.step, which train/api.py::RunClock carries as a
@@ -1429,6 +1463,7 @@ class Retention:
             # precisely so "0 saves" can name which route was never taken.
             save_best = self._saving
             self._best_saved = save_best
+        _prev_resident, _prev_ordered = None, self._ordered
         if (self._keep > 0 and self._saving and prev is not None and best is not None
                 and cm < prev - 1e-6 and cm <= best * (1.0 + self._tol)):
             # 1-BASED AND ROUND-ROBIN OVER ORDERS, NOT OVER RESIDENTS: self_organize.py:6480 is
@@ -1437,6 +1472,7 @@ class Retention:
             # only when the save RETURNED True, and nothing hands that answer back here, so this
             # pointer counts orders.
             rotate_slot = (self._ordered % self._keep) + 1
+            _prev_resident = self._slots.get(rotate_slot)
             self._slots[rotate_slot] = (cm, int(step))
             self._ordered += 1
             self._rotations += 1
@@ -1444,7 +1480,74 @@ class Retention:
         # `_prev_probe[0] = _cm`, which sits OUTSIDE the keep block). The descent test asks whether
         # the curve went down since the LAST reading, not since the last reading that qualified.
         self._prev_probe = cm
+        # THE QUESTION note_saved ANSWERS, stashed only where a save was ordered.
+        self._pending = None
+        if save_best or rotate_slot is not None:
+            self._pending = {"best": bool(save_best),
+                             "slot": (None if rotate_slot is None
+                                      else (rotate_slot, _prev_resident, _prev_ordered))}
         return BestAction(save_best=save_best, rotate_slot=rotate_slot)
+
+    def note_saved(self, ok, slot=None):
+        """What the save a BestAction ordered returned. Called once per best or bestN save.
+
+        slot=None answers the global .best save: `best_saved` becomes what CKPT.save returned, so
+        it means A FILE WAS WRITTEN again, as `_best_bpb[2]` did in the old tree
+        (self_organize.py:4243). The best NUMBER is kept either way -- the report must say what the
+        best was on a run whose save failed.
+
+        slot=k answers the .best<k> save. On a refusal the slot's previous resident is put back
+        (or the slot emptied, when it held none) and the rotation pointer returns to where it
+        stood, so the next low is ordered into the same slot: the ring advances only on a save
+        that returned True, the old tree's `if _save_ckpt(...)` (:6481-6483). `rotations` keeps
+        counting ORDERS, as counters() says; `saves_refused` counts the refusals beside it.
+
+        WHY IT EXISTS (Q-CKPT-6, 2026-09-27): new_retention's obligation (1). CKPT.save returns
+        True iff a file was written, and until this entry point nothing carried that answer back,
+        so `best_saved` and the ring meant "ordered". Called only after best and bestN saves --
+        spine/loop.py's C fan-out runs for every save, and a periodic save answers nothing here.
+
+        A NOTE NOTHING ORDERED IS REFUSED: a slot consider did not return, or a best save it did not
+        order, is a caller answering a question this object never asked.
+
+        WHAT A REFUSED SLOT SAVE LEAVES BEHIND ON DISK, SO IT IS NOT DISCOVERED: when one probe
+        earns both, the .best file is written first and its state() already holds the new slot;
+        a refused .best<k> save then rolls this object back, and that one .best blob carries the
+        ordered slot. A resume from it re-orders into a slot whose file was never written.
+        Recorded, not repaired: both saves failing apart is a disk failure between two writes.
+        """
+        pend = self._pending
+        if pend is None:
+            raise ValueError(
+                f"CKPT.Retention.note_saved(ok={ok!r}, slot={slot!r}): consider ordered no save "
+                f"that is still unanswered. note_saved answers the best or bestN save a BestAction "
+                f"ordered, once each; a periodic, SIGUSR1 or final save answers nothing here.")
+        if slot is None:
+            if not pend["best"]:
+                raise ValueError(
+                    f"CKPT.Retention.note_saved(ok={ok!r}): the last BestAction did not order the "
+                    f"global .best save (save_best was False), so there is no answer to record.")
+            self._best_saved = bool(ok)
+            if not ok:
+                self._saves_refused += 1
+            pend["best"] = False
+        else:
+            if pend["slot"] is None or int(pend["slot"][0]) != int(slot):
+                raise ValueError(
+                    f"CKPT.Retention.note_saved(ok={ok!r}, slot={slot!r}): the last BestAction "
+                    f"ordered slot {None if pend['slot'] is None else pend['slot'][0]!r}, not "
+                    f"this one.")
+            k, was, ordered = pend["slot"]
+            if not ok:
+                if was is None:
+                    self._slots.pop(k, None)
+                else:
+                    self._slots[k] = was
+                self._ordered = ordered
+                self._saves_refused += 1
+            pend["slot"] = None
+        if not pend["best"] and pend["slot"] is None:
+            self._pending = None
 
     def state(self):
         """The retention state for the checkpoint: (best_bpb, best_step, best_saved, prev_probe,
@@ -1460,9 +1563,10 @@ class Retention:
         -- RUN.RunClock.counters, RUN.Cadences.ledger, CAP.Valve.counters -- is a name->value
         mapping, so a report that reads them all reads one shape.
 
-        `best_saved` MEANS "A SAVE WAS ORDERED", NOT "A FILE EXISTS". See new_retention's obligation
-        (1): CKPT.save returns True iff a file was written and no frozen entry point carries that
-        answer back to this object. The same caveat governs the ring's contents.
+        `best_saved` MEANS "A FILE WAS WRITTEN" ONCE note_saved HAS ANSWERED (2026-09-27,
+        Q-CKPT-6); between consider and that answer it means "a save was ordered", and the blob the
+        ordered save itself writes is taken in that interval, so it records the order. The same
+        caveat governs the ring's contents.
         """
         return {
             "best_bpb": self._best_bpb,
@@ -1499,6 +1603,9 @@ class Retention:
             "new_bests": self._new_bests,
             "rotations": self._rotations,
             "slots_used": len(self._slots),
+            # SINCE 2026-09-27 (Q-CKPT-6): best and bestN saves CKPT.save refused, as note_saved
+            # heard them. Not in state(): it counts this process's saves, like _SAVES.
+            "saves_refused": self._saves_refused,
             "inert_reason": self._inert_reason(),
         }
 
@@ -1513,10 +1620,10 @@ class Retention:
         separate statements and each is only made when it is true.
 
         THIS IS NOT A spine.gate.Gate, deliberately. `inert_reason` is the name the frozen
-        docstring on new_retention and both mentions in spine/compose.py's DEFERRED_ENTRY_POINTS
-        give it ("Retention.counters().inert_reason must report 'no curve value has ever
-        arrived'"), and it is a FIELD OF counters(), not a separate DID IT FIRE channel. A Gate
-        beside it would be a second, differently-shaped answer to one question.
+        docstring on new_retention and, until 2026-09-27, both mentions in spine/compose.py's
+        DEFERRED_ENTRY_POINTS gave it ("Retention.counters().inert_reason must report 'no curve
+        value has ever arrived'"), and it is a FIELD OF counters(), not a separate DID IT FIRE
+        channel. A Gate beside it would be a second, differently-shaped answer to one question.
         """
         clauses = []
         if self._keep > 0 and not self._saving:
@@ -1525,10 +1632,20 @@ class Retention:
                 f"is nowhere to write, so no probe can earn a slot however good it is. Raising "
                 f"CKPT_BEST_KEEP changes nothing; setting CKPT_DIR does.")
         if self._probes_seen == 0:
+            # EVERY CAUSE, BECAUSE THIS PACKAGE CANNOT TELL WHICH HELD (2026-09-27, Q-EVAL-12's
+            # review): CKPT never sees the probe, only its values. The clause named two, and there
+            # are two more -- halves too short for a window behind its prefix, where the probe now
+            # stays unarmed, and an armed probe whose every reading had no finite control window;
+            # driven at DATA_STREAM_BYTES=20000, this sentence blamed EVAL_RETENTION_EVERY=0 or
+            # DATA_SYNTH_HOLDOUT=0 on a run with neither. The EVAL(holdout) row names the one.
             clauses.append(
                 "no curve value has ever arrived: CKPT.Retention.consider has not been called "
                 "once, so 0 new bests and 0 rotations are not a measurement of this run's curve. "
-                "EVAL.curve_probe is deferred (spine/compose.py::DEFERRED_ENTRY_POINTS -- nothing "
-                "produces units_by_domain or logits_fn), which is the whole reason the event "
-                "cannot arrive.")
+                "Its caller is the held-out retention probe (spine/loop.py, EVAL.holdout_probe's "
+                "control mean), which EVAL_RETENTION_EVERY=0 disarms, which pins nothing where "
+                "no area has a held-out block (DATA_SYNTH_HOLDOUT=0 on the synthetic source) or "
+                "no half of one can hold a window behind its routing prefix (DATA_HOLDOUT_FRAC, "
+                "DATA_VAL_CAP), and which forwards no reading whose control half scored no "
+                "finite window (eval.holdout.nonfinite, eval.holdout.empty); the EVAL(holdout) "
+                "row says which.")
         return " ".join(clauses)

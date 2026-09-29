@@ -37,9 +37,12 @@ WHAT IT STILL DOES NOT MEASURE, AND THE RUN PRINTS BOTH LISTS RATHER THAN CLAIMI
     than that period reaches none (the cadence ledger prints it, and the cadence audit warns
     before the first window); SIG.train_step is asked every window (296 steps in 300 windows at
     the shipped defaults).
-  * FIVE ENTRY POINTS ARE DEFERRED BY THE CONTRACT, not merely unwritten -- CAP.observe,
-    FAB.contribution, MEM.blend, MEM.judge and WORLD.manage. CAP.observe's absence is why no cap is
-    ever lifted; FAB.contribution's is why the marginal-contribution counterfactual has no producer.
+  * THREE MECHANISMS' ENTRY POINTS ARE DEFERRED BY THE CONTRACT, not merely unwritten --
+    CAP.observe, MEM.judge and WORLD.manage. CAP.observe's absence is why no cap is ever lifted.
+    (This bullet said FIVE until 2026-09-28, naming MEM.blend and FAB.contribution too: MEM.blend is
+    reached through the retention probe's memory-on closure since 2026-09-27, and FAB.contribution
+    has a body and a row since 2026-09-28, built off -- at the shipped FAB_CONTRIB=0 the
+    marginal-contribution counterfactual still never runs.)
 
 WHAT CHANGED ON 2026-09-21/22, because several sentences above used to say the opposite: DOM.observe,
 MEM.read and MEM.census have bodies and are called, so the partition assigns real ids, the store
@@ -106,6 +109,21 @@ def main(argv=None):
                     help="after the run, write RunResult.flush_bytes (the bytes each flush's "
                          "windows' targets cover, one per --loss-curve entry) to PATH as a JSON "
                          "list")
+    # THE RETENTION PROBE'S READINGS, WRITTEN FOR A SCRIPT TO READ (2026-09-27, docs/04_CONTRACT.md
+    # Q-EVAL-12): every reading this process took, in order, with its kind, closure, control and
+    # report means and per-area values. An empty list where the probe is off
+    # (EVAL_RETENTION_EVERY=0). A driver argument like --loss-curve, not a lever.
+    ap.add_argument("--probe-series", default=None, metavar="PATH",
+                    help="after the run, write RunResult.probe_series (one dict per retention "
+                         "reading this process took) to PATH as a JSON list")
+    # THE SOURCE-RELIABILITY BOOK'S PASSES, WRITTEN FOR A SCRIPT TO READ (2026-09-28,
+    # docs/04_CONTRACT.md Q-DATA-11): every pass this process made, in order, with its kind, the
+    # units it read, its seconds and each source's evidence and trust after it -- what E3 reads on
+    # real text. An empty list at DATA_TRUST='off'. A driver argument like --probe-series, not a
+    # lever.
+    ap.add_argument("--trust-series", default=None, metavar="PATH",
+                    help="after the run, write RunResult.trust_series (one dict per pass of the "
+                         "source-reliability book this process made) to PATH as a JSON list")
     args = ap.parse_args(argv)
 
     # THE CALLER OWNS THE ENVIRONMENT, which is compose()'s own first line: `system =
@@ -248,6 +266,14 @@ def main(argv=None):
         import json
         with open(args.flush_bytes, "w", encoding="utf-8") as fh:
             json.dump([int(v) for v in result.flush_bytes], fh)
+    if args.probe_series:
+        import json
+        with open(args.probe_series, "w", encoding="utf-8") as fh:
+            json.dump(list(result.probe_series), fh)
+    if args.trust_series:
+        import json
+        with open(args.trust_series, "w", encoding="utf-8") as fh:
+            json.dump(list(result.trust_series), fh)
     # THE PRECISION ASKED FOR AND THE PRECISION OBSERVED, ON ONE LINE, BECAUSE THEY DISAGREED FOR
     # THE LIFE OF THIS DRIVER. amp_state above is what RUN.process_setup decided; this is the dtype
     # of the tensor the step actually produced. RUN_AMP=bf16 printed "active" and ran fp32 until
@@ -267,11 +293,14 @@ def main(argv=None):
     print(f"=== {len(result.skipped)} MECHANISM(S) ON LOOP_ORDER HAVE NO CALL SITE AT ALL:")
     for s in result.skipped:
         print(f"      - {s}")
-    # AND THE GATED ONES, SEPARATELY, BECAUSE "IT HAS A CALL SITE" IS NOT "IT RAN". Three of the
-    # twenty-two B rows stand behind events that are UNREACHABLE at the shipped defaults --
-    # TOK_PROBATION_USES=0 turns the whole probation family off -- so a report that printed "0 not
-    # called" and stopped would say this run judged probation when nothing did. That is the same
-    # overstatement the skipped list itself was written to repair, one layer in.
+    # AND THE GATED ONES, SEPARATELY, BECAUSE "IT HAS A CALL SITE" IS NOT "IT RAN". Two of the
+    # twenty-seven B rows' calls stand behind events that are UNREACHABLE at the shipped defaults --
+    # TOK_PROBATION_USES=0 turns the whole probation family off -- and four more wherever
+    # EVAL_RETENTION_EVERY=0 turns the retention probe off and DATA_TRUST='off' the
+    # source-reliability book, which both shipped until 2026-09-29's flips (this said "six" from
+    # 2026-09-28 until the flips, and "three of the twenty-two" before it) -- so a report that
+    # printed "0 not called" and stopped would say this run judged probation when nothing did. That
+    # is the same overstatement the skipped list itself was written to repair, one layer in.
     print("=== GATED CALL SITES (a call site is not a call):")
     for g in result.gated:
         print(f"      - {g}")

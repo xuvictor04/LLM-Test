@@ -19,7 +19,7 @@ WIRES READ:  <comma-separated d_ fields, or "none">
 DID IT FIRE: <the counters that prove the mechanism executed, in G4's three states>
 ```
 
-`tests/test_contract.py` parses those blocks. **All 268** of the declared levers are named by at
+`tests/test_contract.py` parses those blocks. **All 298** of the declared levers are named by at
 least one stub as read by it — **261, not 259, since 2026-09-02: there are now TWO CENSUS
 AMENDMENTS, `OPT_GRAD_CLIP` under Q-OPT-3 and `MEM_JUDGE_FRAC` under Q-MEM-8** (see
 `.rework/CENSUS.md`, section `amendments`, which holds both and states that the census's 328 is
@@ -30,26 +30,30 @@ unchanged by either; *2026-09-26: that section now holds eight — `DATA_DRAW` (
 (`FAB.hop_mode`, `FAB.merge_dist`) readers rather than dropping either, so **UNCONSUMED LEVERS**
 below is now an empty table with the two rulings under it. K4 reads that table, so a future lever
 with no reader still lands there with a reason or the check fails.
-**Naming is not calling**: which stubs the composition root actually reaches is section 3, and 118
+**Naming is not calling**: which stubs the composition root actually reaches is section 3, and 133
 of the entry points (§7 holds the count, and it is the only place that does — this sentence was one
-of five copies) are named by a row — 102 in a row's entry column and 16 by a call written
-into a row's note (2026-09-26, after 03b S0b's act rows and its MEM remap) — with the remaining
-**23 declared deferred**, each with the argument that has no
+of five copies) are named by a row — 111 in a row's entry column and 22 by a call written
+into a row's note (2026-09-28, after Q-FAB-19's `A` row; 118, 102 and 16 on 2026-09-26, after 03b
+S0b's act rows and its MEM remap, which the deferred count below had outrun) — with the remaining
+**18 declared deferred**, each with the argument that has no
 producer as the reason. That number was seven until the order tables grew a `produces` column and
 the same standard was applied to every row rather than to EVAL alone (§3.6). *(This sentence said
 "14" while `DEFERRED_ENTRY_POINTS` held 15; corrected 2026-09-02. K6 prints all three numbers, so
 the count is checkable from the suite rather than from here.)*
 
 **Executable today.** `python3 -c "import sys;sys.path.insert(0,'src');from spine.compose import
-compose; compose(environ={})"` runs the composition root against the stubs and stops at the first
-unimplemented one with `NotImplementedError: CAP.startup_refusals: P4 (capacity) fills this in` —
-the **29th** of the 40 rows in `ASSEMBLY_ORDER`. *(This sentence named `RUN.process_setup` until
-2026-09-04, and had been wrong since that entry point got a body: the root now reaches past the
-resume, the corpus, the vocabulary, the model, the fabric, the store, the partition and
-`CAP.new_valve` before it halts. Three further copies of the same stale claim — §3.8, §5's
-`Q-DERIVE-1`, and `capacity/api.py::<module>` — were corrected in the same edit. A claim about where
-the root stops is a copy of a fact and rots the way a count does; **K13 could not see any of the
-four**, because what rots here is a symbol name and K13 reads digits.)*
+compose; compose(environ={})"` runs the composition root through all 42 rows in `ASSEMBLY_ORDER` and
+returns a System at stage `'assembled'` with no refusal — measured 2026-09-27. *(Until Q-EVAL-12's
+review this said it stopped with `NotImplementedError: CAP.startup_refusals: P4 (capacity) fills
+this in` at "the **29th** of the 41 rows": wrong twice, because `CAP.startup_refusals` has a body and
+the `probe` row made it the **30th** — the **31st** since the `focus` row, 2026-09-28. Before that
+it named `RUN.process_setup`, until 2026-09-04, and had been wrong since that entry point got a
+body: the root then reached past the resume, the corpus, the vocabulary, the model, the fabric, the
+store, the partition and `CAP.new_valve` before it halted. Three further copies of the same stale
+claim — §3.8, §5's `Q-DERIVE-1`, and `capacity/api.py::<module>` — were corrected in the same edit,
+both times. A claim about where the root stops is a copy of a fact and rots the way a count does;
+**K13 could not see any of the four**, because what rots here is a symbol name and K13 reads
+digits.)*
 
 ---
 
@@ -142,7 +146,11 @@ eight is restated as a check in `tests/`: a check for them could only ever fire 
 The set declared in the tree and the "both ends obvious" set in `.rework/audits/options_domain.json`
 were compared name by name on 2026-09-14: 33 against 33, nothing in the report undeclared, nothing
 declared the report did not name. The other **174** of the 207 numeric levers carry no pair, and
-that is the honest state rather than an unfinished one — see the ceiling population below.
+that is the honest state rather than an unfinished one — see the ceiling population below. *(Those
+are the 2026-09-14 comparison's numbers. A lever minted since declares its pair where its ends are
+obvious, at birth: on 2026-09-28, 52 of the 228 numeric levers declare one — ten of them the
+source-reliability book's, Q-DATA-11, three its copy detection's, Q-DATA-12, and `FAB_CONTRIB_MAX`,
+Q-FAB-19 — and 176 carry none.)*
 
 **`spine/lever.py::REFUSE_NON_FINITE_FLOAT` — the floor.** `nan`, `inf` and `-inf` are refused on a
 **float** lever inside `Lever.coerce`. Its scope is the 97 float levers and nothing else: the 110
@@ -482,7 +490,7 @@ Each section: purpose, public surface, what it receives and from whom, state, ch
 The full prose — every measured defect, every line number — lives in the stub docstrings, which are
 the normative text. This is the index.
 
-### DATA — `src/data/api.py` (18 levers)
+### DATA — `src/data/api.py` (40 levers, twenty-three of them census amendments — `DATA_DRAW`, `DATA_SYNTH_HOLDOUT`, §8 3.3's three, 3.4's fourteen and 3.7's four)
 
 Owns the only bytes the system sees and the only split it is honestly measured on. Goal B needs a
 **non-stationary** stream: `phase_sched` is not a parameter of the continual-learning experiment, it
@@ -493,25 +501,183 @@ Owns the only bytes the system sees and the only split it is honestly measured o
 | `open_areas(dat, *, seed)` | `seed` ← RUN | `Areas` |
 | `data_plan(dat, areas, *, epochs, win_tokens, bytes_per_token)` | RUN, LM, TOK (measured) | `Plan` |
 | `draw_stream(dat, areas, plan, *, epoch, seed)` | RUN | `Stream` |
-| `stream_state(dat, areas)` / `restore_stream_state(dat, areas, state)` | CKPT | dict / — |
+| `stream_state(dat, areas, *, focus=None)` / `restore_stream_state(dat, areas, state)` | CKPT; `focus` ← the `focus` row | dict / — |
+| `new_focus(dat, areas, plan, *, restored=None)` | `restored` ← CKPT (`Snapshot.payload['DATA'].get('focus')`) | `Focus` |
+| `claims_observe(dat, focus, *, units, sources, step, at)` | `units`, `sources` ← the root's join `_trust_units` (TOK's `byte_pos` over DATA's bytes); `step` ← RUN | — (the book, in place) |
+| `trust_period(dat)` | — | `units.Windows` |
 
 **Wires read:** none. **State:** per-area read cursors (load-bearing across epochs), holdout block
-offsets and sizes, `bytes_present`/`bytes_taken`, the counter vector — all checkpointed. The cached
-`Stream` at `resample=False` is **not**: it is rebuilt from `(seed, epoch)`.
+offsets and sizes and, since 2026-09-27, each block's digest (Q-DATA-9's review),
+`bytes_present`/`bytes_taken`, the counter vector — all checkpointed. The cached
+`Stream` at `resample=False` is **not**: it is rebuilt from `(seed, epoch)`. Nor is
+`Areas.parent_names`, the area list the resumed checkpoint recorded, which `restore_stream_state`
+fills in place from the record on every resume (empty on a fresh run; Q-DATA-9). **`Areas.drawn`
+is** (2026-09-28, Q-FAB-18's review): every area the lineage's streams have drawn a byte from, in
+the order first drawn — filled in place from the record by `restore_stream_state`, extended by
+`draw_stream`, recorded by `stream_state`. A record written before it carries none, and every area
+it declares is then assumed drawn and named in `data.drawn_assumed` ([] where the record carried
+its list; ABSENT on a fresh run). **So is `Areas.drawn_assumed`** (2026-09-28, Q-DATA-10's
+review): the part of that list held only by the assumption and not drawn since — `draw_stream`
+removes each area it draws, `stream_state` records the rest, a later resume reads it back and
+`data.drawn_assumed` names it — so a descendant of such a record does not read the assumption as a
+draw ([] wherever no record of the lineage predates the list, and on a record without the key).
+**The source-reliability book is checkpointed too, and only where it is kept** (2026-09-28,
+Q-DATA-11): `stream_state(..., focus=)` writes `state['focus']` at `trust='observe'` — the claim
+shape, the int32 sketch, the claim table in LRU order, each source's evidence, trust and first
+sight, the per-epoch cursor and stream ordinal, the carried units and the `data.trust.*` counters —
+and nothing at `'off'`, so an `'off'` payload is the one written before the book (a Focus holding a
+checkpoint's book writes it back unchanged, and a later `'observe'` leg reads the units that `'off'`
+run consumed in the epoch the leg resumes in and none of an earlier epoch's — Q-DATA-11's review).
+`Areas.sources` and `Stream.sources` are **not** checkpointed: `open_areas` and `draw_stream`
+recompute both from the same files and draw.
 **Counters:** `data.area_open`, `corpus_cap_trip`, `holdout_block`, `val_cap_trip`, `area_refused`,
 `stream_draw`, `segment`, `contig_wrap`, `resample`, `phase_entered`, `phase_resolved`,
 `state_written/restored/refused` (with `state_written_here`, the process twin of the lineage
-`state_written`, Q-CKPT-4), and three Gates (`exposure_max`, `exposure_skew`,
-`splice_window`).
+`state_written`, Q-CKPT-4), `holdout_admitted` with `holdout_admitted_names` (Q-DATA-9; seeded
+only on a resume at `source="synthetic"`, `synth_holdout=True`, and ABSENT elsewhere),
+`drawn_assumed` (Q-FAB-18's review), and three Gates (`exposure_max`, `exposure_skew`,
+`splice_window`) — five since 2026-09-28, with `replay` and `rehearse_parent` (Q-DATA-10), beside
+`replay.fixed_phases`, `replay.bytes`, `replay.newest_boosted`, `rehearse_parent.areas` and the
+per-phase share gauges `share.p<k>.<area>.planned` / `.realised`; and, since 2026-09-28 (Q-DATA-11),
+the book's `trust.passes`, `trust.updates`, `trust.units`, `trust.claims`, `trust.claims_kv` or
+`trust.claims_ctx`, `trust.conflicted_claims`, `trust.sources`, `trust.evidence_absent`,
+`trust.table_evictions` and `trust.sketch_load` (every one ABSENT at `trust='off'`, PRESENT-and-0 at
+`'observe'`) with its two Gates, `data.trust` (UNREACHABLE naming `DATA_TRUST='off'`) and
+`data.trust.actuation` (UNREACHABLE on every configuration this tree builds), all in the root's
+`DATA(trust)` row beside `data.trust.wall_s`, the root's float; and since 2026-09-28 (Q-DATA-12) the
+copy detection's `trust.copy.passes`, `trust.copy.pairs_judged`, `trust.copy.pairs_dependent`,
+`trust.copy.pairs_certified` and `trust.copy.votes_discounted` (ABSENT unless `trust='observe'` and
+`trust_copy='accu'`, PRESENT-and-0 there), a third Gate, `data.trust.copy` (UNREACHABLE naming
+`DATA_TRUST='off'` or `DATA_TRUST_COPY='off'`, whichever is off; FIRED when a judged pair is
+reported dependent), one line per judged pair in the same row and `data.trust.copy.seconds`, the
+seconds DATA timed in the run()'s copy steps, beside `wall_s` and over the same run() (Q-DATA-12's
+review). **Printed at R since 2026-09-27**,
+in the root's `DATA(areas.counters)`,
+`DATA(areas.gates)`, `DATA(plan.counters)` and `DATA(stream.counters)`
+rows beside the older `DATA(stream.gates)` (Q-DATA-9); before that no row printed them. The Plan's
+gates have their own row since 2026-09-28, `DATA(plan.gates)` (Q-DATA-10): run.py prints them before
+the first window, with a reason only where one fired.
 
-Five levers (`dir`, `corpus_cap`, `holdout_frac`, `val_cap`, `seg_contig`) are **arm-dead** under
-`source="synthetic"`, and `n_processes` under `source="real"`. That is a declared arm reported
-through a Gate, not an unread lever.
+**The schedule's faded sets (2026-09-28, Q-FAB-18; register §8 3.1, NEW-10 and C37).** `Plan`
+gains `faded` — per phase, every area live in an earlier phase and not in this one (index tuples in
+Plan order; `[(), (0,), (0,), (0, 1)]` on the generated four-area schedule) — and `parent_faded`,
+the areas the resumed lineage drew (`Areas.drawn`; `Areas.parent_names`, every area the record
+declares, until Q-FAB-18's review) that no phase of this schedule makes live.
+Both are computed by `data_plan` at startup, move no byte of the stream and are not checkpointed;
+they are printed as the readings `data.phase_faded` (every run) and `data.parent_faded` (only where
+a parent record was restored). The root hands their union to `FAB.manage` as area ids. **An area's
+id** is `spine/derive.py::area_id` of its label (crc32, 31 bits), the key FAB's area books and MEM's
+area column share, and `open_areas` refuses two labels on one id beside the label and key
+collisions, naming both and `data.area_id_collision`, whose Gate reads 0 beside
+`data.area_label_collision`'s in every `Areas` that exists (Q-FAB-18's review).
+
+**The fixed-rehearsal draw, `draw='replay'` (2026-09-28, Q-DATA-10; register §8 3.3, 04-Q1, 04-Q4,
+O9, O16), built OFF: `'planned'` stays the default (D8).** `Plan` gains `shares` — per phase, the
+(area index, bytes) split the draw lays, under every law — and `replay_faded`, per phase the areas the
+'replay' law gives `replay_share` to: `Plan.faded[k]`, plus `Plan.parent_faded` from window 0 at
+`rehearse_parent=True`, and `()` in every phase under `'planned'` and `'uniform'`. Under `'planned'`
+and `'uniform'` `shares` is the scheduled split and `per_area_draw` its sum, the numbers it always
+was. Under `'replay'` a phase with a faded area gives round(`replay_share` × span) bytes to its faded
+areas, split evenly; at `replay_newest` > 0 the newest-arrived live area (the latest first live
+phase, ties to the last in Plan order) takes round((`replay_share` + `replay_newest`) × span) minus
+that; the other live areas split the rest — each rounding half to even on the decimal the lever
+holds, each remainder on the first areas in Plan order, and a sum above 1 refused by name.
+`draw_stream` lays such a phase by DEFICIT: each segment goes to the area with the largest target ×
+laid − span × realised (integers) among those with target left, the first in Plan order on a tie,
+truncated to that area's remaining target — so every phase's realised bytes are its targets exactly,
+`per_area_draw == per_area_drawn`, and the exposure gates stay exact (their reason says so). The
+choice takes no rng draw and iterates no set, and a phase with no faded area is laid by the planned
+law verbatim. `rehearse_parent` has no effect under `'planned'` or `'uniform'` and none on a fresh
+run; a recorded parent area this run does not declare stays refused, the message naming the unbuilt
+replay reservoir (NEW-06). On `source="synthetic"` a rehearsed area whose position in `areas` moved
+is refused by name at `data_plan` (its text is its position's alphabet), and `RUN_SEED`, the text's
+other input, is recorded nowhere and so not checked; an area the lineage holds drawn only by
+assumption (a record older than the drawn list) is rehearsed and named in the Gate's reason
+(Q-DATA-10's review). **SR0's share gauges**, under every law, are `Stream.counters`
+`data.share.p<k>.<area>.planned` and `.realised`, in permille of the phase, for every area the
+phase makes live or its `Plan.shares` entry names (a faded area 'replay' gives 0 bytes reads 0,
+since the review). None of it is checkpointed: a resume recomputes the plan from the same schedule
+and the record's drawn areas, and the stream digest (Q-DATA-9) refuses a continuing resume whose
+draw changed.
+
+**The source-reliability book, `trust='observe'` (2026-09-28, Q-DATA-11; register §8 3.4, 04-6.3),
+built OFF and flipped ON: `'observe'` is the default since 04-6.3's flip, which landed last and alone
+(2026-09-29, Q-DATA-11's dated note; DEFAULT BEHAVIOUR CHANGE 3).** Proposal 04 §1
+item 8's book, in observe mode only. `Areas.sources` names, per area, the file each run of its
+carved body came from (per-file boundaries `_read_area` already walks; a synthetic area is one
+source), and `draw_stream` carries them into `Stream.sources`/`Stream.source_names`, run-length,
+taking no draw — the bytes, labels, draw count, gates and the stream digest are what they were.
+`new_focus` is an ASSEMBLY row after `data_plan` and the only place the book is restored
+(`restore_stream_state` runs before any Plan exists). `claims_observe` reads the TOK units the
+windows consumed since its last pass — their bytes and sources, cut by the root's `_trust_units`
+through `Segmentation.byte_pos` (04's `ids` plus `decode`, which DATA may not import) — forms `'kv'`
+or `'ctx'` claims unit by unit in stream order, counts each in the int32 sketch, records the hot
+ones in the LRU table, and re-votes the whole table: r_s = (agree + 1)/(n + 2) over the conflicted
+keys, iterated 10 times, a tie within 1e-9 deciding nothing, evidence only at n ≥ `trust_min_ev` and
+trust t = clip(r/max r, `trust_min`, 1) only when two or more sources carry it. Its cursor is **per
+epoch**: a pass at 0 opens a new stream (the carry and cursor reset), a pass at the cursor continues
+it, and anything else is refused by name. `trust='loss'` and `'loss+draw'` are refused at startup
+with `NotBuilt`; `trust_period` is 0 at `'off'` and `trust_every` at `'observe'`, and the cadence
+audit's line for it is the root's (`compose.py::_trust_audit`, Q-DATA-11's review). It moves nothing
+the run trains on: SR3's bit-identity is `tests/test_trust.py`.
+
+**Copy detection inside the vote, `trust_copy='accu'` (2026-09-28, Q-DATA-12; register §8 3.7,
+Proposal 04 SR6 and §1 item 8's standing actuation rule (2)), built OFF: at `'off'` the vote above is
+the vote, float for float.** The ACCU-COPY family, as 04 cites it. After each of the vote's ten rounds
+a copy step judges every pair of sources sharing at least `trust_min_ev` conflicted claims, counted
+under the round's truth as shared true, shared false (grouped by n, the key's claimed values less its
+truth) and differing (on any key): the posterior that the later-seen of the two (`Focus.first_seen`)
+copies the earlier is α L / (α L + 1 − α), L the product of 1 − c + c/A per shared true, 1 − c + c n/(1
+− A) per shared false and 1 − c per differing claim, with α `trust_copy_prior` (0.2; 0 and 1 refused by
+name), c `trust_copy_rate` (0.8; 0 refused by name) and A the later source's r that round. A pair
+above `trust_copy_p` (0.5; 0 and 1 refused by name — each refused end one at which no claim can move a
+verdict, the rate's and the threshold's since Q-DATA-12's review) is dependent, and the next round
+counts the later source's vote for each value it shares with the earlier at 1 − c × P; a pair below
+it is certified independent and votes in full. The last round's pairs are `Focus.copy_pairs`,
+checkpointed under `state['focus']['copy']` with the `trust.copy.*` counts — held unchanged by an
+`'off'` leg (`Focus.copy_held`) — and `Focus.copy_seconds` is DATA's running float for the book's copy
+steps, never checkpointed, whose growth over one run()'s passes the root prints as
+`data.trust.copy.seconds`. Observe-only: the discount moves the book's truth, r and t and nothing the
+run trains on, and no actuation is built (§8 5.12 decides SR6 on GPU; O5's lock holds).
+
+**The synthetic source's held-out law is a lever (2026-09-27, Q-DATA-9).** At `synth_holdout=True`
+`open_areas` runs the real sources' carve on each generated body **verbatim** — size, per-area child
+stream, removal, seam, overlap, val-cap tally, and the 0-byte refusal (whose message then names
+`DATA_SYNTH_HOLDOUT` too). At `False`, the build default until 04-Q5's flip (2026-09-29: `True` ships
+since, Q-DATA-9's dated note), it holds nothing out, as before, and the OFF record's `why` names
+`DATA_SYNTH_HOLDOUT=0`. **The resume admits one move:** a
+record of key None and size 0 against a synthetic block now (a real one is a change of source and
+stays refused), counted **per area** in `data.holdout_admitted` (a four-area parent admits 4), each
+admitted area's `seg_contig` cursor mapped onto the carved body (below the block unchanged, past it
+down by the block's size, inside it to the block's offset), and the parent's training on the
+block's bytes said in a warning. A block then and none now is refused naming both settings that
+write one, `DATA_SYNTH_HOLDOUT=1` and `DATA_SOURCE=real`.
+`data.holdout_overlap` is this run's reading and is no longer overwritten by the parent's. **A
+synthetic block rides on a generated body** (Q-DATA-9's review): its length is max(`seg_max` + 1,
+5000, `stream_bytes` // `n_processes`) × 2, shared by every area, and its text is the alphabet the
+area's position in `areas` picks. So on this arm a resume keeps the parent's length and the parent's
+areas' positions — an added area is appended, with `stream_bytes` raised in proportion — or is
+refused naming what moved; the admission holds only where both are the parent's; and on either
+source the record's block digest refuses a text that moved under agreeing offset, size and key.
+
+Two levers (`dir`, `corpus_cap`) are **arm-dead** under `source="synthetic"`, and two more
+(`holdout_frac`, `val_cap`) are there at `synth_holdout=False` only; `n_processes` and `synth_holdout`
+are arm-dead under `source="real"`; `replay_share` and `replay_newest` are read only at
+`draw='replay'`, and `rehearse_parent` moves a byte only there (2026-09-28); the book's thirteen
+`trust_*` levers are read only at `trust='observe'` (2026-09-28, Q-DATA-11), `trust_every` also by
+`trust_period` at `'off'`, where it is not the period, and by the root's audit line, which prints it
+there as the period that arms nothing (Q-DATA-11's review); `trust_copy` is read only at
+`trust='observe'`, and the copy model's `trust_copy_prior`, `trust_copy_rate` and `trust_copy_p` only
+there at `trust_copy='accu'` (2026-09-28, Q-DATA-12). That is a declared arm reported through a
+Gate, not an unread lever. (`seg_contig` was listed here as arm-dead under `source="synthetic"`
+until 2026-09-27, and it is not: `draw_stream` reads it on both sources.)
 **Where they are called (§3):** `draw_stream` is the first statement of stage `E` **and** an
 `ASSEMBLY_ORDER` row for epoch 0, called UNCONDITIONALLY so `dat.resample` is a state this package
 REPORTS rather than a branch the caller takes; `restore_stream_state` is a row immediately after
 `open_areas` and before `data_plan`; `stream_state` is a stage-`C` row. Before this edit nothing in
-either table drew a stream at all.
+either table drew a stream at all. Since 2026-09-28 (Q-DATA-11) `new_focus` is the `focus` row after
+`data_plan`, `claims_observe` a `B` row (behind its arm test, before the retention probe) and an `R`
+row (a stop's tail), and `trust_period` a value of `compose._periods`, key `'data.trust'`.
 
 ### TOK — `src/tok/api.py` (18 levers)
 
@@ -561,13 +727,27 @@ and the parent's newer generation lost its vocabulary). See Q-TOK-13's closing n
 report after the final save; `vocab_rotated_in_place` is present only on the in-place arm), `state_*`,
 and Gates `mint_pmin` and `probation_embed`.
 
-### LM — `src/lm/api.py` (12 levers)
+### LM — `src/lm/api.py` (14 levers, two of them census amendments — `LM_POS` and `LM_CTX_WIDEN`)
 
 Goal A's engine. **One logits path**: `decode` is the only place logits are produced, for training,
 eval and the fabric.
 
 `resolve` · `build_model` · `embed` · `encode` · `decode` · `lm_loss` · `anchor_term` · `on_mint` ·
-`residual_ratios` · `state_dict` · `load_state` · `counters`.
+`residual_ratios` · `state_dict` · `load_state` · `parent_designation` (deferred: a checkpoint's
+question, which no run asks — §3.6) · `counters`.
+
+**Where a token sits is a lever, and the learned table is a door (2026-09-28, Q-LM-15; register
+§8 3.6, O17, NEW-13, C43).** Both arms add a learned row per position before the arch branch, which
+locks a model trained with it to its context. `LM_POS` names the scheme — `'learned'` (today's, ON,
+on both arms), `'alibi'` (the transformer's extrapolating value: a per-head distance bias in every
+layer's attention, no table) and `'none'` (the GRU's: no table, the old `MiniLM`'s own scheme), both
+OFF; the wrong arm's value is refused by name at `resolve`, a scheme change at `load_state`.
+`LM_CTX_WIDEN` (OFF) declares the one widening `'learned'` has: at an epoch-boundary resume a larger
+`LM_CTX` passes the gate and the table grows by rows, the parent's copied and the new ones left at
+this build's initialisation, so on a window of the parent's width the model computes what the
+parent computed. `parent_designation` refuses — by name, switchably (`REFUSE_CONTEXT_LOCKED_PARENT`,
+D17's shape) — to designate any checkpoint B's long-lived parent until a context-widening route in
+`PASSED_WIDENING_ROUTES` has PASSED on GPU (§8 5.8); that set is empty.
 
 **Three layers, three entry points, and the distinction is now structural.** `embed` returns the
 token vectors (the lowest layer, no positional term, no dropout); `encode` returns the hidden
@@ -588,15 +768,19 @@ is still produced at mint time and is still the right number *for the mint*; it 
 probation test wanted. **Both LM additions landed the same day from two independent rulings and the
 set is 123, not 122 — §7 holds the count.**
 **Checkpointed:** the module, the composer's `born` tensor, the counters, the resolved
-`LMGeometry`. **Not:** the derived byte-index tensors (rebuilt on load) or the dead-row mask cache.
+`LMGeometry` — which carries the position scheme `pos` since 2026-09-28 (a record without it reads
+`'learned'`). **Not:** the derived byte-index tensors (rebuilt on load), the dead-row mask cache, or
+ALiBi's slopes (a non-persistent buffer, derived from `LM_HEADS`).
 The counters were written and never read back until 2026-09-24; `load_state` now restores them
-(except `lm.resolve.*`), and its `LoadReport` is bound by the root — a refusal stops the run (Q-CKPT-4).
+(except `lm.resolve.*`, `lm.build.*` and, since 2026-09-28, `lm.pos.scheme` and
+`lm.ckpt.ctx_widened`, each this process's), and its `LoadReport` is bound by the root — a refusal
+stops the run (Q-CKPT-4).
 
 A resume across a `compose` flip is **refused in both directions** and named — under compose,
 `emb`/`head` are not constructed at all. That is a real operational restriction and P7's add-area
 entry point must know it before planning an arm table.
 
-### OPT — `src/opt/api.py` (18 levers, six of them census amendments — `OPT_GRAD_CLIP` and §8 1.4's five)
+### OPT — `src/opt/api.py` (19 levers, seven of them census amendments — `OPT_GRAD_CLIP`, §8 1.4's five and `OPT_DAMP_SOURCE`)
 
 Owns every rate and the size of the batch it acts on. **OPT maintains its own optimizer-step
 counter**, so `units.Steps` becomes literally true — and the horizon's `Windows→Steps` division is
@@ -664,7 +848,10 @@ signature, on any path; `sig.encode_width_mismatch` must be 0 and a nonzero valu
 `load_state_dict` · `encoder_parameters` · `encoder_embedding`.
 
 **Wires read:** none. **Receives:** `width_units` (from `derive.signature_width_bytes`, computed
-once by the root), `alphabet_size`, the unit stream, `seen_units`, **`OptState.encoder`** — the
+once by the root — from the `LM_CTX` the lineage's SIG was built at, `System.sig_ctx`, which
+`payload['LOOP']['sig_ctx']` carries across a widened lineage, so its encoder keeps the width it was
+trained at at every later resume, Q-LM-15 and its review), `alphabet_size`, the unit stream,
+`seen_units`, **`OptState.encoder`** — the
 encoder AdamW built by OPT, addressable by name as of 2026-09-02 (Q-OPT-7), where the whole
 `OptState` crossed before — `windows_since_boundary` ← DOM, `reservoir` ← DOM.
 **SIG owns the encoder step.** `OPT.maybe_step` writes `lr` into both optimizers and steps `base`
@@ -680,7 +867,7 @@ optimizer row; `cadence_due` → `train_step` are stage-`A` rows **before** `enc
 stage-`R` row and is the encoder cadence's **only** did-it-fire surface, because its two-arm gate
 cannot go through `Cadences.due`. Until those rows existed the run trained no encoder at all.
 
-### FAB — `src/fabric/api.py` (82 levers, all 82 read since 2026-09-02)
+### FAB — `src/fabric/api.py` (85 levers, all 85 read, three of them census amendments — `FAB_FADED_CULL`, `FAB_CONTRIB` and `FAB_CONTRIB_MAX`)
 
 The expert population. D1 rules it stays. **One forward pass, both arms**: `society=True` is the soc
 loop at depth 1 with per-expert logits retained.
@@ -692,9 +879,16 @@ loop at depth 1 with per-expert logits retained.
 `d_base_lr`, `d_lr_min_frac`.
 **Receives:** `d_model` ← LM, `signature_dim` ← SIG, `h`/`head` ← LM, `signature` ← SIG,
 `targets` ← the loop, `domain_id`/`live_domains` ← DOM, `soft_cap` ← CAP, `memory_pressure` ← MEM,
-`applied_lr` ← OPT, `baseline_logits_fn` and `per_window_loss` ← the loop.
+`applied_lr` ← OPT, `per_window_loss` ← the loop, and since 2026-09-28 `area_id` and `faded` ← the
+loop, off DATA's labels and schedule as `spine/derive.py::area_id` numbers (Q-FAB-18), and for
+`contribution` its `targets`, `baseline_loss` and `baseline_logits_fn` ← the root's memory-off
+closure over the retention probe's pinned control half, with the closure's own `FAB.forward` inputs
+(Q-FAB-19).
 **Two alarms the report must carry:** `fab.balance_nonzero == 0` while `balance > 0` is **C2** back;
-`fab.contrib_distinct_values == 1` is **C3** back.
+`fab.contrib_degenerate > 0` is **C3** back — a pass whose walks moved no logit, which writes
+nothing (Q-FAB-19). `fab.contrib_distinct_values == 1` stood here until Q-FAB-19's review: the body
+tests the walk itself, and on a pass that is not degenerate one distinct value is the float32 mean
+loss's resolution — the walks moved and every removal read one value — not C3.
 **`observe` splits `use` from `uage`** — a behaviour change with no measurement behind it, since
 `grace=48` was set against a clock that ticked once per window. On P9's list; see **Q-FAB-5**, which
 also supplies the number the retune is set from (`fab.mass_per_selection`) and the arithmetic that
@@ -714,6 +908,32 @@ did. `live_domains` is `DOM.census`'s `n_live` (**Q-FAB-9**), `observe` takes on
 window (**Q-FAB-10**), and the two control arms `FAB_ON=0` / `FAB_NORM_ONLY=1` run end to end,
 with `FAB_ON=0` handing OPT no fabric parameter (**Q-FAB-11**), and neither grows, culls or merges
 (2026-09-27, register LOW-FAB_NORM_ONLY-GROWS).
+**`manage` gained a step 7, FADED AREAS** (**Q-FAB-18**, 2026-09-28; register §8 3.1, NEW-10 and
+C37). `observe(..., area_id=None)` credits each computed expert's new area book
+(`Population.area_use`, routing mass per area, one of `_BOOKS`, checkpointed) under its window's
+area, and `manage(..., faded=None)` reads every expert it removes against the root's faded set --
+DATA's `Plan.faded` for the window's phase plus `Plan.parent_faded` — counting
+`fab.culled_faded_area`, `fab.merged_faded_area` and `fab.faded_unknown`, each with a per-pass gauge
+(`..._last_pass`). **`FAB_FADED_CULL`** (a census amendment) is `'as_is'`, shipped, where no decision
+reads a book, or `'defer'`, an E2 arm and C37's preset value until `FAB.contribution` works, where
+such a removal is skipped and counted and **every other decision of the pass is the one `'as_is'`
+takes**: the rest of the pass reads the population `'as_is'` would hold, so a deferred victim keeps
+its slot in the utilization cull's budget, a deferred absorbee pairs with nobody else, the pressure
+gate is sized without the deferred, and no live-area expert is merged or culled in a deferred one's
+place (Q-FAB-18's review) — or, since 2026-09-28, `'contrib'` (Q-FAB-19): such a removal goes ahead
+only where `FAB.contribution` has MEASURED the expert at or below 0, and is otherwise kept by
+`'defer'`'s own machinery, an unmeasured expert included.
+**`contribution` has a body** (**Q-FAB-19**, 2026-09-28; register §8 3.5, 02-R11 and C37), BUILT
+OFF: `FAB_CONTRIB` (a census amendment, shipped False) arms it and `FAB_CONTRIB_MAX` (64, provisional)
+caps a pass. At 1 the root calls it once per `fab.manage` pass, before `FAB.manage`, on the retention
+probe's pinned control half, with the memory-off closure bound to that batch as
+`baseline_logits_fn` — one callable for the baseline and every counterfactual, which the body checks
+at every pass (ISSUES P1-H11) — and `candidates=None`, **a frozen signature moved**, meaning the next
+`FAB_CONTRIB_MAX` past-grace experts off a rotating cursor on `Population`. A leave-one-out is a
+held-out walk on the looped arm and a reweighted sum of the pass's blend (`FabricOut.blend`, new) on
+the society arm; each value folds into `Population.contrib` at `FAB_COMP_EMA`, the first setting it,
+and `Population.contrib_n` (a book, new) counts measurements, so "never measured" and "measured at
+0" read apart.
 
 ### MEM — `src/memory/api.py` (26 levers, 25 read directly, one of them a census amendment)
 
@@ -736,7 +956,14 @@ writes are partitioned: knowledge is owned but not walled off.
 **`born` (write tick) is a new field beside `last` (retrieval tick)** — one field carrying both
 meanings is what made "LRU" evict the domain that had *stopped being written*.
 **Checkpointed additions:** `prob`, `recon`, `nsrc_max`, `gate_theta` — four omissions that each
-disarmed a live mechanism at the run boundary — and the victim generator `gen` (Q-CKPT-4).
+disarmed a live mechanism at the run boundary — the victim generator `gen` (Q-CKPT-4), and each
+row's `area` (Q-MEM-16).
+**Occupancy by area** (**Q-MEM-16**, 2026-09-28; register §8 3.1, NEW-10). `write(..., areas=None)`
+takes one `spine/derive.py::area_id` per POSITION, beside `positions`, into a new int32 `area` column
+(-1 = no area booked; not `src`, which is DOM's domain); `census` returns `StoreCensus.by_area`,
+active entries per id, and the root prints `store.occupancy.<area>` for every area of the run and
+`store.occupancy_unknown` in the R row `MEM.census(reconcile=True)`. Nothing that writes, evicts,
+reads or rekeys an entry reads the column.
 **Record types are DECLARED, not prose** — `census` returns **`StoreCensus`**, added to the RECORD
 TYPES block 2026-09-02 under **Q-MEM-11**, under MEM's own field spellings; the renames into DOM and
 FAB stay in `compose.py`'s `produces` column.
@@ -824,7 +1051,15 @@ A resume is not a convenience, it is the experiment.
 **`payload` is opaque**; `geometry` is a manifest of `GeometryField(value, rule, env_name, why)`
 records the packages produced, and **the rules are the owner package's** because the legal direction
 differs per field. **A missing field is a refusal, not a skip** — the comparison is driven off the
-manifest's key set, so `if recorded and recorded != live` is not writable here.
+manifest's key set, so `if recorded and recorded != live` is not writable here. **One rule is
+conditional since 2026-09-28 (Q-LM-15):** `lm.ctx` and `lm.pos_max` are EXACT at the shipped
+`LM_CTX_WIDEN=0` and MAY_WIDEN at 1 — the live run's rule is the one applied, and the recording's
+own is never read — and the root reads `check_geometry`'s `GeometryReport` for one field, `lm.ctx`:
+one it widened is a declared widening, and its recorded value is SIG's context wherever the
+checkpoint's `LOOP` carries no `sig_ctx` (Q-LM-15's review). **An EXACT refusal says what the rule
+decides** — "so it may not move at all: this run admits no prefix of it" — and the field's why says
+the rest; it said every EXACT field "is an inner dimension and no prefix of it is valid" until
+Q-LM-15's review, which `lm.ctx`'s why, admitting a larger `LM_CTX` at 1, denied beside it.
 **The suffix applies to the whole snapshot**, tokenizer bytes included (M46).
 **So does the one kept generation** (2026-09-26): `ckpt.pt<suffix>.prev`'s vocabulary is
 `<base><suffix>.prev.dyntok.json`, rotated by TOK, which owns the file, inside `save_vocabulary`.
@@ -1057,14 +1292,17 @@ predictor is **skipped in the forward**, not down-weighted at `1e-6`. `geometry`
 **No period enters WORLD's Config** (C3), and **Q-WORLD-6 is RESOLVED (b)**: no wire, a `NOT_WIRES`
 entry instead — the ledger stays at **19 of 25, 23 declared couplings**.
 
-### EVAL — `src/eval/api.py` (17 levers)
+### EVAL — `src/eval/api.py` (19 levers, two of them census amendments — `EVAL_RETENTION_EVERY` and `EVAL_RETENTION_N`)
 
 Everything that measures the run and nothing that changes it.
 
-`curve_period` (P3) · `curve_probe`, `holdout_probe`, `null_excess` (P5) · `generate`, `coherence`,
-`verdicts`, `wrongness_probe`, `verification_fit` (P6).
+`curve_period` (P3) · `retention_period`, `pin_holdout`, `holdout_probe`, `blowup`, `generate`
+(the retention probe, built 2026-09-27, off at `EVAL_RETENTION_EVERY=0` and on at the shipped 1000
+since 04-6.2's flip, 2026-09-29 — **Q-EVAL-12**) ·
+`curve_probe`, `null_excess` (P5) · `coherence`, `verdicts`, `wrongness_probe`,
+`verification_fit` (P6).
 
-**All 17 levers now have a declared reader.** The five P6 instruments are declared here — with
+**All 19 levers now have a declared reader.** The five P6 instruments are declared here — with
 signatures, not bodies — precisely so that `EVAL_GEN_TEMP` is a knob whose consumer is written down
 rather than one of the 57 armed-but-inert records. What P6 owns is the body.
 **Two rules every function obeys:** G7 (an instrument may not leave the model in a different mode or
@@ -1072,14 +1310,17 @@ move an RNG stream) and the one-logits-path rule (`logits_fn` is passed in, neve
 `null_excess` **refuses `null_draws < 2` at construction**: at 0 it is a `ZeroDivisionError` that
 takes the rest of the report with it, and at 1 the sd is exactly 0.0 so the 2σ test becomes a rubber
 stamp.
-**Where they are called (§3):** `curve_period` alone has an `A` row. The other **eight** are all
-deferred, each with the phase and the argument that has no producer — not "a later phase", which by
-itself is no reason at all. *(This paragraph said `curve_probe` "has a row" and that the deferrals
+**Where they are called (§3):** since 2026-09-27 (Q-EVAL-12) `pin_holdout` has an ASSEMBLY row,
+`retention_period` sits in the cadence row's mapping beside `curve_period`, `holdout_probe` and
+`blowup` have `B` rows, and `holdout_probe` and `generate` have `R` rows. The other **six** are
+deferred, four for an argument that has no producer and two — `curve_probe` and `coherence`, whose
+producers exist since the probe landed — as scope deferrals, not "a later phase", which by itself
+is no reason at all. *(This paragraph said `curve_probe` "has a row" and that the deferrals
 were **seven** and "the whole of `compose.DEFERRED_ENTRY_POINTS`". Both were true when written and
 neither is now: §3.6 moved `curve_probe` into the deferrals — that move is the finding the `produces`
-column was written to expose — and the table grew past EVAL, so EVAL's eight are now eight of
-twenty-three. Corrected 2026-09-04. The numbers here are words, which is why `K13` could not see
-them.)*
+column was written to expose — and the table grew past EVAL, so EVAL's eight became eight of
+twenty-three. Corrected 2026-09-04; EVAL's are six of eighteen since 2026-09-27. The numbers here are
+words, which is why `K13` could not see them.)*
 
 **Two declared outputs had no channel in the signature that must produce them, and both closed on
 2026-09-04 — `Q-EVAL-11`.** `curve_probe` gained `step` (RUN's window counter, which `CurveReading`
@@ -1139,9 +1380,9 @@ report live joins as missing:
 
 | one value | the spellings it is consumed under |
 |---|---|
-| `RunClock.step` | `step` (TOK ×3, `Retention.consider`, `CKPT.save`), `step_windows` (SIG, FAB ×3), `now` (MEM ×2, DOM ×2) |
+| `RunClock.step` | `step` (TOK ×3, `Retention.consider`, `CKPT.save`, `EVAL.holdout_probe`), `step_windows` (SIG, FAB ×4; the probe's closures pass `clock.step + 1`, Q-EVAL-12, and so does `FAB.contribution`, whose baseline is one of them, Q-FAB-19), `now` (MEM ×2, DOM ×2) |
 | `Snapshot.payload` | `state` (DATA, TOK, CAP), `saved` (LM, OPT), `sd` (SIG, FAB, WORLD), `restored` (MEM, DOM, CAP, CKPT), `resume` (OPT), `snapshot` (CKPT) |
-| `LM.lm_loss`'s two returns | `per_window_loss` (FAB.observe), `flush_loss` (FAB.manage/grow_check), `baseline_loss` (FAB.contribution), `bits` (DOM.note_competence; over ln 2, and in bits per build-time token at `DOM_LEVELS`, Q-DOM-5), and one summand of the objective |
+| `LM.lm_loss`'s two returns | `per_window_loss` (FAB.observe), `flush_loss` (FAB.manage/grow_check), `bits` (DOM.note_competence; over ln 2, and in bits per build-time token at `DOM_LEVELS`, Q-DOM-5), and one summand of the objective. `baseline_loss` (FAB.contribution) stood here until 2026-09-28 as the flush's return; it is now the `mean` of the root's OWN `LM.lm_loss` call over the memory-off closure's logits on the probe's control half (Q-FAB-19) |
 | `Assignment.did` | `did` (DOM ×2), `domain_id` (FAB ×3), `sources` (MEM.write) |
 | `Process.device` | `device`, at six constructors |
 | `streams[...]` | `rng` (MEM, DOM, WORLD, EVAL), `generator` (SIG, FAB) |
@@ -1157,8 +1398,9 @@ asks whether an *earlier* row produced each argument, so a value crossing **back
 in it at all. The loop has three such edges and each is written into the consuming row as a
 previous-iteration value, with a carrier named on `System`: `novelty` (the previous flush's mean
 surprise, `:7499`), `windows_since_boundary` (the boundary `DOM.observe` reported on an earlier
-window), and `Due` (asked per window at `A`, acted on per flush at `B`). A fourth, `best_bpb`, has no
-producer at all now that the curve probe is deferred.
+window), and `Due` (asked per window at `A`, acted on per flush at `B`). A fourth, `best_bpb`, is
+`System.probe_reading` since 2026-09-27: the retention probe's last forwarded control mean, set after
+one flush and read by the next `OPT.maybe_step` (Q-OPT-13, Q-EVAL-12), written into that row's note.
 
 ### 3.0.1 `ROW_ARGUMENTS_ELSEWHERE` — the rule, and the two clearest cases
 
@@ -1197,12 +1439,21 @@ training path and 1 byte on the eval path with every check green.
 | `_key_fn` / `_head` / `_sig_encode_fn` | `key_fn` (MEM ×2), `head` (FAB), `encode` (`DOM.rekey` **and**, since 2026-09-02, `EVAL.coherence` — Q-EVAL-10; the *same* callable under the *same* name, because two encoders would be two signature spaces) — entry points partially applied. The callable class of argument has no other producer. |
 | `_n_params` / `_bytes_per_window` | `RUN.bench_summary`'s two measured arguments. `_n_params` sums **both** param groups; summing only the base list undercounts by the whole encoder. |
 | `_geometry_manifest` / `_run_windows` / `_windows_in_epoch` / `_signature_width` / `_alphabet_size` / `_base_parameters` / `_sidecar` / `_signature_stream` / `_signature_units` | the assembly-side joins, unchanged except where §3.8 records a repair. |
+| `_logits_fn(sysm, *, use_memory, view=None, live_domains=None, live_vocab=None)` | `logits_fn` (`EVAL.holdout_probe`, `EVAL.generate`) — **the two closures**, `memory-off` and `memory-on`, each `fn(x, *, prefix_bytes) -> (B, L, V)` along the path the run trained, at the next window's routing clock, under `no_grad` in eval mode; the only place `softmax → MEM.read(promote=False) → MEM.blend → log` is written (Q-EVAL-12, Q-MEM-10). A resume's start reading passes its parent's `view` and `live_domains`; generation passes `live_vocab`, the live vocabulary it may draw from. |
+| `_holdout_units` / `_holdout_tokenize` / `_gen_prompts` | `units_by_domain` (the arrived areas' pinned `(prefix, window)` pairs, with `seen_by_parent`), `tokenize_fn` (`TOK.tokenize` at the last cut's view, no labels, no regularizer) and `prompts_by_domain` (report-half windows — each its routing prefix, its bytes and their cut at that view) — Q-EVAL-12. |
+| `_phase_of` / `_phase_windows` / `_probe_notices` | the phase a window's first byte falls in (the phase-start read's test) and the startup notices, printed and never applied — Q-EVAL-12. |
+| `_area_ids` / `_window_areas` / `_faded_ids` | `area_id` (`FAB.observe`: one per window, its first token's area), `areas` (`MEM.write`: one per position, beside `positions`) and `faded` (`FAB.manage`: `Plan.faded` at the window's phase plus `Plan.parent_faded`), each as `spine/derive.py::area_id` numbers over `Stream.area_names` — Q-FAB-18, Q-MEM-16. |
+| `_trust_units(sysm, lo, hi)` | `units` and `sources` (`DATA.claims_observe`): each TOK unit's **bytes** over this epoch's `ids[lo:hi]`, cut out of `Stream.bytes` at `Segmentation.byte_pos`, and each unit's source name off `Stream.sources`/`Stream.source_names` — `None` where a source run starts inside the unit. It replaces 04's `ids` plus a root-composed `decode` (DATA may not import TOK) — Q-DATA-11. |
+| `_trust_audit(sysm, lines, *, run_windows, periods)` | the `audit` stage's warnings: `RUN.cadence_audit`'s lines, the one for `'data.trust'` in the root's words and every other as RUN wrote it. At `DATA_TRUST='off'` it names `DATA_TRUST='observe'` as what arms the book, since no period does; at `'observe'` a period of 0, or one the run is too short for, is reported with the epoch-end and tail passes that still run. Compose-side, beside `_probe_notices` — Q-DATA-11's review. |
+| `_retention_audit(sysm, lines, *, run_windows, periods)` | the same warnings after `_trust_audit`, the line for `'retention'` in the root's words wherever RUN's would be false: an armed probe (`_probe_armed`) with a period past the run is told its PERIODIC reading cannot fire, beside the phase-start, resume-start and R reads (and generation) that still run, the period named as 04-6.2's interim value rather than a fault; a probe that pinned nothing is DISARMED with the `ProbeSet`'s reason at any period — the one line the root adds, at the key's place, where RUN wrote none. At `EVAL_RETENTION_EVERY=0` RUN's DISARMED line stands, true there. Compose-side, as `_trust_audit` is — Q-EVAL-12, the flip's review. |
 
 What is deliberately **not** there, because writing it would be inventing a producer rather than
-naming one: a `logits_fn` (it must be *the path the run trained*, `eval/api.py:27-30`, which runs
-through `FAB.forward` and so needs the flush's own `novelty`, `live_domains` and `training`); an
-`improving` EMA pair (FAB already keeps one, and a second would be two mechanisms deciding the same
-question); an `owners` rule beyond the old tree's; a `plateau` boolean (WORLD holds that state).
+naming one: an `improving` EMA pair (FAB already keeps one, and a second would be two mechanisms
+deciding the same question); an `owners` rule beyond the old tree's; a `plateau` boolean (WORLD
+holds that state); and a scorer of the `(ctx, src)` arity `MEM.judge` and `EVAL.wrongness_probe`
+declare — the closures route on prefix bytes, which a stored entry does not have. *(A `logits_fn`
+headed this list until 2026-09-27, "it must be the path the run trained … and so needs the flush's
+own novelty, live_domains and training"; Q-EVAL-12 names what each of those became.)*
 
 ### 3.1 The stages
 
@@ -1217,10 +1468,10 @@ with a table of its own that no check can see is still an orphan.*
 | stage | when | what is in it |
 |---|---|---|
 | `E` | before the first window of an epoch, and again whenever `RunClock.advance` returns `Tick.rolled` | `DATA.draw_stream` → `TOK.tokenize` → `RunClock.begin_epoch`. The root also stamps `clock.opt_steps` here as the `shift_at` `OPT.maybe_step` consumes — a resample is a **self-inflicted** shift, and the old tree carried that fact in a closure variable (`:6518-6521`). **At the shipped default these rows never run — see below.** |
-| `A` | per WINDOW, above the accumulator | `Retention.consider`, `MEM.census` (before `DOM.manage`, whose `memory_counts`/`mem_floor_entries` had **no producer**), `DOM.manage`, `DOM.census` (supplying `live_sources` and `live_domains`), `FAB.manage`, `SIG.cadence_due` → `SIG.train_step` (before `encode`), `SIG.encode`, `DOM.observe`, `DOM.rekey` (after `observe`), `TOK.on_window`, `RunClock.advance`. `MEM.judge` and `WORLD.manage` **were here and are now deferred** (§3.6). |
-| `B` | per FLUSH | the flush body, plus `TOK.judge_probation`, event-driven on the `Due.probation` `TOK.on_window` already asked at `A`. `CAP.observe` and `FAB.contribution` **were here and are now deferred**. |
-| `C` | the CHECKPOINT FAN-OUT — an **event**, entered from `B` (periodic/SIGUSR1), `A` (a `BestAction`) and `R` (final) | the twelve `state_dict`/`state`/`vocab_state`/`stream_state`/`Retention.state`/`WORLD.geometry` calls that build the payload and the recorded manifest, then `TOK.save_vocabulary`, then `CKPT.save`. *(2026-09-26: the driver, `spine/loop.py::_save`, calls `CKPT.save` first and `TOK.save_vocabulary` only when it wrote, and since this date that order is load-bearing: the vocabulary's rotation with `ckpt.pt.prev` must not run for a checkpoint CKPT refused. The rows list the reverse order and are unchanged, since K6 checks reach, not order.)* |
-| `R` | once, after `Tick.finished` | `DOM.prior`, both censuses, every `counters()`, `Cadences.ledger()`, `RUN.bench_summary`, and the `reason="final"` save. `MEM.read` and `MEM.blend` **were here and are now deferred**. |
+| `A` | per WINDOW, above the accumulator | `MEM.census` (before `DOM.manage`, whose `memory_counts`/`mem_floor_entries` had **no producer**), `DOM.manage`, `DOM.census` (supplying `live_sources` and `live_domains`), `FAB.contribution` (since 2026-09-28, inside the `fab.manage` answer and before `FAB.manage`, behind its arm test `FAB_CONTRIB=1` — Q-FAB-19), `FAB.manage`, `SIG.cadence_due` → `SIG.train_step` (before `encode`), `SIG.encode`, `DOM.observe`, `DOM.rekey` (after `observe`), `TOK.on_window`, `RunClock.advance`. `MEM.judge` and `WORLD.manage` **were here and are now deferred** (§3.6). |
+| `B` | per FLUSH | the flush body, plus `TOK.judge_probation`, event-driven on the `Due.probation` `TOK.on_window` already asked at `A`. `CAP.observe` **was here and is now deferred**; so was `FAB.contribution`, until it got an `A` row on 2026-09-28 (Q-FAB-19). Since 2026-09-27, per WINDOW after the flush and the act: the retention probe's `EVAL.holdout_probe` → `EVAL.blowup` → `CKPT.Retention.consider`, behind its arm test (Q-EVAL-12) — and since 2026-09-28, before them, the source-reliability book's `DATA.claims_observe`, behind its own (`DATA_TRUST != 'off'`), on its cadence and on the window that rolls the epoch (Q-DATA-11). |
+| `C` | the CHECKPOINT FAN-OUT — an **event**, entered from `B` (periodic/SIGUSR1, and a `BestAction` since 2026-09-27, followed by `Retention.note_saved`) and `R` (final) | the twelve `state_dict`/`state`/`vocab_state`/`stream_state`/`Retention.state`/`WORLD.geometry` calls that build the payload and the recorded manifest, then `TOK.save_vocabulary`, then `CKPT.save`. *(2026-09-26: the driver, `spine/loop.py::_save`, calls `CKPT.save` first and `TOK.save_vocabulary` only when it wrote, and since this date that order is load-bearing: the vocabulary's rotation with `ckpt.pt.prev` must not run for a checkpoint CKPT refused. The rows list the reverse order and are unchanged, since K6 checks reach, not order.)* |
+| `R` | once, after `Tick.finished` | the retention probe's boundary reading (`EVAL.holdout_probe`, both closures, at the head), the source-reliability book's tail pass where a stop left consumed units unread (`DATA.claims_observe`, Q-DATA-11), `DOM.prior`, both censuses, every `counters()`, `Cadences.ledger()`, `RUN.bench_summary`, the `reason="final"` save, and `EVAL.generate` after it. `MEM.read` and `MEM.blend` **were rows here until 2026-08-30**; since 2026-09-27 they are reached through the memory-on closure the R probe row's note names (Q-MEM-10, amended). |
 
 **`Tick.rolled` and `Tick.finished`: the precedence, and the E stage on a one-epoch run.**
 `advance()` sets `rolled` when the stream is exhausted and the epoch increments, and `finished` when
@@ -1253,12 +1504,27 @@ Three independent reasons, any one of which is sufficient:
 `resume_source` → `load` (both before the first refusal, because six constructors already take
 `restored=`) → `DATA.restore_stream_state` (after `open_areas`, before `data_plan`) →
 `TOK.build_vocabulary` → `TOK.restore_vocab` → **`CKPT.check_geometry`** → everything else, with
-each remaining restore immediately after its own package's constructor.
+each remaining restore immediately after its own package's constructor. **The source-reliability
+book is put back by its constructor, `DATA.new_focus(restored=Snapshot.payload['DATA'].get('focus'))`,
+the `focus` row after `data_plan`** (2026-09-28, Q-DATA-11): 04 §5 moved `restore_stream_state` to
+take `focus=` and fill it in place, and that row runs before any `Plan` — so before the record it
+would fill — exists.
 
 **Where the gate sits is the load-bearing part.** `check_geometry` is the last row before
 `LM.build_model`, which is the **first allocation** in the whole assembly. The old gate at
 `:4413-4468` fired only after the tokenizer had resolved and the corpus had been pulled, so a
 `FAB_NMAX` change arrived as five tensor shapes naming no knob, on a warm GPU.
+
+**A continuing mid-epoch resume checks its stream before it replays the log (2026-09-27,
+Q-DATA-9).** At the `segment` stage — after the `stream` row redraws the resumed epoch, before
+`_replay_segmentation` cuts the parent's log over it — the root raises `RefusedRun` (a fourth stop,
+on this path only) on a hold-out admission (`data.holdout_admitted` > 0, naming
+`DATA_SYNTH_HOLDOUT=0` or an epoch-boundary resume) and on a redrawn stream whose digest
+(`_stream_digest`: the bytes and the segment table) differs from the one the log's first event
+recorded, naming the draw-shaping levers. A log written before the digest warns once and keeps the
+rebuilt-length check at the `epoch0` stage; the child's copy of the log then records its own stream.
+**A declared context widening is refused there first** (2026-09-28, Q-LM-15): the saved cursor and
+epoch length count windows of the parent's width, so a widening is an epoch-boundary operation.
 
 **`WORLD.load_into` is strictly before `OPT.build`.** `WORLD.manage` mints parameters mid-run
 through `add_param_group`, so a checkpoint taken after growth has more groups than a freshly built
@@ -1295,13 +1561,19 @@ Every periodic row names a period a package **declares**, evaluated through
 | `fab.manage` | `FAB.manage_period(fab)` ← `FAB.manage_every` | FAB |
 | `dom.rekey` | **`MEM.rekey_period(mem)`** ← `MEM.rekey_every` | MEM — delivered by the spine, with the `SIG.mode == "learned"` arm also evaluated here, because the old line made *two foreign reads in one line* (`:6688-6689`) |
 | `ckpt` | `CKPT.save_period(ck)` ← `CKPT.every` | CKPT |
+| `retention` | `EVAL.retention_period(ev)` ← `EVAL.retention_every` | EVAL — the retention probe, since 2026-09-27 (Q-EVAL-12); its arm test (a pinned `ProbeSet`) is asked first, so at 0 — the shipped value until 04-6.2's flip, 2026-09-29 — and wherever the probe pinned nothing the key reads `checks == 0`; at the shipped 1000 an armed probe's gate is asked every window and a shipped-default run (506-937 windows) reads fires 0, its reads the phase starts' and R's — which the audit's line for the key, **the root's** since the flip's review (`compose.py::_retention_audit`), says beside the periodic reading that cannot fire, where RUN's starved sentence called them never reached; a probe that pinned nothing is DISARMED there at any period |
+| `data.trust` | `DATA.trust_period(dat)` ← `DATA.trust_every` at `DATA_TRUST='observe'`, **0** at `'off'` | DATA — the source-reliability book, since 2026-09-28 (Q-DATA-11); its arm test (`DATA_TRUST != 'off'`) is asked first, so at `'off'` — the shipped value until 04-6.3's flip, 2026-09-29 — the key reads `checks == 0` at period 0, which the audit reports DISARMED — **in the root's line for the key** (`compose.py::_trust_audit`, Q-DATA-11's review), naming `DATA_TRUST='observe'` as the arm, where RUN's own advice, a period of 1 or more, arms nothing. At `'observe'` the book also passes on the window that rolls each epoch and at a stop's tail, so a period of 0, or one the run is too short for, is reported with those passes |
+| `progress` | `RUN.PROGRESS_WINDOWS`, a module constant written `units.Windows` | RUN — the progress/ETA line (Q-RUN-1); no lever and no row of its own |
 | MEM's probe/rekey | `MEM.probe_every`, `MEM.rekey_every`, compared inside `maintain` against a Windows `now` | MEM — **NOT ledger gates**, see below |
 
-**Five keys go through the ledger; three comparisons do not, and the document and the code must
-agree on the count.** The table above has six rows and `Cadences.ledger()` has five keys, because the
-last row is **two comparisons inside `MEM.maintain`** and a third, `SIG.cadence_due`, is a row of its
-own. None of the three is a ledger gate, and a gate that is not in the ledger has a **"0 fires"
-nobody can read** — so each names its own surface instead:
+**Eight keys go through the ledger; three comparisons do not, and the document and the code must
+agree on the count.** The table above has nine rows and `Cadences.ledger()` has eight keys, because
+the last row is **two comparisons inside `MEM.maintain`** and a third, `SIG.cadence_due`, is a row of
+its own. *(This said five keys and six rows until 2026-09-28: `progress` (Q-RUN-1, 2026-09-02) and
+`retention` (Q-EVAL-12, 2026-09-27) had joined the ledger without joining this table, and
+`data.trust` (Q-DATA-11) was added with the two.)* None of the three is a ledger gate, and a gate
+that is not in the ledger has a **"0 fires" nobody can read** — so each names its own surface
+instead:
 
 | comparison | why it cannot go through `Cadences.due` | the did-it-fire surface it uses instead |
 |---|---|---|
@@ -1312,10 +1584,14 @@ nobody can read** — so each names its own surface instead:
 `MEM.rekey_period`'s own docstring says this in as many words ("MEM.maintain compares this same lever
 against a Windows `now` internally; that is the second gate on one lever"). The rows now say it too,
 so a reader counting gates from the code and a reader counting them from this table get the same
-answer: **five ledger keys, three unledgered comparisons, each with a named counter.**
+answer: **eight ledger keys, three unledgered comparisons, each with a named counter.**
 
 **All five accessors now REFUSE a negative period, and the refusal is switchable — the owner's
-ruling of 2026-09-04, `.rework/DECISIONS.md` D17.** `EVAL.curve_period`, `DOM.manage_period`,
+ruling of 2026-09-04, `.rework/DECISIONS.md` D17.** *(Six since 2026-09-27: `EVAL.retention_period`
+refuses under EVAL's switch. The seventh accessor, `DATA.trust_period` (2026-09-28, Q-DATA-11),
+refuses nothing itself: `DATA_TRUST_EVERY` declares `domain=(0, None)`, so a negative is refused at
+the first read, by name, and a second refusal at the accessor would have nothing left to refuse —
+O15.)* `EVAL.curve_period`, `DOM.manage_period`,
 `FAB.manage_period`, `MEM.rekey_period` and `CKPT.save_period` each raise the spine's `LeverError` on
 a negative value of **their own** lever, naming the lever and the value, and each fires **before**
 the `units.Windows` is constructed, so nothing is derived from the bad number. **A period of 0 is
@@ -1350,8 +1626,9 @@ before any accessor is called — where it used to floor the value to `Flushes(1
 cadence in the system. FAB's own guard is unreachable through `assemble.build` because of it, and
 kept for the caller that builds a `Config` any other way, which is D4's rule and not an oversight.
 **What the ruling does NOT reach, said so this is not read as covering every cadence in the tree.**
-The sixth entry in `compose.py`'s `_periods` is `RUN.PROGRESS_WINDOWS`, a module constant rather than
-a lever, so no environment value can make it negative. Of the three **unledgered** comparisons in the
+The last entry in `compose.py`'s `_periods` is `RUN.PROGRESS_WINDOWS` (the sixth until 2026-09-27,
+the eighth since 2026-09-28), a module constant rather than a lever, so no environment value can make
+it negative. Of the three **unledgered** comparisons in the
 table above, MEM's probe and MEM's internal rekey read `probe_every` and `rekey_every` inside
 `MEM.maintain`, which is a stub — there is nothing to guard yet, and when P4 writes it the guard
 belongs at the first read of the lever under that package's own `REFUSE_NEGATIVE_PERIOD`, which is
@@ -1367,8 +1644,10 @@ under this key**; `WORLD.manage` rode `fab.manage`'s single answer **without its
 deferral records that when it returns it must either be written inside that answer, in the shape this
 block uses, or take a key of its own.)
 
-Everything else that fires is **event-driven and says so**: `Retention.consider` (a curve value
-arrived — which today it never can), `SIG.train_step` (`cadence_due` said yes),
+Everything else that fires is **event-driven and says so**: `Retention.consider` (a retention
+reading's control mean arrived, finite — which at `EVAL_RETENTION_EVERY=0`, the shipped value until
+04-6.2's flip on 2026-09-29, it never does, and at the shipped 1000 does at every phase start),
+`SIG.train_step` (`cadence_due` said yes),
 `TOK.judge_probation` (`Due.probation`), `DOM.on_retokenize` (the epoch roll's re-segmentation at a
 moved match table — Q-DOM-2), and the whole `C`
 stage (a save site). **`SIG.cadence_due` is the one periodic gate that cannot go through
@@ -1377,7 +1656,7 @@ stage (a save site). **`SIG.cadence_due` is the one periodic gate that cannot go
 did-it-fire surface the encoder's cadence has. That is stated in its row rather than left for a
 reader to discover from a missing ledger line.
 
-### 3.6 `DEFERRED_ENTRY_POINTS` — fifteen, and no longer only EVAL
+### 3.6 `DEFERRED_ENTRY_POINTS` — eighteen, and no longer only EVAL
 
 `{"PFX.entry": "the phase that will call it, and why it cannot be called now"}`. K6 reads it **both
 ways**: an entry no row names is accepted, and an entry a row **now** names is reported as *stale*
@@ -1388,38 +1667,54 @@ an argument with no producer — while seven rows elsewhere in the tables named 
 same gap. The `produces` column made every one of them decidable, and the seven added below are the
 rows where nothing among the entry points (§7 holds the count) supplies a required argument and no
 join in `compose.py` honestly can. **None is deferred for being late**, and none because a body is missing:
-the whole tree is stubs.
+the whole tree was stubs. **Since 2026-09-27 the retention probe (Q-EVAL-12) has closed five** —
+`EVAL.holdout_probe` and `EVAL.generate` have rows, `CKPT.Retention.consider` has its caller, and
+`MEM.read` and `MEM.blend` are reached through the memory-on closure — and turned two more
+(`EVAL.curve_probe`, `EVAL.coherence`) into **scope** deferrals, whose producers exist. **Since
+2026-09-28 `FAB.contribution` has left too** (Q-FAB-19): its row stood here for want of `candidates`,
+`targets` and a `baseline_logits_fn` that is the callable its `baseline_loss` came from, and it now
+has an `A` row inside the `fab.manage` answer — `candidates` defaults to the next `FAB_CONTRIB_MAX`
+past-grace experts off a cursor FAB keeps (so the root reaches into no `Population`), the batch is
+the probe's pinned control half and `targets` its own shifted ids, and the memory-off closure bound
+to that batch is both the baseline and the source of `baseline_loss`. **Later the same day
+`LM.parent_designation` joined it** (Q-LM-15): O17's designation refusal judges a CHECKPOINT, and
+its `saved_geometry` is a checkpoint's record that no row of a run produces — its caller is the
+unbuilt preset builder, and `tools/designate_parent.py` until then. The table below holds the ten
+deferred for an argument or a scope; the eight deferred for want of a CALLER (accessors and
+RUN.Timing's two) are listed in `spine/compose.py` with their reasons.
 
 | entry | phase | why there is no row |
 |---|---|---|
-| `EVAL.curve_probe` | P5 | **New.** Byte-identical signature to `holdout_probe` until `step` landed (**Q-EVAL-11**, 2026-09-04), same gap, and the same verdict. Nothing produces `units_by_domain` (Areas carries names/bodies/holdout/holdout_bytes/cursors, `DOM.census` returns sizes and radii, `Segmentation` carries ids/byte_pos/labels/bytes_per_token — there is no per-domain window supplier), and nothing produces `logits_fn`. **`step` is not part of the gap**: it is RUN's window counter off `RunClock`, which the root holds when the P5 row lands, and `K12` already counts it as produced. |
-| `EVAL.holdout_probe` | P5 | Needs `units_by_domain` drawn in **byte** coordinates from `Areas.holdout` together with a `logits_fn`, and the root has no join producing that pair. |
+| `EVAL.curve_probe` | P5 | **A SCOPE DEFERRAL SINCE 2026-09-27.** Every argument has a producer now — `units_by_domain` from the retention probe's pinned `ProbeSet`, `logits_fn` the memory-off closure, `step` `RunClock.step`, `rng` an `eval` child (Q-EVAL-12) — and it is not built because no row of the register's §8 builds it: a learning curve at `EVAL_CURVE_EVERY` on unpinned windows would be a second instrument answering the retention probe's question. *(Until then: byte-identical signature to `holdout_probe` until `step` landed, Q-EVAL-11, and the same gap — nothing produced `units_by_domain` or `logits_fn`.)* |
 | `EVAL.null_excess` | P5 | **Reason corrected.** It said `real` and `permute` come from "the verdict machinery, which is P6's" — but `EVAL.verdicts` takes `domain_sizes`, `silhouettes`, `affiliation`, `coherence_reading` and is this function's **consumer**, not its producer. `real` is the measured statistic under test and `permute` the label-permuting redraw of it, so the candidates are the silhouette and affiliation statistics — which have **no producer in the tree**, the very gap `verdicts` is deferred for — and nothing returns a permutation callable. **Neither exists.** |
-| `EVAL.generate` | P6 | `prompts_by_domain` has **no producer** among the entry points (§7 holds the count); `logits_fn` is the same missing join. |
-| `EVAL.coherence` | P6 | **Reason corrected, and the parameter is gone.** It said "nothing in the tree returns a `Sample`" — `EVAL.generate` does. Two arguments have no producer and both are named: `logits_fn`, and `units_by_domain`, the same per-domain supplier `curve_probe` and `holdout_probe` wait on. `encode` is **not** a gap — `_sig_encode_fn` already forms it for `DOM.rekey`. The `sample` parameter was resolved away on 2026-09-02: **Q-EVAL-10**. |
+| `EVAL.coherence` | P6 | **A SCOPE DEFERRAL SINCE 2026-09-27.** Its arguments all have producers — `logits_fn` and `units_by_domain` as `curve_probe`'s, `encode` `_sig_encode_fn`'s callable (the one `DOM.rekey` takes), `rng` an `eval` child — and no row of the register's §8 builds it. The `sample` parameter was resolved away on 2026-09-02: **Q-EVAL-10**. |
 | `EVAL.verdicts` | P6 | Three of four arguments — `silhouettes`, `affiliation`, `coherence_reading` — have no producer; the fourth, `domain_sizes`, comes from `DOM.census`, which stage `R` already collects. |
 | `EVAL.wrongness_probe` | P6 | Takes a **copy** of the store so the instrument cannot edit what it measures; MEM's surface produces no copy, and adding one is a signature change. Its `scorer` is the same missing logits callable as `MEM.judge`'s **and takes the same arity, `scorer(ctx, src) -> logits`** (Q-MEM-8/Q-MEM-10, 2026-09-02). |
 | `EVAL.verification_fit` | P6 | Same missing copy; its inner loop is genuine `units.Steps` and must never be compared against `curve_every`. **`verify_mode` landed 2026-09-04 (Q-EVAL-11) and is not part of the gap**: it is `MEM.verify`, a frozen lever the root holds, passed the way `vocab_slots=LM.vocab_slots` and `lm_kind=LM.arch` already are into `MEM.open_store`. `K12` computes "produced" from the order tables' prose and a deferred entry point has no row, so **until `compose.DEFERRED_ENTRY_POINTS` names it, K12 reads `verify_mode` as a second gap** — the residue is one clause and it is recorded below in §5. |
-| `MEM.read` | P5 | **New.** Nothing produces `queries`. The deleted `R` row named none of them, and the probe contexts it would key on are the same held-out material `holdout_probe`'s `units_by_domain` needs — one missing join, and deferring only one of the two was the inconsistency. **Deferred as a ROW, reached in-package:** Q-MEM-9 (RESOLVED (a)) makes `MEM.maintain`'s job 1 *this call*, with `queries` maintain encoded itself. K6 is satisfied by the absence of a row, not the absence of a call, so this deferral is current and not stale. |
-| `MEM.blend` | P5 | **New.** `retrieval` comes from `MEM.read`; `model_probs` are **probabilities** while every scoring hook takes a `logits_fn` (Q-MEM-10, RESOLVED (a) 2026-09-02: the join is a composition-root closure, `_logits_fn(sysm, *, use_memory)`, and **no signature moves on either side** — but the `logits_fn` still has no producer, so this deferral stands) — which the deleted row's own prose conceded while being written anyway. `model_probs` is also the first positional after the Config, which K10 drops as "the package's own live object" — it is not (MEM's is `store`), so the check is structurally blind here and the deferral is the only record. |
-| `MEM.judge` | P4/P5 | **New.** `scorer(ctx, src) -> logits` is needed by the **default** arm (`MEM.verify` defaults to `selfcon`) and must be *the same forward path training used* (M47). That callable does not exist, and scoring a **stored** ctx needs a signature — the domain id is `Store.src`, so only the *declared shape* was missing, and it is now two arguments (Q-MEM-8). **Q-MEM-8 is RESOLVED and names the row to write when the scorer lands:** at the END of the `dom.manage` block, inside that block's single `Cadences.due` answer. Because `scorer` carries a default, **no check can see it**: a row calling `judge(mem, store)` passes everything and yields `n_checked = 0` forever, which `memory/api.py:350-352` itself names as the inert state. |
-| `FAB.contribution` | P4 | **New.** `candidates` is the eligible past-grace set, which lives in `Population`'s books — no entry point exports it and O10 forbids the root reaching into `pop`. `baseline_logits_fn` is the same missing callable as EVAL's, and it is load-bearing rather than convenient: the whole C3/H11 repair is that the baseline must come from **the same callable** that produced `baseline_loss`. |
+| `MEM.judge` | P4/P5 | `scorer(ctx, src) -> logits` is needed by the **default** arm (`MEM.verify` defaults to `selfcon`) and must be *the same forward path training used* (M47). **Since 2026-09-27 that path exists as a closure, and its ARITY is the gap:** `_logits_fn` is `fn(x, *, prefix_bytes)` and routes on the bytes before the window (Q-EVAL-12), while a **stored** entry has no prefix bytes and carries `Store.src` — so the declared shape is two arguments (Q-MEM-8), and a scorer that routes on a stored id is a second routing rule nobody has ruled on. **Q-MEM-8 is RESOLVED and names the row to write when the scorer lands:** at the END of the `dom.manage` block, inside that block's single `Cadences.due` answer. Because `scorer` carries a default, **no check can see it**: a row calling `judge(mem, store)` passes everything and yields `n_checked = 0` forever, which `memory/api.py:350-352` itself names as the inert state. |
 | `CAP.observe` | P4 | **New.** `improving` = `(slow - fast)/|slow|` off the growth controller's EMAs, which live **inside FAB** and are on no returned record; `observations` is the valve-evaluation count tied to a hardcoded 0.998 EMA rate the caller cannot see. The root must **not** maintain a second EMA pair over the same loss to manufacture them — two mechanisms deciding independently whether the run has stalled is the recorded defect where the valve fired hardest exactly when the run was degrading worst. `blackout`'s home is now half-built: **Q-FAB-6** gave `FAB.grow_check` the `shift_at` stamp and put the resulting blackout state on `GrowReport`, so CAP neither reads FAB's `cooldown` at the call site nor has to mint a blackout-window lever it has no census row for; what is still missing is the root join and the two EMAs. |
 | `WORLD.manage` | P4 | **New.** `plateau` contradicts the package's own `state_dict`, which says the plateau state `(_wl_ema, _wl_lastgrow)` **moves inside this package** and travels in the checkpoint — if the state is inside, the boolean is computed inside, and both sentences cannot hold. `add_param_group` needs OPT to name one of its two AdamW instances (**Q-OPT-7**). `latent` is real but arrives **backwards** (`loss_terms` is a `B` row, this pass was `A`). |
+| `LM.parent_designation` | the continue preset (O17) | **New, 2026-09-28 (Q-LM-15).** `saved_geometry` is `payload['LM']['geometry']` of a checkpoint on disk, which the ASSEMBLY rows read only for the checkpoint this run resumes — and a run never designates its own parent. Its producer is outside the run by design: the continue preset's builder, not built, and `tools/designate_parent.py` until it is, which reads the checkpoint through `CKPT.load` and exits non-zero on the refusal having written nothing. |
 
 **A later phase is not by itself a reason to defer.** Each reason above is about an **argument with
 no producer**, which is the only kind that survives the backwards check.
 
-**What the seven new deferrals cost, said plainly**, because a deferral that hides its cost is the
+**What the deferrals cost, said plainly**, because a deferral that hides its cost is the
 shape it replaces: the run has no capacity valve (nothing lifts a cap, so `CAP.caps` returns the
 starting ceilings and every block reason reads *unreachable*), no WORLD growth, no learning-curve
-probe — and therefore **no best-model save** (`Retention.counters().inert_reason` must report "no
-curve value has ever arrived") and **no restart damping** (`OPT.maybe_step`'s `best_bpb` has no
-producer, so `opt.restart.damped` is unreachable, not zero) — no per-expert contribution and so no
-informed spare rule, and no memory retrieval or wrongness sweep (so `evict="lru"` and `evict="usage"`
-stay write-order FIFO and probation can never promote). **All of that was already inert**: the rows
-named calls whose arguments nothing supplies. The deferral does not remove a mechanism, it stops the
-tables claiming one, and it names the producer each is waiting on.
+probe at `EVAL_CURVE_EVERY`, and no wrongness sweep. *(It listed "no per-expert contribution and so
+no informed spare rule" until 2026-09-28: `FAB.contribution` has a body and a row since (Q-FAB-19),
+built OFF, so at the shipped `FAB_CONTRIB=0` nothing is measured, `FAB.manage` reads no contribution
+(Q-FAB-19's review) and the spare rule is still uninformed. This paragraph also listed no best-model
+save, no restart damping and no memory retrieval until 2026-09-27: the retention probe (Q-EVAL-12)
+supplies the first and the reading the second judges on, and the memory-on closure is the report
+path's retrieval — built OFF, so at `EVAL_RETENTION_EVERY=0` (the shipped value until 04-6.2's flip
+on 2026-09-29) `Retention.counters().inert_reason` still reports "no curve value has ever arrived";
+at the shipped 1000 the phase-start reads feed it, and `OPT_DAMP_SOURCE='off'` keeps the damping
+unjudged. The in-package read probe reached `MEM.read`
+from 2026-09-21, Q-MEM-9.)* **All of that was already inert**: the rows named calls whose arguments
+nothing supplies. The deferral does not remove a mechanism, it stops the tables claiming one, and it
+names the producer each is waiting on.
 
 ### 3.7 What could NOT be placed, and is therefore reported rather than rowed
 
@@ -1492,14 +1787,18 @@ tables claiming one, and it names the producer each is waiting on.
 ### 3.8 What writing the column found in the root itself
 
 Six defects in `spine/compose.py` that the column exposed and that are repaired here. None of them
-is a signature change, and none is reached by the stub-only `compose(environ={})` above: it halts on
-the **29th** of the 40 rows in `ASSEMBLY_ORDER`, at `CAP.startup_refusals`, and the rows carrying
-these six either sit past that point or are on the resume path an empty environment never takes.
-That is the shape this file's own header calls *"a defect hidden behind an earlier stub, this
-project's oldest"*. *(This paragraph said `RUN.process_setup` "raises several rows earlier" until
-2026-09-04. It was true when written and had not been for some time — `RUN.process_setup` is the
-first row and has had a body since **D12**. The shape is unchanged; only the name of the stub these
-defects hide behind has moved.)*
+is a signature change, and none was reached by the stub-only `compose(environ={})` of their day: it
+halted at `CAP.startup_refusals`, and the rows carrying these six either sat past that point or are
+on the resume path an empty environment never takes. That is the shape this file's own header calls
+*"a defect hidden behind an earlier stub, this project's oldest"*. *(This paragraph said
+`RUN.process_setup` "raises several rows earlier" until 2026-09-04. It was true when written and had
+not been for some time — `RUN.process_setup` is the first row and has had a body since **D12**. The
+shape is unchanged; only the name of the stub these defects hide behind has moved. And until
+2026-09-27 (Q-EVAL-12's review) it said "halts on the **29th** of the 41 rows in `ASSEMBLY_ORDER`":
+nothing halts it now — `compose(environ={})` returns a System at stage `'assembled'` (measured
+2026-09-27) — and `CAP.startup_refusals` is the **31st** (the 30th until the `focus` row,
+2026-09-28). The six sit past a stub no longer; the resume path is still one an empty environment
+never takes.)*
 
 1. **`new_cadences` was called with no `periods`.** `new_cadences(run: Config, *, periods)` is
    keyword-only with no default, the ASSEMBLY row describes the five-key mapping in detail, and the
@@ -1511,7 +1810,7 @@ defects hide behind has moved.)*
    `System.warnings`; an **empty** list is a real result and must be printed as one.
 3. **`_run_windows` returned a bare `int`** into two functions that refuse one:
    `derive.cadences_that_cannot_fire` and `derive.opt_steps_from_windows` both raise `UnitError` on
-   a non-`Windows` (ISSUES P1-H51: all 36 Clock-unit levers resolve to bare ints and the typing is real
+   a non-`Windows` (ISSUES P1-H51: all 38 Clock-unit levers resolve to bare ints and the typing is real
    only where `derive` puts it back). It now returns `units.Windows`.
 4. **`_run_windows`' row said `run_windows=Plan's measured length`.** `Plan` has no such field
    (`data/api.py:22`) — the same wrong fact the helper's own docstring had already caught once, in
@@ -1551,7 +1850,20 @@ five, and "ten" was arithmetic over both errors.
 **The direction rule, which is what kept being confused.** In the LIVE manifest and absent from the
 RECORDING is a **REFUSAL** — *"A MISSING FIELD IS A REFUSAL, NOT A SKIP … the comparison is driven
 off the manifest's KEY SET rather than off truthiness."* **UNCHECKED** is the other direction:
-recorded and absent from the manifest, which is where WORLD's grown `n` sits.
+recorded and absent from the manifest, which is where WORLD's grown `n` sits. **That rule is why the
+position scheme is not a manifest field** (2026-09-28, Q-LM-15): a field the live manifest adds and
+every older recording lacks refuses every existing checkpoint, so `LM_POS` travels in LM's own
+payload (`LMGeometry.pos`) and `LM.load_state` refuses a change by name.
+
+**One rule is conditional (2026-09-28, Q-LM-15).** `lm.ctx` and `lm.pos_max` are EXACT at the
+shipped `LM_CTX_WIDEN=0` — NEW-13's "`lm.ctx` stays EXACT" — and MAY_WIDEN at 1, the declared
+widening: a larger `LM_CTX` passes, a smaller one is refused, and `lm.pos_max` takes `lm.ctx`'s rule
+because it is the local wire from it (it printed the environment name `LM_POS_MAX`, which nothing
+reads, and prints `LM_CTX (LM.d_pos_max)` now, the name `LM.load_state` already used). The rule
+applied is the live run's; the recording's own rule is carried and never read. The root binds the
+`GeometryReport` for one field, `lm.ctx` — whether it is in `widened`, and its recorded value, which
+is SIG's context wherever the checkpoint's `LOOP` carries no `sig_ctx` (Q-LM-15's review) — and
+nothing else in it.
 
 **The one quantity that genuinely needs a live object is `world.n`.** `WORLD.geometry(world, w)` is
 the only `geometry()` in the tree and is correctly placed on the **save** side, where a built world
@@ -1662,7 +1974,7 @@ been fixed is a real outcome and acting on it writes a second wrong sentence. **
 The union of the five `levers_unconsumed` lists was **15**. Thirteen of them were EVAL's, and all
 thirteen were given a declared reader by writing the P6 instrument signatures into
 `src/eval/api.py`. **The last two were FAB's, and as of 2026-09-02 this table is EMPTY: every one of
-the 268 declared levers is named `LEVERS READ:` by a stub.** Neither of the two was dropped, and
+the 298 declared levers is named `LEVERS READ:` by a stub.** Neither of the two was dropped, and
 neither was given a fake reader; each was ruled, and the ruling is what produced the reader.
 
 | lever | env name | why it has no reader | disposition |
@@ -1878,11 +2190,15 @@ proposed here. A P4 implementer following the CAP contract writes
 with `int(held) >= cap.pin_windows` as the only form that runs — which `capacity/levers.py:107` names
 as *"the original defect again"*. A reviewer found it by reading both surfaces; nothing executed,
 because `compose()` **then** stopped at `RUN.process_setup`, long before the valve. *(That is no
-longer where it stops, and this sentence said it was until 2026-09-04: `compose(environ={})` now
-halts on the 29th of the 40 rows in `ASSEMBLY_ORDER`, at `CAP.startup_refusals`, which is **past**
-`CAP.new_valve` — so the valve is built on every `compose()` today and both its Gates are readable
-without writing a line. The reading that found this one still had to be done by hand; what has
-changed is that the next one of its kind need not be.)*
+longer where it stops, and this sentence said it was until 2026-09-04: `compose(environ={})` then
+halted at `CAP.startup_refusals`, which is **past** `CAP.new_valve`. It halts nowhere now, and this
+sentence said "now halts on the 29th of the 41 rows" until Q-EVAL-12's review: it returns a System
+at stage `'assembled'` (measured 2026-09-27), and `CAP.startup_refusals` is the 31st row (the 30th until
+the `focus` row, 2026-09-28). Either
+way the valve is built on every `compose()` today and all three of its Gates — `cap.valve`,
+`cap.vocab_arm_honest`, `cap.clamp`; "both" here until the same review, one Gate behind
+`capacity/api.py` — are readable without writing a line. The reading that found this one still had
+to be done by hand; what has changed is that the next one of its kind need not be.)*
 
 **Which side was wrong is not a preference.** `spine/units.py` defines `Steps` as *"Optimizer steps.
 What the LR schedule's horizon is denominated in, **and nothing else**"* and `Windows` as *"Stream
@@ -2098,7 +2414,9 @@ derives `data.stream.e0` itself, so **`RNG_SUBSYSTEMS` does not change**. The ke
 lowercased with every character outside `[a-z0-9_]` replaced by `_`, and a key collision is the same
 startup refusal as the label collision in Q-DATA-4 — which is precisely the objection `rng.py` raises
 against normalising a name, answered at startup instead of papered over. **Whoever rules Q-EVAL-9
-should know this half is now done.**
+should know this half is now done.** *(2026-09-27, Q-DATA-9: the normalisation is
+`spine/derive.py::stream_key`, which `data/api.py::_holdout_key` delegates to, so SR0's probe keys
+its EVAL draw by the same rule without importing DATA.)*
 
 **Two additions, both counters rather than levers.** `data.holdout_seam` — removing a *middle* block
 leaves exactly one manufactured discontinuity per area in a body `seg_contig=True` reads in order,
@@ -2626,7 +2944,11 @@ it**, because *eligible* **is** *past-grace* (rule 3 of `manage`); the honest an
 lowers `merge_dist`, which is what that lever is for); the Adam moments on `A[a], B[a]` go stale
 after an in-place write, as they already do for `rescue`; and the *better* gate — output-space
 redundancy from `FAB.contribution` — is unavailable because that entry point is deferred for want of
-`candidates` and `baseline_logits_fn`. If it is ever un-deferred, revisit this.
+`candidates` and `baseline_logits_fn`. If it is ever un-deferred, revisit this. *(Revisited
+2026-09-28, when it was — Q-FAB-19, built OFF: at `FAB_FADED_CULL='contrib'` a faded-area absorbee
+merges only on a measured contribution at or below 0. Gating EVERY merge on it is not ruled: a pass
+measures `FAB_CONTRIB_MAX` experts, so at the owner's pool most absorbees would be unmeasured, and
+the residual stays the second gate.)*
 
 **2026-09-27 (register LOW-FAB-MERGED-REPORT, Proposal 05 §8 1.6): one merge gate per scope.**
 `fabric/api.py::_three_state` renders a gate's count from the ledger key of the gate's own name, and
@@ -2828,7 +3150,7 @@ prints rather than a claim in a docstring.
 **What it does NOT need, and this is why nothing was minted.** No typed accessor and therefore **no
 new entry point**. The **five** accessors — `EVAL.curve_period`, `DOM.manage_period`,
 `FAB.manage_period`, `MEM.rekey_period`, `CKPT.save_period` — exist because `Config` hands back a
-bare `int` for all 36 Clock-unit *levers* (ISSUES P1-H51, three of five gates handed bare ints until
+bare `int` for all 38 Clock-unit *levers* (ISSUES P1-H51, three of five gates handed bare ints until
 2026-08-30); a module constant has no `Config` to drop its kind, so it is written `units.Windows` at
 its definition. That is a **construction, not a conversion** — it re-attaches a kind, it does not
 cross one. *(This sentence said "four" until 2026-09-03. It is the sixth count this document has got
@@ -2836,8 +3158,9 @@ wrong, and the one K13 cannot catch: **`four` is a word, and the check reads dig
 in K13's own docstring as the worked example of what it does not see.)*
 
 **And this gate has no row**: rows are entry-point calls and no entry point prints the progress line
-— the loop driver does, the way it owns the window cut `_window_bounds` names. So six keys, five of
-them rowed, and that asymmetry is stated at `_periods`, at `new_cadences` and in the `cadence` row.
+— the loop driver does, the way it owns the window cut `_window_bounds` names. So eight keys since
+2026-09-28 (`'data.trust'`, Q-DATA-11; seven from 2026-09-27, `'retention'`, Q-EVAL-12), seven of them
+rowed, and that asymmetry is stated at `_periods`, at `new_cadences` and in the `cadence` row.
 
 **⚠ THE ASYMMETRY IS NO LONGER ONLY STATED — K9 WAS WIDENED TO READ THE MAPPING (2026-09-03).** This
 section said *"`K9` reads the order tables only"*, and that was true and was the defect: the sixth
@@ -3131,8 +3454,9 @@ load-bearing here: a P4 author who believes the docstring goes looking for eight
 **Why the root is the right owner, positively.** It already owns three named cross-package
 arithmetics with exactly this justification — `_signature_width` and `_alphabet_size` (*"the
 assembly's own arithmetic over two packages' frozen Configs, which is exactly what the root is
-for"*) and `_periods` (*"a mapping spanning six packages is exactly the object O10 forbids any one
-of them to build"*). The manifest is the same object and belongs in the same place.
+for"*) and `_periods` (*"a mapping spanning seven packages is exactly the object O10 forbids any one
+of them to build"* — six until `'data.trust'` brought DATA in, 2026-09-28). The manifest is the same
+object and belongs in the same place.
 
 **`WORLD.geometry` is NOT dropped, and (c) must not be read as dropping it.** It is the only
 `geometry()` in the tree and it is correctly placed: it is the only producer of a field that needs a
@@ -3459,7 +3783,9 @@ the arithmetic — one named clamp, not an argument against the option.
    the deliverable**, not an inconvenience. **`FAB.contribution`'s `baseline_logits_fn` must always
    be the memory-off closure** — `fabric/api.py` makes it load-bearing that the baseline comes from
    the same callable that produced `baseline_loss`, and a memory-on baseline there silently undoes
-   the C3/H11 repair.
+   the C3/H11 repair. *(Since 2026-09-28 it is: `_logits_fn(sysm, use_memory=False,
+   book='eval.contrib')` bound to the probe's control batch, which also produces `baseline_loss`
+   through `LM.lm_loss` — Q-FAB-19.)*
 3. **The rule is rewritten, not stretched.** ONE LOGITS PATH now reads: *one closure per scored
    system, formed in the composition root, passed in, never constructed here; the reading names which
    closure produced it.* A docstring edit in `src/eval/api.py`; **no `def` line changes**.
@@ -3483,6 +3809,19 @@ rng)` → `coherence(ev, *, logits_fn, units_by_domain, encode, rng)` — one pa
 **two**, under a different name — and Q-EVAL-10's own section below **refuses** `seed_units` by
 name, because the per-domain keys are load-bearing and `seed_units` would throw the labels away. Two statements in one document naming two different signatures for one entry point is
 the C12 shape; the ruling wins, and this sentence now points at it instead of restating it.)*
+
+**AMENDED 2026-09-27 (Q-EVAL-12, Q-MEM-15): THE HELPER IS WRITTEN, THE RESIDUAL IS RESOLVED, AND
+BLEND IS CREDITED THROUGH A ROW.** `_logits_fn(sysm, *, use_memory)` exists beside `_key_fn` /
+`_head` / `_sig_encode_fn`, and the four data the residual paragraph above named are ruled in
+Q-EVAL-12: `signature` off the pinned prefix before the window, `domain_id` from `DOM.nearest`,
+`live_domains` the count the next training window will use, and **`novelty` as zeros, named** —
+still the one datum with no honest source off the training path, now said at the call rather than
+left open. The sentence that `blend` "is called from that spine helper and never from a row"
+changes in one respect: the helper is still the only caller, and `MEM.encode_queries(...)`,
+`MEM.read(promote=False, ...)` and `MEM.blend(...)` are written as calls in the note of the `R`
+`EVAL.holdout_probe` row, which is how K6 credits an entry point reached inside another row's
+reading. And `read(promote=False)` counts nothing now (Q-MEM-15), where this ruling's text had it
+counting the read.
 
 **Literature bore, narrowly.** kNN-LM (Khandelwal et al., ICLR 2020) interpolates **in probability
 space** — `p = (1-λ)·p_LM + λ·p_kNN` — and reports the perplexity of that mixture, i.e. it takes the
@@ -3723,7 +4062,9 @@ model, PAR, MPS and NCPU. `EXP=world_epoch` is the WORLD re-run's shape (registe
 whole WINDOWS x 189-byte epoch with the window cap out of reach, "RAN OUT OF STREAM" replaced by a
 window-cap flag, and `TOK_RETOK_EVERY` and `DATA_DRAW` pinned; it refuses to launch before SR0.
 `EXP=world`'s analysis of this fleet's archive is byte-identical to the script's before the change
-(`tests/test_gpu_world.py` F11).
+(`tests/test_gpu_world.py` F11). *(Since 2026-09-29, Q-DATA-9's dated note: SR0 is built, so
+`EXP=world_epoch` also pins `DATA_SYNTH_HOLDOUT=1` and `EVAL_RETENTION_EVERY=700` and writes each
+run's reading series, and its refusal now waits on O13's two WORLD levers, the fifth arm's.)*
 
 **`WORLD_FEEDBACK` stayed `True` pending the GPU experiment in `sweep_world.sh`** (history, as written before the run) (5 seeds per arm,
 paired by seed, mean of loss_curve differences over the last half; flip the default if the gain is
@@ -5451,10 +5792,11 @@ fresh 10-window `CKPT_DIR=''` run, 1 and 1 on every package's pair). **Ruling:**
 key. OPT's build seed is removed, and `CAP.counters` prints the twin only once the ledger holds it.
 `spine/loop.py::_save` builds the payload only where `System.saving` is True; `CKPT.save` is still
 called and still counts `refused_off`. `spine/loop.py::_report` renders the armed state over one table,
-`_SAVE_COUNTS` (the ten rows). With saving on, each row's lineage count and twin read 0 when nothing is
-counted yet. With saving off nothing is added, and every twin is ABSENT. The root renders it because
-only the root holds both facts: it records `saving_on`, and it is the only caller of the state_dicts.
-That is the shape of `part.n_retok_events`, which the root seeds, and of TOK's rotation rows, which it
+`_SAVE_COUNTS` (the ten rows; eleven since Q-DATA-9, 2026-09-27, which gave DATA's pair an R row).
+With saving on, each row's lineage count and twin read 0 when nothing is counted yet. With saving off
+nothing is added, and every twin is ABSENT. The root renders it because only the root holds both
+facts: it records `saving_on`, and it is the only caller of the state_dicts. That is the shape of
+`part.n_retok_events`, which the root seeds, and of TOK's rotation rows, which it
 re-reads (Q-TOK-13's 1.1 correction). A `CKPT.dir` wire was not taken: it needs one wire per receiving
 package, eight or nine, and the budget has six left (19 of 25 spent). Nor was a build or restore
 argument taken: that is a frozen-signature move in eight packages for a report twin. **The twin,
@@ -6113,6 +6455,272 @@ shape the unit decides spares, which the default shape never let it do. That is 
 counters fire, and the arms separate where the spare is consulted. It says nothing about which arm
 manages domains better. The end losses (1.947 ON, 2.039 OFF) are one seed on CPU.
 
+### Q-DATA-9 — the synthetic source's held-out block, its one resume admission, and the stream a continuing resume replays — **RESOLVED 2026-09-27 (Proposal 05 §8 3.1; register 04-Q5; Proposal 04 §1 item 7 and SR0): `DATA_SYNTH_HOLDOUT`, BUILT `False` — 04-Q5 RULES IT ON, AND THE FLIP LANDS LAST AND ALONE; ONE RESUME ADMISSION, COUNTED PER AREA; A CONTINUING MID-EPOCH RESUME REFUSED ACROSS IT AND ACROSS A REDRAWN STREAM (A DIGEST IN `seg_log`); `Areas.parent_names`; `derive.stream_key`; DATA's ROWS AT R. ⚠ ONE NEW LEVER, A CENSUS AMENDMENT. NO SIGNATURE MOVES, NO WIRE. ⚠ FLIPPED ON 2026-09-29, LAST AND ALONE: DEFAULT BEHAVIOUR CHANGE 1, WITH 04-Q5's PIN RULE BUILT**
+**What was asked.** The synthetic source held nothing out (`open_areas` set `n_hold = 0` on it), so
+no held-out number could be read on the shipped default source: not SR0's retention probe, not E1's
+primary reading, not the focusbed readings goal B is decided on. 04-Q5 rules `DATA_SYNTH_HOLDOUT`
+ON, built at SR0 under the real sources' law, with the one resume admission (key None, size 0 → n,
+counted as `data.holdout_admitted`), and names the pin rule for fleets that pair with earlier runs.
+Proposal 04 rejected the judge's variant (held-out text drawn from a separate child, bodies left
+whole) as a second holdout law whose block is a continuation drawn after the body, not a sample of
+it.
+
+**The ruling, as built.**
+* **The lever and the law.** `DATA_SYNTH_HOLDOUT` (U.FLAG, `src/data/levers.py` §4 beside
+  `holdout_frac`; a census amendment, the tenth: the old generator had no switch). At `True`,
+  `open_areas` runs the real sources' carve on each generated body **verbatim**: min(int(body ×
+  `DATA_HOLDOUT_FRAC`), `DATA_VAL_CAP`) bytes, the start from `rng_for("data.holdout.<key>", seed)`
+  (one child per area, keyed by name, Q-DATA-6), the block removed from the body, its seam gate and
+  overlap reading, the val-cap tally, and the 0-byte refusal, whose message on this source also names
+  `DATA_SYNTH_HOLDOUT`. `data.holdout_block` and `data.val_cap_trip` take the real arm. At the
+  shipped stream a synthetic area is generated at 60,000 bytes and holds out 3,000, training on a
+  57,000-byte body (the generator sizes each area at twice what the sampler needs, so the floor is
+  never near). At `False` the synthetic branch runs the statements it ran before, in order, and mints
+  no `data.holdout.<key>` child; its OFF record keeps key None, offset 0, size 0, seam None, and its
+  `why` reads *"DATA_SYNTH_HOLDOUT=0 holds nothing out on this source"* (it read *"source=synthetic
+  holds nothing out"*, which the lever made untrue); the two gates read UNREACHABLE naming
+  `DATA_SYNTH_HOLDOUT=0`. On a real source the lever is inert.
+* **Built OFF, ruled ON.** At ON every synthetic body is a block shorter, so every default run's
+  stream changes and no run before the change pairs with one after it. The flip is therefore its own
+  commit, last, after SR0's bit-identity (§8 3.1), with 04-Q5's pins for the fleets that pair with
+  earlier runs.
+* **The one admission** (`restore_stream_state`). A record of key None **and** size 0 against a
+  block now **on the synthetic source** is admitted: all three fields move, and no across-the-boundary
+  number is broken, because the parent had no block for one to read. **Synthetic only, which is
+  narrower than 04-Q5's words and is its move:** only a synthetic run at 0 writes that record (a real
+  area's empty block is refused in `open_areas`), so the same record against a *real* block is a change
+  of source under the same area names. Taken literally, the admission would have let that through;
+  driven at ae70638 it is refused (a two-area synthetic parent resumed at `DATA_SOURCE=real` names
+  the moved offset), and it still is. **The unit is the area**: each admitted area counts one in
+  `data.holdout_admitted` and is named in `data.holdout_admitted_names`, so a four-area parent admits
+  4 and SR0's written "`data.holdout_admitted` 1" is the single-area case. Both keys are ABSENT on a
+  fresh run and read 0 and `[]` on a resume at `DATA_SOURCE=synthetic` `DATA_SYNTH_HOLDOUT=1`, the
+  one arm the admission can fire on, and ABSENT on every other (corrected 2026-09-27, below: they
+  read 0 and `[]` on every resume). **The parent trained on
+  every byte of an admitted block**, so it is text the lineage has seen, not a clean held-out sample:
+  the root prints that in one warning naming the areas, before the first window (the Q-DOM-1
+  precedent; DATA prints nothing). **The read cursor is mapped, not copied**, because it indexed the
+  whole body: below the block it stays, past it it moves down by the block's size, inside it (text
+  now held out) it moves to the block's offset, the first byte after the block in the carved body,
+  reduced mod the carved length as `draw_stream` stores it (`data/api.py::_carved_cursor`). All of
+  that holds only where this run generates the parent's text for the area, which the admission
+  now checks first: the same position and the same length (corrected 2026-09-27, below). **The
+  reverse is refused naming both settings that write a block**, `DATA_SYNTH_HOLDOUT=1` and
+  `DATA_SOURCE=real` (corrected 2026-09-27, below: it named the first alone): a block in the record
+  and none now would train on the text the parent held out. Every other move of a recorded block is
+  refused as before.
+* **`Areas.parent_names`** (a list field, default empty, filled in place by the restore): the
+  record's area names, in its order. It is the one place a later build can ask which areas a parent
+  trained on; §8 3.1's probe and §8 3.3's parent rehearsal are the builds that will read it, and
+  nothing reads it yet.
+* **`data.holdout_overlap` survives the restore.** It is a reading of this run's blocks, which
+  `open_areas` computed a moment before, and the restore copied the parent's over it: an admitted
+  child read *"no block to measure"* beside its block, and an add-an-area child lost the new area's
+  reading. Driven at ae70638, a real-source parent over `eng` and a child over `eng,py`
+  (`DATA_CORPUS_CAP=200000`): the child's own `{'eng': 0.0741, 'py': 0.1142}` became `{'eng':
+  0.0741}` at the restore. The skip list gains it, with the admission pair. `data.area_added`,
+  whose docstring promised "0 on an ordinary resume", is now seeded 0 there; it was ABSENT, and the
+  new report row made the difference visible.
+* **A continuing mid-epoch resume checks its stream before replaying the log** (`spine/compose.py`,
+  the `segment` stage; §3.3). (a) An admission there is refused by name, `RefusedRun` naming
+  `DATA_SYNTH_HOLDOUT=0` or an epoch-boundary resume, because an admitted body is a block shorter and
+  the redraw is not the stream the parent was reading. (b) Otherwise the redrawn stream's digest is
+  compared with the one the log's first event recorded, and a mismatch is refused naming the
+  draw-shaping levers with this run's values (and, on a real source, the corpus on disk). (c) A log
+  written before the digest warns once and keeps the rebuilt-length check at the `epoch0` stage, and
+  the child's copy of the log records its own stream. Both refusals raise at the `segment` stage, a
+  fourth stop on this path only
+  (Q-RUN-13's three are unchanged): neither needs the model, and the replay would cut the parent's
+  log over other text. **The digest** (`_stream_digest`) is blake2b over `Stream.bytes`, then per
+  segment its start (8 bytes, little-endian), its area label and a separator, then the stream's
+  length. `Stream.labels` is one label per byte and constant within a segment, so the segment table
+  covers bytes and labels exactly at O(segments) cost. `_seg_event(vocab, kind, at=None,
+  stream=None)` writes it as the `stream` key of the epoch's first event, at compose's fresh log and
+  at stage E's roll; a splice carries none. It is a dict key in `LOOP.seg_log`: no draw and no
+  counter.
+* **`derive.stream_key(label)`** is the one normalisation of an area label into an rng key
+  (lowercased, every character outside `[a-z0-9_]` → `_`). `data/api.py::_holdout_key` delegates to
+  it, and SR0's probe keys its pinned draw per area and half by the same function (the register's
+  C11 halves are EVAL's, drawn from each block, and are §8 3.1's probe build, not this one). DATA
+  and EVAL may not import each other, so a second copy would be two answers to "which stream is this
+  area's".
+* **DATA's rows at R.** `spine/loop.py::_report` prints `DATA(areas.counters)`,
+  `DATA(areas.gates)` (through `spine/gate.py::three_state`), `DATA(plan.counters)` and
+  `DATA(stream.counters)` beside the older `DATA(stream.gates)`, read off the records as MEM's and
+  TOK's are. `_SAVE_COUNTS` gains DATA's pair, so `data.state_written` and its twin print (k + j, j)
+  under the build 1.6 rule, and Q-CKPT-4's table has eleven rows. Until these rows, "PRINTED" in
+  DATA's own DID IT FIRE lines (`data.area_added`, the overlap reading) had nothing behind it.
+
+**What the default changes.** No training number. At `DATA_SYNTH_HOLDOUT=0` the synthetic branch runs
+the statements it ran before and draws nothing new; the digest is computed off the drawn stream and
+changes no draw; the restore's skip changes one reading, equal to the recorded one for a carried
+area; and the new refusals fire only where the tree before this ruling trained on bytes other than
+the parent's or died unnamed at the rebuilt-length check. `tests/test_baseline.py`'s six workloads
+reproduce their fixtures. The report gains four rows, and their integer counters are listed as new,
+never compared: every leg lists `data.segment`, `data.phase_resolved` and `data.phase_name_resolved`;
+a leg with saving on adds the `data.state_written` pair; a resumed child adds the restore's own,
+`data.state_restored` and `data.area_added` (and listed `data.holdout_admitted` too until the
+correction below, which leaves it ABSENT on the shipped arm).
+
+**Recorded, not repaired: a continuing mid-epoch resume at `DATA_SEG_CONTIG=1` cannot continue.**
+`draw_stream` advances each area's cursor for the whole epoch when it draws it, so the checkpointed
+cursors are the ones after the parent's draw, and the child's redraw of that epoch starts past the
+parent's segments. Driven at ae70638 (tests/test_continuation.py's base at `DATA_SEG_CONTIG=1`, saved
+at window 60): the child died at the rebuilt-length check, 317 windows against 316, naming no lever.
+The digest now refuses it at the `segment` stage, and the message says the refusal is expected with
+every lever unchanged at `DATA_SEG_CONTIG=1`. A boundary resume is unaffected. The repair (the
+epoch-start cursors in the log) is a change to the log's format and is left to the owner.
+
+**What CPU establishes:** operation only. `tests/test_holdout.py` (new): H1, at 0 the synthetic
+bodies are the generated text whole with no `data.holdout.<key>` child, the OFF record compares as
+before, and on a real source the carve equals the law recomputed from disk for three areas, a slash
+entry among them, with the lever inert there; H2, at 1 each shipped area holds out 3,000 of 60,000
+bytes at the offset `rng_for('data.holdout.<key>', seed).randint(0, 57000)` draws (seed 0: eng
+41591, py 39908, num 37668, c 53336; seed 1 differs in all four), adding a fifth area at the same
+per-area size moves no block (and at the shipped `DATA_STREAM_BYTES` moves every one: corrected
+below), the val cap binds, and `DATA_HOLDOUT_FRAC=0.0` is refused naming all
+three levers; H3, the admission per area (4, and 1 for a single-area parent, through compose from a
+finished parent too), the cursor map (hand-computed, and on the cursors a `DATA_SEG_CONTIG=1` parent
+saved), `Areas.parent_names`, the warning, the R row and the overlap; H4, the reverse, a doctored
+offset and a synthetic parent resumed at `DATA_SOURCE=real` refused; H5, the continuing refusals (0 → 1 with and without a digest, `DATA_SEG_MAX` 1800 →
+1700), one segment's label changing the digest, an exact continuation that reads the admission pair
+0 (ABSENT since the correction below), and a digest-stripped log that warns once and continues exactly, all again at epoch 1, where stage
+E wrote the log; H6, `tests/test_continuation.py`'s `plain` and `mint_then_act` shapes continue
+exactly at 1; H7, `derive.stream_key` is `_holdout_key`. `tests/test_continuation.py` S10 reads
+eleven rows. Whether a held-out reading on these blocks measures anything is §8 3.1's probe and the
+GPU readings after it.
+
+**CORRECTED 2026-09-27 (§8 3.1's review) — a synthetic block rides on a generated body, so its
+refusals say what it rides on; the admission holds only on the parent's text; the record carries
+each block's digest; the admission pair is ABSENT where it cannot fire; the reverse names both
+writers; and the restore declares what it reads.** (i) *A synthetic block moves with the body it is
+carved from.* `_synthetic_areas` generates every area at max(`DATA_SEG_MAX` + 1, 5000,
+`DATA_STREAM_BYTES` // `DATA_N_PROCESSES`) × 2 bytes (now `data/api.py::_synthetic_length`, the one
+formula), and at `DATA_SYNTH_HOLDOUT=1` the carve's size is a fraction of that length and its offset
+is drawn over it, so the three levers move every area's block together. Driven at 2d201d0: a fifth
+area at `DATA_STREAM_BYTES` 120000, Q-DATA-4's add-an-area run with only the area and
+`DATA_N_PROCESSES` changed, took each body from 60,000 bytes to 48,000 and each block from 3,000 to
+2,400 (eng: offset 41591, size 3000 → 41591, 2400), and the resume was refused naming only the size;
+one area to two was refused naming only the offset (166367 → 83183), and `DATA_STREAM_BYTES` 120000
+→ 160000 at four areas the same (41591 → 66805). The ruling said a fifth area "at the same per-area
+size moves no block", which is true and was all H2 built (at 150,000 bytes, scaled by hand), while
+the restore's docstring said adding an area could not move another's block, on either source.
+**Ruling:** the law stays the real sources' verbatim. A carve independent of the generated length
+would be a second law, sized by a length that is not the body's: from `DATA_SEG_MAX` and the floor
+alone, max(1801, 5000) × 2 = 10,000 bytes at the shipped values, it holds out 500 bytes per area
+where C11 splits the shipped 3,000 into two halves of 1,500, and any larger length is a literal no
+lever declares. On this arm the refusal says what the block rides on: this run's length with the
+three levers' values,
+the parent's recorded length (`bytes_taken`), the `DATA_STREAM_BYTES` that gives it back where one
+does (150000 for a fifth area), and `DATA_SOURCE=real`, which records the same fields. The
+docstring's claim is scoped to the real sources. **Along a lineage at 1 the generated length is
+fixed:** an add-an-area resume raises `DATA_STREAM_BYTES` with `DATA_N_PROCESSES`. (ii) *And it
+holds the text the area's position picks.* Found while ruling (i): the generator takes each area's
+alphabet by position, `_ALPHABETS[i % 5]` (the old `make_proc`'s `ALPHA[s % len(ALPHA)]`), and
+`_synthetic_areas`' docstring said inserting an entry no longer moved every later area's text,
+which only its per-child draws made true. Driven at 2d201d0: `eng,rust,py,num,c` at 150,000 over a
+parent at `eng,py,num,c` was admitted with py's, num's and c's blocks other bytes under the parent's
+offset, size and key, and `py,eng,num,c` the same for eng and py: across-the-boundary numbers over
+two texts, admitted in silence. A carried area whose alphabet moved is now refused at 1 naming
+`DATA_AREAS`: the parent's areas keep their positions and new ones are appended. The alphabet stays
+positional, because keyed by name it would move the shipped four areas' text, which every synthetic
+run pairs with. (Three of the five alphabets hold 15 symbols and two hold 14; the comments said
+five of 15.) (iii) *The admission's premise.* Its warning says each admitted body is the parent's a
+block shorter and that the parent trained on the block, and the cursor map assumes the same text;
+none of it holds at another length or with the alphabet moved. Driven at 2d201d0: a child at
+`DATA_STREAM_BYTES` 400000 was admitted with all four blocks past the parent's 60,000 bytes (eng at
+166367), and a reordered child with eng's and py's blocks cut from other text. The admission is now
+refused unless this run generates the parent's text for the area, at the same position and the same
+length as the record's `bytes_taken`. The refusal names what moved, with `DATA_SYNTH_HOLDOUT=0` as
+the resume that continues as before. (iv) *The block's digest.* A real block and a synthetic one of
+the same length draw the same offset from one keyed stream over one range. Driven at 2d201d0: a real
+parent over eng (`DATA_CORPUS_CAP=200000`: offset 166367, size 10000) resumed on the synthetic source
+at 1 and `DATA_STREAM_BYTES` 400000 was admitted, as an add-an-area run over py, num and c, with
+English held out in the checkpoint and generated text held out now. Offset, size and key say where a
+block sits, and the refusal's own reason is about what it holds. `stream_state` now records each
+block's blake2b (`_block_digest`: 16 bytes, `person` `data.holdout`), and the restore compares it after
+the fields and the position, refusing a text that moved under agreeing fields and naming both
+sources. A record without it, written before this correction, is compared on the three fields, as
+it was. It also refuses what no field could see: a real corpus changed on disk under an unchanged
+cap, or a synthetic generator changed between the two runs. The cost is one hash over at most
+`DATA_VAL_CAP` bytes per area per save. (v) *DID IT FIRE.* `data.holdout_admitted` and its names were
+seeded on every resume, so the shipped arm and every real-source resume printed "armed, did not
+fire" for an admission that cannot run there: at 0 no synthetic block exists, and a real one is
+never admitted. They are now seeded only at `DATA_SOURCE=synthetic` `DATA_SYNTH_HOLDOUT=1` and are
+ABSENT elsewhere (the Q-FAB-8 precedent: `fab.ind_applied` is seeded only on the arm that can reach
+it). `tests/test_baseline.py`'s B3r and B6r children no longer list `data.holdout_admitted` as new;
+`data.area_added`, armed on every arm, still reads 0. (vi) *The reverse refusal* named
+`DATA_SYNTH_HOLDOUT=1` as "the setting that wrote the block", but a real parent resumed at the shipped
+source takes the same branch. Driven at 2d201d0, following that advice was refused again (offset
+166367 → 41591), and the resume that works, `DATA_SOURCE=real`, was never named. The record cannot
+say which source wrote a block, so the message names both. (vii) *LEVERS READ.* `restore_stream_state`
+declared none and read `source` and `synth_holdout`. It now declares those two and the three that
+size a synthetic body, which its refusals print. **No default moves.** On the shipped arm the restore
+compares two equal empty-block digests and seeds one key pair fewer, and no training number changes:
+`tests/test_baseline.py`'s six workloads reproduce their fixtures. **What CPU establishes:** operation
+only. H2: the add-an-area run as ruled, refused at 120,000 naming the three levers, both lengths and
+150000, admitted appended at 150,000 with no block moved, and refused inserted and reordered naming
+`DATA_AREAS`. H3: the pair on each of the four arms, and the admission refused at 400,000 and
+reordered, admitted appending a fifth area at the parent's length. H4: the reverse naming both
+writers; a real parent at the shipped source refused and restored at `DATA_SOURCE=real`; the digest
+refusing that parent at 400,000, and a real corpus with one byte changed inside its block on disk (a
+byte changed in the training body restores); a digest-stripped record compared as before; a
+doctored digest refused. H5: the pair ABSENT on the shipped continuation. H8 (new): every DATA stub's `LEVERS READ:`
+names exactly the levers its body reads, through the helpers it hands `dat` to.
+
+**THE FLIP, 2026-09-29 (register 04-Q5; §8 3.1's owed flip, in b1d31b7, last and alone
+with 04-6.2's and 04-6.3's, Q-EVAL-12's and Q-DATA-11's dated notes) — `DATA_SYNTH_HOLDOUT` SHIPS
+`True`: DEFAULT BEHAVIOUR CHANGE 1.** The lever's help says so, and `docs/05_DEFAULTS.md` no longer
+lists it among the levers that ship False. (i) *What moves.* Every synthetic-source stream: each
+generated body is a block shorter (3,000 of 60,000 bytes at the shipped four areas), so the drawn bytes,
+the segmentation and every loss a default run trains, from its first flush on, differ from the tree before.
+B6's epoch 0 still holds 104 windows (13,369 ids against 13,417). On a real source nothing moves:
+`tests/test_baseline.py`'s B5u, the real source unpinned against the record made before the flip,
+reproduces its 200 losses and every counter outside P1's exempt set (Q-EVAL-12). At the default the two
+gates take the real arm, `data.holdout_block` firing 4 of 4, and a resume seeds the admission pair. (ii)
+*An older checkpoint.* A synthetic checkpoint written at 0 is admitted at an epoch-boundary resume,
+counted per area, and a continuing mid-epoch resume of it is refused by name — the retok fleet's kept k0
+copies are that shape. `tests/test_holdout.py` H9 drives one: k0's periodic save at window 41, written
+under the three pins below with its log's digest stripped, is refused at the `segment` stage at the new
+defaults and continues exactly under the pins, warning once. (iii) *04-Q5's pin rule, as built.* The
+pins are `DATA_SYNTH_HOLDOUT=0 EVAL_RETENTION_EVERY=0 DATA_TRUST=off`, the three flipped levers at the
+values that restore the tree before them; `DATA_DRAW='planned'` joins them "if that flips", and it has
+not. `gpu_world.sh`'s EXP=retok sets them on every run it launches — smoke, fleet and rerun — and on its
+block's resume line, each only where the tree declares its lever (read off `src/` at launch, as the
+Levels label is, so a checkout from before a flip gets no name the typo net prints UNREAD for), and
+SUMMARY.txt and the block print them (`tests/test_gpu_world.py` F27; F18 before the Stage 3 merge). The
+WORLD re-run is not such a fleet: EXP=world_epoch pins `DATA_SYNTH_HOLDOUT=1` and
+`EVAL_RETENTION_EVERY=700` (04-6.2's cap for its shape, written as a number: the script's
+`PROBE_EVERY`), writes each run's reading series (`run.py --probe-series`), and its guard now waits only
+on O13's two WORLD levers for its five arms (F9). A fleet started on an earlier commit is not pulled
+mid-fleet. *(The Stage 3 merge, 2026-09-29: onto the fleet layer, the pins are read off the fleet's own
+code copy, as the Levels label is, and its runs carry them on `$OUT/code/run.py`; `PIN_RETOK` is the
+shipped 1000, under which 700 still fits the cap, 701-721 at k1000 in the 2026-09-27 fleet. A fleet that
+recorded no pin — one launched before the flip, as the 2026-09-27 retok fleet was — had the three
+features off, so its block's resume line carries the pins the analysing checkout declares, and a row in
+ANALYSIS.txt says whose they are: its kept copies then continue on a flipped checkout as they ran.
+`results/gpu_retok_2026-09-27/CHECKPOINTS.md` says so for that fleet's tars; F27, F7.)* (iv) *The
+baseline net.* The six records made before Stage 3 — B1's at d32e2ce, the rest at ae70638 — moved
+unchanged to `*_pre_sr0.json` and are held to this tree as B1p-B6rp under the three pins, which run and
+are never recorded or compared: every one reproduces, B3rp continuing B3p exactly and B6rp's parent
+stopping at B6p's boundary — "the pinned tree is the previous tree", as a test. `--record` refuses those
+six and B5u. B1-B6r were re-recorded at the commit that flips them (the record names it "the commit
+after 444ecca": a record made on uncommitted `src/` or `run.py` is its own commit's), and each equals
+444ecca's tree run with the three levers set explicitly, on every loss and every integer counter;
+unpinned B3r continues B3 exactly and B6r's parent stops at B6's boundary. *(At the Stage 3 merge,
+2026-09-29, all thirteen reproduced as recorded on the merged tree, whose shipped `TOK_RETOK_EVERY` is
+1000 where each record was made at 3000: no workload at the default cadence reaches window 1000 (B3 and
+B3r set 150), so none was re-recorded; and `rm-predict-DC`'s tree before the merge, b444456, reproduced
+the six pre-SR0 records unpinned.)* (v) *The suites.* One whose known answers were drawn on the stream
+before the flip, or which holds per-flush equalities the probe's reads would move, pins the three:
+`tests/test_draw.py` (D1's digests at c872121), `tests/test_continuation.py` (its save windows and S10's
+save counts), `tests/test_world.py`'s W2 loops and `tests/test_position.py`'s Q7 (494936d, the tree
+before `LM_POS`, is the tree before the flips too, and its mid-epoch checkpoint is written at 0). The
+suites of the three levers themselves name the arm each check reads — `tests/test_holdout.py` 0 unless a
+check sets 1, `tests/test_probe.py` the probe and the block off unless set, `tests/test_trust.py` 'off'
+unless set — and read the shipped value by assembling without the lever (H2, P1, T7). **What CPU
+establishes:** operation only.
+
 ### Q-RUN-11 — a resume drew epoch 0's stream whatever epoch it resumed in — **RESOLVED 2026-09-24: THE `stream` ROW DRAWS `Snapshot.epoch`**
 The `stream` row passed `epoch=0` unconditionally. Driven at `RUN_EPOCHS=2 DATA_RESAMPLE=1`: the
 parent's epoch-1 draw hashed `65cd298845`; its child, resumed at epoch 1, drew `cfacafbe13` (epoch
@@ -6224,7 +6832,9 @@ that is still failing; what it does not intend is a baseline under every selecte
 tree's own `failing(e, comp_glob)` (self_organize.py:2189-2194, fed `asm.comp_glob` at :6718); at
 window 1001 above (comp_glob 3.660) the same pass culls 3 of 13. `comp_glob` None (nothing attributed
 yet) means no failure cull. The additive `fail_tol` is unchanged. (2) the failure path also spares
-`contrib > 0`, the old tree's rule (inert while `FAB.contribution` is deferred). (3) the
+`contrib > 0`, the old tree's rule (inert while `FAB.contribution` is deferred; since 2026-09-28 it
+has a body, built OFF, and the spare can fire at `FAB_CONTRIB=1` and only there — Q-FAB-19 and its
+review). (3) the
 **`comp_protect` spare compared `comp > comp_glob`**; comp is a LOSS, so it spared the worse experts
 (at window 1001 it would have spared the six at comp 3.72-8.12 and left the seven at 3.38-3.61 to the
 cull). It is `<` now, as the lever's help and the old tree's :2271 say. (4) `fabric.cull_eligible`,
@@ -6472,6 +7082,9 @@ before a refused run stops). **Two declared-and-not-built arms** composed with 0
 naming the lever before allocating — the owning package, the `FAB_HOP_MODE=transition` precedent
 (Q-FAB-1), and run.py already prints `NotBuilt` as `REFUSED:` with exit 2. **Rejected:** a string on
 `System.refusals` written by the root (the root would be re-deriving a package's arm).
+*(2026-09-27, Q-DATA-9: a continuing mid-epoch resume has a fourth stop, at the `segment` stage,
+before the log's replay — a hold-out admission and a redrawn stream that is not the parent's are
+refused there, since neither needs the model. The three above are unchanged.)*
 
 ### Q-RUN-14 — a non-finite loss stepped the optimizer and nothing stopped a non-finite checkpoint — **RESOLVED 2026-09-24: THE LOOP STOPS BEFORE THE STEP; `CKPT.save` SCANS THE PAYLOAD; THE LAST FINITE STATE IS KEPT. NOT A DIVERGENCE ALARM**
 Driven before: one flush with a nan loss stepped AdamW on nan gradients, **8 of 8** LM tensors went
@@ -6533,6 +7146,2001 @@ on existing rulings:** gate `fab.on` at `FAB_ON=0` (ruled a switch read false, `
 `fab.lr_own` at `FAB_LR_OWN=False` ("an ARMED arm that chose not to scale", `own_lr_scale`) and
 `fab.growth_armed` at `FAB_GROW=0`, whose `grow_check` family is seeded on that arm the same way.
 
+### Q-EVAL-12 — the retention probe: what it reads, through which closure, at which routing clock, and who consumes its readings — **RESOLVED 2026-09-27 (Proposal 04 SR0 and NEW-03; register §8 3.1/3.2): BUILT OFF AT `EVAL_RETENTION_EVERY=0`. TWO NEW LEVERS, BOTH CENSUS AMENDMENTS; `EVAL.holdout_probe` MOVES; `EVAL.pin_holdout`, `EVAL.retention_period` AND `EVAL.blowup` ARE NEW; `_logits_fn`'s TWO CLOSURES ARE WRITTEN. NO WIRE. ⚠ FLIPPED TO 1000 WITH PHASE-START READS ON 2026-09-29, LAST AND ALONE: DEFAULT BEHAVIOUR CHANGE 2**
+**What was asked.** Goal B is decided on held-out readings taken *during* training, and the tree
+had none: `EVAL.holdout_probe` was deferred for want of `units_by_domain` and a `logits_fn`, so
+`CKPT.Retention.consider` never heard a value, `OPT.maybe_step`'s `best_bpb` had no producer, the
+blow-up alarm had no series and `EVAL.generate` had no prompts. Proposal 04's SR0 fills
+`holdout_probe` as the retention probe and ships it ON only after a test proves it is telemetry;
+NEW-03 binds the closures, generation, the consumers and the blow-up Reading to the same commit.
+
+**The ruling, as built.**
+* **The levers.** `EVAL_RETENTION_EVERY` (`U.Windows`, built **0**: the whole subsystem off — no
+  `ProbeSet`, no stream, no reading, no consumer input, no generation; 04-6.2's 1000 plus
+  phase-start reads flips in its own commit) and `EVAL_RETENTION_N` (6 per arrived area, split 3 + 3,
+  domain `(1, None)`). `EVAL_HOLDOUT_WINDOWS` (32) is now the BOUNDARY reading's size. A negative
+  `EVAL_RETENTION_EVERY` is refused by `EVAL.retention_period` under this package's
+  `REFUSE_NEGATIVE_PERIOD`; `_periods` carries it as `'retention'`, the seventh gate.
+* **The pinned windows (`EVAL.pin_holdout`, the `probe` ASSEMBLY row after SIG's restore row).**
+  Each area's held-out block (`Areas.holdout`) splits at its **midpoint** into **control** (first
+  half) and **report** (second half). Each (area, half) draws its window starts once, sequentially
+  and without repeats, from `rng_for("eval.holdout.<derive.stream_key(area)>.<half>", seed)`, in
+  `[prefix_bytes, half_len - window_bytes]` — so a window **and its routing prefix** stay inside one
+  half and neither half reads the other's text. A half draws the larger of its share of
+  `EVAL_RETENTION_N` and of `EVAL_HOLDOUT_WINDOWS` (the odd one to control); both readings take the
+  **first n**, so the cadence items are a prefix of the boundary items and the two are paired too. A
+  short half records `shortfall`; a half that cannot hold one window behind its prefix draws nothing
+  and mints no stream, an area neither of whose halves can is left out of `items`, and where no half
+  anywhere can the `ProbeSet` is empty, its reason naming the geometry, the halves and
+  `DATA_HOLDOUT_FRAC` / `DATA_VAL_CAP` — the probe unarmed (the review, below). **Geometry:**
+  `window_bytes = LM.ctx + 1` — a window of ctx+1 bytes tokenizes to at most ctx+1 ids, so its
+  inputs fit the model's context at any vocabulary — and `prefix_bytes` = the SIG width. Both are
+  recorded in `LOOP.eval`, so a resume re-pins its parent's windows even where its own geometry
+  moved.
+* **Who is read.** The arrived set: the areas live in every phase this run has entered, plus, on a
+  resume, the parent's arrived set from `LOOP.eval` — or, for a parent that armed no probe (one
+  before the probe, or one run with it off, whose `LOOP.eval` is at most the geometry and the
+  book's counts it inherited — the review, below), `Areas.parent_names`, **assumed** and said so
+  in a warning, and on a continuing resume the areas of the phase the parent's last window fell in.
+  An area whose phase has not begun is left out (`eval.holdout.areas_unarrived`, a gauge); its
+  reading would be of text the run never trained on. Each row carries `seen_by_parent`.
+* **The closures (`spine/compose.py::_logits_fn(sysm, *, use_memory)`, Q-MEM-10's ruling carried
+  out).** **Convention: `fn(x, *, prefix_bytes) -> (B, L, V)`**, x the token ids and
+  `prefix_bytes` the bytes before each row's first byte. The path is the flush's: `SIG.encode` on
+  the width_units units ending at the window's first byte (left-padded like `_sample_window`'s
+  opening windows; under `SIG_SPACE='tokens'` the byte prefix is cut at the view and yields fewer
+  tokens than width_units, so that arm's signature is more padded than a training window's — a
+  known approximation on an arm the tree does not ship), then **`DOM.nearest`** (Q-DOM-6: the id
+  `DOM.observe` would assign, with nothing written; **-1** where it would spawn, which bans exactly
+  what a newborn id would, counted `eval.holdout.domain_spawn`), then under `Process.autocast`
+  `LM.embed`, `WORLD.forecast`, `LM.encode(extra=)`, `FAB.forward(training=False)` with the head
+  (wrapped to count decodes), `targets=None`, **novelty ZEROS** (named: the one datum with no honest
+  source off the training path — a held-out window has no previous flush), `System.live_domains` —
+  and **`step_windows = clock.step + 1`**. Then the vote's logits, or `LM.decode` of the routed hidden.
+  All under `no_grad`, every module put in eval mode and each submodule's own mode restored.
+  `use_memory=True` adds `softmax → MEM.encode_queries → MEM.read(promote=False) → MEM.blend → log`
+  with the `(B*L, key_dim)` reshape; each reading names its closure (`memory-off`, `memory-on`). At
+  `MEM_BLEND_MAX=0` `MEM.blend` hands back the model's distribution itself and the memory-on closure
+  returns the memory-off logits unchanged — not their log-softmax, whose rounding would part the two
+  closures' generations at a boundary draw.
+* **Why `clock.step + 1` (the routing clock).** FAB's identity cache hands a pass at the SAME step
+  the keys the training pass computed **before** the optimizer stepped. At `clock.step` an in-run
+  reading therefore routed on stale keys while a resumed child, whose cache is empty, computed fresh
+  ones — so a start reading could never equal the uninterrupted run's reading at the same weights.
+  At `+1` the keys are recomputed at `FAB_EMB_EVERY=1` (shipped) and are the next window's cached
+  ones at larger values; nothing else `FAB.forward` reads from the step moves on an eval pass
+  (`_ae_rows`, spawn and the learn guard are learn-gated; the anneals are aux-loss only).
+* **The view.** `tokenize_fn` is `TOK.tokenize` at the view the stream was **last cut** at
+  (`seg_log`'s last event), `labels=None`, `regularize=False` — no draw, no cache, counted
+  `tok.segment_remap` and booked `eval.holdout.cuts`. The live table would score a window in a
+  segmentation the run never trained on.
+* **When it reads.** At B, after the flush and the act and before the checkpoint gate: the **arm
+  test first** (a pinned `ProbeSet`), then `Cadences.due('retention', ...)`, plus a **phase-start
+  read** at the first window of every phase k ≥ 0 of every epoch (the window's first byte against
+  `Stream.phase_bounds`, against the (epoch, phase) `LOOP.eval` last read — or, on a continuing
+  resume whose parent recorded none, the phase of the parent's last window, so only a real phase
+  change reads: the review, below) — one memory-off reading of `EVAL_RETENTION_N` per arrived
+  area. **Boundary readings** — `EVAL_HOLDOUT_WINDOWS` per area, both closures — happen at **R**
+  (inside the guard that saves when R raises) and at a **resume's start**, and nowhere else. The
+  start reading uses the **parent's** last-cut view and live-domain count from `LOOP.eval`, so at
+  the same weights it equals the parent's final R reading (**like for like**); a later reading's
+  difference is what this process changed. Boundary readings are
+  reported, **never consumed**. A continuing resume reproduces every memory-off reading the
+  uninterrupted run takes; its later memory-on readings do not, because MEM's rows depart after any
+  continuing resume (`memory/api.py::maintain` retakes its rekey snapshot rather than checkpointing
+  it — recorded in `tests/_state_digest.py` before the probe existed, not repaired here).
+* **Who consumes, and what.** Consumers read the **control mean** of a cadence or phase reading,
+  as `Reading(value, seed_count=1, at=step)`, and only when finite (the rest are not forwarded:
+  `eval.holdout.nonfinite` counts those where a control window scored non-finite,
+  `eval.holdout.empty` those whose control half scored no window at all):
+  `CKPT.Retention.consider` (its `BestAction` saved on the spot, `_carry()` first, then
+  `Retention.note_saved` — Q-CKPT-6), `EVAL.blowup` (reports only), and
+  `System.probe_reading`, the next flush's `best_bpb` (Q-OPT-13). The report half feeds nothing.
+  **The all-area mean drifts with the arrived set, and only the alarm corrects for it.** An arriving
+  area's held-out text is text the run has barely trained on, so the mean steps up at each arrival;
+  the blow-up series re-arms there (below), while `Retention.consider` keeps judging every reading
+  against the best so far, so on a phased run the `.best` checkpoint stays at a pre-arrival reading
+  — driven in `tests/test_probe.py` P6: best at window 41 of 200, `num` arriving at 80 and no later
+  reading beating it. Recorded, not repaired: the plan's R7 sends the gates NEW-04 builds to the
+  per-area rows.
+* **`EVAL.blowup`.** blowup_test.py's call-site rule over each area's control series and an
+  all-area series that **re-arms at every arrival** (the mean steps up when an area arrives, so the
+  stale-80 rule would otherwise fire ~80 readings after it on a healthy run); its horizon is
+  `derive.blowup_horizon` — `blowup_stale`'s own `stale` default read off its signature, times the
+  period through `derive.windows_for_readings` — because O11 refuses that arithmetic elsewhere.
+* **Generation.** `EVAL.generate` after the **final save**, through both closures, on report-half
+  prompts cut at the last-cut view, drawing by inverse CDF from `rng_for('eval.generate', seed)`,
+  minted **once per System** at the `probe` stage (a second `loop.run` would otherwise raise
+  `RngError`). **The closure owns generation's window and prefix**: handed more than `LM.ctx` tokens
+  it keeps the last `LM.ctx` and appends the dropped ids' bytes (`TOK.Vocabulary.decode`) to the
+  prefix, because EVAL can read neither. Each `Sample` row records the prompt window's bytes as
+  `prompt` — the text the model continued — and the routing prefix before it as `prefix` (the
+  review, below). **Generation's closures are capped at the live vocabulary**
+  (`live_vocab = TOK.Vocabulary.size()`, every id at or above it set to `-inf` after the whole path):
+  at the shipped `LM_MASK_DEAD_ROWS=0` a never-minted row keeps some mass, and one drawn has no bytes
+  — driven, a 30-window run's generation drew one and `decode` raised after the final save, taking
+  the report with it. The frozen tree's `vlim` ("never sample untrained ids"). Readings never pass
+  it: they are scored on the distribution the run trains on.
+* **The books.** `System.eval_books`: `eval.holdout.{calls, cadence_reads, phase_reads,
+  boundary_reads, resume_reads, windows, cuts, forwards, decodes, sig_calls, areas_unarrived,
+  shortfall, nonfinite, empty, domain_spawn}`, `eval.mem.{reads, key_encodes, empty, blends}` (one
+  read, one blend per memory-on pass; `key_encodes` counts the query **rows** those reads encoded,
+  `B·L` each, not calls), `eval.blowup.fired` (and `since_best`, a gauge) — **ABSENT** unarmed,
+  **PRESENT-and-0** armed;
+  `eval.holdout.seconds` and `eval.mem.blend_weight_sum` are floats outside the integer channel and
+  the seconds are never checkpointed; `eval.generate.{samples, tokens}` ABSENT at `EVAL_GENERATE=0`
+  or with no `ProbeSet`. Generation's own closure passes are counted there and **only** there — one
+  forward per generated token per closure — and the rest of the book is put back as R read it,
+  because the package rows were read at R, before generation, and the accounting below pairs the
+  two. (A second `run()` over one System — a test's shape; `run.py` makes one call per process, and a
+  checkpoint is written before generation — therefore reads the first call's generation passes in
+  the package rows and not in the book.) The root seeds `fab.eval_passes` when armed (Q-FAB-17). The gated-call
+  report reads `eval.holdout.calls` and `eval.generate.samples`.
+* **THE SIGNATURE MOVE, AND ONE DEPARTURE FROM THE PLAN THAT WROTE IT.**
+  `holdout_probe(ev, *, units_by_domain, logits_fn, tokenize_fn, step, boundary=False,
+  previous=None)`. `rng` left (the draw is `pin_holdout`'s, made once); `tokenize_fn` arrived because
+  EVAL may not import TOK. **`step` is the departure**: the plan's signature had none, and the
+  Readings it returns carry `at` — the window, which EVAL owns no clock to know. It is the Q-EVAL-11
+  precedent exactly (`curve_probe` gained `step` for `CurveReading.step`).
+* **THE EXACT-ACCOUNTING AMENDMENT OF `docs/proposals/04_SELF_REGULATION.md:1396-1397`.** That line
+  asks for "every counter but `eval.*` and `tok.segment_remap`" equal with the probe on and off. The
+  closures run the flush's entry points, and those count their calls, so the honest statement is
+  exact rather than empty: **losses, parameters, optimizer state and every counter are equal, except
+  the probe's own book and a named set each of which moves by exactly the book's own count** —
+  `tok.segment_remap` by `eval.holdout.cuts`; `fab.eval_passes`, `lm.embed.*`, `world.forecast.calls`
+  and `.inert` by `eval.holdout.forwards`; `lm.decode.calls` by `eval.holdout.decodes`;
+  `sig.encode_calls` and `sig.encode_windows` by `eval.holdout.sig_calls`; `lm.encode.calls` by
+  `eval.holdout.forwards` plus `eval.mem.reads` — one key-encode call per MEM read, because
+  `MEM.encode_queries` encodes a pass's `B·L` query rows in one `LM.encode` call (this said "plus
+  the memory-on closure's key encodes" until the review: `eval.mem.key_encodes` counts those rows,
+  and the full epoch's 128 reads encoded thousands); `lm.encode.key_path_truncated` by
+  `eval.mem.reads` where the key path truncates (the transformer at `MEM_KEY_DEPTH > 0`);
+  `lm.mask.*` with the decodes at `LM_MASK_DEAD_ROWS=1` (`lm.mask.applied` by `eval.holdout.decodes`;
+  `rows_masked` is a gauge); and `Retention.counters()`.
+  `tests/test_probe.py` P1/P2 hold that set to it (`expected_delta`).
+* **What it costs.** A reading is `EVAL_RETENTION_N` forwards per arrived area under `no_grad`;
+  where `CKPT_DIR` is set, a `.best` checkpoint on every new best — the first reading of a run is
+  always one — which owner fleets with `CKPT_DIR` pay in I/O (listed as a risk; `Saves.best` per run is
+  what `tests/test_probe.py` P6 reads). CPU runs establish operation only.
+
+**AMENDED 2026-09-27 — THE REVIEW OF THIS RULING.** Seven findings, each measured on the tree before
+it (CPU, operation only). The five that moved behaviour are repaired and held by
+`tests/test_probe.py`, each failing there on the tree before; the accounting sentence and the stale
+prose are corrected where they stood:
+* **A run the probe is off on carries none of its parent's reading state.** `LOOP.eval` passed
+  through such a run unchanged, and it wrote the record into every checkpoint as its own, so a
+  probe-on descendant read its grandparent's arrived set and last phase as its parent's — driven: a
+  grandparent at `EVAL_RETENTION_EVERY=20` for 41 windows, a probe-off child for 150 across three
+  phases, a probe-on grandchild; its start read left out `num`, which the child had trained, called
+  `num` unseen by its parent, paired against a reading two generations old and read a phase start at
+  its first window, with no ASSUMED warning. **Ruled:** an unarmed run keeps only the snapshot's
+  `geometry` and its book's counts (the two gauges, `areas_unarrived` and `since_best`, dropped with
+  the arrived set and the series they read), unchanged; a descendant re-pins the same windows,
+  totals the lineage's book, and takes the ASSUMED path above for everything else.
+  `System.eval_carried` is None only where the snapshot carried nothing (the 'probe' stage). P12.
+* **Pairing is by item, not by position.** `holdout_probe` kept a half's finite values alone, so after
+  one skipped window every later pair compared two different windows — driven on P14's planted case:
+  one non-finite window in the earlier of two readings paired windows 10 with 20 and 20 with 30 (`n`
+  2, mean −0.012, SD 0.255) where both true differences were exactly 0, and a window cut to fewer
+  than two ids did the same. Each half now keeps **one slot per item read**, in pin order,
+  `None` where the window gave no value (`<half>_nonfinite` counts the non-finite ones per area), and
+  a pair is taken only where both slots hold one — a `previous` restored from `LOOP.eval` included,
+  which carries the slots as they stood. P14.
+* **A block with no room is no block.** With every half shorter than `prefix_bytes + window_bytes`,
+  `pin_holdout` returned every area with two empty halves and no reason; the root counted that armed,
+  and every reading scored nothing and was booked non-finite while the gated report said the probe
+  fired and CKPT's inert reason blamed `EVAL_RETENTION_EVERY=0` or `DATA_SYNTH_HOLDOUT=0` — driven at
+  `DATA_STREAM_BYTES=20000`: 250-byte halves against 192 + 129 bytes, 7 readings of 0 windows,
+  `eval.holdout.nonfinite` 5. Now a half that can hold no window draws nothing and mints no stream,
+  an area with no window is unpinned, and with none anywhere the `ProbeSet` is empty with a reason
+  naming the geometry, the halves and `DATA_HOLDOUT_FRAC` / `DATA_VAL_CAP`, so the arm test fails and
+  every row prints UNREACHABLE. An armed B reading whose control half scored no window is booked
+  **`eval.holdout.empty`**, apart from `eval.holdout.nonfinite` — nothing was read to be non-finite —
+  and CKPT's inert reason names every cause, the EVAL(holdout) row the one that held. P1's third off
+  arm, P4 and P14.
+* **A resume whose parent recorded no phase starts in the phase its parent stopped in.** A continuing
+  resume from a parent that armed no probe had no last (epoch, phase), so its first window read as a
+  phase start wherever it fell — driven: a probe-off parent stopped at window 41 and its probe-on
+  child read `'phase'` at 42, mid-phase 0, with `eval.holdout.phase_reads` 1 and the consumers fed (a
+  `.best` save with `CKPT_DIR`). The loop now seeds the record from the parent's last window —
+  window `in_epoch - 1` of the replayed stream, its epoch and the phase its first byte falls in —
+  and adds that phase's areas to the arrived set, seen by the parent. At `in_epoch` 0 (a fresh run,
+  an epoch-boundary resume, a resume that replays its epoch from the first window) the first window
+  opens a phase of the stream this process reads, and nothing is seeded. P12.
+* **`lm.encode.calls` moves by `eval.holdout.forwards + eval.mem.reads`** (the accounting bullet
+  above): the ruling said the key encodes, and `eval.mem.key_encodes` counts query rows —
+  measured, a 120-window arm at 20 on the real source moved `lm.encode.calls` by 264 with 200
+  forwards, 64 reads and 5,169 key-encode rows. `expected_delta` already used the reads.
+* **Generation's rows name the text continued.** `Sample.population` rows recorded the routing prefix
+  under `prompt`; they carry `prefix` and `prompt` (the window's bytes, which the root now hands
+  beside the ids — EVAL has no vocabulary to decode them) apart. P9.
+* **Stale prose the build left or re-edited**: `CAP.startup_refusals` is the **30th** of the 41
+  `ASSEMBLY_ORDER` rows, not the 29th, and `compose(environ={})` no longer stops there or anywhere —
+  it returns a System at stage `'assembled'` (§ executable-today, §3.8, `Q-DERIVE-1`,
+  `capacity/api.py`, `spine/compose.py`, `spine/derive.py`, `ckpt/api.py`); `_head`'s "not formable
+  today" (the probe formed it); `OPT.maybe_step`'s "`best_bpb` HAS NO PRODUCER" (it is
+  `System.probe_reading`, counted once per `at`); and EVAL's negative-period switch, which governs
+  `EVAL_RETENTION_EVERY` as well as `EVAL_CURVE_EVERY`.
+
+**THE FLIP, 2026-09-29 (register 04-6.2; SR0's bit-identity passed; in b1d31b7, last
+and alone with 04-Q5's and 04-6.3's, Q-DATA-9's and Q-DATA-11's dated notes) — `EVAL_RETENTION_EVERY`
+SHIPS 1000, WITH A READ AT THE FIRST WINDOW OF EVERY PHASE: DEFAULT BEHAVIOUR CHANGE 2.** The lever's
+help says so. At the shipped defaults a run pins both halves of every area's block (the block 04-Q5's
+flip gives the synthetic source), reads memory-off at every phase start and on the cadence where it
+reaches it — a shipped-default run of 506-937 windows never does, so `eval.holdout.cadence_reads` reads
+PRESENT-and-0 — reads its R boundary through both closures, feeds `CKPT.Retention.consider` each finite
+control mean (with `CKPT_DIR` set, a `.best` save at every new best, the first reading always one: a
+full checkpoint each, frequent early in training, which an owner fleet with `CKPT_DIR` budgets —
+`gpu_world.sh` since the review below), runs `EVAL.blowup`, inert at 1000 (80 readings without a new
+best is 80,000 windows), and generates after the final save; OPT reads none of it at the shipped
+`OPT_DAMP_SOURCE='off'`. The root prints its two startup notices, above 160 and a phase projected
+below five readings, and the cadence audit's line for 'retention' (the root's since the review
+below). **Nothing a run trains on moves:** P1 re-run at the new defaults — the book at its shipped
+'observe' in both arms, the block on — passes, and on the real source B5u reproduces the record made
+before the flip on every loss and every counter but P1's exempt set (`tests/test_baseline.py`), which
+moves by the reads beside training: at B5's 200 windows `lm.encode.calls` 606 → 924, `lm.decode.calls`
+400 → 844 and `sig.encode_calls` 201 → 423. 1000 is the interim value until E6 picks (§8 6.2); each
+pre-registration writes its cap as a number, never computed at run time (N4) — `gpu_world.sh`'s
+EXP=world_epoch writes 700. **What it costs, and the suites' rule.** At B1's 80 windows a CPU run took
+143 s against 27 s (2026-09-28, one thread): generation's 16 continuations of 200 tokens are most of
+it, the reads 4.7 s (`eval.holdout.seconds`). So a CPU suite that tests no EVAL sets `EVAL_GENERATE=0`
+(`tests/_state_digest.py`, `test_resume.py`, `test_resume_clock.py`, `test_fabric_forward.py`,
+`test_levels.py`, `test_lr_continue.py`, `test_tok_dom_cap.py`, `test_faded.py`, `test_position.py`,
+`test_prose_guards.py`, `test_fabric_internals.py`'s I9, `test_world.py`'s W4, and the probe-reading
+`test_holdout.py` and `test_trust.py`), and one whose counts a read would move sets
+`EVAL_RETENTION_EVERY=0`: `tests/test_mem_probe.py`, whose M1 spy counts every `MEM.read` (the
+memory-on closure's reads and generation's came to 1,667 beside the in-package probe's 4 fires), and
+`tests/test_causality.py`, whose C3 spy takes the first `FAB.forward` call for the flush's (the
+phase-start read at window 1 came first, at `OPT_BATCH_WINDOWS=2`, with `DOM.nearest`'s -1). At the
+owner's scale the register prices the stricter preset cadence (333, at k1000 and in media sessions at
+k3000) at about 7.2% more forward windows, 2.1-2.4% of wall (C03, O11), and E6 picks the densest
+cadence within 2% of wall. P15, which held B1, B3, B3r and B5 to their records at the shipped defaults
+while the probe shipped off, now holds B1p, B3p, B3rp and B5p to theirs under 04-Q5's pins: with the
+probe off the tree is the one before it. `FAB_CONTRIB=1`, refused at startup while the probe shipped
+off, composes at the shipped defaults, whose probe pins a control half in every area (Q-FAB-19's two
+refusals stand at their arms, and `tests/test_contribution.py` C-7 names those arms). **What CPU
+establishes:** operation only.
+
+**AMENDED 2026-09-29 — THE FLIP'S REVIEW.** Five findings against the flip, each measured on the flipped
+tree (CPU, operation only). Three moved behaviour or a budget and are held by tests that fail on the
+flipped tree before them; two were prose, corrected where they stood.
+* **The cadence audit's line for `'retention'` is the root's** (§3.0.2, `compose.py::_retention_audit`;
+  the ruling on the line the note above lists among what a default run prints). At the shipped 1000
+  every shipped-default run of 506-937 windows got RUN's starved sentence — "CANNOT FIRE ONCE. Whatever
+  it gates does not happen in this run … Shorten the period, or lengthen the run" — while the same run
+  read at its phase starts and at R, fed `CKPT.Retention` and generated: B1's record at the flip reads
+  `eval.holdout.calls` 3 (one phase-start read and R's two), `cadence_reads` 0 and 16 continuations;
+  and the advice named 04-6.2's ruled interim value as the fault. RUN's sentences are a cadence's, the
+  probe's arm test is the root's (a pinned `ProbeSet`), and the reads beside the cadence are the loop's,
+  so the root words the line, after `_trust_audit` (Q-DATA-11's review, the same shape): armed with a
+  period past the run, the probe's PERIODIC reading cannot fire once, beside the phase-start,
+  resume-start and R reads (and generation) that still run, the period named as the cadence alone and
+  1000 as 04-6.2's interim telemetry value, with a period at or below the run's length named as what
+  adds a periodic reading. Over a probe that pinned nothing — no block, or no half with room (B6's
+  20,000-byte stream) — the line is DISARMED with the `ProbeSet`'s reason at any period: RUN's advice
+  to shorten the period reached nothing, and where the period fits the run RUN wrote no line for a gate
+  the arm test never asks, so there the root ADDS its one line, at the key's place in the mapping's
+  order (and in place of RUN's "every declared gate can fire" where that was the whole audit — the one
+  addition, in the one state RUN cannot see). At `EVAL_RETENTION_EVERY=0` RUN's DISARMED line stands:
+  nothing is pinned, read or generated there, and a period of 1 or more is what arms the probe. An armed
+  probe whose period the run can reach gets no line, as before. `tests/test_probe.py` P16, which also
+  drives the reads the armed line promises (at the shipped 1000, 12 windows: one phase-start read that
+  `CKPT.Retention` consumes and R's two, the gate asked 12 times and firing never); `tests/test_trust.py`
+  T9 sets the probe's line aside beside the book's.
+* **`OPT_DAMP_SOURCE='probe'` over a probe that pinned nothing is refused** (Q-OPT-13's dated note), at
+  the `probe` stage beside `FAB_CONTRIB=1`'s pinned-nothing refusal. The flip's consequence for it,
+  named beside `FAB_CONTRIB=1`'s above: `'probe'`, refused at startup while the probe shipped off,
+  composes at the shipped defaults, whose probe pins a control half in every area, and is refused where
+  the probe pins none.
+* **`gpu_world.sh` budgets the probe's best saves.** "Which an owner fleet with `CKPT_DIR` budgets", above,
+  was not true of the owner's script: at `KEEP_CKPT=1` every EXP=world and EXP=world_epoch run has a
+  `CKPT_DIR` (its final save only, `CKPT_EVERY=0`) and an armed probe, and `ckpt_files` counted one file
+  a run where the run leaves three — driven at 200 windows on a 60,000-byte stream, the tenth-size
+  fabric: four saves, and `ckpt.pt`, `ckpt.pt.best` and `ckpt.pt.best.prev` on disk (51.5, 50.9 and 49.9
+  MB) with their three vocabulary files beside the directory. `ckpt_files` now adds `BEST_FILES`, 2 + 2N
+  at `CKPT_BEST_KEEP=N`, wherever a run's probe is armed — its `EVAL_RETENTION_EVERY` above 0, read in
+  `run_job`'s order (EXTRA, then the experiment's pins, else the environment, else the lever's declared
+  default off `src/`), so never at EXP=retok, whose pins turn the probe off; the banner, the header and
+  EXP=world_epoch's pre-registration say so. `tests/test_gpu_world.py` F28 (F19 before the Stage 3
+  merge, which also has `tools/gpu_launch.sh`'s disk check run the same block).
+* **Prose.** `tests/test_baseline.py`'s docstring held six shapes "three ways" and had every default run
+  reading and generating: the six shapes are held twice, at the shipped defaults and under the pins,
+  and B5 a third time (B5u), and B6 and B6r pin nothing, so their records carry no `eval.*` key.
+  `sweep_world.sh` said, and wrote into its SUMMARY, that "there is no held-out number in the loop":
+  since the flip every run it launches prints the probe's readings, and the sentence is dated, its
+  columns still training loss.
+
+### Q-OPT-13 — where the restart damping's held-out Reading comes from — **RESOLVED 2026-09-27 (Proposal 04 NEW-03): `OPT_DAMP_SOURCE`, BUILT `'off'`; `'probe'` HANDS IT THE RETENTION PROBE'S CONTROL MEAN; `st.reading_at` CHECKPOINTED. ⚠ ONE NEW LEVER, A CENSUS AMENDMENT. NO SIGNATURE MOVES, NO WIRE**
+`OPT.maybe_step`'s `best_bpb` is the one held-out measurement that crosses back into a training
+decision, and it had no producer. It has one now (`System.probe_reading`, Q-EVAL-12), and whether
+it crosses is a lever rather than a consequence of turning the probe on. **`'off'` (shipped):**
+`maybe_step` sets `best_bpb = None` before `_reading` reads it, so `opt.restart.readings` stays 0 and
+the damping gate's reason names `OPT_DAMP_SOURCE='off'` (a new arm, ahead of the "no Reading has
+ever arrived" arm, which would otherwise send a reader to EVAL for a Reading OPT declined).
+**`'probe'`:** the Reading is `Reading(control mean, seed_count=1, at)`; one run is one seed, so every
+losing restart is **refused** under PLAN 3.8 and counted in `opt.restart.damp_refused_n1` — the
+restart amplitude never moves, which is what a single-seed run can honestly say. The root hands the
+same Reading over on every flush until the next reading; a Reading whose `at` equals the last one
+counted is that measurement re-delivered and counts **once** (the `opt.shift.notifications` rule,
+2026-09-24), with `st.reading_at` on `OptState`, in `state_dict` and in `load_state` (absent → None).
+**The Reading crosses a save too**: `LOOP.eval` carries the last forwarded one (`reading`) and the
+loop puts it back on a resumed System that holds none, so a child's first flushes hand `maybe_step`
+what the uninterrupted run's would — without it a continuing child read `None` until its own first
+reading and, under `'probe'`, departed at the first restart inside that gap; the restored
+`reading_at` keeps it counted once.
+`'probe'` with `EVAL_RETENTION_EVERY=0` is **refused at startup** (`RefusedRun`, the `refuse` stage):
+a source that can never produce is the armed-but-inert state this tree refuses by name. The backward
+edge is written in the `maybe_step` row's note, not in `ROW_ARGUMENTS_ELSEWHERE`: `maybe_step` has
+no required parameter, so K10 would report an entry there stale.
+
+**AMENDED 2026-09-29 — THE FLIP'S REVIEW (Q-EVAL-12's review note): `'probe'` OVER A PROBE THAT PINNED
+NOTHING IS REFUSED TOO.** The `refuse` stage tests the period alone, so `'probe'` composed over an armed
+probe that pinned no window — no area holding a block (`DATA_SYNTH_HOLDOUT=0` on the synthetic
+source), or no half long enough for a window behind its prefix — where the arm test fails, no reading
+is taken and `System.probe_reading` stays None: the same source that can never produce. The gap is as
+old as the probe; 04-6.2's flip moved where it is reached, since `'probe'` alone now composes at the
+shipped 1000 — driven on the flipped tree, `{OPT_DAMP_SOURCE: probe, DATA_STREAM_BYTES: 20000}`
+composed at stage `'assembled'` with `probe_set.items` empty where `FAB_CONTRIB=1` in the same shape was
+refused. **Ruled:** refused at the `probe` stage, where it is first known, beside `FAB_CONTRIB=1`'s
+pinned-nothing refusal, and raised with it at the second stop (`valve`, CAP's), the refusal naming the
+`ProbeSet`'s reason and what gives a half room. At the shipped defaults, whose probe pins a control
+half in every area, `'probe'` composes — the flip's consequence for it, as for `FAB_CONTRIB=1`.
+`tests/test_probe.py` P7.
+
+### Q-DOM-6 — the domain a held-out window would be routed to, asked read-only — **RESOLVED 2026-09-27 (Q-EVAL-12): `DOM.nearest(dom, part, *, signature)`, `_assign`'s DECISION FACTORED INTO ONE PURE HELPER. NO LEVER, NO WIRE**
+The closures route windows the run did not train on, and `DOM.observe` advances the boundary clock,
+drags a centroid, feeds the reservoir and counts the visit — a reading through it would move the
+partition it reads. `_assign`'s three exclusive arms moved whole into `_decide(part, q, ...)`, which
+returns `(kind, did, bumps)` and writes nothing; `_assign` applies the same drag and the same
+counters in the same order (the drag now precedes the radius arm's bootstrap counters; they touch
+disjoint state, and B3 reproduces its fixture). `DOM.nearest` applies the same decision to one
+normalised signature and returns the id `_assign` would re-enter, the nearest at `d_expert_slots`,
+**-1** where it would spawn (the empty partition included) and **0** at `DOM_ENABLED=0`. It skips the
+boundary test — a held-out window is not the stream's next window — writes, bumps and draws nothing,
+and its caller books the -1 answers. LEVERS READ: `enabled`, `accept_rule`, `spawn_dist`, `margin`;
+WIRES READ: `d_expert_slots`.
+
+### Q-MEM-15 — the report path's queries, and what a `promote=False` read counts — **RESOLVED 2026-09-27 (Q-EVAL-12): `MEM.encode_queries(mem, *, contexts, key_fn)`; A `promote=False` READ SEEDS AND BUMPS NO STORE COUNTER; `MEM.blend` HAS A BODY AND IS BOOKED BY ITS CALLER. NO LEVER, NO WIRE**
+* **`encode_queries`** returns `(B*L, key_dim)` unit-norm queries, one per position, built from the
+  `key_win` tokens ending at it (`_key_windows`) and encoded at `key_depth` (`_encode_keys`) — the
+  write path's own helpers, so the report path queries the store in the key space it was written in.
+  Flat because `MEM.read` takes 2-D queries; `MEM_KEY_SRC='frozen'` is refused as in `write`.
+* **A `promote=False` read moves no counter** (amending Q-MEM-10's and `read`'s wording, which said
+  it "still counts `n_reads` and the wrong_* trio"): the six are the store's ledger, which `census`
+  and the `mem.pressure` Gate read as the in-package probe's retrievals, so a report-path reading
+  would move the numbers that Gate judges (G7), and at `MEM_PROBE_EVERY=0` an unarmed report path
+  would print them PRESENT-and-0 for a probe that cannot run. The wrong-flag **exclusion** still
+  applies on both arms; only the count is the promoting read's. The caller books its own:
+  `eval.mem.reads`, `eval.mem.empty`, `eval.mem.key_encodes` (the query rows `encode_queries`
+  encoded, `B·L` per read in one `key_fn` call — so `lm.encode.calls` moves by the reads, Q-EVAL-12).
+* **`blend`'s body** re-asserts the weight (read's ramp recomputed from `conf` under this Config's
+  `match_floor` and `blend_max`, refusing a record that departs), returns `model_probs` untouched at
+  `blend_max == 0`, mixes `(1-w)·p + w·dist` otherwise, and clamps and renormalises only rows at
+  `w >= 1`. It writes no store counter; its declared `store.n_blends` / `store.blend_weight_sum`
+  were never written, and the closure books `eval.mem.blends` and `eval.mem.blend_weight_sum`.
+
+### Q-CKPT-6 — the answer a best save hands back to the retention policy — **RESOLVED 2026-09-27 (Q-EVAL-12): `Retention.note_saved(self, ok, slot=None)`, CALLED ONLY AFTER BEST AND bestN SAVES. NOTHING NEW IS CHECKPOINTED. NO LEVER, NO WIRE**
+`new_retention`'s obligation (1) said `best_saved` and the ring meant "ordered", because nothing
+carried `CKPT.save`'s answer back. `consider` now stashes what it ordered — the slot's previous
+resident and the pointer before it — and `note_saved(ok)` sets `best_saved` from the global `.best`
+save's return, while `note_saved(ok, slot)` on a refused slot save puts the resident back and returns
+the pointer, so the ring advances only on a written file, as the old tree's `if _save_ckpt(...)`
+did. `rotations` keeps counting orders; `counters()` gains `saves_refused`. A note nothing ordered is
+refused. The stash is not in `state()`: `_STATE_FIELDS` is unchanged, because a restore refuses a
+missing field and old blobs must still load. **Recorded, not repaired:** when one reading earns both,
+the `.best` blob is written first and holds the ordered slot, so a refused `.best<k>` save leaves that
+one blob naming a slot whose file was never written. The row is `('C', 'CKPT',
+'Retention.note_saved')`, fed `ok` by the C `CKPT.save` row's `produces` column.
+
+### Q-FAB-17 — which passes FAB's did-it-fire counters count — **RESOLVED 2026-09-27 (Q-EVAL-12): TRAINING PASSES ONLY; AN EVAL PASS COUNTS `fab.eval_passes`. NO TRAINING-PATH NUMBER MOVES**
+Until now nothing but the training flush called `FAB.forward`, so its counters never had to say
+which passes they count. The retention probe's closures call it with `training=False`, and a reading
+must not move the ledger that describes training. Every counter the body wrote on a solo pass —
+`fab.route_calls`, `hops_taken`, `halt_clamped`, `explored_rows`, `explore_distinct_targets`,
+`discovered`, `discover_targets`, `banned_experts`, `ec_applied`, `halt_spent_on_base`,
+`div_applied`, `ind_applied`, `hopsup_applied`, `forward_identity`, `norm_only_passes` — is now
+bumped on **learn** passes only (training and not a counterfactual), which is every pass it counted
+before; an eval pass bumps `fab.eval_passes` (the twenty-fifth key the body writes). **Two more than
+the plan's list**: `fab.ind_applied` and `fab.hopsup_applied` need targets, which an eval pass does
+not hand in, so they could not fire there — gated anyway, so the rule is one rule. `fab.holdout_applied`
+(the counterfactual's) is unchanged. The root seeds `fab.eval_passes` at 0 when the probe is armed,
+because FAB cannot see whether it is (the `tok.due_merged` precedent).
+
+### Q-WORLD-11 — the forecast's gauges on a pass outside training — **RESOLVED 2026-09-27 (Q-EVAL-12): `world.forecast_rms`, `world.forecasts` AND `_proj_trained` ARE WRITTEN ONLY UNDER GRAD. NO TRAINING-PATH NUMBER MOVES**
+`WORLD.forecast` returns the forecast on every call and counts `world.forecast.calls` /
+`world.forecast.inert` as before; the gauge, the fire count and the `_proj_trained` flag — which
+`load_into` reads to decide whether a restored `world_proj` was ever trained — describe training and
+are written only when `torch.is_grad_enabled()`. A probe pass under `no_grad` therefore leaves them
+where the last flush left them.
+
+### Q-LM-14 — encode's `extra` gauges on a pass outside training — **RESOLVED 2026-09-27 (Q-EVAL-12): `lm.encode.extra_ratio`, `extra_ratio_max` AND `extra_applied` ARE WRITTEN ONLY UNDER GRAD. NO TRAINING-PATH NUMBER MOVES**
+The forecast is still added to the hidden state on every call — the closures score the path the run
+trained — but the ratio gauges and the applied count describe the training flush, so a `no_grad`
+probe pass neither measures nor counts them. `lm.encode.calls` still counts every call; it is in the
+probe's exact-accounting set (Q-EVAL-12).
+
+### Q-FAB-18 — which experts the management pass removes from a faded area, and whether it may wait — **RESOLVED 2026-09-28 (Proposal 05 §8 3.1; register NEW-10, C37 and CONTRACT-Q-FAB-5): `FAB.observe(..., area_id=None)` KEEPS A PER-EXPERT AREA BOOK; `FAB.manage(..., faded=None)` COUNTS EVERY REMOVAL WHOSE EXPERT MOSTLY SERVED A FADED AREA; `FAB_FADED_CULL`, BUILT `'as_is'` — `'defer'` IS THE E2 ARM, AND A DEFERRED VICTIM KEEPS ITS BUDGET SLOT. ⚠ ONE NEW LEVER, A CENSUS AMENDMENT; TWO FROZEN SIGNATURES WIDENED WITH A DEFAULTED KEYWORD. NO WIRE, AND NO NUMBER A DEFAULT RUN PRODUCES MOVES**
+**What was asked.** NEW-10 rules that from SR0 on every training run reports "faded-area expert
+culls", C37 that the continue preset defers "culls and merges of experts whose most-served area is
+faded ... (not executed, counted)" until `FAB.contribution` works, with training runs unchanged and
+the deferral an E2 arm, and CONTRACT-Q-FAB-5 asks, per manage pass, for "the count of culled or
+merged experts whose most-served area is faded". At the owner's shape both removals are reached
+(the fleet archive: 481-1,002 experts past grace, 203-810 `cull_fail` and 336-648 merges per run),
+and nothing in FAB knew which area an expert served.
+
+**The ruling, as built.**
+* **An area's number.** `spine/derive.py::area_id(label)` — crc32 of the label's UTF-8 bytes masked
+  to 31 bits. A function of the label alone, so a checkpointed book means the same area in a child
+  whose `DATA_AREAS` inserted, appended or reordered areas (a position in `Areas.names` would not,
+  and Python's `hash` is salted per process); 31 bits, so MEM's int32 column keeps -1 for "none".
+  `DATA.open_areas` refuses two labels on one id beside its label and key collisions, naming both
+  and `data.area_id_collision`, a Gate that reads 0 in every `Areas` that exists (a Gate since
+  the review below; the name was declared and written nowhere).
+* **The faded set.** DATA's `Plan.faded[k]` — every area live in a phase before k and not in k — and
+  `Plan.parent_faded` — the areas the resumed lineage's streams drew (`Areas.drawn`, which
+  `stream_state` records; every area the record declared, `Areas.parent_names`, until the review
+  below) that no phase of this schedule makes live (the DATA section). At each `fab.manage` pass
+  the root hands `faded` = the ids of
+  `Plan.faded` at the phase this window's first byte falls in (the byte the probe's phase-start test
+  reads) together with `Plan.parent_faded`, through the join `compose.py::_faded_ids`. **The parent's
+  half is what makes the count, and the deferral, mean anything in the continue preset C37 is about**:
+  a pure-add child's own schedule fades nothing, while every expert it inherits served the parent's
+  areas.
+* **The area book.** `Population.area_use`, per expert `{area id: mass}`. `FAB.observe`'s new
+  `area_id` (one id per window, in `domain_id`'s shapes; the root passes each window's FIRST token's
+  area, read off `Segmentation.labels` through `compose.py::_window_areas`) credits each computed
+  expert the routing mass `use` gets — so, where every window's area is known, an expert's book sums
+  to its `use` — and a negative id credits nothing. It is one of `_BOOKS`: `_remove` moves it with its
+  expert and clears the vacated last row with a fresh dict, `_claim_slot` clears it, `_merge_into`
+  sums the absorbed book into the survivor's. `fab.area_windows` counts the booked windows (ABSENT
+  until a routed call is handed an area). It is checkpointed in `FAB.state_dict`'s books as sorted
+  `[id, mass]` pairs, and a blob without it restores empty books. A DOMAIN IS NOT AN AREA: `dom_of`
+  is DOM's learned partition, which merges, splits and culls; an area is a corpus the schedule fades
+  by name.
+* **The count** (`FAB.manage`'s step 7). The pass decides first; then every expert it removes — the
+  merge's absorbee, either cull's victim — is read against its book. Its most-served area is the
+  argmax of the book, the smallest id on a tie (never a dict's order, which a checkpoint round trip
+  need not keep). A faded one counts `fab.merged_faded_area` or `fab.culled_faded_area`; an EMPTY
+  book (no area ever booked: a founder no window reached, or every expert restored from a checkpoint
+  older than the book) counts `fab.faded_unknown` instead, so a 0 over empty books is not read as a 0
+  over read ones. The three are cumulative, PRESENT-and-0 from the first pass handed a set (an empty
+  set included: phase 0 hands one) and ABSENT while none was. **Per pass** — CONTRACT-Q-FAB-5's
+  "per manage pass" — each has a gauge, `fab.culled_faded_area_last_pass`,
+  `fab.merged_faded_area_last_pass` and `fab.faded_unknown_last_pass`, as `fab.merged_last_pass` is
+  `fab.merged`'s (since the review below: the pass's counts lived only on the `ManageReport`, which
+  the root files nowhere); `fab.faded_areas_last_pass` is the pass's set size. The four gauges are
+  written on every pass handed a set and dropped on one handed none. `ManageReport` carries the
+  pass's own counts (`culled_faded_area`, `merged_faded_area`, `faded_unknown`,
+  `cull_faded_deferred`, `merge_faded_deferred`).
+* **`FAB_FADED_CULL`** (`'as_is'` | `'defer'`, U.NAME; a census amendment, the fourteenth;
+  `fabric/levers.py` section 6). **`'as_is'`** (shipped): no decision reads a book, and the pass
+  removes exactly what it removed before the book existed. **`'defer'`** (NEW-10's and C37's E2 arm,
+  and C37's preset value until `FAB.contribution` works, §8 3.5): a removal whose expert's most-served
+  area is faded is SKIPPED — the pair is not merged (its other expert stays free for the rest of the
+  scan), the expert is not culled — and counted as an EVENT, `fab.merge_faded_deferred` /
+  `fab.cull_faded_deferred` (an expert deferred on a later pass counts again), beside
+  `fab.faded_deferred_experts`, the distinct experts this pass deferred (a gauge; a deferred expert
+  leaves the pass's remaining decisions, so each is deferred once and the gauge is the pass's
+  events); all three are ABSENT at `'as_is'`. **Every other decision of the pass is the one
+  `'as_is'` takes** (the review below): the rest of the pass reads the population `'as_is'` would
+  hold, so a deferred absorbee pairs with nobody else, the failure cull walks, and the pressure
+  gate and the utilization budget count, the population without the deferred, **a deferred
+  utilization-cull victim keeps its budget slot** (the ranked walk stops at `budget` victims plus
+  deferrals — deferral, not substitution, the critic's finding on the draft), and the survivor of a
+  pair left apart is ranked, paired and read by the use, uage and book the merge would have given
+  it. So a `'defer'` pass removes exactly what `'as_is'` would remove from the same population, less
+  the faded removals. An empty book is not faded and is removed at either value. **The cost is stated, not
+  discovered:** with the pool at `FAB_SLOTS` a deferred expert holds a slot a new area could have been
+  born into (NEW-20). `'contrib'` (a removal gated on `FAB.contribution <= 0`) is §8 3.5's and joins
+  the choices with that build rather than ahead of its producer. *(It joined them on 2026-09-28 with
+  that build: Q-FAB-19.)*
+* **Rescue is not deferred.** `FAB_RESCUE`'s heavy mutation is neither a cull nor a merge and keeps
+  the expert's slot and book; it is OFF at the shipped 0.0, and whether a faded-area expert may be
+  rescued is the question of an arm that turns it on beside `'defer'`. At `'defer'` the pass rescues
+  the experts `'as_is'` would rescue (the review below) — never a deferred one, which `'as_is'` had
+  removed.
+
+**What the rule does not see (recorded, not repaired).** (a) The faded set is the schedule's within
+one epoch: at an epoch roll the schedule restarts, so an area only the previous epoch's later phases
+trained is not faded in the next epoch's early phases (the shipped `RUN_EPOCHS=1` has no roll). (b)
+A parent area a child schedules in a later phase is not faded before that phase; only one the child
+never schedules is `parent_faded`. (c) A window straddling a segment seam books its routing mass to
+its first token's area. Each is a rule a later build may widen; none moves a number a run produces.
+
+**Found while building it, and not repaired (a ruling is owed).** The failure cull walks the
+`eligible` list `FAB.manage` took at entry, before the merge's removals renumbered the population by
+swap-with-last, so an expert moved into a merged-away slot is judged under that slot's past-grace
+entry. Driven on a scripted pass (`FAB_GRACE=2`; one merge absorbs slot 0 and moves the last expert —
+`uage` 0, both error EMAs above `comp_glob + FAB_FAIL_TOL` — into it): that expert, inside grace, was
+failure-culled. B3's shape never reaches it (its six passes, recounted, removed no expert inside
+grace), and at the shipped defaults no expert is past grace; at the owner's shape, where merges and
+failure culls both run, it can cull an expert inside grace. Recomputing the list after the merge
+changes which experts a pass can remove there, so it is left for its own ruling; step 7 counts the
+expert actually removed either way.
+
+**Bit-identity.** Both new arguments default to None and the loop hands both; nothing in the forward
+pass reads a book, at `'as_is'` no decision in FAB does, and no draw is taken — so a default run
+removes, keeps and trains exactly what it did. B1, B3, B3r, B5, B6 and B6r reproduce their fixtures
+and list the new keys as new and nothing else: `fab.area_windows` and Q-MEM-16's five
+`store.occupancy.*` keys on every leg, and `fab.culled_faded_area`, `fab.merged_faded_area`,
+`fab.faded_unknown` and `fab.faded_areas_last_pass` on the three legs that reach a manage pass (B3
+and both of B3r's).
+
+**Known answers** (`tests/test_faded.py`, CPU, operation only). F1 `Plan.faded` on the generated
+four-area schedule is `[(), (0,), (0,), (0, 1)]`, and hand-computed on five explicit schedules and on
+a parent record. F2 `area_id`'s pinned values, and `open_areas` refusing a full crc32 collision
+(`qh9par8f`, `gd221zva`) and one only the mask makes (`g4bgcsbc`, `gyz44zl0`). F3 the book under
+scripted routing, merge, removal, birth and a state_dict round trip. F4 the count on scripted passes
+through each removal path, and `faded=None` leaving every step-7 key ABSENT. F5 `'defer'` on the same
+populations: the utilization cull removes exactly the non-faded members of `'as_is'`'s five victims
+and not the next live-area expert. F6 on B3's shape (314 windows, six passes over phases 0, 1, 1, 2,
+3, 3): every pass handed `Plan.faded` at its window's phase, and the counts (2 merged, 23 culled, 0
+unknown of 146 removals) equal an independent recount of what was removed. F7 `'defer'` on the same
+workload removes no faded-area expert after the fade (55 cull and 15 merge deferrals). F8 a pure-add
+child of an eng-only parent hands every pass `{eng}` from its first. F9 continuing resumes at both
+values are exact and end with the uninterrupted run's books, counts and deferrals; a checkpoint
+stripped of the book resumes exactly, and the removals of experts whose books were not refilled
+count as `fab.faded_unknown`. (F5, F6, F7 and F9 as the review below left them are in its last
+paragraph.)
+
+**CORRECTED 2026-09-28 (Q-FAB-18's review) — `'defer'` takes every decision `'as_is'` takes and
+drops only the faded removals; `Plan.parent_faded` is read off the areas the lineage drew; the count
+is reported per pass; the reasons name the deferrals; `data.area_id_collision` has its row.** (i)
+*The deferral leaked on three paths the budget rule did not reach, and a fourth found while
+repairing them.* The ruling promised that no live-area expert is culled in a deferred one's place,
+and the build kept the promise only inside the utilization cull's walk. Driven on scripted passes at
+the build: a failure-cull deferral stayed in the recounted eligible set, so the budget
+`int(cull_frac * n_elig)` grew — four eligible experts at `FAB_CULL_FRAC` 0.5, expert 0 failing and
+faded: `'as_is'` removed 0 and 1, `'defer'` 1 and 2, live expert 2 in 0's place; a merge deferral
+left `n_live` one larger, so `derive.cull_gate_open` read 6/12 = 0.500, OPEN, at `FAB_PRESSURE` 0.5
+where `'as_is'` read 5/12, SHUT, and `'defer'` culled live experts `'as_is'` kept; a deferred
+absorbee stayed pairable, so with (0, 1) and (0, 2) close and 0 faded `'defer'` merged live expert 2
+into 0 where `'as_is'` merged 0 into 1 and paired 0 with nobody else; and the survivor of a pair
+left apart was ranked by its own `use`, without the absorbee's mass the merge gives it — 0 (use 50)
+and 1 (use 1) close, 0 faded: `'as_is'` ranked 1 at 51 and culled 2 and 3, `'defer'` ranked 1 first
+and culled it. On B3's shape, each `'defer'` pass against `'as_is'` run on a copy of the population
+that entered it: at the pass of window 201 one live-area expert was removed that `'as_is'` kept, and
+five of the six passes counted more deferral events than `'as_is'` made faded removals from the same
+populations (55 cull and 15 merge events over the run, against 48 and 10). **Ruling:** a `'defer'`
+pass removes exactly what `'as_is'` would remove from the same population, each the same way, less
+the faded removals, and defers exactly those. `FAB.manage` names each expert by its slot at entry
+and keeps two layouts through the pass, the population's own and the one `'as_is'` would hold
+(`fabric/api.py::_drop`, `_remove`'s renumbering on a list), and every step after a deferral reads
+the second: a deferred absorbee is consumed for the scan as an absorbed one is; the failure cull
+walks the entry list over `'as_is'`'s layout, so a slot the merge refilled holds the expert
+`'as_is'` would judge there (the defect recorded above is inherited, so the two values judge one set
+until its ruling moves both); the recount, the pressure gate, the budget, the ranking and the rescue
+list are `'as_is'`'s; and the survivor of a pair left apart, and whoever later absorbs it, is
+ranked, paired and read by the use, uage and book the merge would have given it
+(`fabric/api.py::_sum_books`, the one book sum `_merge_into` also makes). A deferred expert
+therefore leaves the pass's remaining decisions and is deferred once per pass, so
+`fab.faded_deferred_experts` is the pass's events. `fab.cull_gate` prints `'as_is'`'s population at
+`'defer'` (the pair its verdict was taken on) and its reason says how many deferred experts stand
+beside it. At `'as_is'` the two layouts are one list and no value is overridden, so every read is
+the read it was: 400 seeded scripted passes (merges that chain, failure culls over refilled slots,
+budgets, gates, spares, ties, rescue on a third) leave books, banks, ledger, gate reasons,
+`ManageReport` and row events bit-identical to the build at `'as_is'` and at `faded=None`, bar the
+three per-pass gauges of (iii); over 2,000 such passes `'defer'` removed exactly `'as_is'`'s
+removals less the faded ones in every one whose `comp_glob` is set (1,057 of the 2,000 deferred
+something). **Found while repairing it, and not repaired (a ruling is owed):** where the failure
+cull does not run — `comp_glob` None, no window attributed yet — the utilization cull ranks the
+`eligible` list taken at entry, which a merge's removals have renumbered: it reads slots past the
+population, dead rows `_remove` leaves holding a moved expert's `use`, and "culling" one moves the
+last live expert into it. Driven at the build on scripted passes: four of 400 took `n_live` below
+zero (−8 at `FAB_N0=22`, `FAB_MERGE_DIST=0.9`, `FAB_CULL_FRAC=0.8`). The path is ae70638's
+(2026-09-24), and no loop run reaches it — the first routed `observe` sets `comp_glob`, and a
+population restored from a checkpoint carries it — but a scripted population with an area book and
+no `comp_glob` can, and there `'defer'` ranks the same entry list in `'as_is'`'s layout without the
+dead slots, which is the one place the two values' decisions can part. (ii) *A declared area is not
+a trained one.* `Plan.parent_faded` was read off `Areas.parent_names`, every area the parent's
+record declares. Driven at the build (`DATA_AREAS=eng,py`, `DATA_PHASE_SCHED=eng|eng|eng|eng`,
+`DATA_STREAM_BYTES` 20000, `FAB_MANAGE_EVERY` 25, `FAB_GRACE` 2): the uninterrupted 85-window run
+handed its passes at 26, 51 and 76 the empty set; a parent stopped at window 60 and its continuing
+child continued exactly, but the child's `Plan.parent_faded` was (1,), `data.parent_faded` ['py'],
+its pass at 76 was handed py's id and `fab.faded_areas_last_pass` read 1 against 0 — py, which
+nothing in the lineage ever drew. **Ruling:** `Areas.drawn`, every area the lineage's streams have
+drawn a byte from, in the order first drawn — filled in place by `restore_stream_state` from the
+record, extended by `draw_stream`, recorded by `stream_state` — and `Plan.parent_faded` is read off
+it. A continuing resume draws its parent's schedule, so its set is the uninterrupted run's; an
+epoch- boundary child's lineage drew every area its epochs held. A record written before the list
+carries none, and then every area it declares is assumed drawn and named in `data.drawn_assumed` ([]
+where the record carried the list; ABSENT on a fresh run). (iii) *CONTRACT-Q-FAB-5 asks for the
+count per manage pass,* and the pass's counts lived only on the `ManageReport`, which the root files
+nowhere; the report carried lineage totals. Each of the three counts now has a gauge written on
+every pass handed a set, `fab.culled_faded_area_last_pass`, `fab.merged_faded_area_last_pass` and
+`fab.faded_unknown_last_pass`, as `fab.merged_last_pass` is `fab.merged`'s; the four per-pass gauges
+of step 7 (with `fab.faded_areas_last_pass`) are dropped on a pass handed no set, so an earlier
+pass's numbers never read as this one's. On B3's shape the six passes read (culled, merged, unknown)
+(0, 0, 0), (2, 2, 0), (10, 0, 0), (6, 0, 0), (5, 0, 0), (0, 0, 0), each its own recount. (iv) *The
+reasons had no word for a deferral.* A pass whose every close pair was deferred printed "no pair
+with a past-grace member sat within `FAB_MERGE_DIST`" in both merge gates, and
+`fabric.cull_eligible` printed "0 culled, 0 spared" of an expert that failed and was kept. Each
+reason now names the deferrals where they are armed — this pass's at `'defer'`, and the ledger's
+`fab.merge_faded_deferred` in the run-scope gate — and an `'as_is'` reason reads as it did. (v)
+*`data.area_id_collision` was declared and written nowhere:* no Gate, no counter, and neither the
+refusal nor `data.area_refused`'s reason named it. It is a Gate beside
+`data.area_label_collision`'s, reading 0 against the entries compared; the refusal names it, and
+`data.area_refused`'s reason lists the area-id collision. **Bit-identity:** at the shipped `'as_is'`
+nothing a run trains on moves; B1, B3, B3r, B5, B6 and B6r reproduce their fixtures and list as new,
+beside the build's, the three per-pass gauges on the three legs that reach a manage pass
+(`data.drawn_assumed` and the new Gate are not integer counter lines). **Known answers**
+(`tests/test_faded.py`, CPU, operation only; 52 checks): F1 adds a parent that declared c, eng and
+py and drew eng alone — `parent_faded` (0,), not (0, 3); F2 the refusal's name, the Gate and
+`data.area_refused`'s reason; F4 the per-pass gauges and their drop on a pass handed none; F5
+`'defer'` against `'as_is'` down each path — the utilization cull, the failure cull then the budget,
+a merge then the gate, the merge scan, the survivor's mass, the failure cull's walk over a refilled
+slot — and a seeded sweep of 150 random populations, all exactly `'as_is'` less the faded removals
+(the build matched 74 of the 150), with the deferral clauses in both merge gates and in
+`fabric.cull_eligible`; F6 each pass's gauges are its own recount; F7 every `'defer'` pass of B3's
+shape against `'as_is'` on a copy of the population that entered it (six passes, five deferring; 47
+cull and 10 merge deferrals over the run); F9 the declared-but-undrawn continuation (the record's
+drawn list ['eng'], every child pass handed the uninterrupted run's set, `data.drawn_assumed` [])
+and a record stripped of the list (py assumed, printed, and handed to the child's pass).
+
+### Q-FAB-19 — what each expert is worth, measured, and the faded-area cull that waits for the measurement — **RESOLVED 2026-09-28 (Proposal 05 §8 3.5; register 02-R11, C37 and NEW-10): `FAB.contribution` HAS A BODY, BUILT OFF AT `FAB_CONTRIB=0`; ITS BATCH IS THE RETENTION PROBE'S PINNED CONTROL HALF AND ITS BASELINE THE MEMORY-OFF CLOSURE BOUND TO THAT BATCH, AT THE CLOSURE'S `clock.step + 1`; `candidates=None` TAKES THE NEXT `FAB_CONTRIB_MAX` PAST-GRACE EXPERTS OFF A ROTATING CURSOR; `FAB_FADED_CULL` GAINS `'contrib'`. ⚠ TWO NEW LEVERS, BOTH CENSUS AMENDMENTS; A FROZEN SIGNATURE MOVED (`candidates` GAINED A DEFAULT); ONE `A` ROW; `FabricOut.blend`, `Population.contrib_n` AND ITS CURSOR ARE NEW. NO WIRE, AND NO NUMBER A DEFAULT RUN PRODUCES MOVES**
+**What was asked.** 02-R11 builds `FAB.contribution` "right after NEW-03", with training runs
+unchanged; C37 has the continue preset defer faded-area culls and merges "until `FAB.contribution`
+works"; NEW-10 rules that "an expert tied to a faded area may be culled only when
+`FAB.contribution <= 0`". The entry point was a frozen stub deferred for want of three things
+(§3.6): `candidates` — the eligible set, which lives in `Population`'s books and which O10 forbids
+the root to read; `targets`; and a `baseline_logits_fn` that is **the callable `baseline_loss` came
+from** — the whole C3/H11 repair — where the only loss on hand was the training flush's and the
+only closure the retention probe's. The old tree's counterfactual failed both ways the stub's
+docstring records: its baseline was scored by a different function than its counterfactuals
+(ISSUES P1-H11, an offset that set contrib's SIGN) and its walk never changed (C3, every value 0).
+
+**The ruling, as built.**
+* **The levers** (`fabric/levers.py` section 6; census amendments, the thirty-sixth and
+  thirty-seventh). `FAB_CONTRIB` (flag, shipped **False**): at False the root never calls the entry
+  point and `FAB.manage` reads no contribution, so both `contrib > 0` spares are inert and no
+  `eval.contrib.*` key exists; on a lineage that never armed it `Population.contrib` stays 0.0 on
+  every expert and no `fab.contrib_*` key exists either, and a child resumed at False from a
+  measuring parent carries the parent's books and `fab.contrib_*` counts, unread (the review
+  below, which ruled the read). `FAB_CONTRIB_MAX` (64,
+  PROVISIONAL, NEW-19; `U.EXPERTS`, domain `(1, None)` — 0 would arm a measurement that measures
+  nothing): how many past-grace experts one pass measures. `FAB_FADED_CULL` gains `'contrib'`.
+* **The batch** (`spine/compose.py::_contrib_material`). The first `(EVAL_RETENTION_N + 1) // 2`
+  pinned **control** items of every area the run has reached — `EVAL.holdout_probe`'s own control
+  share, the items a cadence reading scores, in area and pin order — cut at the last-cut view
+  (`_holdout_tokenize`, booked `eval.contrib.cuts`) and cut back to one length: the shortest cut,
+  and never more than `LM.ctx + 1` ids, from the end, so each row's routing prefix still ends at its
+  first byte and `x` never exceeds the context the closure would otherwise truncate from the front.
+  `targets` are the batch's ids shifted one. The control half because it is held out, pinned once
+  per run (every pass measures the same windows) and already the half consumers act on; the report
+  half stays unread by anything that acts. An area whose phase has not begun is left out, for the
+  probe's reason. A manage pass with no arrived control window calls nothing and is booked
+  `eval.contrib.empty`.
+* **The baseline, and the one rule every argument obeys.** The root binds the memory-off closure
+  to the batch — `_logits_fn(sysm, use_memory=False, book='eval.contrib')`, handed on as
+  `baseline_logits_fn` through `_contrib_baseline`, which turns off any autocast its caller holds so
+  the closure runs as it runs standalone — calls it once with `route={}` to take the `FAB.forward`
+  inputs its pass used (`h`, `signature`, `novelty` ZEROS, `domain_id` = `DOM.nearest` of the first
+  row's signature, `live_domains`, `step_windows`), scores its logits `LM.lm_loss(lm, logits, y)`
+  for `baseline_loss`, and hands `head` = the closure's counted head (`fn.head`). **So the baseline
+  and every counterfactual are one function of the same inputs, and FAB checks it rather than
+  assuming it**: before it removes anyone it re-scores `baseline_logits_fn()`'s logits through
+  `LM.lm_loss`'s reduction, written out as `fabric/api.py::_mean_ce` because FAB may not import LM,
+  and refuses the pass by name (P1-H11) where that is not `baseline_loss` exactly; then it takes one
+  **reference walk** with nothing held out and refuses the pass where that does not reproduce the
+  baseline's logits bit for bit — the offset the H11 repair excludes cannot then enter through the
+  inputs either. On the society arm the leave-one-out is a reweighted sum, and the prediction is
+  re-formed from the pass's own blend and checked bit for bit first. `FAB_CONTRIB=1` implies the
+  memory-off closure (Q-MEM-10 (a)): a memory-on baseline would put retrieval into it.
+* **The pricing.** `step_windows` is the closure's, `clock.step + 1` (Q-EVAL-12), for the baseline,
+  the reference walk and every counterfactual alike. At stage `A` that is one past the window about
+  to train (this window's flush trains at `clock.step`), where after the flush it is the next one.
+  **At the shipped `FAB_EMB_EVERY=1` the two prices give the same walk** — `step_windows` reaches a
+  `training=False` walk only through the identity cache, and both recompute every key from the
+  current weights; at `FAB_EMB_EVERY > 1` the walks may read the cache at another age than this
+  window's flush does. Recorded, not repaired: the baseline and the counterfactuals share it, so it
+  enters no difference, and it is the closure's own pricing, which the plan asked for by name.
+* **The candidates** (`candidates=None`, the move). The next `FAB_CONTRIB_MAX` experts with `uage >=
+  FAB_GRACE`, from `Population.contrib_cursor` (new), wrapping once; the cursor is left one past the
+  last taken, so every past-grace expert is reached once per (past-grace count / `FAB_CONTRIB_MAX`)
+  passes instead of the lowest slots forever. Fewer past-grace experts than the cap are all taken and
+  the cursor stays; a cursor past the population restarts at 0; `_remove` moves the cursor with the
+  expert it points at; the cursor is checkpointed. A list is measured as given, each slot once
+  (a slot outside the population or named twice is refused), and moves no cursor. The root passes
+  none, and so reads nothing inside `Population` (O10).
+* **The walks.** Looped arm: `FAB.forward(training=False, hold_out=c)` per candidate, under
+  `no_grad`, the identity cache unwritten (a pass that cannot carry a graph writes none,
+  `_identities`). Society arm: `FabricOut.blend` (new, `(voters, vote weights, held, base logits)`,
+  None elsewhere) with the candidate's weight removed from every row it voted in and the rest
+  renormalised, the halt blend re-applied, a row it alone voted in falling back to the base
+  representation; the one expression `(1 - held) * vote + held * decode(base)` is evaluated in the
+  order it always was. `fab.holdout_applied` counts one per candidate on both arms.
+* **The write.** Each value is the counterfactual's mean loss minus `baseline_loss`, in nats per
+  token: **positive is load-bearing**, the sign both spares test. The first measurement SETS
+  `Population.contrib` and each later one folds in at `FAB_COMP_EMA` — the old tree's `d if nid not
+  in fab.contrib else EMA` (`self_organize.py:6980`) — and `Population.contrib_n` (new, one of
+  `_BOOKS`, checkpointed, cleared by `_claim_slot`) counts measurements, so "never measured" and
+  "measured at 0" read apart. **A DEGENERATE pass — no candidate's logits moved — writes nothing**
+  and counts `fab.contrib_degenerate` (the C3 alarm). A candidate whose value is not finite is left
+  unmeasured and counted `fab.contrib_nonfinite`, as is every candidate of a pass whose
+  `baseline_loss` is not finite (no walk is taken). A value's resolution is the float32 mean loss's:
+  a removal that moves the logits and not the mean at that resolution reads exactly 0.0, and is
+  written — measured, not load-bearing on this material.
+* **The row** (`LOOP_ORDER` `('A', 'FAB', 'contribution')`, before `FAB.manage`, INSIDE the one
+  `Cadences.due('fab.manage', ...)` answer — a second `due()` under that key would consume the
+  fire). The arm test first: `FAB_CONTRIB=1` on a routed arm with the retention probe armed. Under
+  `no_grad`, `spine/rng.py::frozen_rng(strict=True)` — a pass that moved a global stream raises
+  `RngError`, as the probe's reading does — every module in eval mode (`compose.py::_eval_mode`, the
+  closure's own handling lifted into one helper, because the held-out walks run outside the
+  closure and `LM.decode`'s readout dropout is a training-mode draw) and `Process.autocast`, inside
+  which the root scores `baseline_loss` and FAB its counterfactuals. Its seconds are
+  `eval.contrib.seconds`, outside the `fab.manage` span. `ROW_ARGUMENTS_ELSEWHERE` names each join
+  (34 entries); `_CALLS['A']` gains it; `DEFERRED_ENTRY_POINTS` loses it (17).
+* **`FAB_FADED_CULL='contrib'`** (NEW-10's rule). A faded-area removal goes ahead only where
+  `FAB.contribution` has MEASURED the expert (`contrib_n > 0`) at or below 0 — counted at `'as_is'`'s
+  names and `fab.cull_faded_allowed_by_contrib` / `fab.merge_faded_allowed_by_contrib` — and every
+  other one is kept by `'defer'`'s own machinery (Q-FAB-18's review: the kept victim holds its budget
+  slot, the kept absorbee pairs with nobody else, the gate and budget read `'as_is'`'s population),
+  counted `fab.cull_faded_refused_by_contrib` / `fab.merge_faded_refused_by_contrib`, beside
+  `fab.faded_deferred_experts`; the deferral pair stays ABSENT, and at `'as_is'` and `'defer'` the
+  four new keys do. **An unmeasured expert is kept — C37's deferral lasting until a measurement
+  exists.** A cull's refusal is always an unmeasured expert, since one measured above 0 was spared as
+  load-bearing before either cull read its area; a merge's can be either, since the merge reads no
+  contribution of its own. The pass's reasons say "refused at FAB_FADED_CULL='contrib'" where
+  `'defer'`'s say "deferred", whose words are unchanged.
+* **Startup** refuses `FAB_FADED_CULL='contrib'` at `FAB_CONTRIB=0` (`'defer'` under another name),
+  `FAB_CONTRIB=1` at `EVAL_RETENTION_EVERY=0` (both at the `refuse` stage), and `FAB_CONTRIB=1` over
+  an armed probe that pinned nothing (at the stop after the `valve` stage, once the `ProbeSet` exists,
+  quoting its reason). `FAB_CONTRIB_MAX=0` is refused by its domain.
+* **The counters and the Gate.** `fab.contrib_passes` (the calls that walked — a candidate and a
+  finite baseline, each one reference walk), `fab.contrib_measured` (candidates written),
+  `fab.contrib_degenerate` and `fab.contrib_nonfinite` are seeded 0 by `FAB.build` at
+  `FAB_CONTRIB=1` on a routed arm and are ABSENT otherwise, unless a restored ledger carries its
+  lineage's (the review below); each pass writes the gauges
+  `fab.contrib_distinct_values`, `fab.contrib_positive`, `fab.contrib_negative`,
+  `fab.contrib_coverage` (a float: this pass's candidates over its past-grace count) and
+  `fab.contrib_measured_live`. **Gate `fab.contrib`** is UNREACHABLE naming `FAB_CONTRIB=0` at the
+  shipped value (and naming the arm at `FAB_ON=0` / `FAB_NORM_ONLY=1`), a prediction at 1 until the
+  first pass replaces it by name — the cull gate's treatment — re-rendered as RESTORED on a resume
+  (at 0 too, since the review below, where the restored books or ledger carry a measurement), and
+  its count is `fab.contrib_passes`. `RunResult.gated` gains `FAB.contribution` keyed to
+  `fab.contrib_passes`. The root's book gains `eval.contrib.calls`, `.empty`, `.windows`, `.cuts`,
+  `.forwards`, `.decodes`, `.sig_calls`, `.sig_windows` and `.domain_spawn` (PRESENT-and-0 where
+  armed, carried by `LOOP.eval` like the probe's) and `eval.contrib.seconds` (a float, never carried).
+
+**Deviations from the plan, each forced by the code.** (1) `_GATED` is keyed to
+`fab.contrib_passes`, not `fab.contrib_measured`: `_gate_report` prints "fired N time(s)" and the
+TOK rows' per-call rule (2026-09-24) forbids a count of anything else — `fab.contrib_measured`
+counts experts, so one call measuring 64 would read "fired 64 time(s)". (2) The batch takes
+`(EVAL_RETENTION_N + 1) // 2` control items, not `EVAL_RETENTION_N // 2`: the latter is the report
+share, and `EVAL.holdout_probe` gives the odd item to control. (3) `FabricOut.blend` is new: the
+society arm's prediction cannot be re-formed from `per_expert_logits` alone — the halt mass spent
+on the base and the per-row vote weights are on no other field (`weights` is the routing
+distribution, whose renormalised top-k equals the vote weights in arithmetic and not in the last
+bit on an eval pass) — so the plan's "reweighted sum" could not be exact without it. (4) `Population.contrib_n` is
+new: `contrib` alone cannot tell an unmeasured expert from one measured at 0, and `'contrib'`
+treats the two oppositely. (5) The reference walk and the loss re-score are the plan's "the baseline
+comes from `baseline_logits_fn()`" made a check at every pass (one extra forward a pass) rather than a
+convention. (6) The `eval.contrib` book is new, so Q-EVAL-12's exact accounting still holds with the
+measurement on (below). (7) The nothing-pinned refusal is taken after the `probe` stage, where it
+can be known, not at the `refuse` stage.
+
+**The exact accounting, extended.** With nothing reading `contrib` — `FAB_CULL_FRAC=0`,
+`FAB_MERGE_DIST=0`, `FAB_FAIL_TOL=1000` — at `LM_DROPOUT=0.1`, `FAB_CONTRIB=1` against 0 trains the
+same losses float for float and ends in the same state but `FAB.books.contrib`,
+`FAB.books.contrib_n`, `FAB.contrib_cursor` and `LOOP.eval`; every integer counter is equal but a
+named set, each moving by exactly a book's count: `tok.segment_remap` by `eval.contrib.cuts`;
+`fab.eval_passes` by `eval.contrib.forwards` plus `fab.contrib_passes` (one reference walk each);
+`fab.holdout_applied` by the candidates walked; `lm.embed.*`, `lm.encode.calls`,
+`world.forecast.calls` and `.inert` by `eval.contrib.forwards`; `lm.decode.calls` (and
+`lm.mask.applied` at `LM_MASK_DEAD_ROWS=1`) by `eval.contrib.decodes`; `lm.loss.calls` by
+`eval.contrib.calls`; `sig.encode_calls` by `eval.contrib.sig_calls` and `sig.encode_windows` by
+`eval.contrib.sig_windows` (a pass encodes its batch's rows in one call; the probe's are one row
+each, so its book needs no such key and has none). Where something reads `contrib`, the run
+departs from the first pass on, by design: that is what the measurement is for.
+
+**What it costs.** `FAB_CONTRIB_MAX` forwards a pass plus three (two closure passes and the reference
+walk), every `FAB_MANAGE_EVERY` windows, under `no_grad`. On CPU (operation only) C-2's shape spent
+about 26 s of a 57 s, 200-window run in 7 passes (52 candidates, then 64 each); on the owner's pool
+the pass's share of wall
+is E2's to price with `eval.contrib.seconds`. At the owner's 481-1,002 past grace 64 reaches each
+expert once per 8-16 passes — about once per 3,800-7,800 windows at `FAB_MANAGE_EVERY=500` — so
+`'contrib'` mostly meets unmeasured experts and keeps them until E2 sizes the cap.
+
+**What it does not see (recorded, not repaired).** (a) A merge's survivor keeps its own `contrib`,
+measured before the merge rewrote its weights, until it is measured again. (b) The material is the
+arrived areas' control items: an expert no control row routes to reads exactly 0 — "not
+load-bearing on this material" — and at `'contrib'` a faded-area expert measured so may be removed;
+its own area's control items are in the batch whenever that area has arrived, which a faded area
+has. (c) On the society arm only voters move a row, so a pass whose candidates cast no vote on the
+batch is degenerate: the cursor walks the past-grace population and the batch's
+rows × `FAB_ENS_K` votes reach few of them (C-3 below). (d) The stage-`A` pricing at
+`FAB_EMB_EVERY > 1`, above. (e) On a bf16 device the baseline's SIG encode and nearest-domain run
+outside autocast and its forward inside, as the probe's do; bitwise agreement there is a GPU
+reading, not a CPU one.
+
+**Bit-identity.** At the shipped `FAB_CONTRIB=0` the arm test skips the row and nothing new is
+called; `Population.contrib` stays 0.0 (every fixture's lineage never measured); `'as_is'` and
+`'defer'` are the bodies they were (the `'contrib'` branches are behind `gated`, which is False at
+both, and the spares' `FAB_CONTRIB` test, the review below, decides over a contrib of 0.0 as the
+unconditional read did); the society blend is the same expression in the same order; `FAB.build`
+adds Gate `fab.contrib`, a gate row and not an integer counter line. B1, B3, B3r, B5, B6 and B6r
+reproduce their fixtures.
+
+**Known answers** (`tests/test_contribution.py`, CPU, operation only). C-1 at the shipped
+`FAB_CONTRIB=0`, on a 100-window run that reads the probe (`EVAL_RETENTION_EVERY=20`, `DATA_SYNTH_HOLDOUT=1`) and reaches
+three manage passes: the entry point is never called, `contrib` is 0.0 and `contrib_n` 0 on all 512
+slots, the cursor 0, no `fab.contrib_*` or `eval.contrib.*` key exists, Gate `fab.contrib` and the
+gated-call line read UNREACHABLE naming `FAB_CONTRIB=0`; a direct call at 0 writes nothing. C-2 the
+plan's run (`FAB_CONTRIB=1`, `EVAL_RETENTION_EVERY=20`, `DATA_SYNTH_HOLDOUT=1`, `FAB_GRACE=2`,
+`FAB_MANAGE_EVERY=25`, 200 windows): seven passes (the fires at 26, 51, ..., 176) off the cursor,
+the first taking all 52 experts then past grace and the rest 64 each, distinct values per pass 3, 1,
+3, 6, 5, 6, 7 (the one at window 51 read 0.0 on all 64 while its walks moved the logits — the
+resolution above), `fab.contrib_measured` 436 = the candidates written = `fab.holdout_applied`, no
+pass degenerate, `fab.contrib_coverage` 64/93 at the last, `fab.spared_contrib` 4; the cursor rotates as hand-computed on a scripted population, `_remove`
+moves it, and a list of candidates is validated. C-3 at `clock.step` 200 `FAB.forward` handed the
+closure's own inputs (priced 201) returns its logits bit for bit on 12 rows; on the society arm the
+prediction re-forms bit for bit, a non-voter's removal returns it untouched, and a society run's
+first pass (8 candidates, none a voter) was degenerate while its second wrote 8; `h` moved by 1e-3
+is refused. C-4 a pass over unrouted experts only, and any pass on a one-expert population, is
+degenerate and writes nothing. C-5 in each of the six calls of the phased run below, `LM.lm_loss`
+over `baseline_logits_fn()`'s logits is `baseline_loss` exactly; one ulp away is refused naming
+P1-H11. C-6 on a scripted population routed by its centroids: the planted expert reads +2.853, the
+unrouted ones exactly 0.0 (written), a planted harmful one −9.488; the EMA folds a second reading;
+a non-finite `baseline_loss` measures nothing. C-7 scripted: the utilization cull at `'as_is'` keeps
+experts 5-9, at `'defer'` 0, 2 and 5-9, at `'contrib'` with 0 measured at −0.5 and 2 unmeasured 2 and
+5-9 (2 holding its slot); measured at 0.0 both go; measured at +0.4, 0 is spared as load-bearing and
+the budget walks on; the merge keeps an unmeasured absorbee apart, merges one measured at −0.2 and
+keeps one at +0.3. In B3's shape at `'contrib'` (`FAB_CONTRIB_MAX=32`, 314 windows, six passes)
+every one of the 24 faded-area removals (21 culls, 3 merges) was of an expert measured at or below 0
+when it went, 11 were refused, the allowed counts equal the faded removals and the deferral pair is
+ABSENT; the three startup refusals and the domain's hold. C-8 C-2's run saved at window 110 and
+continued by a second compose ends with its losses, contrib books, cursor, `fab.contrib_*` counts
+and `eval.contrib` book exactly; a blob without `contrib_n` and the cursor restores every expert
+unmeasured. C-9 the accounting above, on three passes: `fab.eval_passes` +9 (6 closure passes and
+3 reference walks), `fab.holdout_applied` +176, `lm.decode.calls` +370, `lm.embed.calls`,
+`lm.encode.calls` and `world.forecast.calls` +6, `lm.loss.calls` +3, `sig.encode_calls` +6,
+`sig.encode_windows` +36, `tok.segment_remap` +18. (C-3, C-6 and C-8 as the review below left them
+are in it.)
+
+**AMENDED 2026-09-28 — THE REVIEW OF THIS RULING.** Five findings, each driven on the tree before it
+(f7ffbe4; CPU, operation only) and each repaired; the ruling's lever bullet, its counters-and-Gate
+bullet and its bit-identity paragraph, the FAB section's alarm, Q-FAB-12's note on the spare, §3.6's
+cost paragraph and the lever-domain note are corrected in place. Run against that tree's `src/`,
+the six new C-8 checks fail; the new C-3 and C-6 checks pass there, since the code they read was
+right, and fail on the plants their findings name.
+* **`FAB_CONTRIB=0` reads no measurement, on a resumed lineage too.** `Population.contrib` and
+  `contrib_n` are books, checkpointed and restored whatever the lever, and both `contrib > 0` spares
+  read `contrib` without asking `FAB_CONTRIB`. So a child resumed at 0 from a measuring parent — E2's
+  `'defer'` arm, say — went on sparing on the parent's frozen measurements while Gate `fab.contrib`
+  printed build's "`Population.contrib` stays 0.0 on every expert and the `contrib > 0` spare in both
+  culls is inert" (`_refresh_build_predictions` re-rendered the line at 1 only), as the lever's
+  comment, `contribution`'s docstring, the census purpose and the lever bullet above said too.
+  Driven at that tree: C-7's utilization population measured at 1 with expert 0 at +0.25, saved by
+  `FAB.state_dict` and restored by `FAB.load_state_dict` into a build at 0, culled experts 1-5 with
+  `fab.spared_contrib` 1, where the same population never measured culls 0-4; C-2's run saved at
+  window 110 (four passes) and resumed at 0 restored 60 measured experts of 253, and the child's
+  report printed the parent's `fab.contrib_*` keys and "FAB.contribution: fired 4 time(s)" beside
+  that line. **Ruled:** the lever switches the reading with the measurement. `FAB.manage` reads
+  `Population.contrib` — in both spares and in `'contrib'`'s rule — at `FAB_CONTRIB=1` only, and its
+  `LEVERS READ` gains `contrib`; at 0 both spares are inert whatever the books hold, and `'contrib'`,
+  which startup refuses at 0, keeps every faded removal — `'defer'` under the rule's names, which is
+  what the lever's comment already said the value would be without a producer. The finding's other
+  remedy, keeping the read and saying so, was not taken: an arm whose report says the mechanism is
+  off would still cull on it. The books still cross a resume and are carried on unread, so a later
+  child at 1 reads them, stale as a merge's survivor's are ((a) of what this ruling does not see).
+  FAB's ledger crosses too, as every FAB count does (lineage, register LOW-FAB-MERGED-REPORT), so such
+  a child's report carries the lineage's `fab.contrib_*` counts — the gauges its last pass's — and its
+  gated-call line counts the lineage's passes; the root's `eval.contrib.*` book is seeded only where
+  armed and restores only the keys it seeded, so that child prints none and its checkpoint carries
+  none on. So each statement is scoped to what is true: at 0 **no decision reads a measurement**, on
+  every lineage, and **`contrib` stays 0.0 and no `fab.contrib_*` key exists on a lineage that never
+  armed it**. Build's line at 0 now says the first ("FAB.manage reads no contribution"), and
+  `_refresh_build_predictions` re-renders Gate `fab.contrib` at 0 as well wherever the restored books
+  or ledger carry a measurement — how many restored live experts carry one, that nothing reads them,
+  the lineage's pass count — while a lineage that never armed it keeps build's line.
+  `fab.spared_contrib` stays seeded on every pass at every value, as `fab.spared_comp` is at
+  `FAB_COMP_PROTECT=0` and as it was before the body existed (B3's fixture holds it at 0): the Gate's
+  UNREACHABLE line is what says the spare cannot fire at 0. The lever's
+  comment, `contribution`'s, `manage`'s and `load_state_dict`'s docstrings, the census purpose and
+  `.rework/CENSUS.md` row, the `A` row's note, the loop's comment and the lever bullet above say so.
+  `tests/test_faded.py`'s F5 sweep plants load-bearing experts to reach the spare and now builds at
+  `FAB_CONTRIB=1`, where the spare reads them as it did, and asserts that it spared some (39 over
+  the 150 populations at `'as_is'`); its verdict and its counts are unchanged (173 merge and 112
+  cull deferrals, on that tree as on this one). C-8 holds the
+  ruling on scripted populations saved by `FAB.state_dict` and restored by `FAB.load_state_dict`:
+  books measured at 1 and restored at 0 are carried and spare nothing — the utilization cull removes
+  0-4 as the population never measured does (at 1 the same books spare 0 and remove 1-5), the
+  failure cull removes both failing experts (at 1 the one at +0.3 is spared), and `'contrib'` at 0
+  by a direct call keeps the faded expert measured at −0.5 beside the unmeasured one. Gate
+  `fab.contrib` then names 2 of 10 restored measured experts, and a lineage that never armed it
+  keeps build's line. End to end, C-2's parent at window 110 resumed at 0, its 60 restored
+  measurements planted at +1.0 (load-bearing), makes no `FAB.contribution` call and trains and ends
+  exactly as a twin whose restored books were cleared: the same losses, the state but the two books,
+  the same FAB ledger, `fab.spared_contrib` the parent's 1. Its ledger's `fab.contrib_*` keys are the
+  parent's, its gated line reads "fired 4 time(s)" and no `eval.contrib.*` key exists. Gate
+  `fab.contrib` is UNREACHABLE, naming 60 of 253 restored live experts as measured. On that tree's
+  `src/` the planted child's passes spared 131 times — `fab.spared_contrib` 132 against the
+  parent's 1 — and its losses and state departed from the twin's.
+* **C-6's fold has a known answer.** Its second reading ran on an unchanged population and returned
+  the first exactly, and `(1 − 0.02) × first + 0.02 × first == first`, so an EMA that overwrote passed
+  (driven: a plant writing `contrib = d` passed all 50 checks). The planted expert's B is now cut to
+  a twentieth between the readings, +2.853 then +2.844, and `contrib` is their fold, neither reading;
+  the overwriting plant fails it.
+* **The society arm's leave-one-out has a known answer.** C-3 asserted only that nothing removed
+  re-forms the prediction, that removing a voter moves its rows and that removing a non-voter returns
+  it, and a plant dropping both the renormalisation and the sole-voter fall-back passed. A blend
+  written by hand now pins both, exact in float32 whatever the order of the sums (integer logits,
+  dyadic vote weights and halt mass): expert 1 removed from the two rows it voted in at weight 0.5
+  gives `(1 − held) × vote′ + held × base` with the rest renormalised (0.375 and 0.125 become 0.75
+  and 0.25), the row it did not vote in untouched; on a one-voter blend the rows it alone voted in
+  are the base logits exactly, at halt mass 0.25 and 0. Each plant alone fails its check.
+* **The C3 alarm is `fab.contrib_degenerate`.** The FAB section read "`fab.contrib_distinct_values ==
+  1` is C3 back", while C-2 above records a healthy pass reading 0.0 on all 64 candidates at window
+  51 — one distinct value beside `fab.contrib_degenerate` 0 — so a run ending after that pass would
+  have raised the alarm. **Ruled:** C3 is `fab.contrib_degenerate > 0`, a pass whose walks moved no
+  logit, which writes nothing; one distinct value on a pass that is not degenerate is the float32
+  mean loss's resolution — the walks moved and every removal read one value, there 0.0. The FAB
+  section, `contribution`'s DID IT FIRE and `ContribReport` say so. The finding's other remedy, a
+  finer difference, was not taken: the value stays the difference of two float32 means,
+  `baseline_loss` as `LM.lm_loss` scores it, and the walk test, not the value, tells a moved walk
+  from one that did not move.
+* **The domain count.** The domain note read "51 of the 227 numeric levers" after `FAB_CONTRIB_MAX`
+  became the 52nd of 228; it reads 52 of 228 and names it.
+
+**What the review changes at the default:** nothing a run trains on, and nothing a default run
+prints but Gate `fab.contrib`'s reason at the shipped 0, which now reads "FAB.contribution is not
+called and FAB.manage reads no contribution" — a gate row, not an integer counter line. Over a
+lineage that never measured every `contrib` is 0.0, so each spare decides as the unconditional read
+did. B1, B3, B3r, B5, B6 and B6r reproduce their fixtures.
+
+### Q-MEM-16 — which area each stored entry came from, and the store's occupancy by area — **RESOLVED 2026-09-28 (Proposal 05 §8 3.1; register NEW-10): `MEM.write(..., areas=None)` FILLS A NEW PER-ENTRY `area` COLUMN; `MEM.census` RETURNS `by_area`; THE ROOT PRINTS `store.occupancy.<area>` BY NAME. A FROZEN SIGNATURE WIDENED WITH A DEFAULTED KEYWORD. NO LEVER, NO WIRE, AND NO NUMBER A DEFAULT RUN PRODUCES MOVES**
+NEW-10 rules that from SR0 on every training run reports "memory occupancy by area" — the reading
+that says whether a parent leaves training with its faded areas' memory evicted (the old tree's
+phased run a9d7258 evicted every English entry). The store kept `src`, DOM's learned domain, which
+folds, splits and is culled (`MEM.apply_domain_plan` rewrites it), and no record of the corpus an
+entry came from.
+* **The column.** `Store.area`, int32, one per row: `spine/derive.py::area_id` of the DATA area the
+  entry came from, and **-1 for "no area was booked"** — every row of a fresh store, every entry a
+  caller wrote without `areas`, every entry restored from a checkpoint older than the column.
+  `_commit_window` writes it beside `tok` and `pos` on every commit, so an overwritten slot never
+  keeps the evicted entry's area.
+* **`write(..., areas=None)`** takes a (B, L) integer tensor, one id per POSITION: the input token's
+  area, whose byte offset `positions` records, so an entry's area and its `pos` name one byte. It is
+  refused by name when mis-shaped, like the other per-row arguments. No gate, eviction, floor, read or
+  rekey reads it, so a write with and without it keeps and evicts the same entries.
+* **`census` returns `StoreCensus.by_area`**: `{area id: active entries}`, ascending ids, an exact
+  count over the active rows' column on every call, so it sums to the active entries by
+  construction. A reading; it moves no counter. It is keyed by id because MEM never sees a name, and
+  it is not `counts`, whose keys are DOM's domains.
+* **The root prints it by name** in the R row `MEM.census(reconcile=True)`: `store.occupancy.<area>`
+  for every area of the run — 0 where none of its entries survive, which is the reading NEW-10 exists
+  for — and `store.occupancy_unknown` for the -1 entries and any id the run does not name. The plan
+  wrote `.unknown`; it is underscored because `DATA_AREAS` may label an area "unknown", and the two
+  would print under one key.
+* **Checkpointed per row** (`"area"`); a row without the key restores -1, so a checkpoint written
+  before the column resumes exactly, its restored entries counted as unknown until they are evicted.
+**Known answers** (`tests/test_faded.py`). F6: on B3's shape the four areas' occupancies (eng 346, py
+2,867, num 2,746, c 569 at the end of the epoch — eng, faded since phase 1, holds the fewest)
+sum to the 6,528 active entries, and every active entry's area is the label of the byte its `pos`
+records. F9: a checkpoint stripped of the column resumes exactly with every restored entry at -1, and
+the child's report counts the survivors as `store.occupancy_unknown`.
+
+### Q-DATA-10 — the fixed-rehearsal draw, and a pure-add child rehearsing the areas its parent trained on — **RESOLVED 2026-09-28 (Proposal 05 §8 3.3; register 04-Q1, 04-Q4, O9 and O16; Proposal 04 §1 item 2 and SR0): `DATA_DRAW='replay'` WITH `DATA_REPLAY_SHARE` (0.27) AND `DATA_REPLAY_NEWEST` (0.0), AND `DATA_REHEARSE_PARENT` (False), ALL BUILT OFF — `'planned'` STAYS THE DEFAULT (D8, O16); EXACT PER-AREA TARGETS LAID BY DEFICIT; SR0's PER-PHASE SHARE GAUGES UNDER EVERY LAW; `Plan.shares` AND `Plan.replay_faded`; THE PLAN'S GATES AT R. ⚠ THREE NEW LEVERS, THREE CENSUS AMENDMENTS. NO SIGNATURE MOVES, NO WIRE, AND NO NUMBER A DEFAULT RUN TRAINS ON MOVES**
+**What was asked.** 04-Q1 builds 'replay' at SR0 (`DATA_REPLAY_SHARE` 0.27, `DATA_REPLAY_NEWEST` 0.0)
+OFF, 'planned' holding until a GPU reading: the toy's 'replay' result puts a GPU 'replay' 0.27 against
+'planned' pair first among the draw tests (§8 5.3), and a confirming reading goes to the owner (O16).
+04-Q4 builds `DATA_REHEARSE_PARENT`, default False: areas in `DATA_AREAS` and in the parent's record but
+live in no phase of the child count as faded from window 0, with no effect under 'planned'; O9 keeps it
+OFF in training and measurement runs and on in the unbuilt continue preset. Proposal 04 §1 item 2 gives
+the law: each phase with faded areas gives `DATA_REPLAY_SHARE` of its bytes to them, split evenly, the
+live areas sharing the rest evenly; `DATA_REPLAY_NEWEST` is the newest-arrived live area's share, the
+other live areas splitting what is left (the critic's `replay_late` control: 0.34, and 0.0975 to each
+of four others); phases with no faded areas are 'planned'; the draw lays the budgets by deficit
+scheduling, ties broken in `Plan` order, and the startup exposure Gates stay exact. SR0's known
+answers: 'replay' realises each phase's planned shares with no front-loading (each quarter of a phase
+within 0.05 of the target) and is identical across `PYTHONHASHSEED` values; and SR0 builds the
+per-phase share gauges. The completeness critic of the Stage-3 plan found the draft's deficit rule
+truncating only at a phase bound, so each area's bytes landed within a segment of its target and the
+exposure Gates were exact no longer; the fix it asked for is built here.
+
+**The ruling, as built.**
+* **The levers** (`src/data/levers.py` §5 beside `draw`; census amendments, the fifteenth to the
+  seventeenth). `DATA_DRAW`'s choices gain `'replay'` (`'retention'` is SR2's and joins them with its
+  body). `DATA_REPLAY_SHARE` (U.FRACTION, domain (0.0, 1.0), 0.27 — a toy value, provisional under
+  NEW-19) and `DATA_REPLAY_NEWEST` (U.FRACTION, domain (0.0, 1.0), 0.0 = off) are read only under
+  'replay'. `DATA_REHEARSE_PARENT` (U.FLAG, False) moves bytes only under 'replay'; `data_plan` reads it
+  under every law for its Gate's reason.
+* **The split, `Plan.shares`, under every law.** Per phase, (area index, bytes) pairs in Plan order,
+  summing to the phase's span. Under 'planned' and 'uniform', and in every phase 'replay' does not lay,
+  it is the scheduled split by the one rule `draw_stream`'s planned budget recomputes (the phase's
+  bytes evenly over its live areas, the remainder on the first), and `Plan.per_area_draw` is its sum
+  over the phases — the numbers, and the key order, it always had. `Plan.replay_faded` is, per phase,
+  the areas the 'replay' law gives its share to: `Plan.faded[k]` (Q-FAB-18), plus `Plan.parent_faded`
+  from window 0 at `DATA_REHEARSE_PARENT=1`; `()` in every phase under 'planned' and 'uniform'. Both are
+  computed by `data_plan` at startup and are not checkpointed.
+* **The replay targets** (`data/api.py::_replay_cut`). A phase with a faded area gives round(share ×
+  span) bytes to its faded areas, split evenly; at `DATA_REPLAY_NEWEST` > 0 the NEWEST-ARRIVED live
+  area — the live area whose first live phase in this run's schedule is latest, ties to the last in
+  Plan order (an add-an-area run appends its new area, Q-DATA-9) — takes round((share + newest) × span)
+  minus that; the other live areas split the rest. Every rounding is half to even on the DECIMAL the
+  lever holds (`data/api.py::_exact_share`, the lever's repr as a `Fraction`): 0.07 of a 150-byte phase
+  is 10.5 and gives 10 bytes, where the float product 10.500000000000002 would give 11. Every remainder
+  falls on the first areas in Plan order, so the targets are integers that sum to the span and can be
+  recomputed by hand: at the shipped four-area schedule under 'replay', phases 1 and 2 give eng 8,100
+  of 30,000 bytes and py and num 10,950 each, and phase 3 gives eng and py 4,050 each and num and c
+  10,950. **A faded phase whose only live area is the newest gives it the whole live remainder** (1 −
+  share): the boost has no other live area to take bytes from, and it counts no boost there. A phase
+  with no faded area keeps the scheduled split and reads neither share. `DATA_REPLAY_SHARE` +
+  `DATA_REPLAY_NEWEST` above 1 is refused by name at `data_plan`, on exact decimals, so 0.7 with 0.3 is
+  admitted.
+* **The draw** (`draw_stream`). Each phase is laid by one of three branches: 'planned' and 'uniform'
+  are their own branch in every phase and run the statements, and take the draws, they took before
+  this ruling; under 'replay' a phase whose `replay_faded` entry is empty is laid by the planned branch
+  verbatim, and a phase with a faded area by DEFICIT against its `Plan.shares` targets. Each segment
+  goes to the area with the largest target × (phase bytes laid so far) − span × (its bytes laid so far)
+  — the integer form of "target share × phase bytes so far − realised" — among the areas with target
+  left, the first in Plan order on a tie, and it is truncated to that area's remaining target as the
+  planned branch truncates to its budget. **So every phase's realised bytes are its targets exactly**,
+  `Plan.per_area_draw == Stream.per_area_drawn`, and the exposure Gates stay exact under 'replay' (their
+  reason now says so; under 'uniform' it still calls the split a prediction). The choice takes no rng
+  draw: segment lengths and offsets come from `rng_for("data.stream.e<epoch>", seed)` as before, and
+  nothing iterates a set or reads a dict's hash order, so the stream is the same under every
+  `PYTHONHASHSEED` (04's minor m1). Phase 0 of a schedule without parent rehearsal has no faded area
+  and is byte-identical to 'planned''s, and a schedule with no faded phase at all draws the planned
+  stream. A Plan whose targets do not fill a phase (none is: `data_plan` builds them to the span) is
+  refused by name at the byte where they run out rather than handed a zero-byte segment.
+* **Rehearsing the parent.** The set is `Plan.parent_faded`, which Q-FAB-18's review reads off
+  `Areas.drawn`: an area this run declares, that the lineage's streams drew, and that no phase of
+  this schedule makes live. A declared area is not a drawn one, so an area a parent declared and
+  never trained is not rehearsed — where the record can say which it drew (the review below: a
+  record older than the list cannot, and its declared areas are rehearsed on the assumption, named).
+  Under 'planned' and 'uniform' the flag moves nothing (04-Q4), and on a fresh run there is no
+  record to read. The parent area's body is this run's, as every declared area's is (its corpus on
+  disk, or its generated text on the synthetic source — the parent's only at the parent's position
+  and `RUN_SEED`, the review below); **a recorded parent area this run does not declare stays
+  refused** at `restore_stream_state`, and the refusal now names the route that would carry one
+  without its corpus, NEW-06's replay reservoir in the checkpoint (register §8 4.5), as not built. A
+  continuing child recomputes the same plan from the record's drawn list and its parent's schedule.
+* **SR0's share gauges**, under every law, in `Stream.counters` beside `data.segment`:
+  `data.share.p<k>.<area>.planned` (the phase's `Plan.shares` target) and `.realised` (the bytes the
+  draw laid there), in permille of the phase's span, rounded half up in integers
+  (`data/api.py::_permille`), for every area the phase makes live or its `Plan.shares` entry names,
+  and every area it drew from ("gives a target" until the review below, which left a faded area
+  given 0 bytes ABSENT; it reads 0 now). A phase of no bytes prints none. Under 'planned' and
+  'replay' the pair is equal by construction; under 'uniform' their difference is the draw's error
+  bar, per phase. They are readings about the bytes, so the resample-off replay carries them over
+  with `data.segment`.
+* **What fired.** `data.replay.fixed_phases` (the phases that give a faded area at least one byte,
+  since the review below; "a faded area and a nonzero span" before it) and `data.replay.bytes` (the
+  bytes per epoch it gives faded areas) are PRESENT at `DATA_DRAW=replay`, 0 where no phase gives a
+  faded area a byte (a schedule with no faded phase, or a share that comes to none), and ABSENT
+  under 'planned' and 'uniform'.
+  `data.replay.newest_boosted` (the faded phases whose newest-arrived live area took the boost beside
+  another live area) is ABSENT unless 'replay' runs at `DATA_REPLAY_NEWEST` > 0, the arm on which the
+  boost is armed, and 0 there when no faded phase had another live area. `data.rehearse_parent.areas`
+  is PRESENT only on a resume at 'replay' with `DATA_REHEARSE_PARENT=1`. All four are `Plan.counters`
+  — the plan's decisions; the gauges say what the draw laid. **Two Gates** join the Plan's three:
+  `data.replay` (UNREACHABLE naming `DATA_DRAW` under 'planned' and 'uniform'; its value the phases
+  that give a faded area a byte against the phase count, armed-but-zero on a schedule with no faded
+  phase and, since the review, where every faded phase's share comes to no byte) and
+  `data.rehearse_parent` (UNREACHABLE at `DATA_REHEARSE_PARENT=0`, under a law with no rehearsal share,
+  and on a fresh run, each with its own sentence; its value the areas rehearsed from window 0 against
+  the lineage's drawn areas this run declares, armed-but-zero where the child schedules every one).
+  **The Plan's gates get an R row, `DATA(plan.gates)`**, rendered through `spine/gate.py::three_state`
+  as the Areas and Stream gates beside it are: run.py's startup print gives a reason only for a gate
+  that fired, so the new Gates' UNREACHABLE sentences — and `data.exposure_skew`'s at one area — reached
+  no reader. The row gives a reason on the two arms `three_state` gives one, unreachable and
+  armed-but-zero; a fired Gate's reason is the startup line's, so the two print each reason once.
+* **Across a continuing resume** the stream digest (Q-DATA-9) is the check: a draw change redraws
+  other bytes and is refused at the `segment` stage, and the refusal now prints `DATA_REPLAY_SHARE`,
+  `DATA_REPLAY_NEWEST` and `DATA_REHEARSE_PARENT` with the other draw-shaping levers.
+  `DATA_REHEARSE_PARENT` flipped under 'planned' redraws the same bytes and continues.
+
+**Refinements of the plan, each because the law needs it.** (1) The plan's rule for the
+newest-arrived area named no case with one live area; it takes the whole live remainder there, since
+1 − share − newest has no other taker, and the boost is not counted. (2) The plan wrote
+`newest_boosted` PRESENT-and-0 wherever 'replay' finds no faded phase; at `DATA_REPLAY_NEWEST=0` the
+boost is OFF (04's table), so its count is ABSENT there (G4, as `data.holdout_admitted` is on the
+arms it cannot fire on, Q-DATA-9's review). (3) `Plan.replay_faded` beside `Plan.shares`, so the
+draw reads which phases the law lays off the Plan rather than reading `DATA_REHEARSE_PARENT` itself.
+(4) Rounding on the decimal, and the tie-breaks for remainders and for the newest area, which the
+plan left open. (5) The `DATA(plan.gates)` row, without which the two Gates the plan asks for print
+their reasons nowhere. (6) `data.rehearse_parent` has a third UNREACHABLE arm beside the plan's two,
+the lever off (the shipped value), checked first. (7) The four new counts are `Plan.counters`, the
+plan's decisions, which the plan left unplaced.
+
+**Found while building it, and corrected in the prose it touched.** `data/levers.py` said
+`Stream.per_area_drawn` and `Plan.per_area_draw` agree "to within one segment per area" under
+'planned'; the planned law's truncation to each area's budget has made them equal since D8, and the
+sentence now says so. Its "It is the only value under which the startup gate is EXACT" (quoted in
+`data_plan`) keeps its words and gains a dated qualifier: 'replay' is exact the same way.
+
+**Measured, recorded for §8 5.3's pre-registration (CPU, operation only).** At the shipped four areas
+and 120,000-byte stream, 'replay' at 0.27 draws c (live only in phase 3) 10,950 bytes and py 40,950,
+so `Gate data.exposure_skew` FIRES before the first window (3.7397 against 3.0; 'planned' reads 3.0 and
+does not). A startup gate flags and does not refuse, and the pair's 'replay' arm will print it.
+
+**What the default changes.** No number a default run trains on. At `DATA_DRAW='planned'` the draw
+runs the statements it ran and takes the same draws, `data_plan`'s split and exposures are the same
+numbers, and the new levers are not read by the law. The report gains the share gauges on every leg
+(integer lines, which `tests/test_baseline.py` lists as new and does not compare), the
+`DATA(plan.gates)` row, and two Plan gates in run.py's startup print, both UNREACHABLE. B1, B3, B3r, B5,
+B6 and B6r reproduce their fixtures.
+
+**What CPU establishes:** operation only. `tests/test_draw.py` (new): D1, the stream on eight shapes
+hashes to the digest drawn before 'replay' existed (c872121), `Plan.per_area_draw` is the old
+formula and `Plan.shares` the planned budget on six schedules, `DATA_REHEARSE_PARENT=1` under
+'planned' and 'uniform' changes nothing and its Gate says why, 'replay' with no faded phase draws
+the planned stream, and under 'planned' every new count is ABSENT and both Gates are UNREACHABLE;
+D2, the hand-computed targets above, realised exactly (also at `DATA_SEG_CONTIG=1`, on the real
+source and in an epoch-1 redraw), phase 0 byte-identical to 'planned''s, each faded phase opening on
+the first area in Plan order, and at 2,000,000 bytes every quarter of phases 1-3 within 0.05 of the
+0.27 target (worst 0.0068); D3, the stream identical under `PYTHONHASHSEED` 0, 1 and random, in
+subprocesses; D4, the newest rule (0.34 and 0.0975 at five live areas, a tie to the last in Plan
+order, the single-live-area remainder, ABSENT at 0), the decimal tie and the refusal; D5, parent
+rehearsal at 0.27 of every phase from the first byte, none at 0, under 'planned' or on a fresh run,
+a declared-but-undrawn area left alone, and end to end through a parent checkpoint with the R rows;
+D6, continuing resumes under 'replay', of a fresh run and of a rehearsing child, exact; D7, a draw
+change across a continuing resume refused by the digest; D8, the permille rule, a Plan that cannot
+fill a phase refused, and the vanished-area refusal naming NEW-06. Whether rehearsal at 0.27
+protects a faded area is §8 5.3's GPU pair and E1's.
+
+**AMENDED 2026-09-28 — THE REVIEW OF THIS RULING.** Five findings, each driven on the tree before it
+(CPU, operation only). The three that moved a byte or a reading are repaired and held by
+`tests/test_draw.py` D9, whose checks of each repair fail when run on d9900c6's `src/` (those of the
+cases the review leaves alone, and of the new key's default, pass on both); the prose is corrected
+where it stood:
+* **A synthetic parent area is rehearsed from the parent's text, or not at all.** On
+  `DATA_SOURCE=synthetic` an area's text is the alphabet its position in `DATA_AREAS` picks, drawn by
+  `RUN_SEED`, and at `DATA_SYNTH_HOLDOUT=0` — the shipped value until 04-Q5's flip — no held-out block
+  rides on it, so `restore_stream_state` checks neither: its moved-alphabet check sits on the carving
+  arm, and the block digest it compares on every arm is of a block that is empty there. Driven: a
+  parent at `eng,py`, seed 0, drew eng alone; a child at `py,eng` scheduling `py|py|py|py` under
+  'replay' at `DATA_REHEARSE_PARENT=1` was admitted with an eng of another alphabet (b'uAuBuyxC…'
+  against the parent's b'flfmfjin…'), `Plan.parent_faded` (1,), and `data.rehearse_parent` FIRED
+  (1 vs 1), "drawn by the lineage" — and a child at the parent's order and `RUN_SEED` 1 likewise,
+  with other text. **Ruled:** at `DATA_REHEARSE_PARENT=1` under 'replay', `data_plan` refuses by
+  name, on the synthetic source, a rehearsed area whose position moved (`_alphabet_moved` against
+  `Areas.parent_names`; five positions apart is the same alphabet and the same text), naming both
+  positions and both area lists, `DATA_REHEARSE_PARENT=0` and `RUN_SEED`; it reads `source` for that,
+  and its `LEVERS READ` says so. **`RUN_SEED` is recorded nowhere** — not in DATA's record, and not in
+  the geometry manifest, where a new field would refuse every checkpoint written before it
+  (`ckpt/api.py::check_geometry` refuses a missing field) — so a reseeded child is admitted and
+  rehearses other text under the parent's name; on the synthetic source the fired Gate's reason says
+  the body is the parent's only at the parent's `RUN_SEED`, which is not checked. A body at another
+  generated length (`DATA_STREAM_BYTES`, `DATA_N_PROCESSES`, `DATA_SEG_MAX`) is a prefix or a
+  continuation of the same sequence, and is admitted. At `DATA_SYNTH_HOLDOUT=1` the restore refused a
+  moved position already; on the real source an area's text is its directory, and a reorder rehearses
+  the parent's own. At `DATA_REHEARSE_PARENT=0`, and under 'planned', the moved child plans and draws
+  as before.
+* **A record older than the drawn list is rehearsed on its assumption, which is named and carried.**
+  `restore_stream_state` holds every area such a record declares as drawn (`data.drawn_assumed`,
+  Q-FAB-18's review), which moved only FAB's faded reading; under 'replay' at `DATA_REHEARSE_PARENT=1`
+  it moves bytes. Driven: an `eng,py,num` parent that drew eng alone, its list stripped, gave a
+  `py|py|py|py` child eng and num 2,700 bytes each where the recorded list gives eng 5,400, and the
+  Gate called both "drawn by the lineage". And it outlived the resume: the old record's child wrote
+  the assumed areas into its own `drawn` as draws, and that child's child read `data.drawn_assumed` []
+  and rehearsed num, which nothing in the lineage had drawn. **Ruled, and not refused** — every
+  checkpoint older than c872121 lacks the list, and a parent that drew every area it declared (the
+  generated schedule's) is the common case, which a refusal would bar from rehearsal: such an area is
+  rehearsed, and `data.rehearse_parent`'s fired reason names the rehearsed areas held drawn only by
+  assumption. **`Areas.drawn_assumed`** is the part of `Areas.drawn` held on the assumption and not
+  drawn since: `restore_stream_state` fills it (all of a record's areas where it has no list, the
+  record's carried `drawn_assumed` where it has one), `draw_stream` removes each area it draws,
+  `stream_state` records the rest, and `data.drawn_assumed` names it at every resume that holds one.
+  A record carrying `drawn` without the new key — c872121 and d9900c6, on this branch, wrote them —
+  reads []: nothing in it can recover an assumption it did not keep. No number a run trains on moves:
+  FAB's sets read `Areas.drawn`, unchanged, and `data_plan` reads the new list only for the reason.
+* **A share that comes to no byte rehearses nothing, and reads so.** At `DATA_REPLAY_SHARE=0.0`, in
+  the lever's domain, the faded phases gave their faded areas 0 bytes, yet `data.replay` read FIRED
+  (3 vs 4) and `data.replay.fixed_phases` 3 beside `data.replay.bytes` 0, and the faded areas printed
+  no share gauge — ABSENT, for a law armed there. **Ruled:** a phase counts in
+  `data.replay.fixed_phases`, and `data.replay` fires, where it gives a faded area at least one byte;
+  armed-but-zero's reason says whether the schedule has no faded phase or its faded phases' share
+  comes to no byte, and a fired reason names the faded phases that gave none. Such a phase is still
+  laid by deficit over its live areas (the plan's rule for a phase with a faded area), its faded areas'
+  pairs in `Plan.shares` reading 0. The gauges print for every area a phase makes live or its
+  `Plan.shares` entry names, and every area it drew from, so a faded area given 0 bytes reads 0 / 0;
+  under 'planned' and 'uniform' the entry names exactly the live areas, and no gauge moves there.
+* **Stale counts.** `data_plan`'s docstring said "TWO OF THE THREE GATES' BOUNDS" and "THREE DECLARED
+  GATES" over a three-gate list; it says five, and lists `data.replay` and `data.rehearse_parent` with
+  their arithmetic (D9 holds every Gate it builds to a name in it). `spine/loop.py`'s comment on the
+  `DATA(plan.gates)` row said every Plan gate reads there "with its arithmetic and reason";
+  `three_state` keeps a reason on the unreachable and armed-but-zero arms only, and a fired Gate's
+  reason is run.py's startup line's, which the comment and the bullet above now say (D5 holds the
+  fired row to its arithmetic).
+* **The `Plan` docstring** said `parent_faded` is () "on a continuing resume, whose schedule is its
+  parent's". A continuing resume recomputes the set its parent leg had — the same schedule over the
+  record's drawn list — and for a pure-add or rehearsing child that is not empty: (0,) for eng under
+  `py|py|py|py` over `eng,py`, which is what keeps the continuation exact. The docstring says so, and
+  D6 holds it.
+
+**What the default changes:** nothing a run trains on and no integer it prints. The gauges, the
+counts and the Gates move only under 'replay', the refusal only at `DATA_REHEARSE_PARENT=1` under
+'replay', and the new record key is a list; B1, B3, B3r, B5, B6 and B6r reproduce their fixtures.
+
+### Q-DATA-11 — the source-reliability book in observe mode, and the sources it reads — **RESOLVED 2026-09-28 (Proposal 05 §8 3.4; register 04-6.3; Proposal 04 §1 item 8, §5, §6 and SR3): `DATA_TRUST` BUILT `'off'`, `'observe'` BUILT AND `'loss'`/`'loss+draw'` REFUSED WITH `NotBuilt`; THIRTEEN LEVERS OF ITS BOOK; `Areas.sources` AND `Stream.sources`; THE `Focus` RECORD THROUGH `DATA.new_focus(restored=)`, `DATA.claims_observe` AND `DATA.trust_period`; SR3's BIT-IDENTITY. ⚠ FOURTEEN NEW LEVERS, FOURTEEN CENSUS AMENDMENTS, THREE NEW ENTRY POINTS AND ONE MOVED (`DATA.stream_state(..., focus=None)`). NO WIRE, AND NO NUMBER A DEFAULT RUN TRAINS ON MOVES. `DATA_SRC_CAP` IS NOT BUILT: DEFERRED TO §8 4.7, WITH THE REGISTER'S NOTE. ⚠ FLIPPED TO `'observe'` ON 2026-09-29, LAST AND ALONE: DEFAULT BEHAVIOUR CHANGE 3; ACTUATION STAYS OFF**
+
+**What was asked.** Proposal 04 §1 item 8: a model-free source-reliability book, observe mode only —
+claims a source makes about a key ('kv', a normalised (key, value) pair around a delimiter, the build
+target; 'ctx', d3's raw context and next unit, kept as an arm), admitted at `DATA_TRUST_MIN_N` readings
+with a top-value share of `DATA_TRUST_SELF`, pre-filtered by a count sketch hot at `DATA_TRUST_HOT`;
+only conflicted claims (two or more sources, two or more values) are evidence; a reliability-weighted
+vote, r = (agree + 1)/(n + 2) iterated 10 times, a tie deciding nothing; t = clip(r / max r,
+`DATA_TRUST_MIN`, 1), set only with `DATA_TRUST_MIN_EV` conflicted claims, below which evidence is
+ABSENT and trust 1. §5 gives the surface: `DATA.claims_observe(dat, focus, *, ids, sources, step,
+decode)` at stage B, `DATA.new_focus(dat, areas, plan) -> Focus` as the assembly row after
+`data_plan`, `DATA.trust_period(dat)`, `stream_state` and `restore_stream_state` taking `focus=`, and
+the checkpoint carrying the claim table, the sketch, r, t and first-seen per source. §6 gives the
+levers and values, SR3 the build and its test — "'observe' against 'off' is bit-exact on training
+numbers" — and 04-6.3 rules 'observe' ON as telemetry once that holds, actuation OFF. The register's
+Stage-3 plan builds it OFF here, flips it last and alone, defers the TOK channels and the
+actuation, and defers `DATA_SRC_CAP` (O18: "built OFF (0) at SR3") with a note where it is ruled. Its
+critic asked for a per-EPOCH cursor reset at every roll and carried across saves, an epoch roll in the
+continuation test, `'focus'` in `System.__slots__`, `DATA_TRUST_EVERY` refused below 0 by a domain,
+and G3 extended to the new accessor (finding 23); `data.trust.wall_s` a float outside the integer
+channel, never checkpointed (19); 33 `ROW_ARGUMENTS_ELSEWHERE` entries (2); the `DATA_SRC_CAP`
+deferral written where it is ruled and not only here (13); and the counts no tool reads — 38
+Clock-unit levers, `_periods` spanning seven packages, EIGHT gates in `RUN.new_cadences`' row (16).
+
+**The ruling, as built.**
+* **The levers** (`src/data/levers.py` §6; census amendments, the eighteenth to the thirty-first).
+  `trust` ('off' | 'observe' | 'loss' | 'loss+draw', default 'off'); `trust_rule` ('claims', the one
+  rule built — 'peer', 'residual' and 'fluency' are SR5's and not choices until built); `trust_claim`
+  ('kv' | 'ctx'); `trust_ctx` 5 and `trust_val` 1 (TOK units, domain (1, None)); `trust_delims`
+  ('=|:| is | are | was | were ', a '|'-separated U.NAME, refused by name at `new_focus` for an empty,
+  repeated or prefix-of-another entry); `trust_hot` 20, `trust_min_n` 3, `trust_min_ev` 10 (U.COUNT,
+  domain (1, None)); `trust_self` 0.8 and `trust_min` 0.3 (U.FRACTION, domain (0.0, 1.0));
+  `trust_every` 160 (U.Windows, domain (0, None) — a negative is refused at the first read, so
+  `trust_period` carries no second refusal, O15; the Clock-unit lever count is 38); `trust_sketch`
+  4194301 (U.SLOTS) and `trust_table` 200000 (U.ENTRIES), domain (1, None). Every value but `trust`'s
+  is 04 §6's and provisional (NEW-19).
+* **The sources.** `Areas.sources` is, per area, [(body offset, source name)]: `_read_area` hands back
+  the per-file boundaries its walk already had (one entry per file contributing a byte), and
+  `open_areas` maps them onto the carved body — an offset before the held-out block stays, one past it
+  moves down by the block's size, one inside it moves to the block's offset, and of entries landing on
+  one offset the last is kept. A real area's source is its file, "<the entry's path under
+  DATA_DIR>/<file>" (`train/eng/alice.txt`); a synthetic area is one source,
+  `synthetic:order2:<label>` (`_synthetic_areas` returned a positional `synthetic:order2:<i>` that
+  nothing read). `draw_stream` carries them into **`Stream.sources`**, run-length ((stream offset,
+  index), …), and **`Stream.source_names`**, per chunk and per wrap piece, **taking no draw**: the
+  bytes, labels, splices, draw count, counters, gates and the digest the segmentation log carries are
+  what they were (`tests/test_trust.py` S2 draws the same Areas with its table emptied and compares
+  all of them). Neither is checkpointed; both are recomputed from the same files and draw.
+* **The book, `DATA.Focus`**, the one DATA record that is a book and not a statement, so not frozen.
+  `new_focus` is the `focus` ASSEMBLY row after `data_plan` and `System.focus` holds it. At 'off' it
+  allocates nothing — no sketch, no table, no counter, two UNREACHABLE gates — and holds a checkpoint's
+  book unchanged (`Focus.held`) for that run's saves to write back. At 'observe' it builds the int32
+  sketch (array('i'), itemsize checked) and an empty LRU table and seeds every `data.trust.*` counter
+  at 0, or puts a checkpoint's book back. 'loss' and 'loss+draw' raise `NotBuilt` there, at startup
+  before any tensor, their messages opening with `DATA_TRUST='loss'` / `'loss+draw'` (G2), the
+  `OPT_LR_CONTINUE='regulated'` precedent. *(2026-09-28: three UNREACHABLE gates at 'off' since
+  Q-DATA-12 — its `data.trust.copy` names `DATA_TRUST='off'` too; `DATA.Focus`'s docstring said two
+  until Q-DATA-12's review.)*
+* **The claims** (`claims_observe`), formed unit by unit in stream order and the same however a stream
+  is cut into passes — `Focus.carry` holds the units the next pass needs (`DATA_TRUST_CTX` for 'ctx';
+  `CTX + VAL + D - 1` for 'kv', D the longest delimiter). 'kv': at each occurrence of a delimiter in
+  the units' bytes, the key is the text from `CTX` units before the unit holding its first byte up to
+  that byte, **cut after its last punctuation, line break or delimiter** — the tree's reading of 04's
+  "up to CTX units", so `x=1; y=2` claims "y" and not "1 y" — and the value the text after it to the end
+  of the `VAL`-th unit after the one holding its last byte, cut at the first; both case-folded,
+  punctuation stripped, whitespace collapsed, so `@EEE=V;` and `@EEE:V;` are one claim ("eee", "v").
+  An empty key or value is none; a claim is formed when its last unit is read. 'ctx': each unit with
+  `CTX` units before it in the stream, the key those units length-prefixed. A claim counts only where
+  ONE source holds every unit it spans; a unit whose bytes straddle two sources has none. Each claim
+  goes into the sketch (bucket `zlib.crc32(key) % DATA_TRUST_SKETCH`, saturating int32) and, once its
+  bucket holds `DATA_TRUST_HOT`, into the table as a count for (key, source, value), the key moved to
+  the table's recent end or inserted with the least recently claimed evicted past `DATA_TRUST_TABLE`.
+* **The vote**, recomputed over the whole table at every pass (d3's ClaimTD): a source's claim on a key
+  is its UNIQUE top value there (a tie at the top is no claim — the vote's own "a tie decides
+  nothing"), admitted at `MIN_N` readings and a `SELF` share; conflicted keys as 04 says; r from 1,
+  re-voted 10 times, a tie within 1e-9 skipped; evidence [r, n] only at n ≥ `MIN_EV`, trust only when
+  two or more sources carry evidence. Sources in name order, keys bytes, the bucket a crc32: the book is
+  the same under every `PYTHONHASHSEED` (T4). `tests/test_trust.py` T3 holds the vote to a transcription
+  of the prototype's `update()` on random tables.
+* **The cursor is per epoch, and `claims_observe` takes `at`.** `at` is the index of `units[0]` in this
+  epoch's segmentation: the book's cursor continues it; 0 opens a new stream (the carry and cursor
+  reset, `Focus.stream` advances); anything else is refused by name. The root carries `lo`, the cursor,
+  and `hi`, the end of the ids the windows cut so far (`bounds[1]`, the cut's own end, so a mid-epoch
+  act's re-cut tail is never read early and the kept prefix `ids[:k0 + 1]` is the one trained); stage
+  E puts both back to 0. A process starts at 0 at `in_epoch` 0 and, mid-epoch, at the book's cursor
+  only if its last pass fell in this epoch (`Focus.last_step` past `clock.step - in_epoch`) — so a
+  periodic save taken after a roll and before the next pass (whose cursor is the last epoch's) resumes
+  reading this epoch from unit 0, as the uninterrupted run does (T5). A book an 'off' leg carried is
+  placed the same way, so the next 'observe' leg reads the units that leg consumed in the epoch it
+  resumes in and none of an earlier epoch's — ruled in the review below (T6).
+* **The loop.** A `B` row at the flush tail, after the X block and before the retention probe: the arm
+  test (`DATA_TRUST != 'off'`) before `Cadences.due('data.trust', DATA.trust_period(dat), clock)`, and
+  a pass on the window that rolls the epoch, due or not (on a rolling tick that cut no window, after
+  the cut's branches), so the book reads every unit of an epoch before the roll replaces its
+  segmentation. An `R` row inside the try that saves on a raising R stage, after the boundary reading:
+  a stop that left consumed units unread (a `max_windows` stop mid-epoch) gets one more pass, so the
+  report and the final checkpoint hold every unit this process consumed and a continuation goes on
+  from the cursor. The join is `compose.py::_trust_units` (§3.0.2), `ROW_ARGUMENTS_ELSEWHERE` names it
+  (33 entries). `data.trust.wall_s` is the root's float, timed around the join and the call, printed
+  to six places in the `DATA(trust)` row, never checkpointed and never in the integer channel (T8).
+  `RunResult.trust_series` holds one dict per pass and `run.py --trust-series` writes it; the gated
+  call-site report carries `DATA.claims_observe` on `data.trust.passes`; `_CALLS` lists it at B and R.
+* **`DATA.trust_period(dat)`** is `units.Windows(DATA_TRUST_EVERY)` at 'observe' and **0 at 'off'**, so
+  the cadence audit calls the gate DISARMED there rather than one that can fire — in the root's line
+  for the key since the review (`compose.py::_trust_audit`), which names `DATA_TRUST='observe'` as what
+  arms the book, because RUN's own advice for a disarmed gate, a period of 1 or more, arms nothing at
+  'off'; `_periods` carries it as `'data.trust'`, the eighth key, and the mapping now spans seven
+  packages. `DATA_TRUST_EVERY=0` is the other disarmed arm: the epoch-end and tail passes only, which
+  the root's line says, as it does for a period the run is too short for.
+* **The checkpoint.** `stream_state(..., focus=)` writes `state['focus']` at 'observe' — mode, rule and
+  claim shape, the sketch, the table in LRU order, evidence, trust, first sights, cursor, stream
+  ordinal, `last_step`, carry and counters — and at 'off' nothing, unless the Focus holds a
+  checkpoint's book, written back unchanged (ON → OFF → ON resumes it, the next 'observe' leg reading
+  the units the 'off' leg consumed in the epoch it resumes in and none of an earlier epoch's — the
+  review's ruling: T6). The sketch is DATA's payload and never a manifest field:
+  `CKPT.check_geometry` refuses a field a checkpoint does not record, so a new one would refuse every
+  checkpoint written before it. `new_focus(restored=)` puts it back and **refuses by name** a sketch
+  of another size (`DATA_TRUST_SKETCH`) and another estimator or claim shape (`DATA_TRUST_RULE`,
+  `_CLAIM`, `_CTX`, `_VAL`, `_DELIMS`), since every bucket and key is theirs; a smaller
+  `DATA_TRUST_TABLE` evicts the least recently claimed keys to fit, counted. A checkpoint with no book
+  — before this build, or from an 'off' lineage — gives an empty one, which reads a mid-epoch resume's
+  epoch from its first unit.
+* **The surface it reports.** `data.trust.passes` (every pass), `.updates` (passes whose vote had a
+  conflicted claim), `.units`, `.claims` (formed), `.claims_kv` or `.claims_ctx` (recorded),
+  `.conflicted_claims`, `.sources`, `.evidence_absent` (readings of the last vote), `.table_evictions`
+  and `.sketch_load` (occupied buckets): ABSENT at 'off', PRESENT-and-0 at 'observe' — 04 §5's
+  spellings where it names them; `units` is added so "no unit read twice or skipped" is a printed
+  number. Gate `data.trust`: UNREACHABLE naming `DATA_TRUST='off'`; at 'observe' FIRED when trust is set
+  for some source (sources trusted vs sources read), armed-but-zero with the evidence arithmetic
+  otherwise. Gate `data.trust.actuation`: UNREACHABLE on every configuration this tree builds. The
+  `DATA(trust)` row prints both in three states, the counters, `data.trust.wall_s`, and per source
+  read its r over its n, and its t — or its evidence ABSENT and trust 1. A `'data.trust'` ledger row
+  joins `Cadences.ledger()`.
+
+**Departures, each recorded because the code showed the proposal's shape or the plan's could not hold
+as written.**
+1. **`claims_observe(dat, focus, *, units, sources, step, at)`.** `units` (each unit's bytes) replace
+   04's `ids` plus a root-composed `decode`, as the plan says: DATA may not import TOK and the root
+   holds the bytes. **`at` is not the plan's.** Without it the per-epoch cursor cannot be kept honest:
+   DATA sees no clock, so it cannot tell a new epoch's first pass from a continuation, and the only
+   other way to reset the cursor at a roll is the root writing DATA's record. With it, a pass
+   continues the cursor or opens a stream at 0, and a mismatch — a unit read twice or skipped — is a
+   refusal naming both numbers. The root reads `Focus.cursor` and `Focus.last_step` to place its
+   first pass of a process (above).
+2. **`restore_stream_state(dat, areas, state)` does not take `focus=`** (the plan's departure from 04
+   §5): it runs at the resume's restore row, before `data_plan`, so the record it would fill does not
+   exist yet. `new_focus(restored=Snapshot.payload['DATA'].get('focus'))` is the one restore.
+3. **The epoch's last window and a stop's tail both pass.** 04 says "at the consumed cursor" and the
+   plan names the B row and "the tail"; without the rolling window's pass an epoch's last units are
+   never read (the roll replaces the segmentation), and without the committing tail the final
+   checkpoint's cursor lags the stream a continuing resume goes on from. A tail pass counts in
+   `data.trust.passes` (and `.updates` where its vote had a conflict), so a lineage stopped mid-epoch
+   reads one pass more than an uninterrupted run; every other field of the book is the same (T5).
+4. **`trust_period` is 0 at 'off'**, reading `trust` beside `trust_every`, so the audit's word is
+   DISARMED; the plan's arm test still comes first. Since the review the line that says so is the
+   root's, because RUN's remedy for a disarmed gate — a period — arms nothing there.
+5. **A claim-shape change is refused on a resume**, beside the plan's sketch-size refusal: a table
+   read under another rule, context length, value length or delimiter class is another table.
+6. **An 'off' run carries a checkpoint's book**, so switching the book off for one leg of a lineage
+   does not destroy it (the retention probe's ON → OFF → ON rule, Q-EVAL-12). What the next
+   'observe' leg reads of that leg was left unruled here and is ruled in the review below: the units
+   it consumed in the epoch the next leg resumes in, and none of an earlier epoch's.
+7. **`first_seen` is a position** ([stream ordinal, unit index]) and not a step, so a continuation
+   records what an uninterrupted run records.
+8. **`data.trust.units`, the `DATA(trust)` row, `RunResult.trust_series` and `run.py
+   --trust-series`** are additions: the count the continuation test reads, the row the plan's
+   `report['DATA(trust)']` names, and what E3 needs to read the book over a run.
+9. **The synthetic source's name** is `synthetic:order2:<label>`, not the positional name
+   `_synthetic_areas` computed and dropped, so it survives a reordered `DATA_AREAS`.
+
+**Not built, and where each lives.**
+* **`DATA_SRC_CAP`** — deferred to §8 4.7, because an unpromoted origin has no producer until the
+  preset writes O5's list; the trust detection floor's per-N-bytes clause (04-6.3) goes with it. The
+  register carries the dated note at O18, 04-Q12, Appendix B's `DATA_SRC_CAP` row and the detection
+  floor's, and §8 3.4's status line.
+* **The actuation** — `DATA.token_weights`, `LM.lm_loss(token_weights=)`, and so 'loss' and 'loss+draw'
+  (refused `NotBuilt`) — and **TOK's `channels=`** on `tokenize`/`splice`, which the book does not
+  need: `_trust_units` maps sources through `byte_pos` in the root.
+* **'focusbed'** and the known answers that read it (`data.trust.ranked_liar_last`,
+  `format_split_floored`, the K sweep, the format-variant world) — SR2's and E5's. Copy detection is
+  SR6's; the rules 'peer', 'residual' and 'fluency' SR5's. *(2026-09-28: SR6's copy detection is
+  built, OFF, inside this vote — `DATA_TRUST_COPY`, Q-DATA-12.)*
+* **The wall measurement** is E3's (register §8 6.2): `data.trust.wall_s` is the instrument, 160 is
+  04's cadence, lengthened if E3 measures more than 2% of wall.
+
+**Tests.** `tests/test_trust.py`: S1-S3 (the sources, the draw's indifference to them, the join), T1
+(SR3's bit-identity at 300 windows on the synthetic source under 'ctx', on data/train under 'kv', and
+on a planted corpus of four files, one stating the next letter, on which the book floors that liar at t
+0.3 while nothing moves), T2 (`@EEE=V;` and `@EEE:V;` one claim under 'kv', two contexts under
+'ctx'), T3 (the planted liar at r 1/22 against 21/22, one conflicted claim or context per entity,
+evidence ABSENT below `MIN_EV`, forty random pass cuts reading one pass's book, the vote against the
+prototype's), T4 (`PYTHONHASHSEED` 0, 1 and 12345, in subprocesses), T5 (continuing, boundary and
+periodic-save resumes across the epoch roll, each ending with the uninterrupted run's book), T6 (a
+book-less checkpoint, the two refusals, ON → OFF → ON inside one epoch and, since the review, across
+the roll, the round trip), T7 (`NotBuilt`), T8 (`wall_s` outside the channel, run.py end to end), and
+since the review T9 (the audit's line for the book). `tests/test_prose_guards.py` G2 gains 'loss' and
+'loss+draw'; G3 gains `DATA_TRUST_EVERY=-1` refused by its domain and `trust_period`'s two arms. CPU
+runs establish operation only: whether the book is right about real sources is E3's, on GPU.
+
+**What the default changes:** nothing a run trains on and no integer counter a default run prints.
+At 'off' the book allocates nothing and is never called; the report gains the `DATA(trust)` row (two
+UNREACHABLE gates), a gated-call line and the ledger's `'data.trust'` key at 0 checks and period 0,
+and a checkpoint's `RUN.cadences` carries that key. **The run also prints one more startup warning**
+— the cadence audit's `'data.trust'` line, DISARMED by `DATA_TRUST='off'`, in the root's words since
+the review (below); this list left it out until then. `Stream.sources` is bookkeeping over a draw
+that did not change. B1, B3, B3r, B5, B6 and B6r reproduce their fixtures. *(2026-09-28: the row's
+UNREACHABLE gates are three since Q-DATA-12, which adds `data.trust.copy` and the line.)*
+
+**AMENDED 2026-09-28 — THE REVIEW OF THIS RULING.** Three findings, each driven on the tree before it
+(00e6fc3; CPU, operation only). The two that printed something false are repaired and held:
+`tests/test_trust.py` T9's three checks of the audit's line fail when run on that tree's `src/` (its
+fourth, the passes the line promises, passes on both), and `tests/test_assemble.py` A10's new row
+check fails on that tree's generator. The third's behaviour is ruled as the code already does it,
+its prose corrected where it stood and both of its sides driven in T6, whose new crossing check
+fails on that tree only on the reason's words: its numbers are the old tree's too.
+* **The cadence audit's line for the book is the root's.** `trust_period` is 0 at 'off', so
+  `RUN.cadence_audit` printed its DISARMED sentence for `'data.trust'` on every default run — one
+  startup warning more than b2361e4 printed, which "What the default changes" did not list — and
+  ended it "Set a period of 1 or more on the package that owns this threshold", which arms nothing at
+  'off': `DATA_TRUST_EVERY=1` printed the same line. At 'observe' with `DATA_TRUST_EVERY=0` the same
+  sentence said "Whatever it gates does not happen in this run" while the book passed — driven: a
+  30-window real-source run made one tail pass over 3841 units that formed 38 claims, the ledger
+  reading (30, 0, None, Windows(0)) — and a period the run is too short for (100000 against a
+  317-window run) printed RUN's starved sentence, which says the same. **Ruled:** the root words that
+  one line, `compose.py::_trust_audit` (§3.0.2), and hands every other back as RUN wrote it; the
+  mapping RUN audits is still the one `new_cadences` was given, so this rewords a line and adds no
+  second audit. At 'off' the line says the gate is DISARMED by `DATA_TRUST='off'` at any
+  `DATA_TRUST_EVERY` and any run length, and names `DATA_TRUST='observe'` as what arms the book; at
+  'observe' a period of 0, or one the run cannot reach, reads as the periodic pass DISARMED or unable
+  to fire once, beside the passes that still run — the window that rolls each epoch, and a stop's
+  tail — so the book reads every unit the run consumes. A period the run reaches gets no line, as
+  before. `trust_period` is unchanged. The finding's other remedy — the lever's period at 'off', read
+  as 'curve's "declared and never asked" — would have silenced the default's line, but left 'off' at
+  `DATA_TRUST_EVERY=0`, or at a period past the run, printing advice that arms nothing, and 'observe'
+  needs the root's line either way. The default run keeps its extra warning, now true, and "What the
+  default changes" names it. T9 drives all five arms (the two 'off' lines, the two 'observe' ones,
+  none at a reachable period, RUN's other lines unchanged) and the passes the line promises: at
+  `DATA_TRUST_EVERY=0` a whole run passes once, at its finishing roll, over every unit, and a stopped
+  one once, at its tail.
+* **The generated defaults table escapes a pipe.** `tools/render_defaults.py::_cell` wrapped a
+  default's `repr` in a code span and escaped no `|`, and GitHub-flavoured Markdown splits a table
+  row on an unescaped `|` inside a code span too. `DATA_TRUST_DELIMS` is the first default holding
+  one: its row in `docs/05_DEFAULTS.md` split into ten cells where every other row has five, so it
+  read "`'=" as the default, ":" as the unit and " is " as what it accepts, and the help fell off the
+  row. `_cell` escapes it (`\|`, the spelling `.rework/CENSUS.md` already used), `_bounds` renders
+  each choice through `_cell`, and the document is re-rendered, one row moving. A10 compared the file
+  with its generator and so passed a malformed row; it now also holds every generated table row to
+  its header's cell count, which fails on 00e6fc3's generator at exactly that row.
+* **What an 'observe' leg reads of an 'off' leg is ruled.** The `Focus` docstring said the held book
+  "reads nothing of what that leg consumes", and the 'off' `data.trust` reason, printed in every such
+  run's report, that it "reads nothing this run consumes"; the code never did either. The next
+  'observe' leg places its first pass as any mid-epoch resume does — at the held cursor where the
+  book's last pass fell in the epoch it resumes in, at unit 0 otherwise. Driven on the planted corpus
+  (`RUN_EPOCHS=2`, `DATA_RESAMPLE=1`, 'observe' every 30 windows), the parent stopped at window 70
+  with its cursor at 8961: after a 20-window 'off' leg the grandchild's first pass read from 8961 over
+  2688 units — the 'off' leg's 2560 and one window of its own — and the lineage ended with the
+  uninterrupted run's book (T6 held that already); after a 70-window 'off' leg that crossed the roll
+  at window 121, the first pass read from 0 over 2561 units, and epoch 0's last 6528 units, all the
+  'off' leg's, were never read — the book ended at 24450 units against the uninterrupted 30978.
+  **Ruled, as the code does it:** a later 'observe' leg reads the units an 'off' leg consumed in the
+  epoch it resumes in, and none of an earlier epoch's, whose segmentation went at its roll. An 'off'
+  leg inside one epoch costs the book nothing; one that crosses a roll costs it exactly the units it
+  consumed before the last roll it crossed, so what the book covers across such a lineage depends on
+  where the rolls fell. The other remedy — a mark in the held book, and the next leg's first pass
+  starting at its resume point — was not taken: it needs a pass that skips units, which
+  `claims_observe` refuses by name because a skipped unit is a wrong count, and it would read less of
+  what the lineage trained on than the placement already reads. `Focus.stream` counts the streams
+  the book opened, so an 'off' leg that crosses two rolls or more leaves it behind the epoch count,
+  and `first_seen` positions are the book's own. The docstring, the reason (which now says what a
+  later leg reads), the loop's placement comment, the cursor and checkpoint bullets and departure 6
+  say so; T6 drives the crossing leg, which ends at exactly the uninterrupted run's units less those
+  6528, with its cursor and stream ordinal and another sketch, the losses continuing exactly.
+
+**What the review changes at the default:** nothing a run trains on, no integer it prints, and not
+the count of startup warnings: the default's `'data.trust'` line is reworded, not added. The held
+book's reason moves only where an 'off' run resumed one, and `docs/05_DEFAULTS.md` moves one row. B1,
+B3, B3r, B5, B6 and B6r reproduce their fixtures.
+
+**THE FLIP, 2026-09-29 (register 04-6.3; SR3's bit-identity passed; in b1d31b7, last
+and alone with 04-Q5's and 04-6.2's, Q-DATA-9's and Q-EVAL-12's dated notes) — `DATA_TRUST` SHIPS
+`'observe'`: DEFAULT BEHAVIOUR CHANGE 3. ACTUATION STAYS OFF.** The lever's help says so. A default run
+now allocates the book — the int32 sketch, `DATA_TRUST_SKETCH` buckets, 16.8 MB at 4194301, carried in
+every checkpoint it writes, and the LRU table — passes it every 160 windows (`DATA_TRUST_EVERY`), at
+every epoch's last window and at a stop's tail, and reports `data.trust.*`, the `DATA(trust)` row's
+gates, the `'data.trust'` ledger key armed and its pass series. **Nothing a run trains on moves:** T1
+re-run at the new defaults — 'observe' against 'off' with the synthetic block and the retention probe on
+in both arms, on synthetic, real and planted text — passes, and B5u (Q-DATA-9's note) prints the book's
+keys as new and moves no other. `'loss'` and `'loss+draw'` stay refused with `NotBuilt`, and copy
+detection stays `'off'` (Q-DATA-12). The book's thirteen values are provisional (register NEW-19's
+backlog lists them), and E3 on real text decides them (§8 6.2); its 2%-of-wall rule may lengthen
+`DATA_TRUST_EVERY` above the detection floor. What a default run pays: the book's passes, 6-7% of wall
+on the toy and owed at the owner's shape, and the sketch in every checkpoint. A fleet that pairs with
+earlier runs pins `'off'` beside the other two (04-Q5's pin rule, Q-DATA-9's note), and
+`tests/test_trust.py` names the arm each check reads, `'off'` unless it sets `'observe'` (T7 reads the
+shipped value by assembling without the lever). **What CPU establishes:** operation only.
+
+### Q-DATA-12 — copy detection inside the source-reliability book's vote (SR6) — **RESOLVED 2026-09-28 (Proposal 05 §8 3.7; register 04-Q12, C05, O5 and §8 5.12; Proposal 04 §1 item 8's standing actuation rule (2) and SR6): `DATA_TRUST_COPY`, BUILT `'off'` — `'accu'` JUDGES EVERY PAIR OF SOURCES FOR COPYING AND DISCOUNTS A DEPENDENT PAIR'S COPY IN THE BOOK'S VOTE, OBSERVE-ONLY; §8 5.12 DECIDES IT ON GPU AND O5's LOCK HOLDS. ⚠ FOUR NEW LEVERS, FOUR CENSUS AMENDMENTS. NO SIGNATURE MOVES AND NO ENTRY POINT OR WIRE IS ADDED; NO NUMBER A RUN TRAINS ON MOVES AT ANY SETTING**
+
+**What was asked.** Proposal 04 §1 item 8's standing actuation rule (2): copy detection — "the
+ACCU-COPY family: sources sharing false values are discounted as dependent; Dong, Berti-Equille and
+Srivastava, VLDB 2009, cited from memory, not from this session's review" — "is built and passes E5's
+majority-false and impersonation worlds before any actuation default is proposed"; §7's SR6 builds it
+"before any trust actuation is proposed as a default". The register's §8 3.7 builds it "with its known
+answers (planted copies found, independent origins certified; operation only)", §8 5.12 is its deciding
+run on GPU (its wall priced, O11), and O5 opens its lock to corroboration by SR6-certified independent
+origins only when 5.12 passes and 5.7's grid shows no confirmed attack success. The Stage-3 plan places
+it inside `claims_observe`'s discovery pass: every pair of sources with at least `MIN_EV` shared
+conflicted claims counted as shared true, shared false and differing under the current truth; the
+posterior of dependence from α and c, "the false-value count per claim floored at 1"; in the next
+iteration "a dependent pair's later-seen source has its shared votes discounted by (1 − c × P(dep))";
+pairs above `COPY_P` reported dependent and those below it certified independent; a stable order;
+state in `Focus`; nothing actuating; `data.trust.copy.seconds` a float outside the integer channel for
+5.12's pricing (its critic, finding 19). Four levers — `DATA_TRUST_COPY` ('off' | 'accu') and
+`_PRIOR` 0.2, `_RATE` 0.8, `_P` 0.5, provisional (NEW-19) — `data.trust.copy.*` ABSENT unless both
+levers are on, and a Gate `data.trust.copy` UNREACHABLE naming whichever is off.
+
+**The ruling, as built.**
+* **The levers** (`src/data/levers.py` §6b; census amendments, the thirty-second to the thirty-fifth).
+  `trust_copy` ('off' | 'accu', default 'off'); `trust_copy_prior` 0.2, `trust_copy_rate` 0.8 and
+  `trust_copy_p` 0.5, U.FRACTION with domain (0.0, 1.0). The prior's two ends are **refused by name**
+  at `DATA.new_focus` when the detection is on (`_trust_copy`; the `LM_DROPOUT` shape — a closed
+  domain, the open end refused by the body saying why): at 0 every pair's posterior is 0, so every
+  judged pair would be *certified* independent before a claim is read, and at 1 every pair is
+  dependent; a certainty no count moves is not a prior. **So, since this ruling's review, are the
+  threshold's two ends and the rate's 0**, each an end at which no claim can move a verdict: no
+  posterior is above a threshold of 1 or below one of 0, and at a rate of 0 a "copier" copies
+  nothing, so every posterior is the prior. The rate's 1 is legal — a single differing claim proves a
+  pair independent, and every other count still moves the posterior. *(The build called both of the
+  rate's ends legal and left the threshold's unruled; the review below.)* The three numbers are the
+  family's values as 04 recalls them and are **provisional** (§8's NEW-19 backlog rows): no toy, CPU
+  or GPU reading is behind any of them.
+* **The pairs.** After each of the vote's ten rounds a copy step (`_trust_copy_step`) runs over the
+  conflicted keys. A pair is two sources that claim one key, ordered by **first sight** —
+  `Focus.first_seen`'s [stream, unit] positions, then name; a source the book never saw (a table
+  built by hand) after every seen one — so it is always (earlier, later), the later the presumed copy.
+  Its claims are counted under that round's truth: **shared true** (both hold the key's truth),
+  **shared false** (both hold one value that is not, grouped by n, the key's claimed values less its
+  truth) and **differing** (two values, on any conflicted key: whether two claims differ does not
+  depend on which is true, so a key the round left tied counts here; a value two sources share on a
+  tied key is neither true nor false and is not counted). A pair is **judged** when the three reach
+  `trust_min_ev`.
+* **The posterior**, `_trust_copy_posterior`: under independence each source is right at its accuracy
+  A and wrong uniformly over the key's n false values; under "the later copies the earlier's value
+  with probability c, else provides its own" the likelihood ratios are 1 − c + c/A per shared true
+  claim, 1 − c + c·n/(1 − A) per shared false one and 1 − c per differing one, A the later source's r
+  that round (strictly inside (0, 1), so every ratio is finite). P = α L / (α L + 1 − α), L their
+  product, computed as the logistic of ln(α/(1 − α)) + ln L on the side that cannot overflow. The
+  verdict is **dependent** above `trust_copy_p`, **independent** (certified) below it, and
+  **undecided** exactly at it.
+* **The discount.** In the next round, on every conflicted key — a tied one included, since that is
+  where a copy's second vote decides a key — the later source's vote for each value it shares with
+  the earlier source of a *dependent* pair counts at r × (1 − c × P), one factor per dependent earlier
+  source holding that value. A certified pair votes in full. The last round's step is the one
+  reported: `Focus.copy_pairs`, [earlier, later, P, shared true, shared false, differing, verdict] in
+  first-sight order. At 'off' none of this runs: every vote is r, the float it was, and
+  `tests/test_trust.py` holds the vote to C5's.
+* **What it moves: the book, and nothing else.** The discount moves the vote's truth estimate, so the
+  book's r, evidence and trust — and, in observe mode, that is all: no trust weights a token or a
+  draw ('loss' and 'loss+draw' stay `NotBuilt`), so no number a run trains on moves at any setting
+  (SR6-6 drives 'accu' against 'off' through the loop).
+* **The state and the checkpoint.** `Focus.copy_mode` ('off' | 'accu', as `new_focus` read it),
+  `copy_pairs`, `copy_held` and `copy_seconds`. `stream_state` writes the copy part under
+  `state['focus']['copy']` — the judged pairs and the `data.trust.copy.*` counters, which
+  `state['focus']['counters']` then does not repeat — at 'accu'; at 'off' a checkpoint's part is held
+  unchanged and written back (`copy_held`), so a lineage that turns the detection off for a leg keeps
+  its count (the book's ON → OFF → ON rule, Q-DATA-11). A book without a part — older than this
+  build, or from an 'off' leg that held none — starts the detection at 0. **A resume may switch
+  `DATA_TRUST_COPY` either way**: no claim-table key depends on it, and the next pass re-votes the
+  table with or without the discount; nothing is refused for it.
+* **The surface it reports.** `data.trust.copy.passes` (votes the detection ran in: every pass with a
+  conflicted key; a lineage count), `.pairs_judged`, `.pairs_dependent`, `.pairs_certified` and
+  `.votes_discounted` (the (key, source) votes the reported dependent pairs discount) — readings of
+  the last step — seeded 0 at 'accu' and ABSENT otherwise. Gate `data.trust.copy`: UNREACHABLE naming
+  `DATA_TRUST='off'` or `DATA_TRUST_COPY='off'`, the latter saying when a held part is carried; at
+  'accu' FIRED when a pair is dependent (dependent pairs vs pairs judged), armed-but-zero with the
+  reason otherwise. The `DATA(trust)` row prints the counters, one line per judged pair (its
+  posterior, three counts and verdict) and **`data.trust.copy.seconds`**, the seconds DATA timed in
+  this run()'s copy steps — summed by the root over the run()'s passes, so it covers the span
+  `wall_s` covers (the review) — a float to six places beside `wall_s`, outside the integer channel
+  `tests/test_baseline.py` reads (T8), never checkpointed. `RunResult.trust_series` gains
+  `copy_seconds` and `copy_pairs` per pass at 'accu'.
+* **One book under every `PYTHONHASHSEED`**: pairs in first-sight order, values in byte order, the
+  counts summed by n in order, no set iterated (T4 digests SR6's majority-false book in three hash
+  seeds).
+
+**Departures, each recorded because the code showed the plan's words could not hold as written, or
+left a choice open.**
+1. **The false-value floor is not written as a clause.** The plan floors n at 1. n is counted only on
+   a key whose truth is decided and whose pair shares a value other than it, so the key holds at
+   least those two values and n is at least 1 by construction; a floor that cannot bind is an
+   untrippable guard, this tree's most recorded defect. The constants' comment says so.
+2. **Only a pair above the threshold discounts** — the plan's "a dependent pair's later-seen
+   source", read literally, rather than a soft discount of every pair by its posterior (the family's
+   vote count, as recalled, and like the citation not re-read here). The difference is the truthful
+   pair: agreeing on true values is what accurate sources do, and with α 0.2 and c 0.8
+   such a pair's posterior rises with its shared claims toward 0.2e^0.8/(0.2e^0.8 + 0.8) = 0.3575 and
+   never reaches 0.5 (SR6-2), so a soft discount would cut the later of every two independent
+   witnesses' votes by up to 0.8 × 0.3575, about 0.29 of it, for agreeing. Certified pairs vote in
+   full.
+3. **The direction is first sight, not both.** The family, as recalled, weighs "a copies b" and "b
+   copies a" each at α/2; the plan names the later-seen source, and the book can see only which
+   source it read first — not which was written first — so one direction, stated. The accuracy in
+   the ratios is the later source's r.
+4. **Differing claims count on a tied key; a value shared on one counts as neither**, for the reason
+   in the pairs bullet — the plan says "under the current truth estimate", which a tie does not have.
+5. **The judging threshold counts the claims the posterior reads** (shared true + shared false +
+   differing), not every key the pair shares: a value the two share on a tied key counts as nothing
+   (4), so it does not make a pair judged either.
+6. **A pair exactly at `trust_copy_p` is 'undecided'** — the plan's "above" and "below" leave the
+   line itself open — so `pairs_dependent + pairs_certified` can be less than `pairs_judged`.
+7. **The reported step is the one after the tenth round** — its truth and r are the book's — and
+   `votes_discounted` counts the votes that step's dependent pairs discount, which is the tenth
+   round's own discount wherever the vote has settled.
+8. **`data.trust.copy.seconds` is DATA's to time**, not the root's as `wall_s` is: the root cannot
+   time a step inside a pass. `Focus.copy_seconds` is a running float outside `_focus_state` and
+   outside the counters, and the root prints its growth over one run()'s passes — since the review;
+   the row printed the field whole until then, an earlier run()'s steps included.
+9. **The gate list is three at every setting**, so the default run's `DATA(trust)` row prints one
+   more UNREACHABLE gate (below).
+
+**Not built, and where each lives.**
+* **The deciding run** — §8 5.12, E5's majority-false and 50%-impersonation worlds under E5's
+  eligibility rule, on GPU and on 'focusbed' (SR2's corpus, owed); it prices the copy pass with
+  `data.trust.copy.seconds` (O11). A failure steps `DATA_TRUST_COPY_P` first (O5's first next arm).
+  Every reading here is CPU and establishes operation only.
+* **Any actuation** — standing rule (2) is half met: copy detection is built, and passing 5.12 is
+  owed. 'loss' and 'loss+draw' stay `NotBuilt`, whatever `DATA_TRUST_COPY` reads.
+* **Corroboration by certified independent origins** (O5, NEW-07, NEW-18) — the `continue` preset's,
+  §8 4.7 and 5.7; the certificate here is a verdict in a report, and nothing promotes on it.
+* **The family's other parts** — per-value truth probabilities in place of the book's r, both copy
+  directions weighed, value similarity and a non-uniform false-value distribution — are not in the
+  plan and not built.
+
+**Tests.** `tests/test_trust.py` (CPU, operation only). SR6-1: on a model-free table in §8 0.6's
+td_stress style — three truthful sources, a liar, its copy (first seen after it, named so that it
+sorts before it) and a second liar — the copy is reported dependent at the hand-computed posterior
+(Bayes' rule in product form, not the tree's logistic), the pair ordered by first sight; the three
+truthful pairs certified at theirs and the eleven mixed ones at theirs; a partial copy (4 of 20 keys
+its own) still dependent at its hand value. SR6-2: two agreeing truthful sources certified, at 20, 60
+and 200 claims each below the 0.3575 limit. SR6-3: the majority-false table, where the undiscounted
+vote loses the ten keys the copy and its source outvote the truth on (cred at r 21/32, t 0.6875) and
+the discounted vote wins them (cred at r 31/32, t 1; the pair at the hand posterior over 20 shared
+false at n 2 and 10 at n 1). SR6-4: at 'off' no copy key, the gate naming the lever, the vote C5's;
+300 random tables against a transcription of the plan's model; a detection with nothing above its
+threshold moves nothing. SR6-5: the prior's ends refused by name, 1.5 by the domain — and, since the
+review, the threshold's ends and the rate's 0, the rate's 1 reaching both verdicts. SR6-6: through
+the loop on a planted corpus with a copy of its liar — the copy dependent at its hand posterior, the
+row's fired gate and pair line; since the review, the copy steps timed, and on a second run() over
+one System that run()'s alone; 'accu' against 'off' with float-exact losses, equal state digests but
+the book and every integer but `data.trust.copy.*`; a continuing resume ending with the uninterrupted
+run's book, judged pairs included; the parent's record put back whole at 'accu', started at 0
+without its copy part and held unchanged at 'off'; ON → OFF → ON for the detection. T4 digests SR6's
+book under three `PYTHONHASHSEED`s; T8 holds `data.trust.copy.seconds` outside the integer channel,
+on the planted copier corpus since the review, where it is a non-zero reading; T1 and T7 read the
+third gate.
+
+**What the default changes:** nothing a run trains on and no integer counter a default run prints.
+At `DATA_TRUST='off'`, the shipped value until 04-6.3's flip on 2026-09-29, the book's gates are three,
+so the `DATA(trust)` row prints one more line, `gate:data.trust.copy`, UNREACHABLE naming
+`DATA_TRUST='off'`; no startup warning is added. (At the shipped `'observe'` since, the line names
+`DATA_TRUST_COPY='off'`, Q-DATA-11's dated note.)
+B1, B3, B3r, B5, B6 and B6r reproduce their fixtures.
+
+**AMENDED 2026-09-28 — THE REVIEW OF THIS RULING.** Four findings, each driven on the tree before it
+(72ff28a; CPU, operation only) and each repaired; the ruling's levers, surface, departure-8 and tests
+text above is corrected in place. Run against that tree's `src/`, the new SR6-5 refusal check and
+SR6-6's second-run check fail; with DATA's clock held constant on this one, T8's reading check and
+SR6-6's two timing checks fail.
+* **The threshold's ends and the rate's 0 are refused by name.** `trust_copy_p` and
+  `trust_copy_rate` declare the closed domain (0.0, 1.0), and no body refused an end of either, while
+  `_trust_copy` refused the prior's for a reason that holds at these too: a verdict no claim can move.
+  Driven on SR6-1's table: at `DATA_TRUST_COPY_P=1.0` no posterior can exceed the threshold (the
+  verdict is `post > p`), so the planted copy, at 0.9999863065, was reported certified independent and
+  Gate `data.trust.copy` read armed-but-zero, 0 vs 15 — an untrippable gate printed as one that never
+  had to fire; at 0.0 the truthful pair (a, b), at 0.3455758077, was reported dependent, the gate
+  fired 15 vs 15 and 60 votes were discounted; at `DATA_TRUST_COPY_RATE=0` every posterior was the
+  prior, 0.2, whatever the pair claimed — every pair certified at the model's threshold, the gate
+  unable to fire, and at a threshold of 0.1 every pair dependent, 15 vs 15, with not one vote
+  discounted (1 − 0 × P is 1) while the row's line for every pair said the later source's votes
+  were. **Ruled:** `_trust_copy` refuses `DATA_TRUST_COPY_P` at 0 and at 1 and `DATA_TRUST_COPY_RATE`
+  at 0 by name, beside the prior's refusal — at `DATA.new_focus`, before any tensor, and only where
+  the detection is on — each message saying which verdict could not move. The rate's 1 stays legal.
+  Inside those ends every setting can reach both verdicts, since a shared false claim's ratio is
+  above 1 (n ≥ 1 and A < 1) and a differing one's below 1 (c > 0), so the gate is armed exactly
+  where it can fire. The finding's lesser remedies were not taken: a gate UNREACHABLE at a threshold
+  of 1 would have left every pair line certifying a planted copy, and recording that a rate of 0
+  decides by the prior would have kept, at the model's own threshold, a gate that cannot fire. SR6-5
+  drives the three refusals at `new_focus` and through compose, and the rate's 1 on SR6-1's table:
+  the copy dependent at its hand posterior, the truthful pairs certified at theirs, the eleven pairs
+  that differ certified at exactly 0, the gate fired 1 vs 15. SR6-4's random tables still call the
+  vote directly at the refused ends, where the arithmetic is the model's and no configuration
+  reaches.
+* **`data.trust.copy.seconds` covers the run() `wall_s` covers.** The row printed
+  `Focus.copy_seconds` — DATA's running float, every copy step since `new_focus` built the book —
+  beside `wall_s`, which `loop.run` starts at 0, and both docstrings called both floats "this
+  process's". On a second `run()` over one System, a path the loop supports, the copy seconds held
+  the first run()'s too. Driven on the planted copier corpus, two 100-window runs over one System: the
+  second printed 0.011767 copy seconds, its own passes' 0.007114 and the first run's 0.004653, so the
+  copy share of its wall read 0.196 against 0.119. **Ruled:** the root sums, pass by pass, the growth
+  of `Focus.copy_seconds` — the `copy_seconds` each `trust_series` entry already carried — and prints
+  that sum; the field stays DATA's running float, never checkpointed and never printed whole. The
+  `Focus` and `_trust_row` docstrings, the loop's comments, the DATA section and this ruling's surface
+  bullet and departure 8 name one span, the run(). SR6-6 drives a second 70-window run() over one
+  System: its float is the sum of its own passes' and the growth of the field over it, within its
+  `wall_s`.
+* **The `Focus` docstring counts three gates at 'off'.** It still said two after this build added the
+  third, where `new_focus`'s said three. Corrected, with a dated pointer at Q-DATA-11's `Focus` bullet
+  and at its default list.
+* **The copy seconds are a reading the tests read.** T8 ran on the synthetic source, where a 'kv' book
+  forms no claim, so run.py printed `data.trust.copy.seconds 0.0` and every series entry read 0.0 with
+  no pair; SR6-6 checked only that the row's value was a float; and with DATA's clock held constant
+  every SR6 check passed. **Held:** T8 runs on the planted copier corpus — 90 windows at E5's period of
+  30, the first pass reading the truthful areas alone and the passes at 61 and at the tail voting over
+  conflicts — and SR6-6 on its whole run: the printed float above 0, the sum of the passes'
+  `copy_seconds` to their rounding and within `wall_s`, and each pass's reading positive where its
+  vote had a conflicted claim, within its own seconds, and exactly 0 where it had none.
+
+**What the review changes at the default:** nothing a run trains on and nothing a default run prints:
+at `DATA_TRUST='off'` (the shipped value until 04-6.3's flip on 2026-09-29) no copy lever is read, and
+at the shipped `DATA_TRUST_COPY='off'` none of the three numbers is. Two lever help strings name their refused ends, so `docs/05_DEFAULTS.md` moves two
+rows, and the census rows for `DATA_TRUST_COPY_RATE` and `_P` say the same. B1, B3, B3r, B5, B6 and
+B6r reproduce their fixtures.
+
+### Q-LM-15 — the position table's door: an extrapolating value per arm, a declared context widening, and the designation it gates — **RESOLVED 2026-09-28 (Proposal 05 §8 3.6; register O17, NEW-13 and C43): `LM_POS`, BUILT `'learned'` — `'alibi'` ON THE TRANSFORMER AND `'none'` ON THE GRU ARE BUILT OFF; `LM_CTX_WIDEN`, BUILT `False`, SO `lm.ctx` STAYS EXACT — AT `True` THE LEARNED TABLE GROWS BY ROWS AT AN EPOCH-BOUNDARY RESUME; `LM.parent_designation` REFUSES EVERY DESIGNATION BY NAME, SWITCHABLY, WHILE NO ROUTE HAS PASSED; `derive.windows_at_ctx`, THE CADENCE-RESCALING KNOWN ANSWER. ⚠ TWO NEW LEVERS, TWO CENSUS AMENDMENTS; ONE NEW ENTRY POINT, DEFERRED. NO WIRE, AND NO NUMBER A DEFAULT RUN PRODUCES MOVES**
+
+**What was asked.** O17 rules that "no checkpoint on either LM arm is designated B's long-lived
+parent until its position scheme has a context-widening route that PASSes on GPU, and the preset
+builder refuses the designation by name (switchable)", with "one LM position lever: 'learned'
+(today's table) ON on both arms, an extrapolating value per arm OFF, and for 'learned' a row-append
+widening at a declared resume boundary (NEW-13)", and `lm.ctx` EXACT until a route passes. NEW-13
+keeps `lm.ctx` EXACT "until an identity check and a cadence-rescaling known answer exist; then a
+widening is a declared operation at a resume boundary". C43's premise — that only the transformer
+carries the table — is O17's correction: this tree adds the table on both arms (`_LM` builds it,
+`encode` adds it before the arch branch). The register's §8 3.6 asks, on CPU and for operation only,
+for the widening's identity known answer ("loss unchanged to 1e-6 on windows at the old ctx"), the
+cadence-rescaling known answer, both extrapolating values building, running finite and resuming
+exactly, and the designation refused by name with a working switch. §8 5.8 on GPU decides: arm (A),
+'learned' against each arm's extrapolating value; arm (B), 'learned''s 128 → 256 widening against a
+parent trained at 256.
+
+**The ruling, as built.**
+* **The levers** (`src/lm/levers.py` section 4; census amendments, the thirty-eighth and
+  thirty-ninth). `pos` (`LM_POS`, U.NAME, choices 'learned' | 'alibi' | 'none', default 'learned')
+  and `ctx_widen` (`LM_CTX_WIDEN`, U.FLAG, default False). Neither is a clock, so the Clock-unit
+  lever count is unchanged. **The switch on the refusal is not a lever**: a run never designates
+  anything, so a lever would be read by no run, and O17 names D17 as the switch's precedent — two
+  module constants in `src/lm/api.py`, below.
+* **The schemes in the model.** At 'learned' `_LM` builds `pos` (pos_max rows) where it always did,
+  first, so the parameter order and `build_model`'s initialisation draws are the tree's before the
+  lever bit for bit, and `encode` adds its first L rows — the statement it always ran. At 'alibi'
+  (transformer only) there is no table: every layer's attention takes one float mask,
+  −m_h × (i − j) for a key j at or before the query i and −inf after it, one (L, L) slab per head
+  repeated over the batch in the (batch × heads) order `nn.MultiheadAttention` indexes a 3-D mask by,
+  with `is_causal=False` because that flag promises the plain causal mask, and the layers run with
+  torch's MHA fast path held off, which reads a float mask as bool (the review, below). The slopes
+  m_h are the ALiBi paper's (Press, Smith and Lewis, "Train Short, Test Long", ICLR 2022): 1/2 ..
+  1/256 at the shipped `LM_HEADS=8`, and for a head count that is not a power of two the paper's
+  interleave; a NON-PERSISTENT buffer (`alibi_slopes`) derived from `LM_HEADS`, so it is not
+  checkpoint state. At 'none' (GRU only) nothing is added: the recurrence is the only order signal,
+  and it is the old tree's own GRU — `MiniLM` built no table (`self_organize.py:1546-1561`), while
+  `TinyTransformer` built a learned one clamped at 512 — so on the GRU arm §8 5.8's (A) also reads
+  the scheme this tree added against the one it replaced. `_param_estimate` counts the table only at
+  'learned'.
+* **The wrong arm's value is refused by name at `LM.resolve`**, before any tensor, with both names:
+  'alibi' on the GRU (no attention to bias) and 'none' on the transformer (a position-free causal
+  transformer is an arm O17 did not name). `choices=` cannot state a relation between two levers;
+  this is the `LM_WIDTH % LM_HEADS` shape.
+* **The scheme across a resume.** `LMGeometry` gains `pos`, so `LM.state_dict` records it with the
+  rest of the geometry and `LM.load_state` refuses a change **by name** before its tensor-set refusal
+  could report the same move as a nameless list. A record without the field — every checkpoint
+  before this ruling — reads 'learned', which built it. **It is not a manifest field**:
+  `CKPT.check_geometry` refuses a field the live manifest carries and a recording lacks, so a new
+  manifest field would refuse every existing checkpoint (the register's R11).
+* **The declared widening, `LM_CTX_WIDEN=1`.** (1) `_geometry_manifest` records `lm.ctx` MAY_WIDEN
+  at 1 and EXACT at 0; `lm.pos_max` takes `lm.ctx`'s rule and why, because it is the local wire from
+  `ctx` and an EXACT one would refuse the move `lm.ctx` admitted, and it now prints `LM_CTX
+  (LM.d_pos_max)` — the name `LM.load_state` already used — where it printed `LM_POS_MAX`, a name
+  nothing reads (never reached: the gate compares `lm.ctx` first). The rule applied is the live
+  run's; a recording's is never read. `lm.ctx`'s why names `LM_CTX_WIDEN`, so the gate's refusal at
+  0 tells the operator the lever exists. (2) The root binds `check_geometry`'s `GeometryReport` for
+  one field, `lm.ctx`: one in `widened` is a declared widening, `System.ctx_widening` = (the
+  parent's `LM_CTX`, this run's), and its recorded value is SIG's context where the checkpoint
+  carries none (5, as the review corrected it). (3) `LM.load_state`, reading `ctx_widen`, admits a
+  LARGER `ctx`/`pos_max` and refuses a smaller one, and fits `pos.weight` **by prefix, matched by
+  name** before the vocabulary rule (whose dim-0 test would take the table for a vocabulary tensor
+  wherever `LM_CTX` equals `LM_VOCAB_SLOTS`): rows [0, parent) are the parent's, and every appended
+  row keeps the initialisation this build drew for it — what a run built wide would have held there
+  before its first step. At 'alibi' and 'none' nothing is appended. No other LM tensor depends on
+  the context, so on any window of the parent's width or less the child computes exactly what the
+  parent did. (4) `OPT.load_state` pads the table's moments with zeros by its existing dim-0 rule
+  (`opt/api.py::_pad_moments`, Q-OPT-8) — `opt.ckpt.moments_widened` 1 — which is the moment state a
+  row that has never been trained holds. (5) **SIG keeps the width its encoder was trained at,
+  across the lineage**: `_signature_width` takes `System.sig_ctx`, the `LM_CTX` the lineage's SIG
+  was built at — this run's on a fresh run; on a resume `payload['LOOP']['sig_ctx']`, which a run
+  writes wherever a widening has moved it off its own `LM_CTX`, or else the recorded `lm.ctx` — and
+  with the adopted bytes/token (Q-TOK-13) that is the parent's number exactly: the encoder was
+  trained at it and SIG's restore refuses any other. (Until the review it took the recorded `lm.ctx`
+  only at the resume that widened, which nothing checkpointed, so every later resume of a widened
+  lineage was refused by SIG.) (6) The retention probe re-pins its parent's windows from
+  `LOOP.eval`'s geometry, as it does at any resume (Q-EVAL-12), so reads across the widening pair on
+  the same bytes. (7) WORLD's `load_into` keeps this build's `world.ctx_tokens` rather than the
+  parent's, which would report a width the child does not run at (a WORLD edit this ruling needed:
+  until a context could move across a resume the two were always equal). (8) **A widening across a
+  continuing mid-epoch resume is refused by name** at the `segment` stage, before the log's replay
+  and before the hold-out and digest checks: the saved cursor and epoch length count windows of the
+  parent's width. A widening is an epoch-boundary operation — the final save of a finished run, or
+  `run.py --max-windows` at the epoch's end — where the child cuts its epoch fresh at its own width.
+  (A resume that replays its epoch from window 0, off a checkpoint older than the segmentation log,
+  is not refused: it is not a continuation.)
+* **The cadence-rescaling known answer, `spine/derive.py::windows_at_ctx(period, old_ctx,
+  new_ctx)`.** A window is `LM_CTX` tokens, so after 64 → 128 every lever counted in windows spans
+  twice the text. The function is the one named conversion (O11): `period` × `old_ctx` / `new_ctx`
+  in integers, rounded to the nearest whole window with a half going up — 1000 → 500, 333 → 167 at
+  64 → 128 — never below 1 for a positive period (0 is OFF for most Windows levers, so 1 → 1), 0 → 0,
+  and a negative period, a non-Windows period and a width that is not a positive int refused with
+  `UnitError`. Nearest and not truncated, because the question is "the same text" and this is a
+  printed suggestion, not a clock that must never fire late (`flush_period`'s reason for
+  truncating). **At a widening resume the root prints, in one warning before the first window, every
+  lever declared in `units.Windows` — read off the declarations, 27 of them at this ruling's sha —
+  beside `windows_at_ctx`'s value, and applies none** (N4: a lever reading another lever at run time
+  is the L1 defect). The plan's wording was "every U.Windows period"; the population is the
+  declarations and not `_periods`' eight keys, because TOK's, FAB's, SIG's and CAP's windows cadences
+  are not in that mapping and change meaning all the same.
+* **The designation, `LM.parent_designation(lm, *, saved_geometry)`** — a new entry point (151 in
+  §7) and **deferred** (§3.6): it judges a CHECKPOINT, and its `saved_geometry` — the checkpoint's
+  `payload['LM']['geometry']` — has no producer in a run's order by design. Its answer in order: the
+  record's (arch, pos) — pos absent reads 'learned' — is admitted when it is in
+  `PASSED_WIDENING_ROUTES`, a `Designation` with `route_passed` True; otherwise it is admitted only
+  with `REFUSE_CONTEXT_LOCKED_PARENT` False, `route_passed` False and a reason saying the refusal
+  was off; otherwise it RAISES `ContextLockedParent`, naming the arm, the scheme, O17 and the switch.
+  A record with no arch or ctx is a `GeometryError` — a checkpoint it cannot read is not judged.
+  **All three schemes are refused today**: 'alibi' and 'none' carry no table, but no GPU reading has
+  shown either to extrapolate, and O17 asks for a route that has PASSED. `PASSED_WIDENING_ROUTES` is
+  an empty frozenset of (arm, scheme) pairs, entered by hand with the GPU reading's commit, the way a
+  ruling is; both constants are D17-shaped code edits. `Designation` (arch, pos, ctx, route_passed,
+  reason) is a fields-only record; `ContextLockedParent` a named `ValueError`.
+* **Its caller until the preset builder exists: `tools/designate_parent.py <checkpoint>`.** It reads
+  the checkpoint through `CKPT.load` with `CKPT_RESUME` set through the lever system (so every
+  spelling `CKPT_RESUME` takes works and nothing reads the environment), asks
+  `LM.parent_designation`, and on an admission writes one record, `<checkpoint file>.designation.json`
+  (or `--out`), holding the `Designation`, the checkpoint's path, step and epoch and both switches as
+  they stood, and exits 0. On the refusal it prints it and **writes nothing**, exit 2 (run.py's
+  refusal code); an unreadable path exits 1.
+* **Counters.** `lm.pos.scheme` is a NAMED gauge, a sentence in LM's tally (the `world.built`
+  precedent), written by `build_model`: 'learned: context-locked (O17: no passed widening route)' at
+  'learned', '<scheme>: extrapolating, not yet designable (O17: no passed widening route)' at
+  'alibi' and 'none', and '<scheme>: a context-widening route has passed on GPU (O17,
+  PASSED_WIDENING_ROUTES)' once one is entered. It is this process's: `load_state` does not restore
+  it over the build's own. Not an integer, so it is in no integer channel a test reads.
+  `lm.pos.alibi_applied` counts every `encode` call that built the ALiBi mask, eval calls included
+  as `lm.encode.calls` counts them — equal to it on `LM_ARCH=transformer LM_POS='alibi'` and ABSENT
+  on every other arm; each of those calls runs its layers with the fast path held off, so it is also
+  the count of calls the hold covered (the review). `lm.ckpt.ctx_widened` is THIS restore's reading
+  — 1 when it admitted a larger context, 0 when the context stood still — PRESENT on every restore
+  at `LM_CTX_WIDEN=1` and ABSENT at 0, where no widening can be admitted (the finding that asked for
+  PRESENT-and-0 on any resume at 1, and not ABSENT, is kept); never taken from a parent's ledger.
+  `lm.ckpt.rows_widened` still counts VOCABULARY tensors only; the table's widening is named in the
+  `LoadReport`'s reason.
+
+**What a CPU run establishes, and what it cannot.** `tests/test_position.py` Q1-Q7, CPU, operation
+only. Q1: on both arms with FAB, SIG and MEM on, a parent at `LM_CTX=64` stopped at its epoch
+boundary (232 windows of `E1`'s 20,000-byte stream) and a child resumed from it at `LM_CTX=128
+LM_CTX_WIDEN=1` give the same LM-level loss (`LM.lm_loss` of `LM.decode(LM.encode(x))`) on windows
+of 64, 17 and 1 tokens at three offsets — **bitwise**, so within the register's 1e-6; the child's
+table is the parent's 64 rows and the 64 a fresh `LM_CTX=128` build draws, and its moments the
+parent's and 64 rows of zeros; SIG's width stays the parent's 87 units (a fresh 128 run would take
+175); the child's start read, through both closures and so through SIG, DOM, FAB and MEM, is the
+unwidened boundary resume's window for window; `lm.ckpt.ctx_widened` 1 against ABSENT; the child
+trains its epoch at 128 and then resumes, widens again and continues exactly (the review, below);
+one notice lists all 27 Windows-unit levers. Q2: without the lever the gate refuses naming `LM_CTX`,
+the EXACT rule and `LM_CTX_WIDEN`; a smaller context is refused at 1; a widening across a continuing
+resume is refused at the `segment` stage; a continuing resume at 1 that widens nothing continues
+exactly with the gauge 0; and `LM.load_state`'s two answers driven directly, alone and beside a
+vocabulary widening (both in one restore at 1, the vocabulary alone at 0). Q3: the grid. Q4: 'alibi'
+and 'none' build with no table, run 120 windows finite, continue exactly from 60, and are causal on
+the built model in its training pass and its eval pass, the two equal (the review, below); ALiBi's
+slopes and mask have their known answers. Q5: both wrong-arm refusals, a scheme change refused, and
+a record without the field resuming as 'learned' exactly and refused at any other scheme. Q6: the
+designation refused on all three schemes and on a legacy record, both switches working, and the tool
+exiting 2 having written nothing, 1 on a missing path, and 0 with one record when the refusal is
+off. Q7: B1, and a checkpoint written by 494936d — the tree before the lever, run from a clean copy
+of its `src/` — whose first 30 losses are this tree's and which continues here exactly. **None of it
+says whether a widened parent learns its new positions without losing its old ones, or which scheme
+a long-lived parent should carry**: those are §8 5.8's arms on GPU, and nothing here enters a route.
+
+**What does not move at the default.** At `LM_POS='learned'` `_LM` and `encode` run the statements
+they ran, in order, with the same draws; at `LM_CTX_WIDEN=0` the manifest's `lm.ctx` is EXACT as
+before and `load_state` takes no new branch; no row calls `parent_designation`. The only changes a
+default run carries are text: `lm.pos.scheme`, a sentence and not an integer, in the R report's LM
+row; `pos` in LM's checkpointed geometry; and the manifest's `lm.ctx`/`lm.pos_max` why and
+`lm.pos_max`'s printed name, which the gate prints only on a refusal. B1, B3, B3r, B5, B6 and B6r
+reproduce their fixtures with no new integer counter line.
+
+**AMENDED 2026-09-28 — THE REVIEW OF THIS RULING.** Three findings, each driven on the tree before
+it (842b8e8; CPU, operation only) and each repaired; the ALiBi bullet, the widening bullet's (2) and
+(5), the counters bullet and the CPU paragraph above, the SIG section's `width_units`, the report
+sentences of the CKPT section and of §3.9, and `System.ctx_widening`'s comment are corrected in
+place. Run against that tree's `src/`, the new Q1 lineage stops at the grandchild's build, SIG
+refusing it (87 against 175); with that part cut, the three reworded Q2 checks and Q4's four checks
+of the 'alibi' eval pass fail there, and every check beside them passes — Q4's causality in both
+passes among them (the training pass was right, and self-only attention is causal too) and every
+'none' check (the GRU has no fast path).
+* **At 'alibi' every eval pass computed another function.** `encode` hands each
+  `nn.TransformerEncoderLayer` one float (batch × heads, L, L) mask with `is_causal=False`, and a
+  layer in eval mode whose parameters need no grad takes torch's fast path,
+  `torch._transformer_encoder_layer_fwd`, whose masked softmax reads a non-bool mask as bool: every
+  nonzero entry masked. ALiBi's bias is nonzero for every earlier key, so each position attended to
+  itself alone. That is every `no_grad` pass: the retention probe's cadence, phase-start,
+  resume-start and boundary reads, `EVAL.generate`, `FAB.contribution`'s baseline and the memory-on
+  closure's queries, which run the model in eval, and MEM's key writes, which run it in train mode
+  with the last layer `encode` runs put in eval. Training — grad on, the Python path — was right, so
+  every reading scored a function no step trained. Driven at 842b8e8 (a built transformer at
+  'alibi', `LM_HEADS=8`, `LM_DROPOUT=0`): max|dh| 7.35 between one model's train-mode pass and its
+  eval pass under `no_grad`, 0.0 between that eval pass and the same layers run with `mask != 0` as
+  a bool mask, and 0.0 between train mode and eval mode with grad on; a 100-window probed run
+  switched to the Python path moved every one of its ten readings (the last memory-off read 6.2588 →
+  6.1398, memory-on 6.6489 → 6.5444) and none of its losses; MEM's stored keys sat 0.106 off the
+  grad-on pass's (minimum cosine 0.951). Q4's causality check ran on the eval pass, so it checked
+  self-only attention, which is causal too. **Ruled:** at 'alibi' `encode` runs its layer loop with
+  `torch.backends.mha.set_fastpath_enabled(False)`, lowered only where it was up and put back in a
+  `finally` — torch's flag is process-wide — and nothing else moves. A gradient pass takes the
+  Python path whatever the flag, so no gradient pass moves; every `no_grad` pass is now the function
+  training trains. The finding's other remedy, computing the biased attention by hand, was not
+  taken: it is a second implementation of torch's layer to keep equal to the first. **'learned'
+  keeps the fast path:** its 0/−inf mask read as bool is the same causal cut, and its eval pass
+  differs from its train-mode pass by the two kernels' rounding alone (max|dh| 2.4e-6 on a freshly
+  built model) — left as it stands, since holding it off would move every reading a default run
+  takes. `lm.pos.alibi_applied` counts the calls the hold covers. Q4 now checks, on both
+  extrapolating values, causality in the training pass and the eval pass alike and the eval pass
+  under `no_grad` equal to the train-mode pass bitwise at `LM_DROPOUT=0`; and at 'alibi' that the
+  eval pass is not self-only attention (max|dh| 52.0 on the 120-window model), that MEM's stored
+  keys are the grad-on pass's bitwise, and that a 40-window probed run reads the same with the fast
+  path off for the whole run — four readings through both closures, window for window, and every
+  loss.
+* **After one declared widening the lineage could not be resumed again.** `_signature_width` took
+  the parent's `LM_CTX` only when THIS resume's gate widened `lm.ctx`, through
+  `System.ctx_widening`, which is not checkpointed. The widened child's checkpoint records SIG at
+  the parent's width and `lm.ctx` at the child's, so every later resume at the child's own `LM_CTX`
+  resolved SIG at that `LM_CTX`, and `SIG.load_state_dict` refused it naming only `width_units`: the
+  child's epoch-boundary checkpoint at `LM_CTX_WIDEN` 0 or 1, and at 256 for a second widening — §8
+  5.8 (B)'s 128 → 256 from a widened parent — all "written at 87 and this run resolves 175" on
+  `E1`'s workload, and its mid-epoch save 96 against 192 on a shorter one, while the control lineage
+  64 → 64 → 64 resumed at every step. `System.ctx_widening`'s comment said the opposite ("a child of
+  this run records this run's LM_CTX, and widens from it or not"). **Ruled:** the lineage carries
+  SIG's context. `System.sig_ctx` is the `LM_CTX` the lineage's SIG was built at: this run's on a
+  fresh run; on a resume `payload['LOOP']['sig_ctx']` where the checkpoint carries it, and otherwise
+  the recorded `lm.ctx` — read off the gate's report, whose one field stays `lm.ctx`. The
+  `signature` stage builds SIG at `signature_width_bytes(sig_ctx, the adopted bytes/token)` on every
+  resume, not only the one that widens, and the C row's `LOOP` block writes `sig_ctx` wherever a
+  widening has moved it off the run's own `LM_CTX`: an unwidened lineage writes the payload it wrote
+  before, and a checkpoint without the key is one whose SIG was built at its recorded `lm.ctx` —
+  every checkpoint before this ruling, and every unwidened one after. It is the root's record under
+  the root's key, not a manifest field (R11) and not SIG's (SIG holds a width, not the context it
+  came from). `ctx_widening` is read at the `segment` stage and for the notice only, and the notice
+  names the width's `LM_CTX`. A checkpoint of a widened lineage without the key — as 842b8e8 wrote
+  them — is refused by SIG by name, never guessed. Q1 now checks, on both arms: the parent's
+  checkpoint carries no `sig_ctx` and the widened child's 64; the child, having trained its whole
+  epoch at 128 (113 windows), resumes at its own `LM_CTX=128` from its boundary with SIG at the
+  lineage's 87 units, the grandchild's start read equal to the child's R read window for window
+  through both closures; a twin saved 10 windows into the child's epoch continues exactly, loss for
+  loss; and the child widens again, 128 → 256, the LM-level loss bitwise the child's on windows of
+  128, 17 and 1 tokens, the table the child's 128 rows and 128 a fresh 256 build draws, SIG at 87
+  and the start read the unwidened grandchild's. And on the GRU arm the stripped key is refused by
+  SIG, 87 recorded and 175 resolved. `E1` runs three epochs for it: the parent stops at the first
+  boundary, the child at the second.
+* **A moved context's refusal contradicted itself.** `LM.load_state`'s refusal of a moved
+  `ctx`/`pos_max` kept the generic "The tensors do not fit and no prefix of them means anything."
+  and then said `LM_CTX_WIDEN=1` admits a larger context, the table keeping the parent's rows — a
+  prefix that means something. **Ruled:** for those two fields the generic clause is replaced — at
+  0, "A larger context is a valid prefix only under LM_CTX_WIDEN=1, which admits it at an
+  epoch-boundary resume, the learned table keeping the parent's rows; a smaller one never is."; at
+  1, "LM_CTX_WIDEN=1 admits a larger context only: a smaller one is never a valid prefix." — and
+  every other field keeps it. **The same contradiction stood at the gate**, the refusal an operator
+  meets first (at `LM_CTX_WIDEN=0` it stops the move before `LM.load_state` runs):
+  `CKPT.check_geometry` said every EXACT field "is an inner dimension and no prefix of it is valid",
+  and `lm.ctx`'s why beside it said a larger `LM_CTX` is admitted at 1, the table keeping the
+  parent's rows. Its EXACT sentence now says what the rule decides, "so it may not move at all: this
+  run admits no prefix of it.", and the field's why says the rest (`fab.rank`'s and `fab.dk`'s say
+  "an inner dimension; no prefix valid" themselves). Q2 checks both refusals' words at both lever
+  values, and a moved `LM_WIDTH` keeping `LM.load_state`'s generic clause.
+
+**What the review changes at the default:** nothing a run trains on or counts. At 'learned' `encode`
+runs the statements it ran — the hold is not taken — and an unwidened lineage's `sig_ctx` is its
+`LM_CTX`, so SIG's width is the number it was and no checkpoint gains a key. The one text a default
+run can print that moved is an EXACT field's gate refusal. B1, B3, B3r, B5, B6 and B6r reproduce
+their fixtures with the same new-counter lists as 842b8e8's tree.
+
 ## 6. What `tests/test_contract.py` checks
 
 | check | what it proves | how it can fail |
@@ -6540,7 +9148,7 @@ on existing rulings:** gate `fab.on` at `FAB_ON=0` (ruled a switch read false, `
 | K1 | every name this document declares exists in the tree **with the signature it claims** | rename a parameter; drop a function |
 | K2 | `spine.compose` imports and `compose()` raises **only `NotImplementedError`, from a stub** | a typo in the root surfaces as `AttributeError`/`TypeError`, not as a missing body |
 | K3 | no package imports another (O10 restated at the contract boundary) | add `from fabric import api` to `src/memory/` |
-| K4 | every one of the 268 declared levers is named `LEVERS READ:` by a stub, or is in the UNCONSUMED table above **with a reason** | declare a lever and give it no reader |
+| K4 | every one of the 298 declared levers is named `LEVERS READ:` by a stub, or is in the UNCONSUMED table above **with a reason** | declare a lever and give it no reader |
 | K5 | every `d_` field the ledger declares is read by a stub in its own package, and no stub reads an undeclared one | add a wire nobody consumes |
 | K6 | every entry point is **named by a row** in `ASSEMBLY_ORDER` or `LOOP_ORDER`, or is in `compose.DEFERRED_ENTRY_POINTS` with a reason | declare a mechanism the root never calls; or leave a deferral in place after a row starts naming it — the check reads that table **backwards** and reports the stale entry |
 | K7 | the root reads only names a package **declares** off a Config | `int(lm.depth)` where LM declares `layers` — a crash at whatever stage reaches it, invisible while an earlier stub raises first |
@@ -6596,7 +9204,7 @@ nobody has watched fail is indistinguishable from a check that cannot fail.
 
 ## 7. THE FROZEN SIGNATURE SET
 
-Everything above is prose about these 141 entry points — 121 until 2026-09-02, when Q-TOK-11 added
+Everything above is prose about these 151 entry points — 121 until 2026-09-02, when Q-TOK-11 added
 `LM.residual_ratios` (122) and Q-LM-12 added `LM.embed` (123); 133 from 2026-09-15, when P4 wrote
 `CAP.caps` and the `Caps` record it returns brought `Caps.headroom(n)` with it; **134 since
 2026-09-22, when `World.parameters(self)` closed the hole `spine/compose.py::_base_parameters` had
@@ -6609,8 +9217,17 @@ cadenced gate's schedule across a resume (Q-RUN-9); **137 since later that day**
 `OPT.remap_rows(opt, st, row_events)` gave AdamW's per-row moments a way to follow the expert rows
 FAB moves (Q-FAB-13); **140 on 2026-09-26**, when 03b's stage S0b added the mid-epoch act's
 three: `TOK.splice`, `RunClock.revise_epoch_length` and `OPT.revise_horizon` (Q-RUN-8 option (a),
-Q-OPT-10); **141 since later that day**, with `TOK.view_of`, the match-table view a segmentation
-records so a continuing resume can cut at it again (Q-TOK-15, Q-RUN-16). Neither of the two before them
+Q-OPT-10); 141 later that day, with `TOK.view_of`, the match-table view a segmentation
+records so a continuing resume can cut at it again (Q-TOK-15, Q-RUN-16); **147 from 2026-09-27**,
+when the retention probe (Proposal 04 SR0 and NEW-03) added six: `EVAL.retention_period`,
+`EVAL.pin_holdout` and `EVAL.blowup` (Q-EVAL-12), `DOM.nearest` (Q-DOM-6), `MEM.encode_queries`
+(Q-MEM-15) and `CKPT.Retention.note_saved` (Q-CKPT-6) -- and MOVED one, `EVAL.holdout_probe`, whose
+`rng` left for `pin_holdout` and which gained `tokenize_fn`, `step`, `boundary` and `previous`
+(Q-EVAL-12); **150 from 2026-09-28**, when the source-reliability book (Proposal 04 SR3, register
+§8 3.4) added three: `DATA.new_focus`, `DATA.claims_observe` and `DATA.trust_period` (Q-DATA-11) --
+and MOVED one, `DATA.stream_state`, which gained `focus=None`; **151 since later that day**, when
+O17's position lever (register §8 3.6) added `LM.parent_designation` (Q-LM-15), DEFERRED -- it
+judges a checkpoint, and no run asks it (§3.6). Neither of the two before them
 is a new ruling: this document has said since the record was specified that "`Caps.headroom(n)`
 exists so the negative clamp (C30) **cannot be written** at a call site", and it became an ENTRY
 POINT the moment a body existed to carry it. A record's public method is public surface, which K1
@@ -6626,7 +9243,15 @@ here rather than a sixth copy. This block is the normative list, and
 `tests/test_contract.py`'s K1 compares it against `src/<pkg>/api.py` **in both directions**: a name
 here that the tree does not have is a failure, and a public entry point in the tree that is not here
 is also a failure. The signature text is `ast.unparse` of the argument list, so a renamed parameter,
-a reordered one, a changed default or a positional-that-became-keyword-only all fail.
+a reordered one, a changed default or a positional-that-became-keyword-only all fail. The three
+moves of 2026-09-28 are that kind and were made here with the tree: §8 3.1's faded-area counters
+widened `FAB.observe` with `area_id=None` and `FAB.manage` with `faded=None` (Q-FAB-18), and
+`MEM.write` with `areas=None` (Q-MEM-16) — each a defaulted keyword at the end, so every existing
+call is the call it was, and none was added, so the count stood at 147 until the book's three, the
+same day. `DATA.stream_state`'s `focus=None` (Q-DATA-11) is the same kind of move. So is
+`FAB.contribution`'s `candidates=None` (Q-FAB-19, the same day), with one difference: it gives a
+default to a keyword that EXISTED, required, rather than adding one — so a call that passes
+`candidates` is the call it was, and the count does not move.
 
 Ten implementation agents work against this list independently. **It does not move without an edit
 to this document and to the tree in the same commit**, which is the only thing keeping them
@@ -6650,15 +9275,20 @@ CKPT: load(ckpt: Config)
 CKPT: check_geometry(ckpt: Config, snapshot, geometry)
 CKPT: new_retention(ckpt: Config, *, restored=None)
 CKPT: Retention.consider(self, curve_bpb, step)
+CKPT: Retention.note_saved(self, ok, slot=None)
 CKPT: Retention.state(self)
 CKPT: Retention.counters(self)
 DATA: open_areas(dat: Config, *, seed: int)
 DATA: data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_token: float)
 DATA: draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int)
-DATA: stream_state(dat: Config, areas)
+DATA: stream_state(dat: Config, areas, *, focus=None)
 DATA: restore_stream_state(dat: Config, areas, state)
+DATA: new_focus(dat: Config, areas, plan, *, restored=None)
+DATA: claims_observe(dat: Config, focus, *, units, sources, step, at)
+DATA: trust_period(dat: Config)
 DOM: open_partition(dom: Config, *, sig_dim, vocab_slots, device, rng, restored=None)
 DOM: observe(dom: Config, part, *, signature, sample_window, tokens, now)
+DOM: nearest(dom: Config, part, *, signature)
 DOM: rekey(dom: Config, part, *, encode)
 DOM: note_competence(dom: Config, part, *, did, bits)
 DOM: manage(dom: Config, part, *, now, memory_counts, mem_floor_entries)
@@ -6668,8 +9298,11 @@ DOM: census(dom: Config, part)
 DOM: state_dict(dom: Config, part)
 DOM: manage_period(dom: Config)
 EVAL: curve_period(ev: Config)
+EVAL: retention_period(ev: Config)
+EVAL: pin_holdout(ev: Config, *, blocks, seed, window_bytes, prefix_bytes)
 EVAL: curve_probe(ev: Config, *, units_by_domain, logits_fn, step, rng)
-EVAL: holdout_probe(ev: Config, *, units_by_domain, logits_fn, rng)
+EVAL: holdout_probe(ev: Config, *, units_by_domain, logits_fn, tokenize_fn, step, boundary=False, previous=None)
+EVAL: blowup(ev: Config, *, series)
 EVAL: null_excess(ev: Config, *, real, permute, rng)
 EVAL: generate(ev: Config, *, logits_fn, prompts_by_domain, rng)
 EVAL: coherence(ev: Config, *, logits_fn, units_by_domain, encode, rng)
@@ -6680,9 +9313,9 @@ FAB: build(fab: Config, *, d_model, signature_dim, device, generator)
 FAB: Population.n(self)
 FAB: Population.parameters(self)
 FAB: forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None, step_windows, domain_id, live_domains, training, hold_out=None)
-FAB: observe(fab: Config, pop, out, *, per_window_loss, domain_id)
-FAB: contribution(fab: Config, pop, *, h, signature, novelty, head, targets, baseline_loss, baseline_logits_fn, step_windows, domain_id, live_domains, candidates)
-FAB: manage(fab: Config, pop, *, step_windows, flush_loss=None)
+FAB: observe(fab: Config, pop, out, *, per_window_loss, domain_id, area_id=None)
+FAB: contribution(fab: Config, pop, *, h, signature, novelty, head, targets, baseline_loss, baseline_logits_fn, step_windows, domain_id, live_domains, candidates=None)
+FAB: manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None)
 FAB: grow_check(fab: Config, pop, *, flush_loss, step_windows, soft_cap, memory_pressure, signature, shift_at=None)
 FAB: own_lr_scale(fab: Config, pop, *, applied_lr)
 FAB: counters(fab: Config, pop)
@@ -6700,10 +9333,12 @@ LM: on_mint(lm: Config, model, mints, id2bytes, *, at_window, sig_emb=None)
 LM: residual_ratios(lm: Config, model)
 LM: state_dict(lm: Config, model, geom)
 LM: load_state(lm: Config, model, geom, saved)
+LM: parent_designation(lm: Config, *, saved_geometry)
 LM: counters(lm: Config, model)
 MEM: open_store(mem: Config, *, key_dim, vocab_slots, device, rng, lm_kind, restored=None)
-MEM: write(mem: Config, store, *, contexts, tokens, surprise, sources, owners, positions, key_fn, now)
+MEM: write(mem: Config, store, *, contexts, tokens, surprise, sources, owners, positions, key_fn, now, areas=None)
 MEM: read(mem: Config, store, *, queries, promote=True)
+MEM: encode_queries(mem: Config, *, contexts, key_fn)
 MEM: blend(mem: Config, model_probs, retrieval)
 MEM: maintain(mem: Config, store, *, now, key_fn, probe_contexts=None, resegment=None, remap=None)
 MEM: apply_domain_plan(mem: Config, store, *, folds, deletions, live_sources)

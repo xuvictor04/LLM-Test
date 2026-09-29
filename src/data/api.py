@@ -19,20 +19,33 @@ implementation agents share; nothing else about the layout is load-bearing.
 RECORD TYPES RETURNED (P4 defines them; they are DATA's objects and other packages receive
 them as arguments, which is not an import and O10 does not refuse it):
   Areas   names, bodies, holdout, holdout_bytes, bytes_present, bytes_taken, cursors, rng_holdout,
-          counters, gates
-  Plan    protocol, schedule, phase_bounds, per_area_draw, exposure, gates, counters
+          counters, gates, parent_names, drawn, drawn_assumed, sources
+  Plan    protocol, schedule, phase_bounds, per_area_draw, exposure, gates, counters, faded,
+          parent_faded, shares, replay_faded
   Stream  bytes, labels, splice_starts, area_changes, phase_bounds, area_names, per_area_drawn,
-          epoch, stream_id, draws, counters, gates
+          epoch, stream_id, draws, counters, gates, sources, source_names
+  Focus   mode, counters, gates, held, rule, claim, ctx, val, delims, sketch_size, sketch, table,
+          evidence, trust, first_seen, cursor, stream, last_step, carry, copy_mode, copy_pairs,
+          copy_held, copy_seconds -- the source-reliability book (2026-09-28, Proposal 04 SR3;
+          docs/04_CONTRACT.md Q-DATA-11), the one record here that is a book and not a statement,
+          so the one that is not frozen; the copy_* four are SR6's copy detection (Q-DATA-12)
 """
+import array
+import bisect
+import collections
 import dataclasses
+import hashlib
 import math
 import os
-import re
+import time
 import weakref
+import zlib
+from fractions import Fraction
 
 from spine.lever import Config, LeverError
 from spine import rng as _rng
-from spine.gate import Gate
+from spine import units as U
+from spine.gate import Gate, NotBuilt
 
 
 class CorpusError(ValueError):
@@ -73,6 +86,41 @@ class Areas:
     report greps both and finds each name once. Until this field existed, every one of those names
     was computed nowhere and DATA's armed-but-0 and UNREACHABLE states were the same silence --
     which is the one distinction spine/gate.py::Gate exists to preserve.
+
+    `parent_names` IS THE AREA LIST THE RESUMED CHECKPOINT RECORDED, in its order, FILLED IN PLACE by
+    restore_stream_state (2026-09-27, Q-DATA-9) -- every area the parent DECLARED, beside `names`,
+    which is this run's. Empty on a fresh run. A list and not a tuple for the reason `cursors` is a
+    dict: the record is frozen and its restore mutates the value, not the field.
+
+    `drawn` IS EVERY AREA THIS LINEAGE'S STREAMS HAVE DRAWN A BYTE FROM, in the order first drawn
+    (2026-09-28, Q-FAB-18's review): restore_stream_state fills it in place from the record, and
+    draw_stream appends each area its draw took a byte from and the list does not hold yet;
+    stream_state records it. A declared area is not a trained one -- a run over "eng,py" that
+    schedules eng alone never draws py -- and Plan.parent_faded is read off this list, not
+    parent_names. Empty on a fresh run until its first draw.
+
+    `drawn_assumed` IS THE PART OF `drawn` HELD ON AN ASSUMPTION AND NOT SEEN DRAWN SINCE
+    (2026-09-28, Q-DATA-10's review): every area a record written before `drawn` existed declared,
+    which restore_stream_state assumes drawn (Q-FAB-18's review), less every area a stream of this
+    lineage has since drawn a byte from -- draw_stream removes each area it draws. stream_state
+    records it beside `drawn` and restore_stream_state reads it back, so a descendant of such a
+    record does not read the assumption as a draw. Until this field the first resume of an old
+    record wrote every area it declared into its own `drawn`, and the next resume read them all as
+    drawn -- `data.drawn_assumed` [], and data.rehearse_parent's reason "drawn by the lineage" for
+    an area nothing in the lineage ever drew. Nothing reads it to move a byte: FAB's faded sets read
+    `drawn`, and data_plan reads this only to name the assumption in data.rehearse_parent's reason.
+    Empty on a fresh run, and wherever no record of the lineage predates `drawn`.
+
+    `sources` IS WHERE EACH AREA'S BODY CAME FROM, BY FILE (2026-09-28, Proposal 04 SR3; register
+    §8 3.4, docs/04_CONTRACT.md Q-DATA-11): per area, [(body offset, source name)] in offset order,
+    one entry per file that contributes at least one byte, each naming the file whose bytes begin at
+    that offset of the CARVED body. A real area's source is its file, named "<the entry's path under
+    DATA_DIR>/<file name>" ("train/eng/alice.txt"); a synthetic area is one source,
+    "synthetic:order2:<label>". The per-file boundaries are the manifest _read_area already walks,
+    kept rather than dropped: the bytes are unchanged, and a file boundary inside the held-out block
+    moves to the block's offset, where the body resumes in the file that holds the block's first
+    following byte. draw_stream carries it into Stream.sources, and the source-reliability book votes
+    by it. Not checkpointed: open_areas recomputes it from the same files.
     """
     names: tuple
     bodies: dict
@@ -84,6 +132,10 @@ class Areas:
     rng_holdout: dict
     counters: dict = dataclasses.field(default_factory=dict)
     gates: tuple = ()
+    parent_names: list = dataclasses.field(default_factory=list)
+    drawn: list = dataclasses.field(default_factory=list)
+    drawn_assumed: list = dataclasses.field(default_factory=list)
+    sources: dict = dataclasses.field(default_factory=dict)
 
 
 def _holdout_key(label):
@@ -95,8 +147,13 @@ def _holdout_key(label):
     lowercased with everything outside [a-z0-9_] replaced by "_", and two areas whose KEYS collide
     are the same startup refusal as two whose labels collide. That is exactly the objection rng.py
     raises, answered at startup rather than papered over.
+
+    THE RULE IS spine/derive.py::stream_key AND THIS DELEGATES TO IT (2026-09-27, Q-DATA-9). SR0's
+    pinned probe keys its windows by the same area names in another package, and two copies of the
+    normalisation would be two answers to "which stream is this area's".
     """
-    return re.sub(r"[^a-z0-9_]", "_", str(label).lower())
+    from spine import derive as _derive
+    return _derive.stream_key(label)
 
 
 
@@ -146,10 +203,24 @@ def open_areas(dat: Config, *, seed: int):
         stops the synthetic arm from reaching a per-area rng_for call unchecked.
 
     On dat.source == "synthetic": builds dat.n_processes order-2 Markov generators over the five
-    15-symbol alphabets (self_organize.py:1084-1099, :1314-1315), seeded from
+    alphabets, three of 15 symbols and two of 14 (self_organize.py:1084-1099, :1314-1315), seeded from
     rng_for("data.synth", seed) so that two run seeds are two different synthetic corpora. Today
     they are not: make_proc is seeded by the PROCESS INDEX, so `DATA_SOURCE=synthetic` measures a
-    between-seed spread with the data held constant (DEFECT D-A13). Holds nothing out.
+    between-seed spread with the data held constant (DEFECT D-A13). WHETHER IT HOLDS ANYTHING OUT IS
+    dat.synth_holdout's to say (2026-09-27, Q-DATA-9; built OFF, ruled ON by 04-Q5 and ON since
+    2026-09-29). At True each generated body goes through the real sources' held-out law below,
+    VERBATIM -- the same size, the same per-area child stream, the same removal, seam, overlap, val-cap
+    tally and 0-byte refusal -- because two holdout laws for two sources would make a synthetic
+    block a different kind of sample from a real one. At False nothing is held out: every body is the
+    whole generated text, no data.holdout.<key> child is minted, and data.holdout_block and
+    data.val_cap_trip read UNREACHABLE naming DATA_SYNTH_HOLDOUT=0. ONE LAW, BUT THE BODY IT RUNS ON
+    IS GENERATED (2026-09-27, Q-DATA-9's review): its length is _synthetic_length, max(DATA_SEG_MAX +
+    1, MIN_AREA_BYTES, DATA_STREAM_BYTES // DATA_N_PROCESSES) x 2, and its text is the alphabet the
+    area's POSITION picks, so at True a synthetic block is keyed by its label only within one
+    generated length and one area order. A real area's body is its own directory, so adding an area
+    there moves no other area's block; here it moves every block unless DATA_STREAM_BYTES rises with
+    DATA_N_PROCESSES and the new area is appended, and restore_stream_state refuses a resume across
+    either move by name.
 
     DATA_AREAS NAMING FEWER ENTRIES THAN DATA_N_PROCESSES IS A STARTUP REFUSAL, not a license to
     invent labels (audit finding, confirmed live). `DATA_SOURCE=synthetic DATA_AREAS=eng
@@ -187,7 +258,10 @@ def open_areas(dat: Config, *, seed: int):
     same way or the paired add-an-area comparison is destroyed on the one run type it exists to
     measure. spine/rng.py::_check_name declares dotted child streams ("fabric.cull") as the supported
     shape, and DATA already derives per-epoch child names ("data.stream.e0") itself, so this needs
-    no new RNG_SUBSYSTEMS entry -- "data.holdout" stays the declared parent.
+    no new RNG_SUBSYSTEMS entry -- "data.holdout" stays the declared parent. THE STREAM IS PER AREA ON
+    BOTH SOURCES; THE BODY IS PER AREA ON A REAL ONE ONLY (2026-09-27, Q-DATA-9's review): a synthetic
+    body's length and text are shared or positional, as the synthetic paragraph above says, so the
+    property this paragraph argues for holds there only at one generated length and one area order.
 
     THE KEY IS THE LABEL, NORMALISED, AND THE COLLISION REFUSAL IS WHAT MAKES THAT SAFE.
     spine/rng.py refuses uppercase in a subsystem name on purpose ("Fabric" and "fabric" would be
@@ -216,7 +290,7 @@ def open_areas(dat: Config, *, seed: int):
                  _synthetic_areas sizes every generated corpus from DATA_STREAM_BYTES, so the shipped
                  configuration's build sample, merge table and measured bytes_per_token all move with
                  a lever this line used to omit; declared here rather than silently left off a second
-                 time)
+                 time), synth_holdout (the synthetic arm's held-out law, Q-DATA-9)
     WIRES READ: none
     DID IT FIRE: EVERY NAME BELOW IS CARRIED OUT ON THE RETURNED `Areas`, exactly once, and which
                  field it lands in follows the rule stated on the record: a name with a
@@ -239,11 +313,14 @@ def open_areas(dat: Config, *, seed: int):
                  data.area_open (one per area; unreachable on source=synthetic),
                  data.area_nested (one per areas entry containing "/" -- 0 is the shipped default
                  and means every area came from train/, which is a STATEMENT and not silence),
-                 data.area_path_refused, data.area_label_collision (both exit at startup, so N>0
-                 is never seen in a completed run; declared so the refusal is a named mechanism
-                 rather than an assertion),
+                 data.area_path_refused, data.area_label_collision, data.area_id_collision (two
+                 labels on one spine/derive.py::area_id, the key FAB's area books and MEM's area
+                 column book by, 2026-09-28; all three exit at startup, so N>0 is never seen in a
+                 completed run; declared so the refusal is a named mechanism rather than an
+                 assertion),
                  data.corpus_cap_trip (fired N / armed but 0, prints taken vs present per area),
-                 data.holdout_block (prints offset+size AND the rng key per area),
+                 data.holdout_block (prints offset+size AND the rng key per area; UNREACHABLE on
+                 source=synthetic at DATA_SYNTH_HOLDOUT=0, and the real arm's gate at 1),
                  data.holdout_seam (one per area -- removing a MIDDLE block leaves exactly one
                  manufactured discontinuity in a body seg_contig=True reads in order, and
                  data/levers.py::DATALevers claims the only boundaries left are the text's own; one
@@ -252,12 +329,16 @@ def open_areas(dat: Config, *, seed: int):
                  offset 0 or at the tail, which is the state it must say rather than read 0),
                  data.holdout_overlap (a READING, not a lever and not a gate: the fraction of
                  held-out bytes that also occur verbatim in the training body at a fixed n-gram
-                 length, per area, printed once at startup. It costs no lever, no wire and no
-                 default, and it answers the one question the split rule CANNOT: Lee et al.
-                 arXiv:2107.06499 measures models "underestimate perplexity on evaluation documents
-                 with near duplicates" and says benchmarks "should actively remove contaminated
-                 training data, rather than just partitioning held out splits by documents", so
-                 NEITHER the tail nor the random block is safe on its own), data.val_cap_trip,
+                 length, per area, computed once at startup -- and printed in the R report's
+                 DATA(areas.counters) row since 2026-09-27; no row printed it before. It costs no
+                 lever, no wire and no default, and it answers the one question the split rule
+                 CANNOT: Lee et al. arXiv:2107.06499 measures models "underestimate perplexity on
+                 evaluation documents with near duplicates" and says benchmarks "should actively
+                 remove contaminated training data, rather than just partitioning held out splits
+                 by documents", so NEITHER the tail nor the random block is safe on its own. It is
+                 a reading of THIS run's blocks, so restore_stream_state never overwrites it with
+                 the parent's), data.val_cap_trip (UNREACHABLE on source=synthetic at
+                 DATA_SYNTH_HOLDOUT=0, like data.holdout_block),
                  data.area_refused (a refusal exits at startup, so N>0 is never seen in a
                  completed run), rng.issued()["data.synth"],
                  rng.issued()["data.holdout.<key>"] -- ONE PER AREA, and the PARENT NAME
@@ -294,7 +375,8 @@ def open_areas(dat: Config, *, seed: int):
     # says must be a startup refusal naming the lever. Neither check below touches disk, so hoisting
     # them above the branch changes nothing about what they refuse, only which arm can reach an
     # unchecked rng_for call.
-    by_label, by_key = {}, {}
+    by_label, by_key, by_id = {}, {}, {}
+    from spine import derive as _derive
     for entry, label in zip(entries, labels):
         if label in by_label:
             raise CorpusError(
@@ -308,8 +390,24 @@ def open_areas(dat: Config, *, seed: int):
                 f"labels {by_key[key][0]!r} and {label!r} both normalise to the rng key "
                 f"{key!r}, so they would draw their held-out (or, on DATA_SOURCE=synthetic, their "
                 f"generator) blocks from ONE stream. Rename one DATA_AREAS entry.")
+        # THE AREA ID IS THE THIRD NAME A LABEL IS LOOKED UP UNDER, AND ITS COLLISION IS THE SAME
+        # REFUSAL (2026-09-28, register §8 3.1; docs/04_CONTRACT.md Q-FAB-18). FAB's per-expert area
+        # books and MEM's per-entry `area` column key each area by spine/derive.py::area_id -- crc32
+        # of the label, 31 bits -- because neither package may see a name and both books cross a
+        # resume. Two labels on one id would be booked as one area: the faded-area counts and the
+        # occupancy rows would file one corpus's experts and entries under the other's name. A
+        # crc32 collision between two real labels is rare, and rarity is the wrong reason to let a
+        # report merge two areas in silence.
+        aid = _derive.area_id(label)
+        if aid in by_id:
+            raise CorpusError(
+                f"labels {by_id[aid][0]!r} and {label!r} both hash to the area id {aid} "
+                f"(spine/derive.py::area_id, crc32 of the label masked to 31 bits), so FAB's area "
+                f"books and MEM's area column would book them as ONE area "
+                f"(data.area_id_collision). Rename one DATA_AREAS entry.")
         by_label[label] = entry
         by_key[key] = (label, entry)
+        by_id[aid] = (label, entry)
 
     raw = {}                       # label -> bytes, before the held-out block is removed
     present, taken, sources = {}, {}, {}
@@ -352,14 +450,18 @@ def open_areas(dat: Config, *, seed: int):
             else:
                 rel = os.path.join("train", entry)
             path = os.path.join(str(dat.dir), rel)
-            body, n_present = _read_area(path, int(dat.corpus_cap))
+            # THE PER-FILE BOUNDARIES, KEPT (2026-09-28, Q-DATA-11): the manifest this read walks,
+            # as (offset in the raw body, file name), so Areas.sources can name each file.
+            files = []
+            body, n_present = _read_area(path, int(dat.corpus_cap), files=files)
             if not body:
                 raise CorpusError(
                     f"area {label!r} at {path!r} holds no usable bytes. Refused rather than "
                     f"dropped: dropping an area desynchronises the label list from the corpus list "
                     f"and the next run reports one corpus's loss under another's name "
                     f"(ISSUES P3-C19).")
-            raw[label], present[label], taken[label], sources[label] = body, n_present, len(body), path
+            raw[label], present[label], taken[label] = body, n_present, len(body)
+            sources[label] = [(off, (rel + "/" + fname).replace(os.sep, "/")) for off, fname in files]
             n_open += 1
             if len(body) < n_present:
                 # data.corpus_cap_trip: the cap BIT for this area. `_read_area` counts `present`
@@ -368,6 +470,13 @@ def open_areas(dat: Config, *, seed: int):
 
     names = tuple(raw)
     bodies, holdout, holdout_bytes, rng_holdout, cursors = {}, {}, {}, {}, {}
+    carved_sources = {}
+    # THE ONE ARM THAT HOLDS NOTHING OUT (2026-09-27, Q-DATA-9): the synthetic source at
+    # DATA_SYNTH_HOLDOUT=0. Everywhere else -- a real source, or the synthetic one at 1 -- the loop
+    # below runs the real sources' law VERBATIM, because one held-out law for both sources is what
+    # makes a synthetic block the same kind of sample as a real one (04-Q5). On this arm the loop runs
+    # the statements it ran before the lever existed, in order, and mints no data.holdout.<key> child.
+    synth_off = str(dat.source) == "synthetic" and not bool(dat.synth_holdout)
     for label in names:
         blob = raw[label]
         # THE FLOOR IS CHECKED ON THE USABLE BODY, i.e. after the held-out block comes out, which is
@@ -377,8 +486,8 @@ def open_areas(dat: Config, *, seed: int):
         # kept per area because the gate below prints the arithmetic rather than a verdict.
         frac_bytes[label] = int(len(blob) * float(dat.holdout_frac))
         n_hold = min(frac_bytes[label], int(dat.val_cap))
-        if str(dat.source) == "synthetic":
-            n_hold = 0             # the synthetic path holds nothing out
+        if synth_off:
+            n_hold = 0             # the synthetic path at DATA_SYNTH_HOLDOUT=0 holds nothing out
         elif frac_bytes[label] > int(dat.val_cap):
             n_val_cap += 1
         if len(blob) - n_hold < floor:
@@ -406,6 +515,11 @@ def open_areas(dat: Config, *, seed: int):
             # REMOVED, NOT MASKED. One manufactured seam per area is the cost, and it is a good
             # trade against the thousands seg_from manufactures -- but it is stated, not hidden.
             bodies[label] = blob[:start] + blob[start + n_hold:]
+            # AND THE FILE BOUNDARIES FOLLOW THE BYTES (2026-09-28, Q-DATA-11): the carve moves
+            # every offset past the block down by its size, and a file that begins inside it
+            # begins, in the body, at the block's offset.
+            carved_sources[label] = _carved_sources(sources.get(label) or (), start, n_hold,
+                                                    len(bodies[label]))
             # SEAM_AT IS THE MANUFACTURED-DISCONTINUITY POSITION, NOT THE BLOCK OFFSET (audit
             # finding, confirmed live). Removing a MIDDLE block leaves one seam; removing a PREFIX
             # (start == 0) or a SUFFIX (start + n_hold == len(blob)) leaves none, because there is no
@@ -433,7 +547,7 @@ def open_areas(dat: Config, *, seed: int):
                     "block landed at the body's own tail: no text follows it, so removing it "
                     "manufactures no discontinuity")
         else:
-            if str(dat.source) != "synthetic":
+            if not synth_off:
                 # A REAL AREA'S HOLDOUT ROUNDING TO ZERO IS A REFUSAL, NOT A SILENT SKIP (audit
                 # finding, confirmed live). The `else` branch below is written for exactly one
                 # reason -- "source=synthetic holds nothing out" -- and used to run unconditionally,
@@ -445,16 +559,29 @@ def open_areas(dat: Config, *, seed: int):
                 # across-the-run-boundary comparison for this area would then have nothing held out
                 # to be computed against, silently. Refused instead, naming both levers and the
                 # arithmetic that zeroed the block.
+                # AND A SYNTHETIC AREA AT DATA_SYNTH_HOLDOUT=1 IS REFUSED THE SAME WAY (2026-09-27,
+                # Q-DATA-9): it runs the real sources' law, so a block that rounds to nothing is the
+                # same failure there, and the OFF record below would stamp "holds nothing out" on a
+                # run that asked for a block. Its message also names the lever that asked.
                 raise CorpusError(
                     f"area {label!r} computed a 0-byte held-out block: min(int({len(blob)} * "
                     f"{float(dat.holdout_frac)}), {int(dat.val_cap)}) == 0 from DATA_HOLDOUT_FRAC="
                     f"{dat.holdout_frac} and DATA_VAL_CAP={int(dat.val_cap)} against a "
                     f"{len(blob)}-byte body. Refused rather than trained on with no held-out block "
-                    f"at all: raise DATA_HOLDOUT_FRAC or DATA_VAL_CAP.")
+                    f"at all: raise DATA_HOLDOUT_FRAC or DATA_VAL_CAP."
+                    + (" DATA_SOURCE=synthetic at DATA_SYNTH_HOLDOUT=1 carves under the real "
+                       "sources' law and is refused the same way; DATA_SYNTH_HOLDOUT=0 is the "
+                       "synthetic arm that holds nothing out." if str(dat.source) == "synthetic"
+                       else ""))
             holdout[label] = b""
             bodies[label] = blob
+            carved_sources[label] = _carved_sources(sources.get(label) or (), 0, 0, len(blob))
+            # THE OFF RECORD NAMES THE LEVER THAT MADE IT (2026-09-27, Q-DATA-9): since the synthetic
+            # source can hold a block out, "source=synthetic holds nothing out" is no longer a
+            # property of the source but of DATA_SYNTH_HOLDOUT=0 on it. The key, offset, size and
+            # seam are unchanged, and they are what restore_stream_state compares.
             rng_holdout[label] = {"key": None, "offset": 0, "size": 0, "seam_at": None,
-                                  "why": "source=synthetic holds nothing out"}
+                                  "why": "DATA_SYNTH_HOLDOUT=0 holds nothing out on this source"}
         holdout_bytes[label] = len(holdout[label])
         cursors[label] = 0
 
@@ -508,17 +635,22 @@ def open_areas(dat: Config, *, seed: int):
             reason=f"DATA_SOURCE=synthetic: each area is generated to the size the sampler needs and "
                    f"nothing is read off disk, so DATA_CORPUS_CAP={int(dat.corpus_cap)} truncates "
                    f"nothing and bytes_present == bytes_taken by construction, not by measurement"))
-        gates.append(Gate(
-            "data.holdout_block", False, None, n_entries, reachable=False,
-            reason="DATA_SOURCE=synthetic: this arm holds nothing out, so no block is drawn and no "
-                   "data.holdout.<key> child stream is minted for any area -- an area with no child "
-                   "in rng.issued() never asked for a block, which is a different statement from a "
-                   "block of size zero"))
-        gates.append(Gate(
-            "data.val_cap_trip", False, None, int(dat.val_cap), reachable=False,
-            reason=f"DATA_SOURCE=synthetic: with nothing held out there is no block for "
-                   f"DATA_VAL_CAP={int(dat.val_cap)} to bind, so the cap is not armed-and-inert "
-                   f"here -- it has nothing to be armed against"))
+        if synth_off:
+            # THE HELD-OUT PAIR IS UNREACHABLE ON THIS ARM ONLY AT DATA_SYNTH_HOLDOUT=0 (2026-09-27,
+            # Q-DATA-9), and the reason now names that lever and not the source: at 1 the synthetic
+            # source carves under the real sources' law, and both gates take the real arm below.
+            gates.append(Gate(
+                "data.holdout_block", False, None, n_entries, reachable=False,
+                reason="DATA_SOURCE=synthetic at DATA_SYNTH_HOLDOUT=0: this arm holds nothing out, so "
+                       "no block is drawn and no data.holdout.<key> child stream is minted for any "
+                       "area -- an area with no child in rng.issued() never asked for a block, which "
+                       "is a different statement from a block of size zero. DATA_SYNTH_HOLDOUT=1 "
+                       "carves one per area under the real sources' law"))
+            gates.append(Gate(
+                "data.val_cap_trip", False, None, int(dat.val_cap), reachable=False,
+                reason=f"DATA_SOURCE=synthetic at DATA_SYNTH_HOLDOUT=0: with nothing held out there "
+                       f"is no block for DATA_VAL_CAP={int(dat.val_cap)} to bind, so the cap is not "
+                       f"armed-and-inert here -- it has nothing to be armed against"))
     else:
         gates.append(Gate(
             "data.area_open", n_open > 0, n_open, n_entries,
@@ -542,6 +674,9 @@ def open_areas(dat: Config, *, seed: int):
             "data.corpus_cap_trip", n_cap_trip > 0, n_cap_trip, len(names),
             reason=f"DATA_CORPUS_CAP={int(dat.corpus_cap)}, and the cap's bite is a PRINTED NUMBER "
                    f"per area rather than a warning about a default -- {cap_detail}"))
+    if not synth_off:
+        # THE HELD-OUT PAIR'S REAL ARM, taken by a real source and, since 2026-09-27, by the
+        # synthetic one at DATA_SYNTH_HOLDOUT=1 (Q-DATA-9): the same law, so the same two gates.
         block_detail = "; ".join(
             f"{label}: {rng_holdout[label]['key']} offset {rng_holdout[label]['offset']} "
             f"size {rng_holdout[label]['size']}" for label in names)
@@ -567,12 +702,24 @@ def open_areas(dat: Config, *, seed: int):
         reason="the label and rng-key collision checks run for BOTH sources, before the source "
                "branch; a collision raises CorpusError and exits, so this row reads zero in every "
                "Areas that exists and its threshold is the number of entries it compared"))
+    # THE AREA-ID REFUSAL'S OWN ROW (2026-09-28, Q-FAB-18's review). The refusal landed with the id
+    # and its name was declared above and nowhere written: no Gate, no counter, and neither the
+    # message nor data.area_refused's reason named it, so the declared mechanism had no row in any
+    # report. Its sibling's shape, for its sibling's reason.
+    gates.append(Gate(
+        "data.area_id_collision", False, 0, n_entries,
+        reason="the area-id collision check (two labels on one spine/derive.py::area_id, the key "
+               "FAB's area books and MEM's area column share) runs for BOTH sources, in the same "
+               "loop as the label and rng-key checks; a collision raises CorpusError and exits, so "
+               "this row reads zero in every Areas that exists and its threshold is the number of "
+               "entries it compared"))
     gates.append(Gate(
         "data.area_refused", False, 0, n_entries,
         reason="every refusal in this function raises CorpusError and exits at startup -- an empty "
-               "DATA_AREAS, a label or rng-key collision, an entry that escapes DATA_DIR, an area "
-               "with no usable bytes, a body under the derived floor, a real area whose held-out "
-               "block rounded to zero, or DATA_N_PROCESSES out of range -- so this row reads zero "
+               "DATA_AREAS, a label, rng-key or area-id collision, an entry that escapes DATA_DIR, "
+               "an area with no usable bytes, a body under the derived floor, an area whose "
+               "held-out block rounded to zero (a real one, or a synthetic one at "
+               "DATA_SYNTH_HOLDOUT=1), or DATA_N_PROCESSES out of range -- so this row reads zero "
                "in every Areas that exists. It is declared so a refusal is a named mechanism and "
                "not an assertion nobody counts"))
 
@@ -603,16 +750,22 @@ def open_areas(dat: Config, *, seed: int):
 
     return Areas(names=names, bodies=bodies, holdout=holdout, holdout_bytes=holdout_bytes,
                  bytes_present=present, bytes_taken=taken, cursors=cursors,
-                 rng_holdout=rng_holdout, counters=counters, gates=tuple(gates))
+                 rng_holdout=rng_holdout, counters=counters, gates=tuple(gates),
+                 sources=carved_sources)
 
 
-def _read_area(path, cap):
+def _read_area(path, cap, files=None):
     """Every usable file under `path`, concatenated, up to `cap` bytes. Returns (bytes, present).
 
     SKIPS basenames starting with "_" and anything ending .json: fetch manifests were being spliced
     into the corpus and trained on as if they were English. `present` is the total the directory
     HOLDS, counted even past the cap, because the cap's bite has to be a printed number rather than
     a warning about a default.
+
+    `files`, WHEN A LIST IS GIVEN, RECEIVES THE MANIFEST THIS WALK ALREADY HAS (2026-09-28,
+    Q-DATA-11): one (offset in the returned bytes, file name) per file that contributed at least one
+    byte, in read order -- Areas.sources' per-file boundaries. The bytes are the same with or
+    without it.
     """
     if not os.path.isdir(path):
         return b"", 0
@@ -626,9 +779,37 @@ def _read_area(path, cap):
         n = os.path.getsize(f)
         present += n
         if len(out) < cap:
+            at = len(out)
             with open(f, "rb") as fh:
                 out += fh.read(cap - len(out))
+            if files is not None and len(out) > at:
+                files.append((at, name))
     return bytes(out), present
+
+
+def _carved_sources(entries, start, n_hold, body_len):
+    """Areas.sources for one area: its raw [(offset, name)] file boundaries, mapped onto the body
+    open_areas leaves after carving [start, start + n_hold) out (2026-09-28, Q-DATA-11).
+
+    An offset before the block stays; one at or past its end moves down by n_hold; one inside it
+    moves to `start`, where the body resumes. Of entries that land on one offset the LAST is kept --
+    the file holding the body's byte there -- and an entry at or past the body's end is dropped,
+    since no byte of the body is its. UNIT: bytes. Pure arithmetic; it reads no lever.
+    """
+    out = []
+    for off, name in entries:
+        off = int(off)
+        if off >= start + n_hold:
+            off -= n_hold
+        elif off > start:
+            off = start
+        if off >= body_len:
+            continue
+        if out and out[-1][0] == off:
+            out[-1] = (off, name)
+        else:
+            out.append((off, name))
+    return out
 
 
 def _holdout_overlap(holdout_bytes, body_bytes, n=50):
@@ -669,13 +850,39 @@ def _holdout_overlap(holdout_bytes, body_bytes, n=50):
     return hits / total
 
 
-# The five 15-symbol alphabets, from the old tree's synthetic generator.
+# The five alphabets from the old tree's synthetic generator: three of 15 symbols and two of 14 (it
+# said "15-symbol" for all five until 2026-09-27). An area takes the one at its POSITION in the area
+# list, mod five, as the old make_proc took ALPHA[s % len(ALPHA)] (_synthetic_areas).
 _ALPHABETS = ("abcdefghijklmno", "pqrstuvwxyzABCD", "EFGHIJKLMNOPQRS",
               "TUVWXYZ0123456", "789!?.,;:'\"-()")
 
 
+def _synthetic_length(seg_max, stream_bytes, n_processes):
+    """One synthetic area's generated length, in bytes: max(DATA_SEG_MAX + 1, MIN_AREA_BYTES,
+    DATA_STREAM_BYTES // DATA_N_PROCESSES) x 2.
+
+    Enough text that the floor is clearable and a DATA_STREAM_BYTES stream can be drawn without the
+    sampler wrapping: the areas are generated, so there is no corpus to be short. DATA_N_PROCESSES is
+    known >= 1 wherever this runs (_synthetic_areas refuses 0 first), so it needs no max(1, n) clamp:
+    DATA_N_PROCESSES=0 is a startup refusal, not a divide-by-zero guard wearing a clamp's clothes.
+
+    ONE FORMULA FOR ITS TWO READERS (2026-09-27, Q-DATA-9's review). _synthetic_areas generates every
+    area to this length, and restore_stream_state prints it when a synthetic block moved. At
+    DATA_SYNTH_HOLDOUT=1 the block is carved out of a body of this length -- its size is a fraction of
+    it and its offset is drawn over it -- so these three levers move EVERY synthetic area's block
+    together: adding a fifth area at DATA_STREAM_BYTES 120000 takes each body from 60,000 bytes to
+    48,000 and each block from 3,000 to 2,400. Pure arithmetic on the values passed; it reads no
+    lever itself.
+
+    UNIT IN: seg_max = bytes, stream_bytes = bytes, n_processes = count. UNIT OUT: bytes.
+    """
+    return max(int(seg_max) + 1, MIN_AREA_BYTES, int(stream_bytes) // int(n_processes)) * 2
+
+
 def _synthetic_areas(dat, seed, entries, labels):
-    """`dat.n_processes` order-2 Markov generators, one area each. Holds nothing out.
+    """`dat.n_processes` order-2 Markov generators, one area each. Holds nothing out ITSELF: what it
+    returns is each area's whole generated text, and open_areas carves the held-out block from it
+    under the real sources' law when DATA_SYNTH_HOLDOUT asks for one (2026-09-27, Q-DATA-9).
 
     `labels` ARRIVES PRE-VALIDATED, computed once by open_areas for both sources (basename applied,
     checked against every OTHER entry for a label or rng-key collision) rather than derived twice and
@@ -692,11 +899,17 @@ def _synthetic_areas(dat, seed, entries, labels):
     guard in spine/rng.py found the conflict: RUN.streams mints every name in RNG_SUBSYSTEMS so
     rng.issued() is a complete register at step 0, and this function drawing on `data.synth`
     directly is a SECOND generator for one name -- two call sites replaying one sequence while each
-    believes it has its own. The per-child form fixes that and buys the property Q-DATA-6 argues
-    for on the other stream: an area's text stops being a function of how many areas were generated
-    before it, so inserting one entry no longer moves every later area's corpus. The parent keeps
-    its RNG_SUBSYSTEMS row and reports zero draws, which is the honest reading -- declared, never
-    drawn -- and is what `data.holdout` already does.
+    believes it has its own. The per-child form fixes that and buys HALF the property Q-DATA-6 argues
+    for on the other stream: an area's DRAWS stop being a function of how many areas were generated
+    before it. Its ALPHABET does not, and this docstring said the whole property held until
+    2026-09-27 (Q-DATA-9's review): the alphabet is _ALPHABETS[i % 5] by the area's position i, so
+    inserting an entry, or reordering the list, still moves every later area's text -- relabelled
+    where the two alphabets are the same size, drawn afresh where they are not. Driven: DATA_AREAS
+    "eng,rust,py,num,c" against "eng,py,num,c" gives py, num and c other text. Keyed by position it
+    stays, because the shipped four areas' text is keyed so and every synthetic run pairs with it;
+    where a held-out block rides on the text, restore_stream_state refuses the move by name. The
+    parent keeps its RNG_SUBSYSTEMS row and reports zero draws, which is the honest reading --
+    declared, never drawn -- and is what `data.holdout` already does.
     """
     n = int(dat.n_processes)
     if n < 1:
@@ -723,12 +936,10 @@ def _synthetic_areas(dat, seed, entries, labels):
             f"the areas nobody named: name at least {n} area(s) in DATA_AREAS, or lower "
             f"DATA_N_PROCESSES.")
     labels = labels[:n]
-    # Enough text that the floor is clearable and a 120,000-byte stream can be drawn without the
-    # sampler wrapping: the areas are generated, so there is no corpus to be short. `n` is now known
-    # >= 1 (refused above), so this no longer needs the max(1, n) clamp the LEVERS READ docstring
-    # line and the audit both named: DATA_N_PROCESSES=0 is a startup refusal, not a divide-by-zero
-    # guard wearing a clamp's clothes.
-    per_area = max(int(dat.seg_max) + 1, MIN_AREA_BYTES, int(dat.stream_bytes) // n) * 2
+    # Enough text that the floor is clearable and the stream can be drawn without the sampler
+    # wrapping; the arithmetic, and why it needs no max(1, n) clamp now that `n` >= 1 is refused
+    # above, is _synthetic_length's, the one formula restore_stream_state prints as well.
+    per_area = _synthetic_length(dat.seg_max, dat.stream_bytes, n)
     raw, present, taken, sources = {}, {}, {}, {}
     for i, label in enumerate(labels):
         stream = _rng.rng_for(f"data.synth.{_holdout_key(label)}", seed)
@@ -748,7 +959,9 @@ def _synthetic_areas(dat, seed, entries, labels):
         raw[label] = bytes(out)
         present[label] = len(out)
         taken[label] = len(out)
-        sources[label] = f"synthetic:order2:{i}"
+        # ONE SOURCE PER GENERATED AREA, NAMED BY ITS LABEL (2026-09-28, Q-DATA-11): Areas.sources'
+        # shape. This read f"synthetic:order2:{i}", by position, and nothing read it.
+        sources[label] = [(0, f"synthetic:order2:{label}")]
     return raw, present, taken, sources
 
 
@@ -767,6 +980,44 @@ class Plan:
     (data.phase_name_resolved -- 0 is the honest statement "every entry was an index", not silence).
     Added because the audit found the last of these computed and then discarded with no field to
     land in (n_by_name was incremented and never read again anywhere in this file).
+
+    `faded` AND `parent_faded` ARE THE SCHEDULE'S STATEMENT OF WHICH AREAS HAVE FADED (2026-09-28,
+    register §8 3.1, NEW-10 and C37; docs/04_CONTRACT.md Q-FAB-18), in the same index space as
+    `schedule`. `faded[k]` is every area live in some phase before k and not live in phase k -- at
+    derive.phase_schedule(4) over four areas, [(), (0,), (0,), (0, 1)] -- sorted by index, which is
+    Plan order. `parent_faded` is every area this run declares that the resumed lineage's streams
+    DREW from (Areas.drawn, as the record carried it) and that is live in NO phase of this run's
+    schedule: the areas a child inherits the training of and never trains, faded from its first
+    window -- () on a fresh run and wherever the schedule makes live every area the lineage drew.
+    A CONTINUING RESUME RECOMPUTES THE SET ITS PARENT LEG HAD, not an empty one (2026-09-28,
+    Q-DATA-10's review; this line said "() ... on a continuing resume, whose schedule is its
+    parent's" until then): the same schedule over the record's drawn list, which holds what the
+    parent leg read at its own restore plus its own draws, and every draw of that schedule is of an
+    area some phase makes live. So a pure-add or rehearsing child's parent areas stay faded from
+    window 0 across its continuation -- (0,) for eng under "py|py|py|py" over "eng,py" -- which is
+    what keeps the continuation exact. An area the parent declared and never drew is not in it
+    (Q-FAB-18's review: it was read off Areas.parent_names, every DECLARED area, so a run over
+    "eng,py" that scheduled eng alone handed its continuing child's passes py as faded where the
+    uninterrupted run handed them nothing). Both are known at startup because the
+    schedule is, and both are READINGS OF THE SCHEDULE WITHIN ONE EPOCH: an area only a previous
+    epoch's later phases trained is not in phase 0's set when the schedule restarts, and a parent
+    area the child schedules later is not faded before its phase -- Q-FAB-18 records both as what
+    the rule does not see. FAB.manage is handed the union at each pass, as area ids.
+
+    `shares` IS THE SPLIT THE DRAW LAYS, PER PHASE, UNDER EVERY LAW (2026-09-28, register §8 3.3;
+    docs/04_CONTRACT.md Q-DATA-10): one tuple per phase of (area index, bytes) pairs in Plan order,
+    each phase's summing to its span. Under 'planned' and 'uniform', and in every phase 'replay'
+    does not lay, it is the scheduled split -- the phase's bytes over its live areas, the remainder
+    on the first live areas -- which draw_stream's planned budget recomputes by the same rule; under
+    'replay', a phase with a faded area carries the replay law's targets. `per_area_draw` is its sum
+    over the phases, and draw_stream prints it beside what each phase drew (the share gauges).
+    `replay_faded` is, per phase, the areas the 'replay' law gives DATA_REPLAY_SHARE to: `faded[k]`,
+    plus `parent_faded` at DATA_REHEARSE_PARENT=1 -- () in every phase under 'planned' and 'uniform',
+    and a phase whose tuple is empty is laid by the planned law. A phase whose tuple is not empty is
+    laid by the replay law's deficit even where the share comes to no byte for its faded areas
+    (2026-09-28, Q-DATA-10's review): their pairs in `shares` then read 0, and the phase REHEARSES
+    nothing, which data.replay does not count. Both are known at startup, move no byte by
+    themselves and are not checkpointed: a resume recomputes them from the same schedule and record.
     """
     protocol: str
     schedule: tuple
@@ -775,6 +1026,10 @@ class Plan:
     exposure: dict
     gates: tuple
     counters: dict = dataclasses.field(default_factory=dict)
+    faded: tuple = ()
+    parent_faded: tuple = ()
+    shares: tuple = ()
+    replay_faded: tuple = ()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -801,12 +1056,25 @@ class Stream:
     record in this tree that can say UNREACHABLE and carry the reason. `data.segment` is a reading in
     `counters` instead: it counts the segments THESE BYTES are spliced from, which is as true of a
     replayed Stream as of the draw that produced it, and wrapping a reading in a Gate prints "armed,
-    did not fire" for a number that never had a condition to meet.
+    did not fire" for a number that never had a condition to meet. So are SR0's per-phase share
+    gauges (2026-09-28, register §8 3.3; docs/04_CONTRACT.md Q-DATA-10), under every law:
+    `data.share.p<k>.<area>.planned` and `.realised`, the area's bytes in phase k as Plan.shares
+    planned them and as these bytes hold them, each in permille of the phase's span.
 
     A REPLAY RE-STATES THE GATES AND KEEPS THE COUNTERS, and that split is the whole point of having
     both fields. The bytes are the first draw's and so is every reading about them; but "did THIS
     epoch draw" is a question about this call, and its answer is UNREACHABLE -- not the FIRED the
     first draw earned and not a measured zero either. See data/api.py::_replay_gates.
+
+    `sources` AND `source_names` SAY WHICH SOURCE EVERY BYTE CAME FROM (2026-09-28, Proposal 04
+    SR3; register §8 3.4, docs/04_CONTRACT.md Q-DATA-11), run-length: `sources` is ((stream offset,
+    index into source_names), ...) in offset order, one entry where the source changes, and
+    `source_names` the names -- Areas.sources' spelling -- in the order these bytes first reach
+    them. draw_stream fills both from each chunk's body offsets as it lays it, the wrap's second
+    piece included, and TAKES NO DRAW to do it: the bytes, labels, segment table, draw count and
+    every counter and gate are what they were, so the stream digest the segmentation log carries
+    (spine/compose.py::_stream_digest) does not move. A replay carries them with the bytes. An area
+    Areas.sources names nothing for is one source under its own label.
     """
     bytes: bytes
     labels: list
@@ -820,6 +1088,8 @@ class Stream:
     draws: int = 0
     counters: dict = dataclasses.field(default_factory=dict)
     gates: tuple = ()
+    sources: tuple = ()
+    source_names: tuple = ()
 
 
 def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_token: float):
@@ -882,7 +1152,7 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
     seen 2.1x and the original is 28% sampled, and "adding py cost eng X bits/byte" is then
     confounded with "py was memorised and eng was skimmed" (ISSUES P3-H22).
 
-    TWO OF THE THREE GATES' BOUNDS ARE REFUSED AT nan AND AT +inf, BEFORE THE SCHEDULE IS PARSED.
+    TWO OF THE FIVE GATES' BOUNDS ARE REFUSED AT nan AND AT +inf, BEFORE THE SCHEDULE IS PARSED.
     At either value `max(vals) > bound` and `skew > bound` are False for every possible exposure, so
     the gate CANNOT fire while spine/gate.py::Gate's default reachable=True renders it as the middle
     state -- measured, "Gate data.exposure_max: armed, did not fire (0.75 vs nan)". That is the
@@ -891,8 +1161,9 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
     closes two values per lever and claims nothing beyond them -- a finite bound no exposure can
     reach (1e26) passes it and is exactly as uncrossable. See the block itself.
 
-    THREE DECLARED GATES, each printing its own arithmetic so "did not fire" is distinguishable
-    from "could not fire":
+    FIVE DECLARED GATES (three until 2026-09-28, when Q-DATA-10 added the last two; this line and
+    the one above said three until that ruling's review), each printing its own arithmetic so "did
+    not fire" is distinguishable from "could not fire":
       data.exposure_max     max(exposure) > dat.exposure_max. COMPUTED AT ONE AREA TOO: both reads
                             sat inside `if DATA_MODE == "real" and NP > 1`, so the check was
                             unavailable on exactly the single-area goal-A configuration where
@@ -902,6 +1173,56 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
       data.splice_window    mean_segment_bytes / (win_tokens * bytes_per_token) < 8. The one place
                             the byte/token boundary is crossed, and it is crossed with the MEASURED
                             bytes/token handed in, never with an estimate (ISSUES P1-H16).
+      data.replay           the phases in which the 'replay' law gives its faded areas at least one
+                            byte, against the phase count; fired above 0. UNREACHABLE, naming
+                            DATA_DRAW, under 'planned' and 'uniform'.
+      data.rehearse_parent  the areas rehearsed from window 0 (Plan.parent_faded under 'replay' at
+                            DATA_REHEARSE_PARENT=1), against the areas the lineage drew that this
+                            run declares; fired above 0. UNREACHABLE at DATA_REHEARSE_PARENT=0,
+                            under 'planned' and 'uniform', and on a fresh run.
+
+    THE FADED SETS (2026-09-28, register §8 3.1, NEW-10 and C37; docs/04_CONTRACT.md Q-FAB-18).
+    Plan.faded[k] is every area live in a phase before k and not live in phase k; Plan.parent_faded
+    is every area the resumed lineage's streams drew from (Areas.drawn, filled by
+    restore_stream_state before this call; since Q-FAB-18's review, and not Areas.parent_names,
+    every area the parent merely declared) that no phase of this schedule makes live. Both are
+    index tuples in Plan order, computed here because the schedule is; the root hands their union to
+    FAB.manage at each pass as area ids. Neither moves a byte of the stream.
+
+    THE SPLIT EACH PHASE IS LAID IN, Plan.shares, UNDER EVERY LAW (2026-09-28, register §8 3.3;
+    docs/04_CONTRACT.md Q-DATA-10): per phase, (area index, bytes) pairs summing to the phase's
+    span. Under 'planned' and 'uniform' it is the scheduled split above, per phase, and
+    Plan.per_area_draw is its sum over the phases, exactly as before it existed.
+    THE 'replay' LAW (Proposal 04 §1 item 2; register 04-Q1, 04-Q4, O9, O16), BUILT OFF. A phase k
+    with a faded area -- Plan.faded[k], plus Plan.parent_faded from window 0 at dat.rehearse_parent,
+    the pair in Plan.replay_faded[k] -- gives round(dat.replay_share x span) bytes to its faded
+    areas, split evenly; at dat.replay_newest > 0 the newest-arrived live area (the latest first
+    live phase, ties to the last in Plan order) takes round((replay_share + replay_newest) x span)
+    minus that; the other live areas split the rest evenly. Every rounding is half to even on the
+    DECIMAL the lever holds (Fraction(repr(value)): 0.07 of a 150-byte phase is 10.5 and rounds to
+    10, where the float product 10.500000000000002 rounds to 11) and every remainder falls on the
+    first areas in Plan order, so the targets are integers that sum to the span and a hand can
+    recompute them. A phase with no faded area is 'planned' and reads neither share. replay_share +
+    replay_newest above 1 is refused by name: no phase can give away more bytes than it has.
+    Plan.per_area_draw is then the replay targets' sum, and because draw_stream truncates every
+    segment to its area's target, the two exposure gates stay EXACT under 'replay' (04 §1 item 2) --
+    the caveat names it so. A faded phase whose only live area is the newest gives it the whole live
+    remainder: the boost has no other live area to take bytes from. dat.rehearse_parent has NO
+    EFFECT under 'planned' or 'uniform' (04-Q4), and Plan.parent_faded is the same reading either
+    way: FAB's count reads it whatever the law.
+    WHAT A REHEARSED PARENT AREA'S BODY IS (2026-09-28, Q-DATA-10's review). This run's, as every
+    declared area's is -- and on DATA_SOURCE=synthetic that is the parent's text only where this run
+    generates it: the alphabet the area's POSITION in DATA_AREAS picks, drawn by RUN_SEED. At
+    DATA_SYNTH_HOLDOUT=0 no held-out block rides on the text, so restore_stream_state admits a moved
+    position, and driven, a child at "py,eng" over a parent at "eng,py" rehearsed alphabet 1's text
+    under the parent's eng, the Gate calling it drawn by the lineage. So at DATA_REHEARSE_PARENT=1
+    under 'replay' a synthetic parent area whose position moved is REFUSED here by name. RUN_SEED
+    no record carries, so it is not checked: a rehearsing child resumes at its parent's, and the
+    Gate's reason says so. And an area the lineage holds as drawn only by ASSUMPTION
+    (Areas.drawn_assumed: a record older than the drawn list could not say which declared areas it
+    drew) is rehearsed as the assumption says, as FAB's faded count reads it, and the Gate's reason
+    names it: a parent that declared an area and never trained it has it rehearsed here, and only
+    this name says so.
 
     RECEIVES: epochs <- RUN.epochs; win_tokens <- LM.ctx; bytes_per_token <- TOK, measured by
     derive.bytes_per_token after build_vocabulary. All three are arguments: bytes_per_token cannot
@@ -909,18 +1230,48 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
     RETURNS: Plan.
 
     LEVERS READ: phase_sched, phases, phase_live, stream_bytes, seg_min, seg_max, exposure_max,
-                 exposure_skew, draw
+                 exposure_skew, draw, replay_share, replay_newest (both only under 'replay'),
+                 rehearse_parent (under every law, for its Gate's reason; it moves bytes only under
+                 'replay'), source (only under 'replay' at rehearse_parent, since Q-DATA-10's
+                 review: a synthetic parent area's text is its position's, and a moved one is
+                 refused)
     WIRES READ: none
     DID IT FIRE: data.phase_resolved, data.protocol_named (the recognised protocol, printed by
                  name -- one of the four, never blank), data.phase_name_resolved (entries given as
                  a NAME rather than an index; 0 means every entry was an index, which is the
-                 shipped spelling and a statement rather than silence),
+                 shipped spelling and a statement rather than silence), data.phase_faded (a
+                 READING: per phase, the names of the areas faded in it -- [[], ['eng'], ['eng'],
+                 ['eng', 'py']] at the shipped four areas), data.parent_faded (a READING, present
+                 only where a parent record was restored and ABSENT on a fresh run: the areas the
+                 lineage drew that no phase of this run makes live),
                  Gate data.exposure_max, Gate data.exposure_skew -- EXACT under the shipped
-                 DATA_DRAW="planned" and a PREDICTION under "uniform", where the run trains on a
-                 random draw from the scheduled split that deviated by up to 47.9% per area over
-                 eight seeds. The caveat rides on the gate's `reason` and not on its name, so a
-                 report can be grepped across both arms (ISSUES P1-H58, ruled),
-                 Gate data.splice_window
+                 DATA_DRAW="planned" and under "replay" (2026-09-28), and a PREDICTION under
+                 "uniform", where the run trains on a random draw from the scheduled split that
+                 deviated by up to 47.9% per area over eight seeds. The caveat rides on the gate's
+                 `reason` and not on its name, so a report can be grepped across every arm (ISSUES
+                 P1-H58, ruled),
+                 Gate data.splice_window,
+                 data.replay.fixed_phases (the phases in which the 'replay' law gives its faded
+                 areas at least one byte; it read every phase with a faded area and bytes until
+                 Q-DATA-10's review, so DATA_REPLAY_SHARE=0.0 counted three phases that rehearsed
+                 nothing), data.replay.bytes (the bytes per epoch it gives faded areas) --
+                 both ABSENT unless DATA_DRAW=replay, and 0 there when no phase gives a faded area a
+                 byte -- and data.replay.newest_boosted (the faded phases whose newest-arrived live
+                 area took DATA_REPLAY_NEWEST beside another live area; ABSENT unless
+                 DATA_DRAW=replay with DATA_REPLAY_NEWEST above 0, where the boost is armed), Gate
+                 data.replay (UNREACHABLE naming DATA_DRAW under 'planned' and 'uniform'; its value
+                 the fixed phases, against the phase count, and armed-but-zero both on a schedule
+                 with no faded phase and where every faded phase's share comes to no byte -- the
+                 reason says which), data.rehearse_parent.areas (the parent areas the draw
+                 rehearses from window 0; ABSENT unless DATA_DRAW=replay at
+                 DATA_REHEARSE_PARENT=1 on a resume, the one configuration that arms it), Gate
+                 data.rehearse_parent (UNREACHABLE at DATA_REHEARSE_PARENT=0, under 'planned' or
+                 'uniform' where it has no effect, and on a fresh run, which has no parent record;
+                 its value the rehearsed areas, against the lineage's drawn areas this run declares;
+                 its reason names any it holds drawn only by assumption, and on the synthetic
+                 source that RUN_SEED must be the parent's)
+                 -- all six added 2026-09-28 (Q-DATA-10), and both Gates printed at R in the
+                 root's DATA(plan.gates) row
     """
     dat = dat.owned_by("DATA")
 
@@ -954,7 +1305,9 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
     # value under which the startup gate is EXACT, and a startup gate is the only thing that can
     # refuse a bad configuration BEFORE it spends the GPU time." A bound that no value can cross
     # gives back exactly what D8 paid for -- the gate becomes untestable again, and this time the
-    # report says "armed" rather than carrying a caveat.
+    # report says "armed" rather than carrying a caveat. (Since 2026-09-28 'replay' is exact the same
+    # way, Q-DATA-10, so the refusal protects it too; it is built OFF, and 'planned' stays the
+    # default by D8 and register O16.)
     #
     # WHAT IS NOT REFUSED, AND IT IS MEASURED RATHER THAN ASSUMED. -inf AND 0 ARE LEFT ALONE ON BOTH
     # LEVERS. They are the "flag every plan" configuration, and on both the arithmetic and the
@@ -1011,7 +1364,8 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
             f"DATA_DRAW defaults to 'planned' because, in data/levers.py::DATALevers's own words, "
             f"that 'is the only value under which the startup gate is EXACT, and a startup gate is "
             f"the only thing that can refuse a bad configuration BEFORE it spends the GPU time' -- a "
-            f"bound nothing can cross hands that back. NEITHER LEVER DECLARES A NON-FINITE MEANING: "
+            f"bound nothing can cross hands that back ('replay', built OFF on 2026-09-28, is exact "
+            f"the same way, and the bound guards it too). NEITHER LEVER DECLARES A NON-FINITE MEANING: "
             f"data/levers.py::DATALevers says only 'above which the data plan is flagged' for "
             f"exposure_max and 'above which the data plan is flagged as imbalanced' for "
             f"exposure_skew, and there is no inf branch anywhere in this file. WHAT IS STILL "
@@ -1096,14 +1450,144 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
     bounds = tuple((round(k * total / n_phases), round((k + 1) * total / n_phases))
                    for k in range(n_phases))
 
-    per_area_draw = {n: 0 for n in names}
+    # THE FADED SETS, READ OFF THE SCHEDULE AT STARTUP (2026-09-28, register §8 3.1, NEW-10 and C37;
+    # docs/04_CONTRACT.md Q-FAB-18). An area has FADED in phase k when some phase before k had it
+    # live and phase k does not: the set FAB.manage counts culls and merges of experts against, and
+    # the set §8 3.3's 'replay' draw gives its share to (below). Accumulated phase by phase, so an
+    # area that fades, returns and fades again is faded exactly in the phases it is absent from after
+    # it was first live. Sorted by index, which is Plan order, so no reader iterates a set. (Computed
+    # before the split since 2026-09-28, Q-DATA-10: the 'replay' targets are cut from it.)
+    _seen, _faded = set(), []
+    for live in schedule:
+        _faded.append(tuple(sorted(_seen - set(live))))
+        _seen |= set(live)
+    faded = tuple(_faded)
+    # AND THE LINEAGE'S: an area this run declares, which the resumed lineage's streams DREW from
+    # (Areas.drawn, filled by restore_stream_state one row above this one), and which NO phase of
+    # this schedule makes live -- a pure-add child's parent areas, faded from its first window. A
+    # DECLARED AREA IS NOT A DRAWN ONE (Q-FAB-18's review): this read Areas.parent_names, every area
+    # the record declares, so a parent over "eng,py" that scheduled eng alone left py faded in its
+    # continuing child -- whose schedule is the parent's -- and that child's passes were handed a
+    # set the uninterrupted run's never were. This run's own draws come after this call, and each is
+    # of an area some phase of this schedule makes live, so they could not enter it either way. A
+    # recorded area this run does not declare cannot reach here: restore_stream_state refuses it.
+    _parent = {str(n) for n in (getattr(areas, "drawn", None) or ())}
+    parent_faded = tuple(i for i, n in enumerate(names) if n in _parent and i not in _seen)
+
+    # THE SPLIT EACH PHASE IS LAID IN, Plan.shares, UNDER EVERY LAW (2026-09-28, register §8 3.3;
+    # docs/04_CONTRACT.md Q-DATA-10). The scheduled split first, phase by phase, by the one rule
+    # draw_stream's planned budget recomputes: the phase's bytes split evenly among its live areas,
+    # with the remainder on the first, so the per-area bytes sum to the phase span exactly. It was
+    # summed straight into per_area_draw until this date; per_area_draw is now its sum over the
+    # phases, the same numbers in the same key order, so under 'planned' and 'uniform' nothing
+    # this function returns moved.
+    law = str(dat.draw)
+    cuts = []
     for (lo, hi), live in zip(bounds, schedule):
         span = hi - lo
+        cut = {}
         for j, idx in enumerate(live):
-            # The phase's bytes split evenly among its live areas, with the remainder on the first
-            # so the per-area totals sum to the phase span exactly.
-            share = span // len(live) + (1 if j < span % len(live) else 0)
-            per_area_draw[names[idx]] += share
+            cut[idx] = cut.get(idx, 0) + span // len(live) + (1 if j < span % len(live) else 0)
+        cuts.append(cut)
+
+    # THE 'replay' LAW (Proposal 04 §1 item 2; register 04-Q1, 04-Q4, O9, O16), BUILT OFF. Each
+    # phase with a faded area -- Plan.faded[k], and Plan.parent_faded from window 0 at
+    # DATA_REHEARSE_PARENT=1 -- is re-cut: DATA_REPLAY_SHARE of its bytes to those areas, split
+    # evenly, DATA_REPLAY_NEWEST to the newest-arrived live area where set, the rest evenly over the
+    # other live areas (_replay_cut). A phase with no faded area keeps the scheduled split above and
+    # draw_stream lays it by the planned law, verbatim. THE TWO SHARES ARE READ ONLY UNDER 'replay'
+    # -- here, and by its caveat and Gate below -- so under 'planned' and 'uniform' neither is read
+    # and the cut above is the whole of the split.
+    # rehearse_parent is read under every law, for its Gate below: it has NO EFFECT but under
+    # 'replay' (04-Q4), and Plan.parent_faded is the same reading either way, because FAB's
+    # faded-area count reads it whatever the law.
+    rehearse = bool(dat.rehearse_parent)
+    replay_faded = tuple(() for _ in schedule)
+    n_fixed = n_boosted = faded_bytes = 0
+    if law == "replay":
+        share, newest_share = _exact_share(dat.replay_share), _exact_share(dat.replay_newest)
+        if share + newest_share > 1:
+            # REFUSED BY NAME, BEFORE A BYTE IS CUT. A phase cannot give its faded areas and its
+            # newest area more than all of its bytes, and a clamp would lay a split nobody asked for
+            # while the banner printed the one they did.
+            raise LeverError(
+                f"DATA: DATA_REPLAY_SHARE={float(dat.replay_share)} and "
+                f"DATA_REPLAY_NEWEST={float(dat.replay_newest)} sum to {float(share + newest_share)}, "
+                f"above 1. Under DATA_DRAW=replay each phase with a faded area gives the first to its "
+                f"faded areas and the second to its newest-arrived live area, and the other live "
+                f"areas split what is left, so the two together are at most the whole phase. Lower "
+                f"one of them (04 section 1 item 2's control is 0.27 with 0.34, leaving 0.39 for the "
+                f"other live areas).")
+        # PARENT AREAS ARE FADED FROM WINDOW 0 at DATA_REHEARSE_PARENT=1 (04-Q4, O9). They are live in
+        # no phase, so no phase's own faded set holds them and the two never overlap.
+        from_parent = parent_faded if rehearse else ()
+        # A SYNTHETIC PARENT AREA IS REHEARSED FROM THE PARENT'S TEXT OR NOT AT ALL (2026-09-28,
+        # Q-DATA-10's review). Its text is the alphabet its POSITION in DATA_AREAS picks
+        # (_synthetic_areas), and at DATA_SYNTH_HOLDOUT=0 no held-out block rides on that text, so
+        # restore_stream_state admits a moved position: driven, a child at "py,eng" over a parent at
+        # "eng,py" drew alphabet 1 under the parent's eng, and data.rehearse_parent read FIRED,
+        # "drawn by the lineage". The rehearsal would give DATA_REPLAY_SHARE of every phase to text
+        # the parent never trained on, so it is refused by name here, where the rehearsal is decided;
+        # at DATA_SYNTH_HOLDOUT=1 restore_stream_state has refused the move already. RUN_SEED is the
+        # text's other input and no record carries it, so it cannot be checked: the Gate's reason
+        # below says so.
+        if from_parent and str(dat.source) == "synthetic":
+            was = [str(n) for n in (getattr(areas, "parent_names", None) or ())]
+            moved = [(names[i], _alphabet_moved(names[i], was, names))
+                     for i in from_parent if names[i] in was]
+            moved = [(n, at) for n, at in moved if at is not None]
+            if moved:
+                raise CorpusError(
+                    f"DATA: DATA_REHEARSE_PARENT=1 under DATA_DRAW=replay would rehearse "
+                    + "; ".join(f"{n!r} at position {at[1]} of this run's areas, where the checkpoint "
+                                f"had it at {at[0]}" for n, at in moved)
+                    + f" (this run's: {', '.join(names)}; the checkpoint's: {', '.join(was)}). On "
+                    f"DATA_SOURCE=synthetic an area's text is the alphabet its position picks "
+                    f"(_ALPHABETS[position % {len(_ALPHABETS)}], data/api.py::_synthetic_areas), so "
+                    f"this body is other text, and the rehearsal would give DATA_REPLAY_SHARE of "
+                    f"every phase to text the parent never trained on, under the parent area's name. "
+                    f"Keep the parent's areas at their positions in DATA_AREAS and add new ones after "
+                    f"them (Q-DATA-9), or resume at DATA_REHEARSE_PARENT=0, which rehearses nothing. "
+                    f"The text's other input is RUN_SEED, which no record carries: resume at the "
+                    f"parent's.")
+        replay_faded = tuple(tuple(sorted(set(f) | set(from_parent))) for f in faded)
+        # WHO ARRIVED LAST: each area's first live phase, read off this run's schedule. Ties go to the
+        # last area in Plan order -- an add-an-area run appends its new area (Q-DATA-9) -- and
+        # max() over the phase's live TUPLE with an explicit key is the whole rule: no set, no dict
+        # order.
+        first = {}
+        for k, live in enumerate(schedule):
+            for i in live:
+                first.setdefault(i, k)
+        for k, ((lo, hi), live) in enumerate(zip(bounds, schedule)):
+            if not replay_faded[k]:
+                continue
+            span = hi - lo
+            newest = max(live, key=lambda i: (first[i], i))
+            # THE BOOST NEEDS ANOTHER LIVE AREA TO TAKE BYTES FROM. A phase whose only live area is
+            # the newest gives it the whole live remainder, 1 - DATA_REPLAY_SHARE, whatever the boost.
+            boost = newest_share > 0 and len(live) > 1
+            cuts[k] = _replay_cut(span, replay_faded[k], live, newest if boost else None, share,
+                                  newest_share)
+            gave = sum(cuts[k][i] for i in replay_faded[k])
+            faded_bytes += gave
+            # A PHASE IS COUNTED WHERE IT GIVES A FADED AREA A BYTE (2026-09-28, Q-DATA-10's review).
+            # It was counted wherever it had a faded area and bytes, so DATA_REPLAY_SHARE=0.0 read
+            # data.replay.fixed_phases 3 and Gate data.replay FIRED (3 vs 4) beside data.replay.bytes
+            # 0: armed, and rehearsing nothing. Such a phase is still laid by deficit over its live
+            # areas, and the Gate's reason names it.
+            if gave > 0:
+                n_fixed += 1
+            if span > 0:
+                n_boosted += 1 if boost else 0
+    # (area index, bytes) pairs in Plan order, per phase: the record's form, which a reader walks in
+    # one order whatever order the cut was built in.
+    shares = tuple(tuple(sorted(cut.items())) for cut in cuts)
+
+    per_area_draw = {n: 0 for n in names}
+    for cut in shares:
+        for idx, n_bytes in cut:
+            per_area_draw[names[idx]] += n_bytes
 
     # A WHOLE-RUN QUANTITY, WHICH IS THE POINT. 60 MB of English beside 8 MB of Python draws 2 MB
     # from each per epoch -- quiet -- while over 8 epochs the added area is seen 2.1x and the
@@ -1124,14 +1608,25 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
     #              about the wrong number -- in the guard against P3-H22, where an added area seen
     #              2.1x while the original was 28% sampled made "adding py cost eng X b/B"
     #              indistinguishable from "py was memorised and eng was skimmed".
-    # ONE GATE NAME UNDER BOTH LAWS. A report whose keys change with the configuration cannot be
+    #   replay  -> (2026-09-28, Q-DATA-10) draw_stream truncates every segment to its area's replay
+    #              target, so `per_area_draw` -- the targets' sum -- IS what the run trains on, and the
+    #              gate is a MEASUREMENT again, as 04 section 1 item 2 requires.
+    # ONE GATE NAME UNDER EVERY LAW. A report whose keys change with the configuration cannot be
     # grepped across arms, which costs more than the caveat it would save, so the caveat rides on
     # the gate's own `reason` -- which spine/gate.py prints on every arm for exactly this case.
-    law = str(dat.draw)
-    caveat = "" if law == "planned" else (
-        "DATA_DRAW=uniform: this is the SCHEDULED split and the run trains on a random draw from "
-        "it (measured deviation up to 47.9% per area), so read it as a prediction and read "
-        "Stream.per_area_drawn for what happened.")
+    if law == "planned":
+        caveat = ""
+    elif law == "uniform":
+        caveat = (
+            "DATA_DRAW=uniform: this is the SCHEDULED split and the run trains on a random draw from "
+            "it (measured deviation up to 47.9% per area), so read it as a prediction and read "
+            "Stream.per_area_drawn for what happened.")
+    else:
+        caveat = (
+            f"DATA_DRAW=replay: this split is EXACT, as under 'planned' -- the replay law's per-phase "
+            f"targets (Plan.shares), DATA_REPLAY_SHARE={float(dat.replay_share)} of each phase with "
+            f"a faded area to its faded areas, and draw_stream truncates every segment to its "
+            f"area's target, so Stream.per_area_drawn equals it byte for byte.")
     # COMPUTED AT ONE AREA TOO. Both old reads sat inside `if DATA_MODE == "real" and NP > 1`, so
     # the check was unavailable on exactly the single-area goal-A configuration where accidental
     # repetition is easiest to reach (ISSUES P1-L21).
@@ -1169,7 +1664,9 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
     # Stated here rather than left implicit, the way exposure_max/exposure_skew's `caveat` already
     # states the same law's effect on THOSE two gates: a "did not fire" reading near 8.0 is
     # optimistic under either law and MORE optimistic under the shipped one, and should be
-    # corroborated by inspecting the actual Stream draw rather than trusted alone.
+    # corroborated by inspecting the actual Stream draw rather than trusted alone. UNDER 'replay'
+    # (2026-09-28) the same truncation runs to each area's replay target, and a faded area's
+    # smaller target cuts its segments shorter still, so the sentence is added there.
     splice_caveat = (
         "data.splice_window is a STARTUP PREDICTION from the declared seg_min/seg_max mean, never "
         "measured from the actual draw (data_plan runs before a single byte is drawn). Under "
@@ -1179,8 +1676,119 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
         "'armed, did not fire' here read true on 8/8 seeds while the realized windows-per-segment "
         "was already below 8.0 on all 8; the gap widens with phase count. A reading near the "
         "threshold should be corroborated against the actual Stream draw, not trusted alone.")
+    if law == "replay":
+        splice_caveat += (
+            " DATA_DRAW=replay truncates the same way, each segment to its area's replay target, and "
+            "a faded area's smaller target cuts its segments shorter still.")
     gates.append(Gate("data.splice_window", windows_per_segment < 8.0,
                       round(windows_per_segment, 3), 8.0, reason=splice_caveat))
+
+    # THE 'replay' LAW'S OWN GATE (2026-09-28, Q-DATA-10). UNREACHABLE under the two laws that lay
+    # no fixed rehearsal share, naming the lever; under 'replay' its value is the phases that give
+    # their faded areas a byte, against the phase count. ARMED-BUT-ZERO HAS TWO CAUSES AND THE
+    # REASON SAYS WHICH (Q-DATA-10's review): a schedule with no faded phase, which 'replay' lays as
+    # 'planned' throughout, and faded phases whose share comes to no byte -- DATA_REPLAY_SHARE=0.0,
+    # or a share too small for the phase -- which rehearse nothing and are still laid by deficit
+    # over their live areas. The second read FIRED (3 vs 4) at 0.0 until the review, with
+    # data.replay.bytes 0 beside it.
+    if law != "replay":
+        gates.append(Gate(
+            "data.replay", False, None, n_phases, reachable=False,
+            reason=f"DATA_DRAW={law}: the fixed-rehearsal law lays no phase on this configuration, so "
+                   f"'phases laid under it' is not a number this run has; DATA_DRAW=replay gives each "
+                   f"phase with a faded area a fixed DATA_REPLAY_SHARE of its bytes for its faded "
+                   f"areas (Proposal 04 section 1 item 2, built OFF)"))
+    else:
+        with_faded = [k for k in range(n_phases) if replay_faded[k]]
+        given = {k: sum(cuts[k][i] for i in replay_faded[k]) for k in with_faded}
+        laid = "; ".join(
+            f"phase {k}: {', '.join(names[i] for i in replay_faded[k])} {given[k]} of "
+            f"{bounds[k][1] - bounds[k][0]} bytes" for k in with_faded)
+        boosted = (f", DATA_REPLAY_NEWEST={float(dat.replay_newest)} to its newest-arrived live area "
+                   f"in {n_boosted} of them" if float(dat.replay_newest) > 0 else "")
+        n_none = sum(1 for k in with_faded if given[k] == 0)
+        if n_fixed:
+            reason = (f"DATA_REPLAY_SHARE={float(dat.replay_share)} of each phase with a faded area "
+                      f"goes to its faded areas{boosted}, laid by deficit and truncated to each "
+                      f"area's target -- {laid}"
+                      + (f"; {n_none} of those {len(with_faded)} phase(s) give their faded areas no "
+                         f"byte (a 0 above: the share comes to none there), so they rehearse nothing "
+                         f"and are not counted, and one with bytes is still laid by deficit over its "
+                         f"live areas" if n_none else ""))
+        elif with_faded:
+            reason = (f"DATA_REPLAY_SHARE={float(dat.replay_share)} of each phase with a faded area "
+                      f"comes to no byte in every one of them{boosted} -- {laid} -- so the law is "
+                      f"armed and rehearses nothing: each of those phases that has bytes is still "
+                      f"laid by deficit over its live areas, and every other phase by the planned "
+                      f"law")
+        else:
+            reason = ("no phase of this schedule has a faded area (every area live in an earlier "
+                      "phase is live again, and no parent area is rehearsed), so every phase is laid "
+                      "by the planned law, byte for byte as DATA_DRAW=planned lays it")
+        gates.append(Gate("data.replay", n_fixed > 0, n_fixed, n_phases, reason=reason))
+
+    # THE PARENT'S AREAS (2026-09-28, register 04-Q4 and O9; Q-DATA-10). Three arms cannot rehearse
+    # one, each its own sentence: the lever off (every training and measurement run), a law with no
+    # rehearsal share (04-Q4: no effect under 'planned'), and a fresh run, which has no parent record.
+    # Armed, the value is the areas made faded from window 0 against the lineage's drawn areas this
+    # run declares, and armed-but-zero is a child that schedules every one of them.
+    lineage = [i for i, n in enumerate(names) if n in _parent]
+    has_parent = bool(getattr(areas, "parent_names", None))
+    if not rehearse:
+        gates.append(Gate(
+            "data.rehearse_parent", False, None, len(lineage), reachable=False,
+            reason="DATA_REHEARSE_PARENT=0 (the shipped value, and the value of every training and "
+                   "measurement run, register O9): no area of a resumed lineage is made faded from "
+                   "window 0, so none is rehearsed; at 1 with DATA_DRAW=replay the lineage's drawn "
+                   "areas this schedule never makes live share each phase's DATA_REPLAY_SHARE"))
+    elif law != "replay":
+        gates.append(Gate(
+            "data.rehearse_parent", False, None, len(lineage), reachable=False,
+            reason=f"DATA_REHEARSE_PARENT=1 has no effect under DATA_DRAW={law} (register 04-Q4): "
+                   f"only the 'replay' law gives faded areas a share of a phase, so a parent area "
+                   f"this schedule never makes live draws no byte; DATA_DRAW=replay rehearses it"))
+    elif not has_parent:
+        gates.append(Gate(
+            "data.rehearse_parent", False, None, len(lineage), reachable=False,
+            reason="no parent record: a fresh run, whose areas carry no lineage, so there is no "
+                   "parent area to rehearse; a run resumed from a checkpoint (CKPT_RESUME) reads "
+                   "the areas its lineage drew off the record"))
+    else:
+        # TWO THINGS THE FIRED ARM MUST SAY, BOTH FROM Q-DATA-10's REVIEW. (1) Which rehearsed areas
+        # the lineage holds as drawn only by ASSUMPTION (Areas.drawn_assumed): a record older than the
+        # drawn list cannot say which declared areas its lineage drew, every one is taken as drawn,
+        # and one a parent declared and never trained is rehearsed here as if it had been -- driven,
+        # an eng,py,num record with its list stripped gave eng and num 2,700 bytes each where the
+        # recorded list ['eng'] gives eng 5,400, and the reason called both "drawn by the lineage".
+        # (2) On the synthetic source, that the body is the parent's only at the parent's RUN_SEED,
+        # which no record carries (a moved position is refused above).
+        assumed_in = set(getattr(areas, "drawn_assumed", None) or ())
+        assumed = [names[i] for i in parent_faded if names[i] in assumed_in]
+        caveat_rp = ""
+        if assumed:
+            caveat_rp += (
+                f". {', '.join(assumed)} {'is' if len(assumed) == 1 else 'are'} held drawn only by "
+                f"ASSUMPTION (Areas.drawn_assumed; data.drawn_assumed at the restore): a record of "
+                f"this lineage predates the list of the areas its streams drew, so every area it "
+                f"declared is taken as drawn, and one it declared and never trained is rehearsed "
+                f"here as if it had been")
+        if str(dat.source) == "synthetic":
+            caveat_rp += (
+                ". On DATA_SOURCE=synthetic the rehearsed body is this run's generated text, which "
+                "is the parent's only at the parent's positions in DATA_AREAS -- checked against the "
+                "record, a moved one refused -- and at the parent's RUN_SEED, which no record "
+                "carries, so it is not checked: a rehearsing child resumes at its parent's")
+        gates.append(Gate(
+            "data.rehearse_parent", len(parent_faded) > 0, len(parent_faded), len(lineage),
+            reason=(f"DATA_DRAW=replay at DATA_REHEARSE_PARENT=1: "
+                    f"{', '.join(names[i] for i in parent_faded)} -- "
+                    f"{'held drawn' if assumed else 'drawn'} by the lineage and live in "
+                    f"no phase of this schedule -- faded from window 0, sharing "
+                    f"DATA_REPLAY_SHARE={float(dat.replay_share)} of every phase{caveat_rp}"
+                    if parent_faded else
+                    f"every area the lineage drew that this run declares "
+                    f"({', '.join(names[i] for i in lineage) or 'none'}) is live in some phase of "
+                    f"this schedule, so none is faded from window 0")))
 
     # PHASE_NAME_RESOLVED, CARRIED OUT RATHER THAN COMPUTED AND DISCARDED (audit finding, confirmed
     # live: n_by_name was incremented above and never read again anywhere in this file -- Plan had
@@ -1191,9 +1799,73 @@ def data_plan(dat: Config, areas, *, epochs: int, win_tokens: int, bytes_per_tok
     counters = {"data.phase_resolved": len(schedule), "data.protocol_named": protocol,
                 "data.phase_name_resolved": n_by_name}
 
+    # BOTH FADED SETS ARE PRINTED BY NAME, as READINGS. data.phase_faded on every run (phase 0's is
+    # always empty, and a stationary or pure-add schedule's are all empty, which is a statement about
+    # the schedule and not silence); data.parent_faded only where there is a parent record to read,
+    # so a fresh run leaves it ABSENT rather than printing an empty list that would read "a parent
+    # was checked and nothing it trained was left out".
+    counters["data.phase_faded"] = [[names[i] for i in f] for f in faded]
+    if getattr(areas, "parent_names", None):
+        counters["data.parent_faded"] = [names[i] for i in parent_faded]
+    # THE 'replay' LAW'S COUNTS, ABSENT WHERE IT CANNOT RUN (2026-09-28, Q-DATA-10). The phases it
+    # lays and the bytes per epoch it gives faded areas are PRESENT at DATA_DRAW=replay -- 0 where no
+    # phase has a faded area -- and ABSENT under 'planned' and 'uniform'. The newest-area boost is
+    # armed only at DATA_REPLAY_NEWEST above 0 (04's table: OFF at 0), so its count is ABSENT at 0 as
+    # well, and 0 where it is armed and no faded phase had another live area to take bytes from.
+    if law == "replay":
+        counters["data.replay.fixed_phases"] = n_fixed
+        counters["data.replay.bytes"] = faded_bytes
+        if float(dat.replay_newest) > 0:
+            counters["data.replay.newest_boosted"] = n_boosted
+        # THE PARENT'S COUNT, armed only on a resume at DATA_REHEARSE_PARENT=1 -- the configuration
+        # its Gate reads reachable on -- and ABSENT everywhere else.
+        if rehearse and has_parent:
+            counters["data.rehearse_parent.areas"] = len(parent_faded)
+
     return Plan(protocol=protocol, schedule=schedule, phase_bounds=bounds,
                 per_area_draw=per_area_draw, exposure=exposure, gates=tuple(gates),
-                counters=counters)
+                counters=counters, faded=faded, parent_faded=parent_faded, shares=shares,
+                replay_faded=replay_faded)
+
+
+def _exact_share(value):
+    """A DATA share lever as the exact DECIMAL it was written as: Fraction(repr(float(value))).
+
+    UNIT: fraction in, Fraction out. WHY NOT THE FLOAT (2026-09-28, Q-DATA-10): the 'replay' targets
+    are round(share x span) bytes, rounded half to even, and a float's last bit decides a tie --
+    0.07 of a 150-byte phase is 10.5, which rounds to 10, while the float product
+    10.500000000000002 rounds to 11. repr() is the shortest decimal that round-trips, so it is the
+    value the operator wrote (DATA_REPLAY_SHARE=0.27 is 27/100), and every target is then a number a
+    hand can recompute. The lever's domain (0.0, 1.0) has already refused nan and the infinities.
+    """
+    return Fraction(repr(float(value)))
+
+
+def _replay_cut(span, faded, live, newest, share, newest_share):
+    """One faded phase's targets under 'replay': {area index: bytes}, summing to `span` exactly.
+
+    UNIT: span = bytes; share, newest_share = exact fractions of the span (_exact_share); out =
+    bytes per area. The faded areas get round(share x span), split evenly with the remainder on the
+    first in `faded`'s order (Plan order); `newest`, when given, gets round((share + newest_share) x
+    span) minus that; the other live areas, in Plan order, split what is left evenly the same way.
+    `newest` is None when the boost is off or has no other live area to take bytes from, and then
+    every live area splits the live remainder. Rounding is monotone and share + newest_share is at
+    most 1 (data_plan refuses above), so no target is negative and the three parts are the span.
+    """
+    cut = {}
+    to_faded = round(share * span)
+    for j, i in enumerate(faded):
+        cut[i] = to_faded // len(faded) + (1 if j < to_faded % len(faded) else 0)
+    rest = sorted(live)
+    to_live = span - to_faded
+    if newest is not None:
+        to_newest = round((share + newest_share) * span) - to_faded
+        cut[newest] = to_newest
+        rest = [i for i in rest if i != newest]
+        to_live -= to_newest
+    for j, i in enumerate(rest):
+        cut[i] = to_live // len(rest) + (1 if j < to_live % len(rest) else 0)
+    return cut
 
 
 def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
@@ -1212,12 +1884,27 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
         shipped defaults, about 4% of them, down to ~171 bytes). Both are the price of the realized
         split matching the scheduled one, and they are stated here rather than discovered.
       "uniform" -- uniformly among all the phase's live areas, every segment a full
-        randint(seg_min, seg_max). This is the law every recorded result was taken under. dat.seg_contig=False seeks to a random offset inside
-    the area body each segment; True reads the body in order from a cursor that PERSISTS ACROSS
-    EPOCHS, so an English-only run has only the text's own boundaries rather than discontinuities
-    we manufacture every 8-20 KB (self_organize.py:1291-1298 -- eng_only reported 71 domains partly
-    by counting our own seek points). The default is False and is a LITERAL, not a computed
-    default: the shipped `1 if NP == 1 else 0` resolved to 0 on both shipped configurations.
+        randint(seg_min, seg_max). This is the law every recorded result was taken under.
+      "replay" (2026-09-28, register §8 3.3; docs/04_CONTRACT.md Q-DATA-10; built OFF) -- a phase
+        whose Plan.replay_faded entry is EMPTY is laid by the planned law above, verbatim, so a
+        schedule with no faded phase draws exactly what "planned" draws and phase 0 of any schedule
+        without parent rehearsal is byte-identical to it. A phase with a faded area is laid by
+        DEFICIT against its Plan.shares targets (Proposal 04 section 1 item 2): each segment goes to
+        the area with the largest target x (phase bytes laid so far) - span x (its bytes laid so
+        far) -- the scaled form of "target share x phase bytes so far - realised", in integers --
+        among the areas with target left, the first in Plan order on a tie, and it is truncated to
+        that area's remaining target as "planned" truncates to its budget. So the realised split
+        is the planned one byte for byte, the rehearsal bytes are spread through the phase rather
+        than front-loaded (the uniform-among-budgets pick of "planned" would lay a small faded
+        budget early), and the choice takes no draw: segment lengths and offsets come from the
+        same data.stream.e<epoch> stream and nothing iterates a set or a dict's hash order, so
+        the stream is the same under every PYTHONHASHSEED (04's minor m1).
+    dat.seg_contig=False seeks to a random offset inside the area body each segment; True reads the
+    body in order from a cursor that PERSISTS ACROSS EPOCHS, so an English-only run has only the
+    text's own boundaries rather than discontinuities we manufacture every 8-20 KB
+    (self_organize.py:1291-1298 -- eng_only reported 71 domains partly by counting our own seek
+    points). The default is False and is a LITERAL, not a computed default: the shipped
+    `1 if NP == 1 else 0` resolved to 0 on both shipped configurations.
 
     THE PHASE FILL IS EXACT: phase k covers [round(k*B/P), round((k+1)*B/P)) and the final segment
     of a phase is TRUNCATED to the bound rather than overshooting it by a whole 700-1800 byte
@@ -1238,6 +1925,18 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
     Stream carries an `epoch` and a `stream_id` so MEM can invalidate or re-base provenance rather
     than silently carrying byte offsets into a stream that no longer exists (ISSUES P1-M83).
 
+    EVERY AREA A DRAW TAKES A BYTE FROM IS APPENDED TO Areas.drawn, in place, where the list does not
+    hold it yet (2026-09-28, Q-FAB-18's review): the lineage's record of what it drew, which
+    stream_state carries and a child's Plan.parent_faded is read off. And it leaves
+    Areas.drawn_assumed, the part of the list an older record held only by assumption (2026-09-28,
+    Q-DATA-10's review): a draw is what confirms one.
+
+    EVERY BYTE'S SOURCE IS KEPT (2026-09-28, Proposal 04 SR3; docs/04_CONTRACT.md Q-DATA-11):
+    Stream.sources and Stream.source_names, run-length, read off each chunk's body offsets against
+    Areas.sources as it is laid -- the wrap's second piece as its own piece. It takes no draw and
+    moves no byte, so every other field of the Stream, and the digest the segmentation log carries,
+    is what it was without it.
+
     RETURNS: Stream.
 
     LEVERS READ: stream_bytes, seg_min, seg_max, seg_contig, resample, draw
@@ -1253,6 +1952,16 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
                  data.segment (a READING in `counters`: how many segments these bytes are spliced
                  from -- as true of a replayed Stream as of the draw that made it, so it is not a
                  gate),
+                 data.share.p<k>.<area>.planned and .realised (READINGS in `counters`, under every
+                 law, 2026-09-28, Q-DATA-10: SR0's per-phase share gauges, the area's bytes in phase
+                 k as Plan.shares planned them and as these bytes hold them, in permille of the
+                 phase's span, rounded half up, for every area the phase makes live or its
+                 Plan.shares entry names -- a faded area 'replay' gives 0 bytes reads 0, since
+                 Q-DATA-10's review -- and every area it drew from; a phase of no bytes has no
+                 share to read and prints none. Equal under "planned" and "replay" by
+                 construction, and under "uniform" the difference is the draw's error bar, per
+                 phase. A reading about the bytes, so the resample-off replay below carries them
+                 over with data.segment),
                  Gate data.contig_wrap (unreachable at seg_contig=False, with the gate arithmetic:
                  a random-offset seek is bounded by the body it reads and there is no cursor to
                  wrap, so 0 there is not a count),
@@ -1355,6 +2064,10 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
     cursors = areas.cursors
     last_area = None
     contig = bool(dat.seg_contig)
+    # WHICH SOURCE EACH BYTE CAME FROM (2026-09-28, Q-DATA-11), run-length over the stream: filled
+    # from each chunk's body offsets as it is laid below. Bookkeeping only -- no draw is taken and no
+    # byte moves.
+    src_runs, src_names, src_index = [], [], {}
     # THE DID IT FIRE TALLIES, TAKEN AT THE DECISION POINT THAT OWNS EACH ONE rather than
     # reconstructed from the returned Stream afterwards -- the same rule open_areas' surface follows
     # and for the same reason: `n_phase_entered` counts phases this loop actually entered, which is
@@ -1371,14 +2084,26 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
     #     this project was taken under, and it is kept for exactly that reason -- but under it the
     #     realized split is a DRAW from the scheduled one, and the worst per-area deviation measured
     #     over eight seeds at the shipped defaults was 47.9%.
+    #   replay (2026-09-28, Q-DATA-10; built OFF) lays each phase Plan.replay_faded names by DEFICIT
+    #     against the phase's Plan.shares targets, and every other phase by the planned law,
+    #     verbatim. Each phase is laid by ONE of three branches, its `mode`; 'planned' and 'uniform'
+    #     name their own mode in every phase, so the two laws run the statements, and take the
+    #     draws, they took before 'replay' existed.
     law = str(dat.draw)
-    for (lo, hi), live in zip(plan.phase_bounds, plan.schedule):
+    fixed_by_phase = tuple(plan.replay_faded) if law == "replay" else ()
+    # SR0's SHARE GAUGES (2026-09-28, Q-DATA-10), under every law: per phase, per area, the bytes
+    # Plan.shares planned beside the bytes these segments laid, in permille of the phase. Readings
+    # tallied from the chunks below; nothing here draws, and no branch reads them.
+    gauges = {}
+    for k, ((lo, hi), live) in enumerate(zip(plan.phase_bounds, plan.schedule)):
         # THE PLANNED LAW'S REMAINING BUDGET, per area, in the same shares data_plan computed. It is
         # recomputed here from the phase span rather than read off Plan.per_area_draw because that
         # field is the WHOLE-RUN total across every phase an area appears in; taking a phase's share
         # out of a whole-run total is the kind of arithmetic that silently drifts. Both use the same
         # rule -- floor division with the remainder on the first live areas -- so the two agree by
-        # construction and not by coincidence.
+        # construction and not by coincidence. (Since 2026-09-28 Plan.shares states each phase's
+        # split directly, by that rule; the budget is still recomputed here, so the planned law runs
+        # the statements it ran before, and tests/test_draw.py holds the two equal.)
         #
         # ACCUMULATED, NOT ASSIGNED, AND THE FIRST VERSION ASSIGNED (found by the H58 review). A phase
         # whose live list repeats an index -- schedule ((2, 0, 0, 1),) -- gave area 0 two shares in
@@ -1391,6 +2116,16 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
         budget = {}
         for j, idx in enumerate(live):
             budget[idx] = budget.get(idx, 0) + span // len(live) + (1 if j < span % len(live) else 0)
+        # THE PHASE'S LAW. Under 'replay', a phase with a faded area is laid by deficit and every
+        # other phase by the planned law; the other two laws are their own mode in every phase.
+        fixed = fixed_by_phase[k] if k < len(fixed_by_phase) else ()
+        mode = "deficit" if fixed else ("planned" if law == "replay" else law)
+        # THE PLANNED BYTES, per area, as Plan.shares states them -- the deficit law's targets, and
+        # every law's gauge. A Plan built without shares (none is: data_plan fills them under every
+        # law) falls back to this phase's scheduled budget, the same rule, taken before the loop
+        # spends it.
+        target = dict(plan.shares[k]) if k < len(plan.shares) else dict(budget)
+        got = {}
         if len(out) < hi:
             # data.phase_entered, COUNTED AT THE ONE LINE THAT DECIDES IT. The `while` below runs
             # its body if and only if this is true, so this is the phase's entry and not a proxy for
@@ -1398,7 +2133,7 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
             # drift the gate below is armed against (ISSUES P1-L22).
             n_phase_entered += 1
         while len(out) < hi:
-            if law == "planned":
+            if mode == "planned":
                 # Uniform among the areas that still have budget, so the ORDER is random and the
                 # SHARES are not. An area drops out of the choice when its budget is spent.
                 avail = [i for i in live if budget[i] > 0]
@@ -1409,6 +2144,31 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
                     avail = list(live)
                     budget[avail[0]] = hi - len(out)
                 idx = avail[stream.randrange(len(avail))] if len(avail) > 1 else avail[0]
+            elif mode == "deficit":
+                # THE AREA FURTHEST BEHIND ITS TARGET SHARE OF THE BYTES LAID SO FAR (04 section 1
+                # item 2): target x laid - span x got is span x (target share x phase bytes so far -
+                # realised), kept in integers so no float decides an order. Only an area with target
+                # left may be chosen -- a spent area's deficit is negative, and an area whose target
+                # rounded to 0 would tie at 0 and be handed a zero-byte segment. Ties go to the
+                # first in Plan order, the order Plan.shares walks, and no rng draw is taken.
+                laid = len(out) - lo
+                idx, best = None, None
+                for i, t in plan.shares[k]:
+                    g = got.get(i, 0)
+                    if g >= t:
+                        continue
+                    lag = t * laid - span * g
+                    if best is None or lag > best:
+                        idx, best = i, lag
+                if idx is None:
+                    # UNREACHABLE BY CONSTRUCTION, and a refusal rather than a hang: data_plan's
+                    # targets sum to the phase span, so while the phase is short some area has
+                    # target left. A Plan whose shares do not is a Plan this draw cannot lay.
+                    raise CorpusError(
+                        f"DATA_DRAW=replay: phase {k} holds {len(out) - lo} of its {span} bytes and "
+                        f"no area has target left in Plan.shares {plan.shares[k]!r}, whose targets "
+                        f"must sum to the phase span. The Plan was not built by data_plan for this "
+                        f"configuration.")
             else:
                 idx = live[stream.randrange(len(live))] if len(live) > 1 else live[0]
             label = names[idx]
@@ -1423,11 +2183,16 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
             # describe. The floor is not a silent clamp of the operator's number: seg_min is refused
             # at startup below, and this line only guarantees progress for a bound that got here.
             want = max(1, want)
-            if law == "planned":
+            if mode == "planned":
                 # AND TRUNCATED TO THIS AREA'S REMAINING SHARE, which is what makes the realized
                 # split equal the scheduled one. A segment that overran its area's budget would put
                 # the difference on whichever area happened to be drawn next.
                 want = min(want, budget[idx])
+            elif mode == "deficit":
+                # THE SAME TRUNCATION, TO THE AREA'S REMAINING REPLAY TARGET (the critic's finding on
+                # the draft: a deficit rule that truncated only at the phase bound realised each
+                # area's bytes to within a segment, and the startup gates were exact no longer).
+                want = min(want, target[idx] - got.get(idx, 0))
             if contig:
                 # THE CURSOR PERSISTS ACROSS EPOCHS, so an English-only run has only the text's own
                 # boundaries rather than discontinuities we manufacture every 8-20 KB. eng_only
@@ -1436,7 +2201,9 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
                 # above `cursors = areas.cursors` -- rather than a value nothing ever reads back.)
                 start = cursors[label] % len(body)
                 chunk = body[start:start + want]
+                pieces = ((start, len(chunk)),)
                 if len(chunk) < want:
+                    pieces = pieces + ((0, want - len(chunk)),)
                     chunk = chunk + body[:want - len(chunk)]
                     # data.contig_wrap, COUNTED HERE BECAUSE THIS LINE IS THE WRAP. The read ran off
                     # the end of the body and was completed from its head; there is no other line in
@@ -1453,6 +2220,15 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
             else:
                 start = stream.randint(0, max(0, len(body) - want))
                 chunk = body[start:start + want]
+                pieces = ((start, len(chunk)),)
+            # THE CHUNK'S SOURCES, piece by piece (the wrap's head is the second piece), before its
+            # bytes are appended: the stream offset each run starts at is len(out) plus its place in
+            # the chunk.
+            _at = len(out)
+            for _p0, _pn in pieces:
+                _source_runs(areas.sources.get(label), label, _p0, _pn, _at, src_runs, src_names,
+                             src_index)
+                _at += _pn
             splice.append(len(out))
             if last_area is not None and label != last_area:
                 # THE SUBSET WHERE THE AREA ACTUALLY CHANGED. Scoring boundary precision against
@@ -1462,8 +2238,37 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
             out += chunk
             labels.extend([label] * len(chunk))
             per_area[label] += len(chunk)
-            if law == "planned":
+            got[idx] = got.get(idx, 0) + len(chunk)
+            if mode == "planned":
                 budget[idx] -= len(chunk)
+        # THE PHASE'S GAUGES, in Plan order, for every area the phase makes live or its Plan.shares
+        # entry names, and every area it drew from. Permille of the span, rounded half up in
+        # integers; a phase of no bytes has no share to read and prints none, which is not a 0.
+        # NAMED, NOT HANDED BYTES (2026-09-28, Q-DATA-10's review): this read "a target above 0", so
+        # a faded area the 'replay' law names with a target of 0 -- DATA_REPLAY_SHARE=0.0, or a
+        # share that comes to no byte in the phase -- printed no gauge, and ABSENT reads as a law
+        # that cannot reach the area where it is armed and gave it nothing. It reads 0 now. Under
+        # 'planned' and 'uniform' the entry names exactly the live areas, so nothing there moved.
+        if span > 0:
+            for i, name in enumerate(names):
+                if i in live or i in target or got.get(i, 0):
+                    gauges[f"data.share.p{k}.{name}.planned"] = _permille(target.get(i, 0), span)
+                    gauges[f"data.share.p{k}.{name}.realised"] = _permille(got.get(i, 0), span)
+
+    # THE LINEAGE'S DRAWN AREAS, IN PLACE (2026-09-28, Q-FAB-18's review): every area this draw took
+    # a byte from, appended in Plan order where Areas.drawn does not hold it yet. stream_state
+    # records the list, and a child's Plan.parent_faded is read off it -- the areas the lineage
+    # actually drew, which a declared area this schedule never makes live is not. The replay arm
+    # above draws nothing and appends nothing: its bytes are the first draw's, already here.
+    for label in names:
+        if per_area[label] > 0 and label not in areas.drawn:
+            areas.drawn.append(label)
+    # AND AN ASSUMPTION A DRAW CONFIRMS IS AN ASSUMPTION NO LONGER (2026-09-28, Q-DATA-10's review):
+    # an area this draw took a byte from leaves Areas.drawn_assumed, the part of the list a record
+    # older than it could not vouch for. Whatever is left is recorded by stream_state as still
+    # assumed, so a descendant names it rather than reading it as drawn.
+    if areas.drawn_assumed:
+        areas.drawn_assumed[:] = [n for n in areas.drawn_assumed if per_area.get(n, 0) == 0]
 
     # ---- THE DID IT FIRE SURFACE THIS FUNCTION DECLARES ------------------------------------------
     # Built here, at the end, from tallies taken at the decision points above -- so a name whose
@@ -1478,8 +2283,10 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
     # A READING, NOT A GATE, and the docstring above says so in as many words: how many segments
     # these bytes are spliced from. It is a property of the BYTES, so it is still true when this
     # Stream is handed back for a later epoch under DATA_RESAMPLE=0 -- which is why the replay arm
-    # carries `counters` over unchanged and re-states only the gates.
+    # carries `counters` over unchanged and re-states only the gates. The share gauges are readings
+    # about the same bytes (2026-09-28, Q-DATA-10) and ride with it.
     counters = {"data.segment": n_seg}
+    counters.update(gauges)
 
     gates = []
     if n_seg:
@@ -1554,7 +2361,8 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
                 stream_id=f"s{seed}.e{int(epoch)}.{len(out)}",
                 # THE DRAW COUNT, CARRIED OUT because rng.issued() cannot answer it (see Stream's
                 # docstring) -- read off the local Rng before it goes out of scope.
-                draws=stream.draws, counters=counters, gates=tuple(gates))
+                draws=stream.draws, counters=counters, gates=tuple(gates),
+                sources=tuple(src_runs), source_names=tuple(src_names))
     if not bool(dat.resample):
         # THE WEAKREF'S CALLBACK IS THE EVICTION, not a periodic sweep: when this Areas is collected,
         # the callback fires and pops exactly this id() entry, which is what lets the cached Stream
@@ -1565,6 +2373,42 @@ def draw_stream(dat: Config, areas, plan, *, epoch: int, seed: int):
         key = id(areas)
         _REPLAY[key] = (weakref.ref(areas, lambda _ref, key=key: _REPLAY.pop(key, None)), st)
     return st
+
+
+def _source_runs(entries, label, start, n, at, runs, names, index):
+    """Append body[start:start + n]'s sources to a stream's run-length source table, in place
+    (2026-09-28, Q-DATA-11). `entries` is the area's Areas.sources list; `at` is the stream offset
+    the piece is laid at. A run is appended only where the source changes, so two chunks of one file
+    laid back to back are one run. An area with no entries is one source under its own label.
+
+    UNIT: bytes. It takes no draw and reads no lever.
+    """
+    if n <= 0:
+        return
+    entries = entries or ((0, str(label)),)
+    offs = [int(o) for o, _ in entries]
+    i = max(0, bisect.bisect_right(offs, start) - 1)
+    first = i
+    while True:
+        name = entries[i][1]
+        # THE PIECE'S FIRST RUN STARTS WHERE THE PIECE DOES; every later one where its file does.
+        pos = at if i == first else at + (offs[i] - start)
+        idx = index.get(name)
+        if idx is None:
+            idx = index[name] = len(names)
+            names.append(name)
+        if not runs or runs[-1][1] != idx:
+            runs.append((pos, idx))
+        i += 1
+        if i >= len(offs) or offs[i] >= start + n:
+            return
+
+
+def _permille(part, whole):
+    """`part` bytes of a `whole`-byte phase in permille, rounded half up, in integers: the unit of
+    draw_stream's share gauges (2026-09-28, Q-DATA-10). UNIT: bytes, bytes -> permille. `whole` is
+    a phase's span and is above 0 wherever this is called: a phase of no bytes prints no gauge."""
+    return (2000 * int(part) + int(whole)) // (2 * int(whole))
 
 
 def _replay_gates(dat, plan, cached, epoch):
@@ -1632,14 +2476,1064 @@ def _replay_gates(dat, plan, cached, epoch):
 _REPLAY = {}
 
 
-def stream_state(dat: Config, areas):
+# ==================================================================================================
+# THE SOURCE-RELIABILITY BOOK (2026-09-28, Proposal 04 §1 item 8 and SR3; register 04-6.3, §8 3.4;
+# docs/04_CONTRACT.md Q-DATA-11)
+# ==================================================================================================
+# A book of which source the stream's text can believe, kept by reading the text itself: the claims
+# its sources make about one key, where two sources disagree, and a reliability-weighted vote over
+# those disagreements (d3's ClaimTD, results/self_regulation_design_2026-09-26/prototypes/d3/run.py).
+# It reads no model output and no loss. Built in OBSERVE mode only: it logs r, t, the conflicted
+# claims and the weight a built actuation would apply, and it changes nothing the run trains on.
+
+# THE BYTES THAT BOUND A 'kv' KEY AND VALUE on the side away from the delimiter: ASCII punctuation, and
+# the line breaks. A key is cut after the last of them before its delimiter, a value at the first after
+# it -- 04 §1 item 8's "up to the next delimiter or punctuation", applied to both sides, so a key never
+# reaches back across the previous clause (`x=1; y=2` claims "y", not "1 y").
+_TRUST_BOUND = frozenset(b"!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~\n\r")
+# THE VOTE's ITERATIONS AND TIE, d3's: r_s = (agree + 1) / (n + 2), re-voted ten times, and a claim
+# whose top two weighted values are within 1e-9 decides nothing.
+_TRUST_ITERATIONS = 10
+_TRUST_TIE = 1e-9
+# THE SKETCH's COUNTS ARE int32 (04 §6: "buckets (int32)") AND SATURATE rather than wrap.
+_TRUST_SKETCH_MAX = 2 ** 31 - 1
+# EVERY COUNTER THE BOOK SEEDS AT 'observe', the rule's claims key added per DATA_TRUST_CLAIM. ABSENT,
+# every one, at 'off' -- the tree's word for "this mechanism cannot run on this configuration".
+_TRUST_COUNTERS = ("data.trust.passes", "data.trust.updates", "data.trust.units",
+                   "data.trust.claims", "data.trust.conflicted_claims", "data.trust.sources",
+                   "data.trust.evidence_absent", "data.trust.table_evictions",
+                   "data.trust.sketch_load")
+
+# SR6's COPY DETECTION (2026-09-28, Proposal 04 §1 item 8's standing rule (2) and SR6; register §8 3.7;
+# docs/04_CONTRACT.md Q-DATA-12), inside the vote at DATA_TRUST_COPY='accu'. The ACCU-COPY family --
+# Dong, Berti-Equille and Srivastava, VLDB 2009, as 04 cites it: from memory, not from a review -- read
+# on the book's own quantities. For a pair of sources, e seen first and l later (Focus.first_seen, the
+# book's positions: a copy is presumed to come after what it copies), the conflicted claims both make
+# are counted under the round's truth: SHARED TRUE (both hold the key's truth), SHARED FALSE (both hold
+# one value that is not it, on a key whose claimed values less its truth number n) and DIFFERING (two
+# values; a key whose truth is tied still counts here, since whether two claims differ does not depend
+# on which is true, and a value shared on a tied key is neither). Under independence each source is
+# right at its accuracy A and wrong uniformly over the key's n false values; under "l copies e's value
+# with probability c, else provides its own", the three likelihood ratios dependent/independent are
+#     shared true   1 - c + c / A        shared false   1 - c + c n / (1 - A)        differing   1 - c
+# with A the later source's r this round (r = (agree + 1)/(n + 2) lies strictly inside (0, 1), so
+# every ratio is finite and positive but a differing one at c = 1, which is 0). The posterior that l
+# depends on e is alpha L / (alpha L + 1 - alpha), L the product -- computed as a logistic of
+# ln(alpha / (1 - alpha)) + ln L, so no count overflows it. THE PLAN FLOORS n AT 1 AND THE FLOOR IS NOT
+# WRITTEN: n is counted only on a key whose truth is decided and whose pair shares a value other than
+# it, so the key holds at least those two values and n is at least 1 by construction -- a clause that
+# cannot bind is an untrippable guard, this tree's most recorded defect.
+# EVERY COPY COUNTER, seeded 0 at DATA_TRUST_COPY='accu' and ABSENT, every one, at 'off' or at
+# DATA_TRUST='off'. `passes` is the lineage's count of votes the copy detection ran in; the other four
+# are readings of the last vote's copy step. They live in Focus.counters beside the book's, and a
+# checkpoint carries them under state['focus']['copy'] with the judged pairs, so an 'off' leg can carry
+# them unchanged (Focus.copy_held).
+_TRUST_COPY_PREFIX = "data.trust.copy."
+_TRUST_COPY_COUNTERS = ("data.trust.copy.passes", "data.trust.copy.pairs_judged",
+                        "data.trust.copy.pairs_dependent", "data.trust.copy.pairs_certified",
+                        "data.trust.copy.votes_discounted")
+
+
+@dataclasses.dataclass
+class Focus:
+    """The source-reliability book (2026-09-28, Proposal 04 SR3; docs/04_CONTRACT.md Q-DATA-11): the
+    record DATA.new_focus produces, DATA.claims_observe fills and DATA.stream_state checkpoints.
+
+    NOT FROZEN, and it is the one DATA record that is not: it is a BOOK, written by every pass, like
+    DOM's partition or MEM's store, where Areas, Plan and Stream are statements about the run's
+    material fixed when they are made.
+
+    AT DATA_TRUST='off' IT HOLDS NOTHING: `mode` 'off', no sketch, no table, no counter -- the
+    data.trust.* keys are ABSENT -- and three UNREACHABLE gates saying why. `held` is the one
+    exception: a checkpoint's book, carried through an 'off' run's saves unchanged, so a lineage
+    that switches the book off for one leg and on again resumes it (the retention probe's ON -> OFF
+    -> ON rule, Q-EVAL-12). That leg makes no pass, and what the next 'observe' leg reads of it is
+    RULED (Q-DATA-11's review; this said "the book reads nothing of what that leg consumes", which
+    the code never did): its first pass is placed as any mid-epoch resume's is -- at the held
+    cursor where the book's last pass fell in the epoch that leg resumes in, at the epoch's first
+    unit otherwise -- so it reads the units the 'off' leg consumed in that epoch, and none of an
+    earlier epoch's, whose segmentation went at its roll. An 'off' leg inside one epoch costs the
+    book nothing (the lineage ends with the uninterrupted run's book); one that crosses a roll costs
+    it the units it consumed before the last roll it crossed.
+
+    AT 'observe' (the fields a checkpoint carries, `state['focus']`):
+      rule, claim, ctx, val,   the estimator and the claim shape -- DATA_TRUST_RULE, _CLAIM, _CTX,
+      delims                   _VAL and _DELIMS as the book was built; a resume that changes one is
+                               refused by name, because the table's keys are this shape's.
+      sketch_size, sketch      the count sketch: array('i') of sketch_size int32 buckets, each the
+                               count of claims whose key hashes there (zlib.crc32 of the key modulo
+                               sketch_size). A resume at another DATA_TRUST_SKETCH is refused by
+                               name.
+      table                    the claim table: an OrderedDict, key -> {source name -> {value ->
+                               count}}, least recently claimed first, holding the keys the sketch
+                               found hot, bounded by DATA_TRUST_TABLE.
+      evidence                 per source name, [r, n]: its reliability and the conflicted claims
+                               it took part in -- ONLY for a source with n >= DATA_TRUST_MIN_EV. A
+                               source below it has no entry: its evidence is ABSENT.
+      trust                    per source name, t = clip(r / max r, DATA_TRUST_MIN, 1) -- set only
+                               when two or more sources carry evidence. A source with no entry has
+                               trust 1.
+      first_seen               per source name, [stream, unit]: the stream ordinal and unit index
+                               at which the book first read a unit of it -- a POSITION, so a
+                               continuation records what an uninterrupted run records.
+      cursor                   units of the current stream the book has read: the index the next
+                               pass starts at. PER EPOCH -- a new stream (a pass at 0) resets it.
+      stream                   how many streams the book has opened since it was built, less one:
+                               0 on its first epoch's stream.
+      last_step                RunClock.step at the last pass (-1 before the first): with `cursor`,
+                               what the root reads to place its first pass of a process (a cursor
+                               from a pass before this epoch began is not this epoch's).
+      carry                    the last units of the current stream, [bytes, source] each: what the
+                               next pass needs to finish a claim this one could not -- a key's
+                               context, or a value whose units had not arrived. So the claims a
+                               stream yields do not depend on where its passes fall.
+      counters                 data.trust.*: passes, updates, units, claims, claims_kv or
+                               claims_ctx, conflicted_claims, sources, evidence_absent,
+                               table_evictions and sketch_load -- and, at DATA_TRUST_COPY='accu',
+                               data.trust.copy.* (below). The lineage's, like every DATA counter.
+    `gates` (data.trust, data.trust.actuation and data.trust.copy) is re-stated at every pass and is
+    not checkpointed. The seconds the passes cost (data.trust.wall_s) are the ROOT's to time and are
+    not here: a float in a book the continuation compares would differ on every run.
+
+    SR6's COPY DETECTION (2026-09-28, Q-DATA-12), the vote's own part of the book:
+      copy_mode                'off' or 'accu', DATA_TRUST_COPY as new_focus read it. At 'off' the
+                               vote is the one this record was built for, no data.trust.copy.* key
+                               exists and copy_pairs stays empty.
+      copy_pairs               the last vote's judged pairs, [earlier, later, posterior, shared
+                               true, shared false, differing, verdict] each, in first-sight order:
+                               verdict 'dependent' above DATA_TRUST_COPY_P, 'independent'
+                               (certified) below it, 'undecided' exactly at it. Checkpointed, with
+                               the data.trust.copy.* counters, under state['focus']['copy'].
+      copy_held                at DATA_TRUST_COPY='off', a checkpoint's copy part -- its pairs and
+                               counters -- carried unchanged to this run's saves, so a lineage that
+                               switches the detection off for one leg and on again keeps its count
+                               (the book's ON -> OFF -> ON rule, Q-DATA-11). None otherwise.
+      copy_seconds             the seconds this book's copy steps have taken since new_focus built
+                               it: a running float, DATA's to time, unlike wall_s, because only
+                               DATA knows where a copy step starts and ends inside a pass; never
+                               checkpointed and never compared. It is NOT what the root prints: the
+                               root reads its growth over each pass and prints the sum over one
+                               run()'s passes as data.trust.copy.seconds, so that float and wall_s
+                               cover the same run() -- on a second run() over one System, that
+                               run() alone (Q-DATA-12's review: the root printed this field until
+                               then, the earlier run()'s steps included).
+    """
+    mode: str
+    counters: dict = dataclasses.field(default_factory=dict)
+    gates: list = dataclasses.field(default_factory=list)
+    held: object = None
+    rule: str = ""
+    claim: str = ""
+    ctx: int = 0
+    val: int = 0
+    delims: tuple = ()
+    sketch_size: int = 0
+    sketch: object = None
+    table: object = None
+    evidence: dict = dataclasses.field(default_factory=dict)
+    trust: dict = dataclasses.field(default_factory=dict)
+    first_seen: dict = dataclasses.field(default_factory=dict)
+    cursor: int = 0
+    stream: int = 0
+    last_step: int = -1
+    carry: list = dataclasses.field(default_factory=list)
+    copy_mode: str = "off"
+    copy_pairs: list = dataclasses.field(default_factory=list)
+    copy_held: object = None
+    copy_seconds: float = 0.0
+
+
+def _trust_copy(dat: Config):
+    """SR6's copy model as the vote reads it (2026-09-28, Q-DATA-12): None at DATA_TRUST_COPY='off',
+    else (prior, rate, p) -- DATA_TRUST_COPY_PRIOR, _RATE and _P.
+
+    REFUSES BY NAME EVERY END OF THE THREE AT WHICH NO CLAIM CAN MOVE A VERDICT, each one admitted by
+    its lever's closed domain (spine/lever.py::Lever's rule for an interval open at an end: the
+    declaration under-refuses by the endpoint and the body refuses it, saying why):
+      * a PRIOR of 0 or 1. At 0 every pair's posterior is 0, so every judged pair would be CERTIFIED
+        independent before a claim is read; at 1 every pair is dependent. A certainty no count can
+        move is not a prior, and a certificate issued by one is not evidence.
+      * a RATE of 0 (Q-DATA-12's review, 2026-09-28; the build called both ends legal). A copier
+        that copies nothing predicts the claims an independent source makes, so every ratio is 1
+        and every judged pair's posterior is the prior whatever it claims: each verdict is the prior
+        against DATA_TRUST_COPY_P, the same for every pair, a dependent one discounting nothing
+        (1 - 0 x P = 1), and at the model's values no pair can be dependent -- Gate
+        data.trust.copy armed and untrippable, every pair certified. A rate of 1 stays legal: every
+        count still moves the posterior, and one differing claim proves a pair independent.
+      * a THRESHOLD of 0 or 1 (the same review). No posterior is above 1, so at 1 no pair could be
+        reported dependent -- the gate armed and untrippable -- and every judged pair, a planted
+        copy of a liar included, would be certified independent (undecided where its posterior
+        rounds to 1); none is below 0, so at 0 no pair could be certified and every judged pair
+        would be reported dependent (undecided where its posterior is exactly 0), two truthful
+        sources that agree included, the later one's votes discounted.
+    INSIDE THOSE ENDS EVERY SETTING CAN REACH BOTH VERDICTS: a shared false claim's ratio is above 1
+    (n >= 1 and A < 1) and a differing one's below 1 (c > 0), so enough of either carries a pair
+    across the threshold."""
+    dat = dat.owned_by("DATA")
+    if str(dat.trust_copy) == "off":
+        return None
+    prior = float(dat.trust_copy_prior)
+    if not 0.0 < prior < 1.0:
+        raise LeverError(
+            f"DATA_TRUST_COPY_PRIOR={prior!r}: copy detection's prior that two sources are dependent "
+            f"must lie strictly between 0 and 1. At 0 every pair's posterior is 0 and every judged "
+            f"pair would be certified independent before one of its claims was read; at 1 every "
+            f"pair is dependent whatever it claims. A certainty no count moves is not a prior. The "
+            f"model's value is 0.2 (the ACCU-COPY family's, as Proposal 04 cites it).")
+    # THE RATE's AND THE THRESHOLD's REFUSALS ARE WRITTEN FOR tests/test_ownership.py's O15, which
+    # pairs a refusal with every lever whose name its message holds. The rate's names the prior and
+    # the threshold in words: by name, O15 cannot read it as a refusal of the prior and sets the
+    # prior aside from its over-refusal arm. And the threshold is read where it is tested, bound to
+    # no local: 'DATA_TRUST_COPY_P' is a prefix of 'DATA_TRUST_COPY_PRIOR', so with a local bound to
+    # it O15 takes the prior's refusal above for one of the threshold too and sets the threshold
+    # aside. Driven: either sets 2 levers aside there and both 3, where this tree's reads 1.
+    rate = float(dat.trust_copy_rate)
+    if rate <= 0.0:
+        raise LeverError(
+            f"DATA_TRUST_COPY_RATE={rate!r}: copy detection's copy rate must be above 0. At 0 the "
+            f"model's copier copies nothing, so a dependent source predicts exactly the claims an "
+            f"independent one makes: every likelihood ratio is 1, and every judged pair's posterior "
+            f"is the prior, {prior!r}, whatever the two sources claim. Each verdict would be that "
+            f"prior against the threshold, the same for every pair -- all certified independent, or "
+            f"all reported dependent with nothing discounted (1 - 0 x P is 1) -- and at the model's "
+            f"values no pair could ever be dependent. A verdict no claim moves is not a judgment. 1 "
+            f"is legal: a copier that copies every value, which one differing claim proves "
+            f"independent. The model's value is 0.8 (the ACCU-COPY family's, as Proposal 04 cites "
+            f"it).")
+    if not 0.0 < float(dat.trust_copy_p) < 1.0:
+        raise LeverError(
+            f"DATA_TRUST_COPY_P={float(dat.trust_copy_p)!r}: copy detection's threshold must lie "
+            f"strictly between 0 and 1. No posterior is above 1, so at 1 no pair could ever be "
+            f"reported dependent -- Gate data.trust.copy armed and never able to fire -- and every "
+            f"judged pair, a planted copy of a liar included, would be certified independent (or, "
+            f"where its posterior rounds to 1, left undecided); no posterior is below 0, so at 0 no "
+            f"pair could ever be certified, and every judged pair would be reported dependent (or, "
+            f"where its posterior is exactly 0, left undecided), two truthful sources that agree "
+            f"included, the later one's votes discounted. A threshold every posterior clears, or "
+            f"none can, tests nothing. The model's value is 0.5, the even-odds line.")
+    return prior, rate, float(dat.trust_copy_p)
+
+
+def _trust_delims(dat):
+    """DATA_TRUST_DELIMS as a tuple of byte strings, or a refusal naming the lever. Split on '|';
+    each entry is its UTF-8 bytes. REFUSED: an empty entry, a repeated one, and one that is a
+    prefix of another -- whether a position holds the shorter one would then depend on bytes a later
+    pass has not read, and a claim must be decidable from the bytes it spans."""
+    raw = str(dat.trust_delims)
+    parts = raw.split("|")
+    out = []
+    for p in parts:
+        b = p.encode("utf-8")
+        if not b:
+            raise LeverError(
+                f"DATA_TRUST_DELIMS={raw!r} holds an empty entry: the class is '|'-separated byte "
+                f"strings, and an empty delimiter would stand at every byte of the stream.")
+        if b in out:
+            raise LeverError(f"DATA_TRUST_DELIMS={raw!r} names {p!r} twice.")
+        out.append(b)
+    for a in out:
+        for b in out:
+            if a != b and b.startswith(a):
+                raise LeverError(
+                    f"DATA_TRUST_DELIMS={raw!r}: {a.decode('utf-8')!r} is a prefix of "
+                    f"{b.decode('utf-8')!r}. Refused, because a claim must be decidable from the "
+                    f"bytes it spans: where the shorter stands at the end of what one pass has read, "
+                    f"whether the longer stands there too is in bytes the next pass reads.")
+    return tuple(out)
+
+
+def _trust_gates(dat, focus):
+    """The book's three gates, re-stated from what it holds. data.trust.actuation is UNREACHABLE on
+    every configuration this tree builds; data.trust.copy (SR6, Q-DATA-12) is UNREACHABLE naming
+    whichever lever is off -- DATA_TRUST, or DATA_TRUST_COPY -- and at 'accu' FIRES when a judged pair
+    of sources is reported dependent (dependent pairs vs pairs judged)."""
+    dat = dat.owned_by("DATA")
+    mode = str(dat.trust)
+    actuation = Gate(
+        "data.trust.actuation", False, None, None, reachable=False,
+        reason="DATA_TRUST='loss' and 'loss+draw' are declared and NOT BUILT -- DATA.new_focus "
+               "refuses both at startup with NotBuilt, because DATA.token_weights and "
+               "LM.lm_loss(token_weights=) are not in this tree -- so no trust weights a token or a "
+               "draw here. Under DATA_TRUST='observe' a source's t is the weight a built actuation "
+               "would apply, and it multiplies nothing")
+    copy = _trust_copy_gate(dat, focus)
+    if mode == "off":
+        # WHAT A LATER 'observe' LEG READS OF THIS RUN IS RULED (Q-DATA-11's review): this said the
+        # held book "reads nothing this run consumes", and the next leg's first pass reads, from the
+        # held cursor, every unit this run consumed in the epoch it resumes in.
+        held = (" A checkpoint's book is carried unchanged to this run's saves, and no pass of "
+                "this run reads into it. A later DATA_TRUST=observe leg's first pass reads the "
+                "units this run consumed in the epoch that leg resumes in -- from the book's "
+                "cursor, or from the epoch's first unit where the book's last pass fell in an "
+                "earlier epoch -- and none of an earlier epoch's, whose segmentation went at its "
+                "roll." if focus.held is not None else "")
+        return [Gate("data.trust", False, None, None, reachable=False,
+                     reason="DATA_TRUST='off': no book is kept -- DATA.new_focus allocates nothing "
+                            "and the loop's arm test withholds every DATA.claims_observe call "
+                            "before the 'data.trust' gate is asked, so no source is read, no claim "
+                            "formed and no trust set. DATA_TRUST=observe keeps the book and "
+                            "changes nothing the run trains on." + held),
+                actuation, copy]
+    min_ev = int(dat.trust_min_ev)
+    n_read, n_ev, n_trust = len(focus.first_seen), len(focus.evidence), len(focus.trust)
+    if n_trust:
+        why = (f"trust is set for {n_trust} of the {n_read} source(s) read: every source with at "
+               f"least DATA_TRUST_MIN_EV={min_ev} conflicted claims, and two or more of them "
+               f"carry evidence")
+    else:
+        why = (f"{n_read} source(s) read and {n_ev} of them carry evidence -- at least "
+               f"DATA_TRUST_MIN_EV={min_ev} conflicted claims -- and trust is set only when two or "
+               f"more do, so every source's trust is 1 and its r and t are ABSENT")
+    return [Gate("data.trust", n_trust > 0, n_trust, n_read, reason=why), actuation, copy]
+
+
+def _trust_copy_gate(dat, focus):
+    """Gate data.trust.copy (2026-09-28, SR6; Q-DATA-12), re-stated from the last vote's judged
+    pairs: UNREACHABLE at DATA_TRUST='off' or DATA_TRUST_COPY='off', naming the lever that is off;
+    at 'accu' FIRED when a pair is reported dependent, the arithmetic dependent pairs vs pairs
+    judged, and armed-but-zero otherwise with the reason saying why no pair was dependent."""
+    if str(dat.trust) == "off":
+        return Gate("data.trust.copy", False, None, None, reachable=False,
+                    reason="DATA_TRUST='off': no book is kept, so no vote runs and no pair of "
+                           "sources is judged for copying. DATA_TRUST=observe with "
+                           "DATA_TRUST_COPY=accu judges them")
+    if str(dat.trust_copy) == "off":
+        held = (" A checkpoint's copy part -- its judged pairs and data.trust.copy.* counts -- is "
+                "carried unchanged to this run's saves." if focus.copy_held is not None else "")
+        return Gate("data.trust.copy", False, None, None, reachable=False,
+                    reason="DATA_TRUST_COPY='off': the book votes every source's claims in full "
+                           "and judges no pair of sources for copying (SR6, the ACCU-COPY family), "
+                           "so a source that copies another counts as a second witness. "
+                           "DATA_TRUST_COPY=accu judges every pair and discounts a dependent "
+                           "pair's copy in the book's vote, and in nothing the run trains on."
+                           + held)
+    min_ev, p_dep = int(dat.trust_min_ev), float(dat.trust_copy_p)
+    pairs = focus.copy_pairs
+    n_dep = sum(1 for q in pairs if q[6] == "dependent")
+    n_ind = sum(1 for q in pairs if q[6] == "independent")
+    n_und = len(pairs) - n_dep - n_ind
+    if not pairs:
+        why = (f"no pair of the {len(focus.first_seen)} source(s) read shares DATA_TRUST_MIN_EV="
+               f"{min_ev} conflicted claims -- shared true, shared false or differing under the "
+               f"vote's truth -- so none is judged, and the vote counts every claim in full")
+    else:
+        why = (f"{len(pairs)} pair(s) of sources judged on at least DATA_TRUST_MIN_EV={min_ev} "
+               f"shared conflicted claims: {n_dep} reported dependent, their posterior above "
+               f"DATA_TRUST_COPY_P={p_dep} -- the later-seen source of each votes at 1 - "
+               f"DATA_TRUST_COPY_RATE x P on the values it shares with the earlier, in the book's "
+               f"vote and in nothing the run trains on -- and {n_ind} certified independent"
+               + (f", {n_und} exactly at the threshold" if n_und else ""))
+    return Gate("data.trust.copy", n_dep > 0, n_dep, len(pairs), reason=why)
+
+
+def new_focus(dat: Config, areas, plan, *, restored=None):
+    """The source-reliability book: an empty one, or the checkpoint's put back. -> Focus.
+
+    THE PRODUCER (K10) OF `focus`, the record both DATA.claims_observe rows take and DATA.stream_state
+    checkpoints (2026-09-28, Proposal 04 §5 entry point 8 and SR3; register 04-6.3, §8 3.4;
+    docs/04_CONTRACT.md Q-DATA-11). An ASSEMBLY row after data_plan. `restored` is the checkpoint's
+    `state['focus']` -- Snapshot.payload['DATA'].get('focus') -- or None. DATA.restore_stream_state
+    does not take it, although 04 §5 moved both calls: the restore row runs before data_plan, so the
+    record it would fill in place does not exist yet, and this row puts the book back instead.
+    `areas` and `plan` are SR2's -- its per-area books are keyed by them -- and SR3 reads neither.
+
+    AT DATA_TRUST='off' IT ALLOCATES NOTHING: a Focus with mode 'off', no counter and three UNREACHABLE
+    gates, holding a checkpoint's book unchanged where there is one (Focus.held).
+    'loss' AND 'loss+draw' ARE REFUSED WITH spine/gate.py::NotBuilt, naming the value, the way
+    OPT_LR_CONTINUE='regulated' is: the actuation needs DATA.token_weights and
+    LM.lm_loss(token_weights=), which this tree does not build.
+    AT 'observe' it allocates the int32 sketch (DATA_TRUST_SKETCH buckets, zeros) and an empty
+    claim table and seeds every data.trust.* counter at 0; given a checkpoint's book it puts that
+    back instead -- and REFUSES BY NAME a sketch of another size (DATA_TRUST_SKETCH) or another
+    estimator or claim shape (DATA_TRUST_RULE, _CLAIM, _CTX, _VAL, _DELIMS), since every bucket and
+    table key is theirs.
+    A table larger than DATA_TRUST_TABLE loses its least recently claimed keys to fit, counted in
+    data.trust.table_evictions. A checkpoint with no book -- written before it, or by a run with the
+    book off -- gives an empty one: 04 §5's "a new source gets trust 1 and ABSENT evidence", for
+    every source at once.
+    SR6's COPY DETECTION (2026-09-28, Q-DATA-12) is read here too, at 'observe' only: at
+    DATA_TRUST_COPY='accu' the data.trust.copy.* counters are seeded at 0, or the checkpoint's copy
+    part -- its judged pairs and counts, state['focus']['copy'] -- is put back (a book without one,
+    older than the detection or from an 'off' leg, starts it at 0); DATA_TRUST_COPY_PRIOR and
+    DATA_TRUST_COPY_P at 0 or 1, and DATA_TRUST_COPY_RATE at 0, are REFUSED BY NAME (_trust_copy),
+    each an end at which no claim can move a verdict (the rate and threshold since Q-DATA-12's
+    review). At DATA_TRUST_COPY='off' no copy key exists and a checkpoint's copy part is held
+    unchanged for this run's saves (Focus.copy_held). The detection changes no table key, so a
+    resume may switch it either way, and none is refused for it.
+
+    RETURNS: Focus.
+
+    LEVERS READ: trust, trust_rule, trust_claim, trust_ctx, trust_val, trust_delims, trust_sketch,
+                 trust_table, trust_min_ev (at 'observe', in the data.trust gate's reason),
+                 trust_copy (at 'observe'), trust_copy_prior (at 'accu', refused here at 0 or
+                 1), trust_copy_rate (at 'accu', refused here at 0), trust_copy_p (at 'accu',
+                 refused here at 0 or 1, and in the data.trust.copy gate's reason)
+    WIRES READ: none
+    DID IT FIRE: Gate data.trust (UNREACHABLE at 'off', naming it; armed at 'observe' until a
+                 source's trust is set), Gate data.trust.actuation (UNREACHABLE on every
+                 configuration this tree builds), Gate data.trust.copy (UNREACHABLE naming
+                 DATA_TRUST='off' or DATA_TRUST_COPY='off'; armed at 'accu' until a pair is
+                 reported dependent); the data.trust.* counters, seeded at 'observe' and ABSENT at
+                 'off', and the data.trust.copy.* ones, seeded at 'accu' and ABSENT otherwise
+    """
+    dat = dat.owned_by("DATA")
+    mode = str(dat.trust)
+    if mode in ("loss", "loss+draw"):
+        raise NotBuilt(
+            f"DATA_TRUST={mode!r} is declared and NOT BUILT (Proposal 04 §1 item 8; register 04-6.3, "
+            f"Proposal 05 §8 3.4; docs/04_CONTRACT.md Q-DATA-11). It weights each token's loss by "
+            f"its source's trust" + (" and multiplies the draw by it" if mode == "loss+draw" else "")
+            + ", through DATA.token_weights and LM.lm_loss(token_weights=), neither of which is in "
+            f"this tree; and 04-6.3's standing rules forbid either value as a default before copy "
+            f"detection -- built OFF since 2026-09-28, DATA_TRUST_COPY (Q-DATA-12) -- passes E5's "
+            f"majority-false and 50%-impersonation worlds (register §8 5.12), and while a truthful "
+            f"source in another format is floored. Refused rather than run as 'observe' under a "
+            f"label naming an actuation that never happened. The built values are 'off' (the "
+            f"default) and 'observe', which keeps the book and changes nothing the run trains on.")
+    if mode == "off":
+        focus = Focus(mode="off", held=restored if isinstance(restored, dict) else None)
+        focus.gates = _trust_gates(dat, focus)
+        return focus
+
+    rule = str(dat.trust_rule)          # 'claims', the one rule built; SR5 adds the ablations
+    claim = str(dat.trust_claim)
+    ctx, val = int(dat.trust_ctx), int(dat.trust_val)
+    delims = _trust_delims(dat)
+    size, bound = int(dat.trust_sketch), int(dat.trust_table)
+    # SR6's COPY DETECTION (Q-DATA-12): None at DATA_TRUST_COPY='off'; a prior or threshold of 0 or
+    # 1, or a rate of 0, is refused here, at startup, before any tensor.
+    copy = _trust_copy(dat)
+    focus = Focus(mode="observe", rule=rule, claim=claim, ctx=ctx, val=val, delims=delims,
+                  sketch_size=size, copy_mode="off" if copy is None else "accu")
+    rec = restored if isinstance(restored, dict) and restored.get("mode") == "observe" else None
+    if rec is None:
+        sketch = array.array("i", bytes(4 * size))
+        if sketch.itemsize != 4:
+            raise RuntimeError(
+                f"DATA.new_focus: array('i') holds {sketch.itemsize}-byte items on this platform; "
+                f"the sketch is int32 (DATA_TRUST_SKETCH buckets) and a checkpoint would not "
+                f"restore across platforms.")
+        focus.sketch = sketch
+        focus.table = collections.OrderedDict()
+        focus.counters = {k: 0 for k in _TRUST_COUNTERS}
+        focus.counters[f"data.trust.claims_{claim}"] = 0
+        if copy is not None:
+            focus.counters.update({k: 0 for k in _TRUST_COPY_COUNTERS})
+        focus.gates = _trust_gates(dat, focus)
+        return focus
+
+    # THE CHECKPOINT'S BOOK, PUT BACK. The geometry first: a bucket index is crc32(key) % size and a
+    # key is the claim shape's, so a book of another size or shape cannot be read by this one.
+    then = int(rec.get("sketch_size", -1))
+    if then != size:
+        raise CorpusError(
+            f"DATA_TRUST_SKETCH={size}: the checkpoint's source-reliability book counts its claims "
+            f"in a sketch of {then} buckets, and a bucket is crc32(key) modulo that size, so every "
+            f"count would land in another bucket here. Resume at DATA_TRUST_SKETCH={then}, or with "
+            f"DATA_TRUST=off, which carries the book unchanged and reads nothing.")
+    for name, now, was in (("DATA_TRUST_RULE", rule, str(rec.get("rule"))),
+                           ("DATA_TRUST_CLAIM", claim, str(rec.get("claim"))),
+                           ("DATA_TRUST_CTX", ctx, int(rec.get("ctx", -1))),
+                           ("DATA_TRUST_VAL", val, int(rec.get("val", -1))),
+                           ("DATA_TRUST_DELIMS", delims,
+                            tuple(bytes(d) for d in (rec.get("delims") or ())))):
+        if now != was:
+            raise CorpusError(
+                f"{name}: the checkpoint's source-reliability book was built at {was!r} and this "
+                f"run asks for {now!r}. The claim table's keys and values are that shape's -- a "
+                f"key read another way is another key -- so the two books cannot be one. Resume "
+                f"at the recorded value, or with DATA_TRUST=off, which carries the book unchanged.")
+    sketch = rec.get("sketch")
+    if not isinstance(sketch, array.array) or sketch.typecode != "i" or len(sketch) != size:
+        raise CorpusError(
+            f"DATA_TRUST_SKETCH={size}: the checkpoint's book carries no int32 sketch of that size "
+            f"({type(sketch).__name__}), so it cannot be put back.")
+    focus.sketch = array.array("i", sketch)
+    table = collections.OrderedDict()
+    for key, per in rec.get("table") or ():
+        table[bytes(key)] = {str(s): {bytes(v): int(c) for v, c in vals} for s, vals in per}
+    focus.table = table
+    focus.evidence = {str(s): [float(r), int(n)] for s, (r, n) in (rec.get("evidence") or {}).items()}
+    focus.trust = {str(s): float(t) for s, t in (rec.get("trust") or {}).items()}
+    focus.first_seen = {str(s): [int(a), int(b)]
+                        for s, (a, b) in (rec.get("first_seen") or {}).items()}
+    focus.cursor = int(rec.get("cursor", 0))
+    focus.stream = int(rec.get("stream", 0))
+    focus.last_step = int(rec.get("last_step", -1))
+    focus.carry = [[bytes(u), None if s is None else str(s)] for u, s in (rec.get("carry") or ())]
+    focus.counters = {k: int(v) for k, v in (rec.get("counters") or {}).items()}
+    for k in _TRUST_COUNTERS + (f"data.trust.claims_{claim}",):
+        focus.counters.setdefault(k, 0)
+    # THE COPY PART (Q-DATA-12), state['focus']['copy']: put back at DATA_TRUST_COPY='accu' -- the
+    # last vote's judged pairs, and its data.trust.copy.* counts into the book's counters -- or
+    # HELD UNCHANGED at 'off', where no copy key may exist, for this run's saves to write back. A
+    # book without one starts the detection at 0.
+    part = rec.get("copy") if isinstance(rec.get("copy"), dict) else None
+    if copy is None:
+        focus.copy_held = part
+    else:
+        if part is not None:
+            focus.copy_pairs = [[str(a), str(b), float(p), int(t), int(f), int(d), str(v)]
+                                for a, b, p, t, f, d, v in (part.get("pairs") or ())]
+            focus.counters.update({str(k): int(v) for k, v in (part.get("counters") or {}).items()})
+        for k in _TRUST_COPY_COUNTERS:
+            focus.counters.setdefault(k, 0)
+    # A SMALLER BOUND EVICTS THE LEAST RECENTLY CLAIMED KEYS TO FIT, counted as any eviction is.
+    while len(focus.table) > bound:
+        focus.table.popitem(last=False)
+        focus.counters["data.trust.table_evictions"] += 1
+    focus.gates = _trust_gates(dat, focus)
+    return focus
+
+
+def trust_period(dat: Config):
+    """The source-reliability book's cadence, AS units.Windows. Handed to RUN's Cadences.due.
+
+    ONE CONSTRUCTION, for the reason EVAL.curve_period gives: Cadences.due refuses a bare int while
+    Config hands one back for every Clock-unit lever, so the period arrives through this package's
+    typed accessor and spine/compose.py::_periods carries it under the key 'data.trust' (2026-09-28,
+    Q-DATA-11). It is DATA_TRUST_EVERY at DATA_TRUST='observe', and 0 at 'off' -- the gate is
+    disarmed there, and the cadence audit says so rather than calling a gate the arm test never
+    asks one that "can fire", in a line the root words for this key (spine/compose.py::_trust_audit,
+    Q-DATA-11's review): RUN's own advice for a disarmed gate, a period of 1 or more, arms nothing
+    at 'off', so the line names DATA_TRUST='observe' instead. The loop's arm test runs before the
+    gate is asked either way, so at 'off' the ledger reads 'data.trust' with zero checks.
+    DATA_TRUST_EVERY=0 is the other disarmed arm: the book then passes at each epoch's end and at a
+    stop's tail only, which the root's line says.
+
+    A NEGATIVE IS REFUSED AT THE FIRST READ, BY THE LEVER'S DECLARED DOMAIN (0, None), and not here:
+    the six other period accessors refuse one under their packages' REFUSE_NEGATIVE_PERIOD, and a
+    second refusal of the same range here would be one the domain has left nothing to refuse
+    (tests/test_ownership.py's O15).
+
+    LEVERS READ: trust, trust_every
+    WIRES READ: none
+    DID IT FIRE: Cadences.ledger()["data.trust"]
+    """
+    dat = dat.owned_by("DATA")
+    every = int(dat.trust_every)
+    if str(dat.trust) == "off":
+        return U.Windows(0)
+    return U.Windows(every)
+
+
+def claims_observe(dat: Config, focus, *, units, sources, step, at):
+    """One pass of the source-reliability book over the units the run consumed since the last one.
+
+    Stage B, and R's tail (2026-09-28, Proposal 04 §5 entry point 6 and SR3; register §8 3.4;
+    docs/04_CONTRACT.md Q-DATA-11). `units` is the TOK units' BYTES, in stream order, and `sources`
+    each unit's source name -- or None for a unit whose bytes straddle two sources -- both sliced
+    by the root's join spine/compose.py::_trust_units through Segmentation.byte_pos and
+    Stream.sources. They replace 04's (ids, decode): DATA may not import TOK, and the root holds the
+    bytes. `at` is the index of units[0] in this epoch's segmentation: the book's cursor, where it
+    continues; or 0, where the stream is new -- the carry and the cursor reset and the stream
+    ordinal advances. Any other `at` is refused by name: the root's cut and the book's cursor would
+    disagree, and a unit read twice or skipped is a wrong count. `step` is RunClock.step,
+    units.Windows. Only at DATA_TRUST='observe'; the root's arm test withholds every call at 'off'.
+
+    THE CLAIMS (04 §1 item 8), formed unit by unit in stream order, so a claim does not depend on
+    where a pass falls -- the carry holds the units the next pass needs:
+      'kv'   at each occurrence of a DATA_TRUST_DELIMS entry in the units' bytes: the KEY is the text
+             from DATA_TRUST_CTX units before the unit holding the delimiter's first byte up to that
+             byte, cut after its last punctuation, line break or delimiter; the VALUE is the text
+             after the delimiter to the end of the DATA_TRUST_VAL-th unit after the one holding its
+             last byte, cut at its first punctuation, line break or delimiter. Both are case-folded
+             and their whitespace collapsed, so `@EEE=V;` and `@EEE:V;` are ONE claim, ("eee",
+             "v"). An empty key or value is no claim. The claim is formed when its last unit is
+             read.
+      'ctx'  at each unit with DATA_TRUST_CTX units before it in the stream: the key is those units
+             (each length-prefixed, so two unit sequences with the same bytes are two contexts) and
+             the value is the unit.
+    A claim counts only where ONE source holds every unit it spans (its key's first unit to its
+    value's last). Each goes into the count sketch -- bucket zlib.crc32(key) % DATA_TRUST_SKETCH --
+    and, once its bucket holds DATA_TRUST_HOT claims, into the claim table, as a count for (key,
+    source, value); a key the table holds is moved to its recent end, and a new key beyond
+    DATA_TRUST_TABLE evicts the least recently claimed one.
+
+    THE VOTE, recomputed from the whole table at every pass (d3's ClaimTD): a source's claim on a key
+    is its unique top value there, admitted when it read the key at least DATA_TRUST_MIN_N times and
+    the top value holds at least DATA_TRUST_SELF of them. A key is CONFLICTED when two or more
+    sources claim it with two or more values. Over the conflicted keys, reliability starts at 1 and
+    is re-voted 10 times: each key's truth is the value with the largest summed reliability of its
+    claimants -- a tie within 1e-9 decides nothing -- and r_s = (agree + 1) / (n + 2). A source
+    with n >= DATA_TRUST_MIN_EV has evidence, [r, n]; below it, none (ABSENT). When two or more
+    sources have evidence, each gets t = clip(r / max r, DATA_TRUST_MIN, 1); otherwise no trust is
+    set and every source's is 1. Sources are visited in name order and table keys are bytes hashed
+    by crc32, so the book is the same under every PYTHONHASHSEED.
+
+    THE COPY DETECTION, AT DATA_TRUST_COPY='accu' ONLY (2026-09-28, Proposal 04 SR6 and §1 item 8's
+    standing rule (2); register §8 3.7; docs/04_CONTRACT.md Q-DATA-12) -- the ACCU-COPY family inside
+    that vote. After each of its ten rounds a copy step judges every pair of sources sharing at least
+    DATA_TRUST_MIN_EV conflicted claims counted under the round's truth -- shared true, shared false,
+    differing -- by the posterior that the later-seen of the two (Focus.first_seen) copies the earlier,
+    from DATA_TRUST_COPY_PRIOR and _RATE, the later source's r standing for its accuracy (the model's
+    arithmetic is at _TRUST_COPY_COUNTERS). A pair above DATA_TRUST_COPY_P is DEPENDENT: in the next
+    round the later source's vote for each value it shares with the earlier, on any conflicted key,
+    counts at 1 - DATA_TRUST_COPY_RATE x P (one factor per dependent earlier source that holds the
+    same value). A pair below it is CERTIFIED INDEPENDENT and votes in full. Pairs are visited in
+    first-sight order and values in byte order, so this too is one book under every PYTHONHASHSEED.
+    The last round's step is the one reported (Focus.copy_pairs). It moves the book's vote -- the
+    truth, r and t it reports -- and NOTHING the run trains on: observe mode, and no actuation is
+    built (the standing rule asks copy detection to pass E5's majority-false and impersonation
+    worlds, register §8 5.12, before any is proposed). At 'off' the vote is the one above, statement
+    for statement, and no data.trust.copy.* key exists.
+
+    RETURNS: None -- the book is updated in place.
+
+    LEVERS READ: trust (the data.trust gate's re-statement), trust_hot, trust_self, trust_min_n,
+                 trust_min_ev, trust_min, trust_table (the claim shape and the sketch size were
+                 read by new_focus and are the book's), trust_copy, trust_copy_prior (at 'accu'),
+                 trust_copy_rate (at 'accu'), trust_copy_p (at 'accu')
+    WIRES READ: none
+    DID IT FIRE: data.trust.passes (every call), data.trust.updates (passes whose vote had a
+                 conflicted claim), data.trust.units, data.trust.claims (claims formed),
+                 data.trust.claims_kv or claims_ctx (claims the table recorded),
+                 data.trust.conflicted_claims, data.trust.sources and data.trust.evidence_absent
+                 (readings of the last vote), data.trust.table_evictions, data.trust.sketch_load
+                 (occupied buckets); Gate data.trust re-stated. At DATA_TRUST_COPY='accu':
+                 data.trust.copy.passes (votes the copy detection ran in: every pass with a
+                 conflicted claim), data.trust.copy.pairs_judged, .pairs_dependent,
+                 .pairs_certified and .votes_discounted (the (key, source) votes the reported
+                 dependent pairs discount) -- readings of the last vote's copy step -- and Gate
+                 data.trust.copy re-stated; Focus.copy_seconds, a float, never in the counters
+    """
+    dat = dat.owned_by("DATA")
+    if focus is None or focus.mode != "observe":
+        raise ValueError(
+            f"DATA.claims_observe: the book is {getattr(focus, 'mode', None)!r}, not 'observe'. The "
+            f"loop's arm test (DATA_TRUST != 'off') withholds every pass where no book is kept.")
+    units = list(units)
+    sources = list(sources)
+    if len(units) != len(sources):
+        raise ValueError(f"DATA.claims_observe: {len(units)} unit(s) and {len(sources)} source(s); "
+                         f"the join hands one source per unit.")
+    at = int(at)
+    if at == 0 and focus.cursor != 0:
+        # A NEW STREAM: an epoch roll re-cut the text, or a boundary resume draws the next epoch.
+        focus.carry = []
+        focus.cursor = 0
+        focus.stream += 1
+    elif at != focus.cursor:
+        raise ValueError(
+            f"DATA.claims_observe: this pass starts at unit {at} and the book has read {focus.cursor} "
+            f"unit(s) of stream {focus.stream}. A pass continues at the cursor or opens a new stream "
+            f"at 0; anything else reads a unit twice or skips one.")
+    hot, self_share = int(dat.trust_hot), float(dat.trust_self)
+    min_n, min_ev, floor = int(dat.trust_min_n), int(dat.trust_min_ev), float(dat.trust_min)
+    size, bound = int(focus.sketch_size), int(dat.trust_table)
+    ctr = focus.counters
+    claim_key = f"data.trust.claims_{focus.claim}"
+
+    # THE UNITS THIS PASS READS, after the carry: first sight of each source, by position.
+    for i, s in enumerate(sources):
+        if s is not None and s not in focus.first_seen:
+            focus.first_seen[s] = [int(focus.stream), at + i]
+    seq_u = [bytes(u) for u, _ in focus.carry] + [bytes(u) for u in units]
+    seq_s = [s for _, s in focus.carry] + sources
+    k0 = len(focus.carry)
+    claims = (_kv_claims if focus.claim == "kv" else _ctx_claims)(focus, seq_u, seq_s, k0)
+
+    # INTO THE SKETCH, AND THE HOT ONES INTO THE TABLE, IN STREAM ORDER.
+    sketch, table = focus.sketch, focus.table
+    for key, value, src in claims:
+        ctr["data.trust.claims"] += 1
+        b = zlib.crc32(key) % size
+        c = sketch[b]
+        if c < _TRUST_SKETCH_MAX:
+            sketch[b] = c + 1
+            if c == 0:
+                ctr["data.trust.sketch_load"] += 1
+            c += 1
+        if c < hot:
+            continue
+        per = table.get(key)
+        if per is None:
+            per = table[key] = {}
+            if len(table) > bound:
+                table.popitem(last=False)
+                ctr["data.trust.table_evictions"] += 1
+        else:
+            table.move_to_end(key)
+        vals = per.setdefault(src, {})
+        vals[value] = vals.get(value, 0) + 1
+        ctr[claim_key] += 1
+
+    # THE CARRY: the last units a claim formed later can still reach back to.
+    if focus.claim == "kv":
+        keep = focus.ctx + focus.val + max(len(d) for d in focus.delims) - 1
+    else:
+        keep = focus.ctx
+    focus.carry = [[u, s] for u, s in zip(seq_u[-keep:], seq_s[-keep:])] if keep > 0 else []
+    focus.cursor = at + len(units)
+    focus.last_step = int(step)
+    ctr["data.trust.units"] += len(units)
+    ctr["data.trust.passes"] += 1
+
+    copy = _trust_copy(dat)
+    conflicted = _trust_vote(focus, min_n=min_n, self_share=self_share, min_ev=min_ev, floor=floor,
+                             copy=copy)
+    if conflicted:
+        ctr["data.trust.updates"] += 1
+        if copy is not None:
+            ctr["data.trust.copy.passes"] = ctr.get("data.trust.copy.passes", 0) + 1
+    ctr["data.trust.conflicted_claims"] = conflicted
+    ctr["data.trust.sources"] = len(focus.first_seen)
+    ctr["data.trust.evidence_absent"] = sum(1 for s in focus.first_seen if s not in focus.evidence)
+    focus.gates = _trust_gates(dat, focus)
+
+
+def _trust_cut_key(raw, delims):
+    """A 'kv' key's raw bytes cut after the last punctuation, line break or delimiter in them."""
+    cut = 0
+    for i in range(len(raw) - 1, -1, -1):
+        if raw[i] in _TRUST_BOUND:
+            cut = i + 1
+            break
+    for d in delims:
+        j = raw.rfind(d)
+        if j >= 0:
+            cut = max(cut, j + len(d))
+    return cut
+
+
+def _trust_cut_value(raw, delims):
+    """A 'kv' value's raw bytes cut at the first punctuation, line break or delimiter in them."""
+    cut = len(raw)
+    for i, ch in enumerate(raw):
+        if ch in _TRUST_BOUND:
+            cut = i
+            break
+    for d in delims:
+        j = raw.find(d)
+        if 0 <= j < cut:
+            cut = j
+    return cut
+
+
+def _trust_norm(raw):
+    """Case-folded, punctuation stripped, whitespace collapsed (04 §1 item 8's normalisation)."""
+    kept = bytes(ch for ch in raw.lower() if ch not in _TRUST_BOUND)
+    return b" ".join(kept.split())
+
+
+def _one_source(seq_s, lo, hi):
+    """The source every unit in seq_s[lo:hi + 1] shares, or None."""
+    s = seq_s[lo]
+    if s is None:
+        return None
+    for j in range(lo + 1, hi + 1):
+        if seq_s[j] != s:
+            return None
+    return s
+
+
+def _kv_claims(focus, seq_u, seq_s, k0):
+    """The 'kv' claims whose last unit is one this pass read (index >= k0 in the carried sequence),
+    in stream order: [(key, value, source)]."""
+    text = b"".join(seq_u)
+    starts, pos = [], 0
+    for u in seq_u:
+        starts.append(pos)
+        pos += len(u)
+    ends = starts[1:] + [pos]
+    found = []
+    for d in focus.delims:
+        j = text.find(d)
+        while j >= 0:
+            found.append((j, d))
+            j = text.find(d, j + 1)
+    out = []
+    for d0, d in found:
+        e = d0 + len(d)
+        c0 = bisect.bisect_right(starts, d0) - 1
+        c1 = bisect.bisect_right(starts, e - 1) - 1
+        q = c1 + focus.val
+        if q < k0 or q >= len(seq_u):
+            continue                  # formed by an earlier pass, or its value is not read yet
+        k_lo = starts[max(0, c0 - focus.ctx)]
+        raw_key = text[k_lo:d0]
+        kp = k_lo + _trust_cut_key(raw_key, focus.delims)
+        key = _trust_norm(text[kp:d0])
+        raw_val = text[e:ends[q]]
+        value = _trust_norm(raw_val[:_trust_cut_value(raw_val, focus.delims)])
+        if not key or not value:
+            continue
+        src = _one_source(seq_s, bisect.bisect_right(starts, kp) - 1, q)
+        if src is None:
+            continue
+        out.append((q, d0, key, value, src))
+    out.sort(key=lambda t: (t[0], t[1]))
+    return [(k, v, s) for _q, _d, k, v, s in out]
+
+
+def _ctx_claims(focus, seq_u, seq_s, k0):
+    """The 'ctx' claims at every unit this pass read that has DATA_TRUST_CTX units before it:
+    [(key, value, source)], in stream order."""
+    k = focus.ctx
+    out = []
+    for q in range(max(k0, k), len(seq_u)):
+        src = _one_source(seq_s, q - k, q)
+        if src is None:
+            continue
+        key = b"".join(len(u).to_bytes(4, "big") + u for u in seq_u[q - k:q])
+        out.append((key, seq_u[q], src))
+    return out
+
+
+def _trust_vote(focus, *, min_n, self_share, min_ev, floor, copy=None):
+    """The reliability-weighted vote over the whole table, recomputed from scratch; sets
+    focus.evidence and focus.trust and returns how many keys are conflicted.
+
+    `copy` is None -- DATA_TRUST_COPY='off', the vote as it was built, every float the same -- or
+    (prior, rate, p), SR6's model (_trust_copy; Q-DATA-12): then a copy step follows each round
+    (_trust_copy_step), the next round discounts the votes it names, the last step's judged pairs go
+    to focus.copy_pairs and its readings to the data.trust.copy.* counters, and focus.copy_seconds
+    gains the steps' seconds. With no conflicted key no step runs and the readings read 0."""
+    conflicted = []
+    for per in focus.table.values():
+        claimed = []
+        for src in sorted(per):
+            vals = per[src]
+            n = sum(vals.values())
+            if n < min_n:
+                continue
+            top = max(vals.values())
+            tops = [v for v, c in vals.items() if c == top]
+            if len(tops) != 1 or top / n < self_share:
+                continue
+            claimed.append((src, tops[0]))
+        if len(claimed) >= 2 and len({v for _s, v in claimed}) >= 2:
+            conflicted.append(claimed)
+    focus.evidence, focus.trust = {}, {}
+    if copy is not None:
+        focus.copy_pairs = []
+        focus.counters.update({k: 0 for k in _TRUST_COPY_COUNTERS[1:]})
+    if not conflicted:
+        return 0
+    names = sorted({s for claimed in conflicted for s, _v in claimed})
+    r = {s: 1.0 for s in names}
+    tally = {s: [0, 0] for s in names}
+    # THE COPY STEP's STANDING MATERIAL, built once per vote: first-sight ranks, each key's value
+    # groups and every pair's differing count, none of which a round's truth moves.
+    if copy is not None:
+        _t0 = time.perf_counter()
+        shape = _trust_copy_shape(conflicted, focus.first_seen)
+        spent = time.perf_counter() - _t0
+    # `discount` is the last copy step's: {(key index, source): factor}, empty until a step names a
+    # dependent pair -- and always at 'off', where every vote below is r[s], the float it was.
+    discount, judged = {}, []
+    for _ in range(_TRUST_ITERATIONS):
+        tally = {s: [0, 0] for s in names}
+        truths = []
+        for ki, claimed in enumerate(conflicted):
+            vote = {}
+            for s, v in claimed:
+                w = r[s]
+                if discount:
+                    f = discount.get((ki, s))
+                    if f is not None:
+                        w = w * f
+                vote[v] = vote.get(v, 0.0) + w
+            ranked = sorted(vote.items(), key=lambda kv: (-kv[1], kv[0]))
+            if len(ranked) > 1 and abs(ranked[0][1] - ranked[1][1]) < _TRUST_TIE:
+                truths.append(None)
+                continue              # a tie decides nothing
+            truth = ranked[0][0]
+            truths.append(truth)
+            for s, v in claimed:
+                tally[s][0] += 1 if v == truth else 0
+                tally[s][1] += 1
+        r = {s: (a + 1) / (n + 2) for s, (a, n) in tally.items()}
+        if copy is not None:
+            _t0 = time.perf_counter()
+            judged, discount = _trust_copy_step(shape, truths, r, min_ev=min_ev, copy=copy)
+            spent += time.perf_counter() - _t0
+    focus.evidence = {s: [r[s], tally[s][1]] for s in names if tally[s][1] >= min_ev}
+    if len(focus.evidence) >= 2:
+        top = max(e[0] for e in focus.evidence.values())
+        focus.trust = {s: min(1.0, max(floor, e[0] / top)) for s, e in focus.evidence.items()}
+    if copy is not None:
+        focus.copy_pairs = judged
+        ctr = focus.counters
+        ctr["data.trust.copy.pairs_judged"] = len(judged)
+        ctr["data.trust.copy.pairs_dependent"] = sum(1 for q in judged if q[6] == "dependent")
+        ctr["data.trust.copy.pairs_certified"] = sum(1 for q in judged if q[6] == "independent")
+        ctr["data.trust.copy.votes_discounted"] = len(discount)
+        focus.copy_seconds += spent
+    return len(conflicted)
+
+
+def _trust_copy_shape(conflicted, first_seen):
+    """What every copy step of one vote reads and no round's truth moves: (rank, keys, differ).
+
+    `rank` orders the sources by first sight -- Focus.first_seen's [stream, unit] positions, then name;
+    a source the book never saw (a table built by hand) after every seen one, by name -- so a pair is
+    always (earlier, later), the later the presumed copy. `keys` holds, per conflicted key in table
+    order, its value groups [(value, [sources in rank order])] in byte order of the value. `differ`
+    counts, per pair, the conflicted keys on which the two hold different values: whether two claims
+    differ does not depend on which of them is true, so a key whose truth a round leaves tied counts
+    here in every round."""
+    names = sorted({s for claimed in conflicted for s, _v in claimed})
+    order = sorted(names, key=lambda s: ((0, int(first_seen[s][0]), int(first_seen[s][1]), s)
+                                         if s in first_seen else (1, 0, 0, s)))
+    rank = {s: i for i, s in enumerate(order)}
+    keys, differ = [], {}
+    for claimed in conflicted:
+        by_value = {}
+        for s, v in claimed:
+            by_value.setdefault(v, []).append(s)
+        groups = [(v, sorted(by_value[v], key=rank.__getitem__)) for v in sorted(by_value)]
+        keys.append(groups)
+        for gi in range(len(groups)):
+            for gj in range(gi + 1, len(groups)):
+                for a in groups[gi][1]:
+                    for b in groups[gj][1]:
+                        pair = (a, b) if rank[a] < rank[b] else (b, a)
+                        differ[pair] = differ.get(pair, 0) + 1
+    return rank, keys, differ
+
+
+def _trust_copy_step(shape, truths, r, *, min_ev, copy):
+    """One copy step after a round of the vote: every pair judged on the round's truth, and the
+    discount the next round applies. -> (judged, discount).
+
+    A pair's counts are its shared-true and shared-false claims on the keys the round decided -- the
+    shared-false ones grouped by n, the key's claimed values less its truth -- and its differing
+    claims (shape). A pair is JUDGED when the three reach DATA_TRUST_MIN_EV; its posterior is
+    _trust_copy_posterior's, with the later source's r as its accuracy, and its verdict 'dependent'
+    above DATA_TRUST_COPY_P, 'independent' below it, 'undecided' at it. `judged` lists [earlier,
+    later, posterior, shared true, shared false, differing, verdict] in first-sight order.
+    `discount` maps (key index, source) to the product of 1 - rate x P over the dependent pairs in
+    which that source is the later and the earlier holds the same value on that key -- on every
+    conflicted key, a tied one included, since that is where a copy's second vote can decide a key
+    -- and names only a vote whose factor is below 1."""
+    rank, keys, differ = shape
+    prior, rate, p_dep = copy
+    shared_true, shared_false = {}, {}
+    for groups, truth in zip(keys, truths):
+        if truth is None:
+            continue              # a value two sources share on a tied key is neither true nor false
+        n_false = len(groups) - 1
+        for v, members in groups:
+            for i in range(len(members)):
+                for j in range(i + 1, len(members)):
+                    pair = (members[i], members[j])
+                    if v == truth:
+                        shared_true[pair] = shared_true.get(pair, 0) + 1
+                    else:
+                        per = shared_false.setdefault(pair, {})
+                        per[n_false] = per.get(n_false, 0) + 1
+    judged, dependent = [], {}
+    for pair in sorted(set(shared_true) | set(shared_false) | set(differ),
+                       key=lambda q: (rank[q[0]], rank[q[1]])):
+        k_true = shared_true.get(pair, 0)
+        k_false = shared_false.get(pair, {})
+        k_diff = differ.get(pair, 0)
+        k_false_all = sum(k_false.values())
+        if k_true + k_false_all + k_diff < min_ev:
+            continue
+        post = _trust_copy_posterior(k_true, k_false, k_diff, r[pair[1]], prior, rate)
+        verdict = "dependent" if post > p_dep else ("independent" if post < p_dep else "undecided")
+        judged.append([pair[0], pair[1], post, k_true, k_false_all, k_diff, verdict])
+        if verdict == "dependent":
+            dependent[pair] = post
+    discount = {}
+    if dependent:
+        for ki, groups in enumerate(keys):
+            for _v, members in groups:
+                for i in range(1, len(members)):
+                    f = 1.0
+                    for j in range(i):
+                        post = dependent.get((members[j], members[i]))
+                        if post is not None:
+                            f *= 1.0 - rate * post
+                    if f < 1.0:
+                        discount[(ki, members[i])] = f
+    return judged, discount
+
+
+def _trust_copy_posterior(k_true, k_false, k_diff, acc, prior, rate):
+    """P(the later source of a pair copies the earlier | their shared conflicted claims), SR6's
+    ACCU-COPY posterior (the arithmetic is written out at _TRUST_COPY_COUNTERS): `k_true` shared-true
+    claims, `k_false` the shared-false ones as {n: count} (n the key's false values), `k_diff`
+    differing ones; `acc` the later source's accuracy, its r this round, strictly inside (0, 1);
+    `prior` alpha, strictly inside (0, 1); `rate` c, in (0, 1] as _trust_copy admits it (the
+    arithmetic holds at 0 too, where every ratio is 1 and the posterior is the prior). The
+    log-likelihood ratio is summed in n order and the logistic taken on the side that cannot
+    overflow."""
+    if k_diff and rate >= 1.0:
+        return 0.0                # a copier that copies every value never differs from its source
+    llr = 0.0
+    if k_true:
+        llr += k_true * math.log(1.0 - rate + rate / acc)
+    for n in sorted(k_false):
+        llr += k_false[n] * math.log(1.0 - rate + rate * n / (1.0 - acc))
+    if k_diff:
+        llr += k_diff * math.log(1.0 - rate)
+    z = math.log(prior) - math.log(1.0 - prior) + llr
+    if z >= 0.0:
+        return 1.0 / (1.0 + math.exp(-z))
+    e = math.exp(z)
+    return e / (1.0 + e)
+
+
+def _focus_state(focus):
+    """What stream_state checkpoints of a Focus: everything but its gates and its seconds, as plain
+    data. SR6's copy part (Q-DATA-12) goes under 'copy' -- the last vote's judged pairs and the
+    data.trust.copy.* counters, which 'counters' does not repeat -- at DATA_TRUST_COPY='accu', or
+    the held one written back unchanged at 'off'; a book that never ran the detection writes none,
+    and its record is the one written before the detection existed."""
+    out = {
+        "mode": focus.mode, "rule": focus.rule, "claim": focus.claim, "ctx": int(focus.ctx),
+        "val": int(focus.val),
+        "delims": [bytes(d) for d in focus.delims], "sketch_size": int(focus.sketch_size),
+        "sketch": array.array("i", focus.sketch),
+        "table": [[key, [[src, [[v, int(c)] for v, c in vals.items()]] for src, vals in per.items()]]
+                  for key, per in focus.table.items()],
+        "evidence": {s: [float(r), int(n)] for s, (r, n) in focus.evidence.items()},
+        "trust": {s: float(t) for s, t in focus.trust.items()},
+        "first_seen": {s: [int(a), int(b)] for s, (a, b) in focus.first_seen.items()},
+        "cursor": int(focus.cursor), "stream": int(focus.stream),
+        "last_step": int(focus.last_step),
+        "carry": [[bytes(u), s] for u, s in focus.carry],
+        "counters": {k: int(v) for k, v in focus.counters.items()
+                     if not k.startswith(_TRUST_COPY_PREFIX)},
+    }
+    if focus.copy_mode == "accu":
+        out["copy"] = {
+            "pairs": [[str(a), str(b), float(p), int(t), int(f), int(d), str(v)]
+                      for a, b, p, t, f, d, v in focus.copy_pairs],
+            "counters": {k: int(v) for k, v in focus.counters.items()
+                         if k.startswith(_TRUST_COPY_PREFIX)}}
+    elif focus.copy_held is not None:
+        out["copy"] = focus.copy_held
+    return out
+
+
+def stream_state(dat: Config, areas, *, focus=None):
     """The mutable state that must survive into a checkpoint: the per-area read cursors, the epoch
-    index of the last draw, the holdout block offsets and sizes, and the counter vector.
+    index of the last draw, the holdout block offsets and sizes (and, since 2026-09-27, a digest of
+    each block's bytes: Q-DATA-9's review), the areas the lineage has drawn from (Areas.drawn, since
+    2026-09-28: Q-FAB-18's review) and the part of that list held only by assumption
+    (Areas.drawn_assumed, since Q-DATA-10's review), and the counter vector.
 
     The cursors are LOAD-BEARING: without them a resume re-reads the head of every area under
     seg_contig and silently trains a second time on material the parent already used. The counter
     vector is checkpointed because a DID-IT-FIRE count that resets on resume counts the wrong thing.
     The cached Stream at resample=False is NOT checkpointed -- it is rebuilt from (seed, epoch).
+
+    AND THE SOURCE-RELIABILITY BOOK, UNDER 'focus', WHERE THERE IS ONE (2026-09-28, Proposal 04 §5;
+    docs/04_CONTRACT.md Q-DATA-11): `focus` is the System's Focus, and at DATA_TRUST='observe' its
+    book is written whole -- the claim shape, the int32 sketch, the claim table in its LRU order,
+    each source's evidence, trust and first sight, the per-epoch cursor and stream ordinal, the
+    carried units and the data.trust.* counters, and since 2026-09-28 SR6's copy part under
+    'copy' where the copy detection runs or a held one is carried (Q-DATA-12) -- for
+    DATA.new_focus(restored=) to put back. At 'off' nothing is written, so an 'off' run's payload
+    is the one this function wrote before the book existed, unless the Focus holds a checkpoint's
+    book, which is written back unchanged. The
+    sketch is DATA's payload and never a geometry-manifest field -- CKPT.check_geometry refuses a
+    field a checkpoint does not record, so a new one would refuse every checkpoint written before
+    it -- and its size is refused on a resume by new_focus instead.
 
     RETURNS: dict, handed to CKPT.save as part of the opaque payload.
 
@@ -1647,14 +3541,16 @@ def stream_state(dat: Config, areas):
     WIRES READ: none
     DID IT FIRE: data.state_written (LINEAGE, and it counts the save that writes it),
                  data.state_written_here (THIS PROCESS's; restore_stream_state never restores it;
-                 ABSENT until this process saves, and read in the blob: no R row prints DATA's
-                 counters)
+                 ABSENT until this process saves). Both are printed in the R report's
+                 DATA(areas.counters) row since 2026-09-27 (Q-DATA-9), under the root's
+                 _SAVE_COUNTS rule like every other package's pair; before that no row printed
+                 them and they were read in the blob
     """
     dat = dat.owned_by("DATA")
     # BUMPED BEFORE THE COUNTERS ARE COPIED, SO A BLOB COUNTS ITSELF, with a process twin the
     # restore skips (2026-09-27, register LOW-RESUME-SAVED-COUNTERS; lm/api.py::state_dict says
-    # what the old order cost). No R-stage row prints DATA's counters, so the pair is read in the
-    # blob.
+    # what the old order cost). The R report's DATA(areas.counters) row prints the pair (Q-DATA-9),
+    # one save short of the final blob, as every package's pair is.
     areas.counters["data.state_written"] = areas.counters.get("data.state_written", 0) + 1
     areas.counters["data.state_written_here"] = areas.counters.get("data.state_written_here",
                                                                    0) + 1
@@ -1668,16 +3564,41 @@ def stream_state(dat: Config, areas):
         # whose held-out block MOVED. That refusal is the one goal B rests on: an ACROSS THE RUN
         # BOUNDARY number computed over a different block than the parent's compares two different
         # texts and reports the difference as forgetting.
+        # AND WHAT THE BLOCK HOLDS, beside where it sits (2026-09-27, Q-DATA-9's review): offset,
+        # size and key say where a block is, and two DIFFERENT texts can agree on all three -- a
+        # synthetic area moved to another position in DATA_AREAS, or a real block and a synthetic
+        # one of the same length, which draw their offset from the same keyed stream over the same
+        # range. _block_digest is the block's bytes, so the restore can compare the texts
+        # themselves. A record written before it carries none, and the restore then compares the
+        # three fields alone, as it did.
         "holdout": {k: {"offset": int((areas.rng_holdout.get(k) or {}).get("offset", 0)),
                         "size": int(areas.holdout_bytes.get(k, 0)),
-                        "key": (areas.rng_holdout.get(k) or {}).get("key")}
+                        "key": (areas.rng_holdout.get(k) or {}).get("key"),
+                        "digest": _block_digest(areas.holdout.get(k, b""))}
                     for k in areas.names},
         "bytes_present": {k: int(v) for k, v in areas.bytes_present.items()},
         "bytes_taken": {k: int(v) for k, v in areas.bytes_taken.items()},
+        # THE AREAS THIS LINEAGE HAS DRAWN FROM, in the order first drawn (2026-09-28, Q-FAB-18's
+        # review): Areas.drawn, the record's list plus this run's draws. A child reads its
+        # Plan.parent_faded off this, and not off the `holdout` keys above, which are every area the
+        # parent DECLARED -- drawn or not.
+        "drawn": [str(n) for n in areas.drawn],
+        # AND THE PART OF IT HELD ONLY BY ASSUMPTION (2026-09-28, Q-DATA-10's review):
+        # Areas.drawn_assumed, the areas a record older than `drawn` declared and no stream of this
+        # lineage has drawn since. Without it the assumption was written into `drawn` above as a
+        # draw, and a descendant rehearsed an area nothing ever drew while calling it "drawn by the
+        # lineage". [] wherever no record of the lineage predates the list.
+        "drawn_assumed": [str(n) for n in areas.drawn_assumed],
         # THE COUNTER VECTOR, because a DID-IT-FIRE count that resets on resume counts the wrong
         # thing -- it counts "since the last checkpoint" while being read as "this run".
         "counters": dict(areas.counters),
     }
+    # THE SOURCE-RELIABILITY BOOK (2026-09-28, Q-DATA-11): written only where there is one, so the
+    # payload at DATA_TRUST='off' is the one written before the book existed.
+    if focus is not None and focus.mode == "observe":
+        out["focus"] = _focus_state(focus)
+    elif focus is not None and focus.held is not None:
+        out["focus"] = focus.held
     # THE CACHED Stream AT resample=False IS NOT CHECKPOINTED and that is deliberate: it is rebuilt
     # from (seed, epoch), so saving it would put a second copy of a derivable thing in the payload
     # and let the two disagree.
@@ -1686,9 +3607,10 @@ def stream_state(dat: Config, areas):
 
 def restore_stream_state(dat: Config, areas, state):
     """Put the cursors and holdout offsets back. REFUSES LOUDLY if any area the parent RECORDED
-    comes back with a different holdout offset or size: a resume whose held-out block moved is a
-    resume whose ACROSS THE RUN BOUNDARY number compares two different texts, and that is the one
-    number goal B rests on.
+    comes back with a different holdout offset or size -- or, where the record carries the block's
+    digest (since 2026-09-27, Q-DATA-9's review), a different text at the same offset and size: a
+    resume whose held-out block moved is a resume whose ACROSS THE RUN BOUNDARY number compares two
+    different texts, and that is the one number goal B rests on.
 
     WHICH READING OF THE NAME CHECK IS NORMATIVE (ruled 2026-09-02, with Q-DATA-4). NOT
     set-equality. An add-an-area run is BY DEFINITION a resume whose area list gained a name --
@@ -1699,7 +3621,9 @@ def restore_stream_state(dat: Config, areas, state):
 
       * every area name PRESENT IN THE RECORD must be present now, with the same holdout offset,
         the same holdout size and the same rng key -> restore its cursor. A disagreement on any of
-        the four is the loud refusal, and it names which area and which field moved.
+        the four is the loud refusal, and it names which area and which field moved. Where the
+        record carries the block's digest (_block_digest), the block's bytes must agree too, and
+        a text that moved under agreeing fields is the same refusal, naming the digests.
       * a name present NOW and absent from the record is ADMITTED, its cursor starts at 0, and one
         data.area_added line is PRINTED naming it. That is the add-an-area run.
       * a name present in the RECORD and absent now is the loud refusal, not a silent drop: the
@@ -1708,15 +3632,102 @@ def restore_stream_state(dat: Config, areas, state):
         two different statements and only one of them is an experiment.
 
     This reading still catches everything the refusal's own stated reason is about -- a moved block
-    for a carried-over area -- and it is the reading the per-area holdout streams in open_areas
-    make TRUE rather than merely permitted: keyed by label, adding an area cannot move any other
-    area's block, so an honest add-an-area resume can no longer be refused by accident.
+    for a carried-over area -- and ON A REAL SOURCE it is the reading the per-area holdout streams in
+    open_areas make TRUE rather than merely permitted: keyed by label, adding an area cannot move any
+    other area's block there, so an honest add-an-area resume can no longer be refused by accident.
+    ON THE SYNTHETIC SOURCE AT DATA_SYNTH_HOLDOUT=1 IT CAN, AND THE REFUSAL SAYS WHY (2026-09-27,
+    Q-DATA-9's review; this paragraph claimed both sources until then). The block is carved from the
+    area's GENERATED body, whose length is _synthetic_length -- max(DATA_SEG_MAX + 1, MIN_AREA_BYTES,
+    DATA_STREAM_BYTES // DATA_N_PROCESSES) x 2 -- and whose text is the alphabet the area's POSITION
+    picks (_synthetic_areas). Driven: a fifth area at DATA_STREAM_BYTES 120000 took every body from
+    60,000 bytes to 48,000 and every block from 3,000 to 2,400, and the resume was refused naming
+    only the size that moved. So on this arm a moved block is refused naming those three levers with
+    this run's values, the parent's recorded length beside this run's, the DATA_STREAM_BYTES that
+    generates the parent's length where one does (150000 there), and DATA_SOURCE=real, which writes
+    the same fields. And a carried area whose position changed -- an entry inserted before it, or
+    the list reordered -- keeps its block's offset, size and key but not its text, which the field
+    comparison cannot see: driven, "eng,rust,py,num,c" at DATA_STREAM_BYTES 150000 was admitted over
+    a parent at "eng,py,num,c" with py's, num's and c's blocks other bytes. That is refused naming
+    DATA_AREAS. And since the fields cannot see a text at all, the record now carries each block's
+    digest and the restore compares it, which catches the rest: driven, a real parent over eng
+    resumed here at the matching length (DATA_STREAM_BYTES 400000 against DATA_CORPUS_CAP 200000)
+    drew the same offset and size and was admitted with its English block replaced by generated
+    text. On this arm an add-an-area resume appends the area and keeps the parent's length.
 
-    LEVERS READ: none
+    THE ONE ADMISSION (2026-09-27, Q-DATA-9; register 04-Q5, SR0). A record of key None AND size 0
+    for an area -- what the synthetic source writes at DATA_SYNTH_HOLDOUT=0, where it holds nothing
+    out -- against a block NOW on the synthetic source (DATA_SYNTH_HOLDOUT=1) is ADMITTED: all three
+    fields move, and nothing is lost, because the parent had no held-out block and so no number
+    across the run boundary reads one. The same record against a REAL block is a change of source
+    under the same area names, and it is refused as it was before the ruling. Each admitted AREA
+    counts one in data.holdout_admitted -- the unit is the area, so a four-area parent admits 4 --
+    and is named in data.holdout_admitted_names. THE PARENT TRAINED ON THOSE BYTES: an admitted
+    block is text the lineage has seen, not a clean held-out sample, and the root says so in the
+    warning it prints. Its read cursor, which indexed the WHOLE body, is mapped
+    onto the carved one (_carved_cursor): below the block it stays, past it it moves down by the
+    block's size, and inside it -- text now held out -- it moves to the block's offset, the first
+    byte after the block in the carved body. ALL OF THAT HOLDS ONLY WHERE THIS RUN GENERATES THE
+    PARENT'S TEXT FOR THE AREA, so the admission checks it first (Q-DATA-9's review): the same
+    position, so the same alphabet, and the same length as the record's bytes_taken. Driven before
+    the check: a child at DATA_STREAM_BYTES 400000 carved all four blocks past the 60,000 bytes its
+    parent had, and one with DATA_AREAS reordered carved eng's and py's out of other text, and both
+    were admitted under a warning that the parent trained on those bytes. Either is refused naming
+    what moved, with DATA_SYNTH_HOLDOUT=0 as the resume that continues as before. THE REVERSE IS
+    REFUSED: a block in the record and none now would train on the text the parent held out. The
+    record does not say which source wrote the block, so the refusal names both that write one --
+    DATA_SOURCE=real, and DATA_SOURCE=synthetic at DATA_SYNTH_HOLDOUT=1 (Q-DATA-9's review: it named
+    the second alone, and a real parent resumed at the shipped synthetic source, told to set it, was
+    refused again for an offset that moved). Every other move of a recorded block is the loud
+    refusal above, unchanged.
+
+    `Areas.parent_names` IS FILLED HERE: the record's area names, in its order -- the areas the
+    parent declared, whatever this run's list says (Q-DATA-9). It said "the areas the parent trained
+    on" until 2026-09-28 (Q-FAB-18's review), and a declared area need not have been drawn: a run
+    over "eng,py" that schedules eng alone records py and never trains it.
+
+    `Areas.drawn` IS FILLED HERE TOO (2026-09-28, Q-FAB-18's review): the record's list of the areas
+    the lineage's streams drew from, which Plan.parent_faded is read off. A record written before
+    stream_state carried it has none, and then every area it declares is ASSUMED drawn and named
+    in data.drawn_assumed -- over-counting only a declared area no phase ever drew, which a record
+    cannot tell apart. THE ASSUMPTION IS CARRIED DOWN THE LINEAGE (2026-09-28, Q-DATA-10's review):
+    it fills `Areas.drawn_assumed`, draw_stream removes each area a draw confirms, stream_state
+    records what is left, and a later resume reads that back into both -- so a descendant's
+    data.drawn_assumed names what its own record still cannot vouch for, where it read [] and the
+    assumption as a draw. Under 'replay' at DATA_REHEARSE_PARENT=1 the assumption moves bytes (an
+    assumed area is rehearsed), and data.rehearse_parent's reason names it.
+
+    THE COUNTERS THE RECORD DOES NOT OVERWRITE are this resume's own statements and this run's own
+    readings: the restore and refusal tallies, data.area_added and its names, the process twin
+    data.state_written_here, the admission pair, data.drawn_assumed (this resume's assumption, not
+    the parent's), and data.holdout_overlap -- a reading of THIS run's blocks, which open_areas
+    computed a moment ago. Copying the parent's over it would read "no block to measure" beside an
+    admitted block, and it dropped a newly added area's reading from the add-an-area run: driven at
+    ae70638, the tree before this ruling, a real-source child over eng,py resumed from a parent over
+    eng read {'eng': 0.0741} where its own was {'eng': 0.0741, 'py': 0.1142}
+    (DATA_CORPUS_CAP=200000).
+
+    LEVERS READ: source (the admission and the synthetic refusals are the synthetic source's,
+                 Q-DATA-9), synth_holdout (arms the admission, and is named in the reverse
+                 refusal), n_processes, stream_bytes, seg_max (the generated body's length, printed
+                 with their values when a synthetic block moved or an admission's length is not
+                 the parent's; this line said "none" until 2026-09-27, Q-DATA-9's review, though the
+                 admission and its reverse read the first two from the day they landed)
     WIRES READ: none
-    DID IT FIRE: data.state_restored, data.state_refused (with the area and the field that moved),
-                 data.area_added (the arriving area, PRINTED; 0 on an ordinary resume, which is the
-                 statement "this resume added nothing"), data.area_vanished
+    DID IT FIRE: data.state_restored, data.state_refused (with the area and the field that moved --
+                 or, since Q-DATA-9's review, the synthetic position, length or block digest),
+                 data.area_added (the arriving area, PRINTED in the R report's DATA(areas.counters)
+                 row; 0 on an ordinary resume, which is the statement "this resume added nothing"
+                 -- seeded at 0 since 2026-09-27, when that row made the missing key visible),
+                 data.area_vanished, data.holdout_admitted and data.holdout_admitted_names (0 and
+                 [] on a resume on DATA_SOURCE=synthetic at DATA_SYNTH_HOLDOUT=1, the one arm the
+                 admission can fire on; ABSENT on a fresh run and on every other arm, which is
+                 UNREACHABLE and not "armed, none admitted": at 0 no synthetic block exists to
+                 admit, and a real one is never admitted -- Q-DATA-9's review, where they read 0 on
+                 every resume), data.drawn_assumed (a READING, 2026-09-28, Q-FAB-18's review: the
+                 areas this resume ASSUMED the lineage drew because the record carries no list of
+                 them -- every area it declares -- or, since Q-DATA-10's review, the part of its
+                 list the record carries as still assumed; [] on a resume whose lineage's records
+                 all carried the list; ABSENT on a fresh run)
     """
     dat = dat.owned_by("DATA")
     if not state:
@@ -1728,7 +3739,49 @@ def restore_stream_state(dat: Config, areas, state):
 
     recorded = dict(state.get("holdout") or {})
     cursors = dict(state.get("cursors") or {})
+    # THE PARENT'S LENGTH PER AREA, which stream_state has recorded as bytes_taken since DATA's resume
+    # state existed. On the synthetic source it is the generated body a block is carved from, so the
+    # synthetic refusals below compare it with this run's and print both (Q-DATA-9's review).
+    lengths = dict(state.get("bytes_taken") or {})
     live = set(areas.names)
+    # THE PARENT'S AREA LIST, IN ITS ORDER, ON THE RECORD (Q-DATA-9): every area the parent
+    # declared.
+    areas.parent_names[:] = list(recorded)
+    # AND THE AREAS THE LINEAGE DREW FROM (2026-09-28, Q-FAB-18's review), which a declared area
+    # need not be: the list Plan.parent_faded is read off. A record written before it carries none,
+    # and then every area it declared is ASSUMED drawn -- the reading the faded sets took of every
+    # record until this date -- and data.drawn_assumed names them; [] where the record carried its
+    # list. This run's draws are appended by draw_stream.
+    # AND THE ASSUMPTION IS CARRIED, NOT LAUNDERED (2026-09-28, Q-DATA-10's review): the part of the
+    # list a record holds only by assumption comes back as Areas.drawn_assumed -- all of it on a
+    # record older than the list, the record's own carried part on one since -- and
+    # data.drawn_assumed names it. Until the review a record older than the list was assumed here
+    # and then written into the next record's `drawn` as a draw: driven, the child of an eng,py,num
+    # record whose parent drew eng alone saved drawn ['eng', 'py', 'num'], and its own child read
+    # data.drawn_assumed [] and rehearsed num as "drawn by the lineage". A record carrying `drawn`
+    # without this key (the two builds on this branch before the review) carries no assumption.
+    if state.get("drawn") is not None:
+        areas.drawn[:] = [str(n) for n in state["drawn"]]
+        areas.drawn_assumed[:] = [str(n) for n in (state.get("drawn_assumed") or ())
+                                  if str(n) in areas.drawn]
+    else:
+        areas.drawn[:] = list(recorded)
+        areas.drawn_assumed[:] = list(recorded)
+    areas.counters["data.drawn_assumed"] = list(areas.drawn_assumed)
+    # THE ONE ARM THE ADMISSION CAN FIRE ON: the synthetic source at DATA_SYNTH_HOLDOUT=1. At 0 every
+    # live synthetic block has size 0, so there is nothing to admit, and a real block is never
+    # admitted (a change of source, below).
+    carves = str(dat.source) == "synthetic" and bool(dat.synth_holdout)
+    # THE RESUME'S OWN STATEMENTS, SEEDED BEFORE THE COMPARISON SO THAT 0 READS "ARMED, NONE" -- and
+    # seeded only where they are armed (2026-09-27, Q-DATA-9's review; G4). The admission pair was
+    # seeded on every resume, so the default arm and every real-source resume printed "armed, did not
+    # fire" for a mechanism that cannot run there; ABSENT is how this tree says UNREACHABLE, as
+    # fab.ind_applied's arm does. data.area_added is armed everywhere: an area can arrive on either
+    # source, and an ordinary resume says it added none, where a fresh run has no key.
+    if carves:
+        areas.counters["data.holdout_admitted"] = 0
+        areas.counters["data.holdout_admitted_names"] = []
+    areas.counters["data.area_added"] = 0
 
     # NOT SET-EQUALITY, AND THE RULING IS 2026-09-02's (Q-DATA-4). An add-an-area run is BY
     # DEFINITION a resume whose area list gained a name -- longrun.sh:938 runs DOMAINS="eng,$NAME"
@@ -1740,22 +3793,166 @@ def restore_stream_state(dat: Config, areas, state):
             # this run cannot score, so its ACROSS THE RUN BOUNDARY number has no counterpart. It is
             # counted separately from an arrival because "an area arrived" and "an area vanished"
             # are two different statements and only one of them is an experiment.
+            # AND IT STAYS REFUSED UNDER PARENT REHEARSAL (2026-09-28, register 04-Q4 and NEW-06;
+            # Q-DATA-10). DATA_REHEARSE_PARENT draws a parent area from its body, which this run
+            # reads only for an area it declares; the route that would carry one without its corpus
+            # -- NEW-06's replay reservoir in the checkpoint, register §8 4.5 -- is not built, and
+            # the message says so, so the operator is not left to look for it.
             areas.counters["data.area_vanished"] = areas.counters.get("data.area_vanished", 0) + 1
             _refuse(f"DATA: the checkpoint recorded area {name!r} and this run does not have it. "
                     f"The parent trained on text this run cannot score, so its across-the-boundary "
-                    f"number has no counterpart. Restore the area, or start a new run.")
+                    f"number has no counterpart. Restore the area, or start a new run. A parent "
+                    f"area is rehearsed (DATA_REHEARSE_PARENT, DATA_DRAW=replay) only from a body "
+                    f"this run reads, so declare it in DATA_AREAS with its corpus in place: the "
+                    f"replay reservoir that would carry it in the checkpoint when the corpus is gone "
+                    f"(register NEW-06, Proposal 05 section 8 row 4.5) is not built in this tree.")
         was, now = recorded[name], {
             "offset": int((areas.rng_holdout.get(name) or {}).get("offset", 0)),
             "size": int(areas.holdout_bytes.get(name, 0)),
             "key": (areas.rng_holdout.get(name) or {}).get("key"),
         }
+        if carves and was.get("key") is None and was.get("size") == 0 and now["size"] > 0:
+            # THE ONE ADMISSION (Q-DATA-9, 04-Q5): the parent held nothing out of this area and this
+            # run holds a block out of it. No across-the-boundary number reads a parent block that
+            # does not exist, so moving all three fields breaks no comparison. The parent trained on
+            # the block's bytes, which the root's warning says; the cursor is mapped, not copied,
+            # because it indexed the whole body.
+            # ON THE SYNTHETIC SOURCE ONLY, which is the move 04-Q5 rules on: DATA_SYNTH_HOLDOUT
+            # 0 -> 1. Only a synthetic run at 0 writes key None and size 0 (a real area's empty
+            # block is refused in open_areas), so the same record against a REAL block is a change
+            # of source under the same area names, and it stays the refusal it was before this
+            # ruling -- driven at ae70638, the field loop below refuses it naming the moved offset.
+            # ITS PREMISE FIRST (Q-DATA-9's review): this body must be the parent's text -- the
+            # alphabet its position picks, and the parent's length -- or "a block shorter than the
+            # parent's", "text the parent trained on" and the cursor map are all false. The record's
+            # one writer is a synthetic run at 0, whose text follows the same two rules, so the
+            # refusal can say which of them moved.
+            moved = []
+            at = _alphabet_moved(name, recorded, areas.names)
+            if at is not None:
+                moved.append(
+                    f"It is at position {at[1]} of this run's areas ({', '.join(areas.names)}) and "
+                    f"was at {at[0]} of the checkpoint's ({', '.join(recorded)}), and a synthetic "
+                    f"area's text is the alphabet its position picks (_ALPHABETS[position % "
+                    f"{len(_ALPHABETS)}], data/api.py::_synthetic_areas): this body is other text, "
+                    f"and the parent never trained on the block this run would carve from it. Keep "
+                    f"the parent's areas at their positions in DATA_AREAS and add new ones after "
+                    f"them.")
+            if name in lengths and int(lengths[name]) != int(areas.bytes_taken.get(name, 0)):
+                arith, back = _synthetic_body(dat, int(lengths[name]))
+                moved.append(
+                    f"The parent generated {int(lengths[name])} bytes of it and this run generates "
+                    f"{arith}: at another length this body is not the parent's a block shorter, "
+                    f"and past the parent's length the block is not text the parent trained on. "
+                    f"Generate the parent's length"
+                    + (f" (DATA_STREAM_BYTES={back} at DATA_N_PROCESSES={int(dat.n_processes)} "
+                       f"does)." if back is not None else "."))
+            if moved:
+                _refuse(
+                    f"DATA: the checkpoint held nothing out of area {name!r} (key None, size 0, as "
+                    f"DATA_SOURCE=synthetic writes at DATA_SYNTH_HOLDOUT=0), and the one admission "
+                    f"(Q-DATA-9) holds only where this run generates the parent's text for the "
+                    f"area. " + " ".join(moved) + " Or resume at DATA_SYNTH_HOLDOUT=0, which "
+                    f"continues as before.")
+            areas.counters["data.holdout_admitted"] += 1
+            areas.counters["data.holdout_admitted_names"].append(name)
+            if name in cursors:
+                areas.cursors[name] = _carved_cursor(int(cursors[name]), now["offset"],
+                                                     now["size"], len(areas.bodies[name]))
+            continue
+        if (was.get("size") or 0) > 0 and now["size"] == 0:
+            # THE REVERSE IS REFUSED, AND BY THE SETTINGS THAT WRITE A BLOCK (Q-DATA-9). A live size
+            # of 0 is only reachable on the synthetic source at DATA_SYNTH_HOLDOUT=0 -- a real area's
+            # 0-byte block is refused in open_areas -- so the field loop's "size moved" would name
+            # the symptom and not the setting. WHICH setting wrote the record's block it cannot
+            # say: a real source and the synthetic one at 1 record the same key, offset and size, so
+            # the message names both (Q-DATA-9's review). It named DATA_SYNTH_HOLDOUT=1 alone, and a
+            # real parent resumed at the shipped DATA_SOURCE, told to set it, was refused a second
+            # time for an offset that moved, never told that DATA_SOURCE=real was the resume.
+            _refuse(
+                f"DATA: area {name!r} had a {was.get('size')}-byte held-out block in the "
+                f"checkpoint (key {was.get('key')!r}, offset {was.get('offset')!r}) and has none "
+                f"now: DATA_SOURCE={dat.source} at DATA_SYNTH_HOLDOUT="
+                f"{int(bool(dat.synth_holdout))} holds nothing out. This run would train on the "
+                f"text the parent held out, and its across-the-boundary number would have no block "
+                f"to be read on. The record does not say which source wrote the block, and two "
+                f"do: DATA_SOURCE=real, which carves one out of every area, and "
+                f"DATA_SOURCE=synthetic at DATA_SYNTH_HOLDOUT=1. Resume with the one that wrote "
+                f"it. Only the other direction is admitted: a block where the checkpoint held none "
+                f"(key None, size 0), counted in data.holdout_admitted.")
         for field in ("offset", "size", "key"):
             if was.get(field) != now[field]:
+                # ON THE SYNTHETIC SOURCE AT 1 THE REFUSAL ALSO SAYS WHAT THE BLOCK RIDES ON
+                # (Q-DATA-9's review): the generated body's length, from three levers every area
+                # shares, so the one move an add-an-area resume makes by default moved every block
+                # and was refused naming only the field.
+                note = ""
+                if carves:
+                    then = int(lengths[name]) if name in lengths else None
+                    arith, back = _synthetic_body(dat, then)
+                    here = int(areas.bytes_taken.get(name, 0))
+                    note = (f" On DATA_SOURCE=synthetic at DATA_SYNTH_HOLDOUT=1 the block is carved "
+                            f"out of the area's generated body, {arith} on this run")
+                    if then is None:
+                        note += "; the checkpoint records no length for this area to compare."
+                    elif then != here:
+                        note += (f", where the checkpoint recorded {then}: every area's block moves "
+                                 f"with that length, so a resume that keeps the parent's blocks -- "
+                                 f"one that adds an area included -- generates the parent's length"
+                                 + (f" (DATA_STREAM_BYTES={back} at DATA_N_PROCESSES="
+                                    f"{int(dat.n_processes)} does)." if back is not None
+                                    else "."))
+                    else:
+                        note += (", the length the checkpoint recorded, so those three levers did "
+                                 "not move it: at one length a block moves with DATA_HOLDOUT_FRAC, "
+                                 "DATA_VAL_CAP or RUN_SEED.")
+                    note += (" A checkpoint written on DATA_SOURCE=real records the same fields: if "
+                             "the parent read this area from disk, resume with DATA_SOURCE=real.")
                 _refuse(
                     f"DATA: area {name!r} had holdout {field}={was.get(field)!r} in the checkpoint "
                     f"and {now[field]!r} now. A resume whose held-out block moved compares two "
                     f"different texts across the run boundary, and that is the one number goal B "
-                    f"rests on. Named here rather than discovered in the eval.")
+                    f"rests on. Named here rather than discovered in the eval." + note)
+        if carves:
+            # THE BLOCK'S FIELDS AGREE AND ITS TEXT NEED NOT (Q-DATA-9's review). The field loop
+            # compares where a block sits, not what it holds, and on the synthetic source what it
+            # holds is the alphabet the area's position picks: an entry inserted before this one,
+            # or the list reordered, keeps its offset, size and key and moves its bytes -- the
+            # across-the-boundary number over two different texts, admitted in silence.
+            at = _alphabet_moved(name, recorded, areas.names)
+            if at is not None:
+                _refuse(
+                    f"DATA: area {name!r} is at position {at[1]} of this run's areas "
+                    f"({', '.join(areas.names)}) and was at {at[0]} of the checkpoint's "
+                    f"({', '.join(recorded)}). A synthetic area's text is the alphabet its "
+                    f"position picks (_ALPHABETS[position % {len(_ALPHABETS)}], "
+                    f"data/api.py::_synthetic_areas), so this area's text is not the parent's and "
+                    f"neither is its held-out block, though the block's offset, size and key "
+                    f"agree: its across-the-boundary number would compare two different texts, "
+                    f"and that is the one number goal B rests on. Keep the parent's areas at their "
+                    f"positions in DATA_AREAS and add new ones after them (Q-DATA-9).")
+        if was.get("digest") is not None:
+            # AND THE TEXT ITSELF, WHERE THE RECORD CARRIES IT (Q-DATA-9's review; _block_digest).
+            # The three fields agree and the position did not move the alphabet, so what is left is
+            # a text the fields cannot see: a real block and a synthetic one of the same length, a
+            # corpus changed on disk, a generator that changed. A record written before the digest
+            # carries none and is compared on the fields alone, as it was.
+            have = _block_digest(areas.holdout.get(name, b""))
+            if have != was.get("digest"):
+                _refuse(
+                    f"DATA: area {name!r} has the checkpoint's holdout offset, size and key "
+                    f"({now['offset']}, {now['size']}, {now['key']!r}) and another text in them: the "
+                    f"block's blake2b is {have} now and {was.get('digest')} in the checkpoint "
+                    f"(data/api.py::_block_digest). A resume whose held-out block moved compares two "
+                    f"different texts across the run boundary, and that is the one number goal B "
+                    f"rests on. The fields cannot say which source wrote the block: DATA_SOURCE=real "
+                    f"and DATA_SOURCE=synthetic at DATA_SYNTH_HOLDOUT=1 record the same three for a "
+                    f"body of the same length. This run is DATA_SOURCE={dat.source}"
+                    + (": if the parent read this area from disk, resume with DATA_SOURCE=real; if "
+                       "it was synthetic, the generator's text moved."
+                       if str(dat.source) == "synthetic" else
+                       ": if the parent was DATA_SOURCE=synthetic at DATA_SYNTH_HOLDOUT=1, resume with "
+                       "that; if it read this area from disk, the corpus under DATA_DIR changed."))
         if name in cursors:
             areas.cursors[name] = int(cursors[name])
 
@@ -1768,9 +3965,93 @@ def restore_stream_state(dat: Config, areas, state):
             areas.counters.setdefault("data.areas_added_names", []).append(name)
     if state.get("counters"):
         for k, v in state["counters"].items():
+            # data.holdout_overlap IS THIS RUN'S READING (Q-DATA-9): skipped with the resume's own
+            # statements, so the parent's reading of its own blocks never stands in for this one.
             if k not in ("data.state_restored", "data.state_refused", "data.area_added",
                          "data.area_vanished", "data.areas_added_names",
-                         "data.state_written_here"):
+                         "data.state_written_here", "data.holdout_admitted",
+                         "data.holdout_admitted_names", "data.holdout_overlap",
+                         "data.drawn_assumed"):
                 areas.counters[k] = v
     areas.counters["data.state_restored"] = areas.counters.get("data.state_restored", 0) + 1
     return areas
+
+
+def _carved_cursor(cursor, offset, size, body_len):
+    """Where a read cursor over a WHOLE body lands once [offset, offset + size) is carved out of it.
+
+    UNIT: bytes in, bytes out. An admitted area's parent read its body whole (Q-DATA-9), so its
+    DATA_SEG_CONTIG cursor indexes text that now includes a held-out block. Below the block the two
+    bodies agree byte for byte and the cursor stays; past it every byte sits `size` earlier and so
+    does the cursor; INSIDE it the cursor pointed at text this run holds out, and the next byte the
+    parent would have read that this run still trains on is the first byte after the block, which in
+    the carved body is at `offset`. Reduced mod the carved body's length, the form draw_stream stores,
+    so a block at the tail sends a cursor inside it to the head, where the whole body's read would
+    have wrapped.
+    """
+    if cursor < offset:
+        at = cursor
+    elif cursor >= offset + size:
+        at = cursor - size
+    else:
+        at = offset
+    return at % body_len if body_len > 0 else 0
+
+
+def _block_digest(block):
+    """blake2b of one area's held-out block: what the block HOLDS, which stream_state records beside
+    where it sits and restore_stream_state compares (2026-09-27, Q-DATA-9's review).
+
+    WHY THE THREE FIELDS WERE NOT ENOUGH. The offset is drawn from rng_for("data.holdout.<key>",
+    seed) over len(body) - size, and the size is a fraction of len(body), so two bodies of one length
+    under one label get the same three fields whatever they hold. Driven: a real parent over eng
+    (DATA_CORPUS_CAP=200000: offset 166367, size 10000) resumed on the synthetic source at
+    DATA_SYNTH_HOLDOUT=1 and DATA_STREAM_BYTES=400000 (a 200,000-byte generated body) drew the same
+    offset and size, and was admitted -- as an add-an-area run over py, num and c -- with English
+    held out in the checkpoint and generated text held out now. An area whose synthetic alphabet
+    moved agrees on all three the same way. Hashing the bytes compares the texts themselves.
+
+    Under its own `person`, like spine/compose.py::_stream_digest, so it cannot collide with the
+    tree's other blake2b uses. Hashing the empty block of an area that holds nothing out is harmless:
+    the admission, the one move that changes it, never reads the recorded digest.
+    """
+    return hashlib.blake2b(bytes(block), digest_size=16, person=b"data.holdout").hexdigest()
+
+
+def _alphabet_moved(name, order, names):
+    """(its position in the record, its position now) for an area whose synthetic ALPHABET moved
+    between the checkpoint's area list `order` and this run's `names`; None where it did not.
+
+    _synthetic_areas gives the area at position i the alphabet _ALPHABETS[i % 5], so two positions
+    five apart are the same alphabet and the same text, and any other move is other text -- the
+    same draws relabelled where the two alphabets are the same size, other draws where they are not.
+    Positions count from 0, as the generator's `i` does. Called on the synthetic source only: a real
+    area's text is its directory, whatever its position (2026-09-27, Q-DATA-9's review).
+    """
+    then, now = list(order).index(name), list(names).index(name)
+    return None if then % len(_ALPHABETS) == now % len(_ALPHABETS) else (then, now)
+
+
+def _synthetic_body(dat, then):
+    """(the sentence, the DATA_STREAM_BYTES) a synthetic refusal in restore_stream_state prints: this
+    run's _synthetic_length spelled out with the three levers' values, and the DATA_STREAM_BYTES that
+    generates the parent's `then` bytes at this run's DATA_N_PROCESSES and DATA_SEG_MAX -- None when
+    `then` is None, or when no value does, because the parent's length was held by another term of
+    the max (2026-09-27, Q-DATA-9's review).
+
+    WHY THE SECOND NUMBER IS WORTH PRINTING: the move an add-an-area resume makes by default --
+    DATA_N_PROCESSES up by one, DATA_STREAM_BYTES left alone -- shortens every synthetic body, and
+    the one lever that gives the parent's length back is DATA_STREAM_BYTES, raised in proportion
+    (120000 -> 150000 for a fifth area). It is CHECKED, not assumed: the value is kept only if the
+    one formula, run on it, returns `then`.
+    """
+    seg_max, stream_bytes, n = int(dat.seg_max), int(dat.stream_bytes), int(dat.n_processes)
+    text = (f"max(DATA_SEG_MAX + 1 = {seg_max + 1}, {MIN_AREA_BYTES}, DATA_STREAM_BYTES="
+            f"{stream_bytes} // DATA_N_PROCESSES={n}) x 2 = "
+            f"{_synthetic_length(seg_max, stream_bytes, n)} bytes")
+    back = None
+    if then is not None and int(then) > 0:
+        guess = (int(then) // 2) * n
+        if _synthetic_length(seg_max, guess, n) == int(then):
+            back = guess
+    return text, back

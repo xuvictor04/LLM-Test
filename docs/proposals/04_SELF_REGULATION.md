@@ -1395,6 +1395,10 @@ Stages are named SR0-SR6, to avoid colliding with 03's S-series.
     - **probe ON against probe OFF gives bit-identical training losses, parameters, optimizer state
       and every counter but `eval.*` and `tok.segment_remap`**. It runs at `EVAL_RETENTION_EVERY` 50
       over at least 500 windows, so several probes fire, with FAB and MEM on (R-8, M8);
+      *(amended 2026-09-27, `docs/04_CONTRACT.md` Q-EVAL-12: the probe's closures run the flush's
+      entry points, which count their calls, so the claim is made exact rather than wider — every
+      counter equal but the probe's own book and a named set, each moving by exactly that book's
+      count; `tests/test_probe.py` P1-P2)*
     - with `DATA_SYNTH_HOLDOUT=0` and the probe off, the run is bit-exact against HEAD;
     - holdout resume: admit 0 → n with `data.holdout_admitted` 1; refuse n → 0 and any moved block;
     - 'replay' realises each phase's planned shares within one segment, with no front-loading (the

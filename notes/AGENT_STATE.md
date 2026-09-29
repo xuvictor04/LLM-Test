@@ -1,8 +1,16 @@
 # Agent state — read this first after a session reset
 
-Updated 2026-09-28 (the retok fleet read and its review: `TOK_RETOK_EVERY` ships 1000; the file-structure reorganisation's Phase A, with Phase B after the Stage 3 merge; the cooldown fleet read and its review: 1000 and `FAB_COOLDOWN` 400 stay) on `rm-predict-DC` (the only branch pushed to; no PRs unless asked).
+Updated 2026-09-29 (the Stage 3 merge: SR0 built on `sr0-build`, reviewed and merged, its three defaults on and 04-Q5's pins carried into the new gpu_world.sh; the reorganisation's Phase B unblocked) on `rm-predict-DC` (the only branch pushed to; no PRs unless asked).
 
 ## Where things stand
+- **Stage 3 (SR0) is built, reviewed and merged** (2026-09-29; register §8 3.1-3.7, `sr0-build`'s 22
+  commits a605b59..951c7f0 merged onto b444456): the retention probe, the synthetic held-out block, the
+  observe-mode source-reliability book, the 'replay' draw, FAB.contribution, O17's position lever and
+  SR6's copy detection, each built OFF with its review; then DATA_SYNTH_HOLDOUT on, EVAL_RETENTION_EVERY
+  1000 with a read at every phase start and DATA_TRUST 'observe' (b1d31b7, the flip). 298 levers, 151
+  entry points (10 stubs, 18 deferred). A fleet that pairs with pre-flip runs pins all three (EXP=retok
+  does); EXP=world_epoch waits on O13's two WORLD levers. No GPU test is ready: E2's held-out re-read,
+  E6 and the WORLD re-run need their scripts, the re-run O13's levers too.
 - **WORLD_FEEDBACK ships False** (d97779d) on the 20k-window GPU fleet: the forecast was within
   noise (docs/04_CONTRACT.md Q-WORLD-10, results/gpu_world_2026-09-24/ANALYSIS.txt). WORLD stays enabled.
 - **GPU slowdown repaired** (4feb65f): FAB.manage's scalar merge scan was n^2/2 device syncs from
@@ -226,12 +234,26 @@ Updated 2026-09-28 (the retok fleet read and its review: `TOK_RETOK_EVERY` ships
   relative bar); the cooldown fleet kept no checkpoint and gives §8 6.1 no parent (NEW-20, O20); the
   WORLD re-run reads its time-integrated gaps from 20% of the stream on, phase 1 reported only, its
   seeds from the measured spread (note WORLD 4, §8 6.5).
+- 2026-09-29, THE STAGE 3 MERGE (`git merge --no-ff sr0-build`; its message has the detail): conflicts
+  in gpu_world.sh, tests/test_gpu_world.py, the register and the brief, both sides kept. In the new
+  gpu_world.sh the pins and the probe's disk budget are read off the fleet's code copy ($CODE_DIR),
+  EXP=world_epoch's runs pass --probe-series to $OUT/code/run.py, and PIN_RETOK is the shipped 1000
+  (PROBE_EVERY 700 still fits: 701-721 at k1000). sr0's F18/F19 are F27/F28; main's F18-F26 keep theirs.
+  DECIDED, the flip review's open item 1: a fleet that recorded no pin (launched before the flip) gets
+  the analysing checkout's pins on its resume line, and a row says whose (F27, F7);
+  results/gpu_retok_2026-09-27/CHECKPOINTS.md says so for that fleet's tars. tools/gpu_launch.sh counts
+  the probe's best saves by running the script's budget block (F28), knows PROBE_EVERY, and names
+  O13's levers for EXP=world_epoch. Fixtures: none re-recorded. Every workload reproduces on the merged
+  tree (no default-cadence workload reaches window 1000, so TOK_RETOK_EVERY's move reaches none), and
+  b444456 reproduces the six pre-SR0 records unpinned. The whole suite and --mutants pass. NEXT: Phase
+  B (docs/REORGANISATION.md), the owed items under Known low items, then Stage 4.
 0. Proposal 05 §8 orders everything: Stage 0 (owner rulings O1-O20; the fleet-archive reads; the
    k0_nuis pair; phase-traversal resizing), then Stage 1's small builds (vocab `.prev` rotation, DOM
    Levels, counters, OPT_LR_CONTINUE 'as_logged', gpu_world.sh kept checkpoints) before the owner's
-   retok fleet (Stage 2), then SR0 (Stage 3). §8 1.5 DONE (2026-09-27): `EXP=retok bash gpu_world.sh`
-   keeps k0's checkpoints at the act windows, reports rates and secondaries, and ends in a PASTE THIS
-   BACK block plus a .tgz the owner keeps; EXP=world_epoch is sized and refuses to run before SR0.
+   retok fleet (Stage 2), then SR0 (Stage 3, merged 2026-09-29), then Stage 4. §8 1.5 DONE
+   (2026-09-27): `EXP=retok bash gpu_world.sh` keeps k0's checkpoints at the act windows, reports
+   rates and secondaries, and ends in a PASTE THIS BACK block plus a .tgz the owner keeps;
+   EXP=world_epoch is sized and refuses to run before SR0.
 1. The owner rules on 03 §16, or accepts the recommendations.
 2. S1 per 03 Appendix A as amended by §0. **Step 0 is the baseline fixture (R7), before any tree edit.**
    Then derive ids/frames, Areas.media, the aud/tones generator plus DATA.recover, and media_batch.
@@ -257,15 +279,15 @@ Updated 2026-09-28 (the retok fleet read and its review: `TOK_RETOK_EVERY` ships
   by 1.95x at CAL_WINDOWS 600, so the advice does not fit it: 13 runs at PAR 12 left k0_rerun running
   alone from +590 s to +986 s. The register's row records that the raise is not taken (2026-09-28).
   Owed: an ETA priced by waves, and a FILL that fills a partial last wave.
-- OWED after the Stage 3 merge (src/ and gpu_world.sh are left alone until then). Text: the two
+- OWED, UNBLOCKED BY THE STAGE 3 MERGE (2026-09-29; the lines are the merged tree's). Text: the two
   places in src/fabric/api.py that Q-RUN-17's correction contradicts, grow_check's docstring on the
-  stall counter (:4327-4331 before the merge) and the "WINDOWS, NOT PASSES" comment above its windows
-  count (:4492-4494): .stall counts every waiting check inside a blackout, not refused asks, so a quiet
-  loss does not read 0 there (k1000 read 1,897-2,726 against 8-10 stall asks); gpu_world.sh:142's
-  "paired noise floor" (M decides nothing); the EXP=world_epoch printout (gpu_world.sh:2393-2397, "5
-  paired seeds" and the gap over the whole run) to note WORLD 4's endpoint, before SR0 lifts its
-  guard; the C13 alarm's COOLDOWN_ARM=100 advice, read null on 2026-09-28 (with
-  tests/test_gpu_world.py:484, which pins it); the block's "at PAR" when fewer runs ran, its ETA on
+  stall counter (:5278-5282) and the "WINDOWS, NOT PASSES" comment above its windows count
+  (:5443-5445): .stall counts every waiting check inside a blackout, not refused asks, so a quiet
+  loss does not read 0 there (k1000 read 1,897-2,726 against 8-10 stall asks); gpu_world.sh:156's
+  "paired noise floor" (M decides nothing); the EXP=world_epoch printout (gpu_world.sh:2500-2514, "5
+  paired seeds" and the gap over the whole run) to note WORLD 4's endpoint, before O13's build lifts
+  its guard; the C13 alarm's COOLDOWN_ARM=100 advice, read null on 2026-09-28 (with
+  tests/test_gpu_world.py:506, which pins it); the block's "at PAR" when fewer runs ran, its ETA on
   nominal windows, and "ESTIMATED" on a split the act windows give exactly. Code: a FILL guard for a
   capped seed count (until then a capped command passes FILL=0); per-area cells in analyze_retok.
 - Next hunt classes: lever isolation, efficacy vs labels, long-horizon mechanisms, SIGUSR1 saves.

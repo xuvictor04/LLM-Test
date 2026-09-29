@@ -48,18 +48,22 @@ is pinned here, on a fleet whose every number is chosen.
   F6  AN ACT ARM WITH NO ACT AT ANY SEED is NO ACT FIRED and never ships, and an incumbent that did not
       act is not read, so it stays; with no k0_nuis, M is not formed and still decides nothing, the
       DECISION reads, and the block is written.
-  F7  THE KEPT-CHECKPOINT INDEX, on torch-saved stand-ins: a copy is named for the step it holds and
-      is coherent when its merge count equals its vocabulary's entries, INCOHERENT otherwise; the run's
+  F7  THE KEPT-CHECKPOINT INDEX, on torch-saved stand-ins: a copy is named for the step it holds and is
+      coherent when its merge count equals its vocabulary's entries, INCOHERENT otherwise; the run's
       final save is dropped; the act windows it covers are counted off the act arms' logs; the resume
-      line carries the run's seed, device and stream. A keep directory stamped by another launch is
-      refused, with nothing indexed and nothing dropped, and the block says so. With no ckpt/ (an
-      unpacked archive), KEPT.txt is kept and read, and whether the fleet kept any is SUMMARY's to say:
-      ON with no KEPT.txt is "none here", never "KEEP_CKPT off" (the review of 88d3fae: --analyze of an
-      archive deleted its KEPT.txt, said "off", and repacked the archive without it).
+      line carries the run's seed, device and stream, and, the fleet having recorded no pin, the pins
+      this checkout declares (F27). A keep directory stamped by another launch is refused, with nothing
+      indexed and nothing dropped, and the block says so. With no ckpt/ (an unpacked archive), KEPT.txt
+      is kept and read, and whether the fleet kept any is SUMMARY's to say: ON with no KEPT.txt is "none
+      here", never "KEEP_CKPT off" (the review of 88d3fae: --analyze of an archive deleted its KEPT.txt,
+      said "off", and repacked the archive without it).
   F8  THE WHOLE-EPOCH FLAGS: under EXP=world_epoch a run that read its epoch is not "RAN OUT OF
       STREAM" and one that hit the cap is "STOPPED AT THE WINDOW CAP"; EXP=world flags as it did.
   F9  THE REFUSALS: EXP=world_epoch without GO_WORLD_EPOCH=1 exits 2 having written nothing and prints
-      its sizing and pins; an unknown EXP and an unusable cadence are refused by name.
+      its sizing and pins -- since SR0's build (2026-09-29) DATA_SYNTH_HOLDOUT=1 and EVAL_RETENTION_EVERY
+      at 04-6.2's cap beside TOK_RETOK_EVERY and DATA_DRAW -- and a guard that waits on O13's two WORLD
+      levers for its five arms, saying which this tree declares; an unknown EXP, an unusable cadence and
+      an unusable PROBE_EVERY are refused by name.
   F10 A LAUNCH, WITH run.py STOOD IN: EXP=world with KEEP_CKPT off puts no CKPT_ variable and no
       --flush-bytes on any run and ends in the block and the archive; EXP=retok's default arms the
       k0 family's periodic saves and the act arms' final one, and a smoke whose k0 kept no copy stops
@@ -159,6 +163,21 @@ is pinned here, on a fleet whose every number is chosen.
       and resume lines, which need the checkpoints and give way to one line naming KEPT.txt as the
       source; KEPT.txt stays as it was and the repacked archive holds it; at the default incumbent the
       same runs read "stays 1000"; and the committed archive is never touched.
+  F27 04-Q5's PINS ON EVERY RETOK RUN (2026-09-29, the flip of DATA_SYNTH_HOLDOUT, EVAL_RETENTION_EVERY
+      and DATA_TRUST; F18 on sr0-build): every run an EXP=retok launch makes carries DATA_SYNTH_HOLDOUT=0
+      EVAL_RETENTION_EVERY=0 DATA_TRUST=off, SUMMARY.txt and the block record them, the resume line
+      carries them after EXTRA, and EXP=world carries none; on a tree that declares none of the three
+      levers, and on one that declares DATA_SYNTH_HOLDOUT alone, each run carries exactly the pins whose
+      lever the tree declares. A fleet that recorded no pin (launched before the flip, as the 2026-09-27
+      retok fleet was), read by --analyze, gets the pins the reading tree declares on its resume line,
+      and a row in ANALYSIS.txt says whose they are (the Stage 3 merge's decision on the flip's open item).
+  F28 THE PROBE'S BEST SAVES ARE IN THE DISK BUDGET (2026-09-29, the flip's review; F19 on sr0-build):
+      wherever a run's probe is armed ckpt_files counts ckpt.pt.best and .best.prev beside its other
+      files, 2 + 2N at CKPT_BEST_KEEP=N -- at EXP=world (the shipped 1000) and EXP=world_epoch (its pin),
+      never at EXP=retok (its pins) or at EVAL_RETENTION_EVERY=0, nor on a tree whose default is 0 or that
+      declares no probe; the settings read in run_job's order, off the fleet's code. An EXP=world launch
+      at KEEP_CKPT=1 budgets 3 files a run and its banner names them, and tools/gpu_launch.sh's disk
+      check, which runs the same block, counts them too.
 """
 import glob
 import json
@@ -223,6 +242,9 @@ def block_of(stdout):
 
 # ---- a synthetic fleet --------------------------------------------------------------------------
 NEW13 = ("fab.blackout_windows", "tok.mint_wait_windows", "loop.act_seconds", "tok.bpt_tail")
+# 04-Q5's PINS AS EXP=retok SETS THEM ON A TREE THAT DECLARES ALL THREE LEVERS (2026-09-29), in the order the
+# script appends them; the resume line carries them after EXTRA, as run_job does (F10, F27).
+PINS27 = "DATA_SYNTH_HOLDOUT=0 EVAL_RETENTION_EVERY=0 DATA_TRUST=off"
 
 
 def summary(out, *, exp="retok", seeds="0 1 2", windows=20000, stream=3780000, extra="", dirty=False,
@@ -701,9 +723,12 @@ try:
     check("F7 the kept files are read-only", not (os.stat(os.path.join(kd, "k0.s0.w1001", "ckpt.pt")).st_mode & 0o222))
     # THE RESUME LINE IS THE RUN'S OWN (build 1.5's review): run_job sets RUN_SEED, RUN_DEVICE and
     # DATA_STREAM_BYTES on every run and EXTRA carries none of them; without them the resume is refused.
+    # This fleet's SUMMARY records no pin, so the line also carries the three this checkout declares (the
+    # Stage 3 merge; F27).
     _res = (f"CKPT_RESUME={kd}/k0.s0.w1001 CKPT_DIR=<NEW dir> OMP_NUM_THREADS=1 RUN_SEED=0 RUN_DEVICE=cuda "
-            f"DATA_STREAM_BYTES=3780000 TOK_RETOK_EVERY=0 python3 run.py")
-    check("F7 the resume line names the run's seed, device and stream, in ANALYSIS and in the block",
+            f"DATA_STREAM_BYTES=3780000 TOK_RETOK_EVERY=0 {PINS27} python3 run.py")
+    check("F7 the resume line names the run's seed, device and stream, and this checkout's pins, in ANALYSIS and in "
+          "the block",
           f"resume one: {_res} -- a NEW CKPT_DIR, never a kept copy" in a7
           and f"  resume one: {_res}" in open(os.path.join(o7, "PASTE_BACK.txt")).read(),
           str([l for l in a7.splitlines() if "resume one" in l]))
@@ -809,10 +834,20 @@ try:
     # THE PIN IS THE SHIPPED CADENCE (S0b-ship: every dependent experiment pins and labels it): 1000 since
     # the 2026-09-27 retok fleet's DECISION (register O14), 3000 before it.
     check("F9 ... having printed its sizing: one whole WINDOWS x 189-byte epoch, the cap at 3 x WINDOWS, "
-          "CAL_WINDOWS 600, and the TOK_RETOK_EVERY pin at the shipped 1000",
+          "CAL_WINDOWS 600, and the pins -- TOK_RETOK_EVERY at the shipped 1000 and DATA_DRAW, and since SR0 "
+          "(2026-09-29) its held-out block on and the probe at 04-6.2's cap, 700",
           "DATA_STREAM_BYTES=3780000" in p9.stdout and "window cap 60000" in p9.stdout
           and "CAL_WINDOWS 600" in p9.stdout and "TOK_RETOK_EVERY=1000 pinned" in p9.stdout
-          and "DATA_DRAW=planned pinned" in p9.stdout)
+          and "DATA_DRAW=planned pinned" in p9.stdout and "DATA_SYNTH_HOLDOUT=1 pinned" in p9.stdout
+          and "EVAL_RETENTION_EVERY=700 pinned" in p9.stdout)
+    check("F9 ... and the guard waits on O13's two WORLD levers, not SR0: five arms, detached among them, "
+          "and which of the two this tree declares (neither, today)",
+          "All five arms -- fb_off, fb_on, skip, world_off and detached" in p9.stdout
+          and "WORLD_FORECAST_BOUND not declared, WORLD_INPUT_GRAD not declared" in p9.stdout
+          and "after SR0" not in p9.stdout and "(before SR0" not in p9.stdout, p9.stdout[-900:])
+    p9e = gw(EXP="world_epoch", PROBE_EVERY="7x", OUT=os.path.join(TMP, "f9e"))
+    check("F9 a PROBE_EVERY that is not a positive window count is refused by name, before anything is written",
+          p9e.returncode == 2 and "PROBE_EVERY='7x'" in p9e.stdout and not os.path.exists(os.path.join(TMP, "f9e")))
     p9b = gw(EXP="wrold", OUT=os.path.join(TMP, "f9b"))
     check("F9 an unknown EXP is refused by name, before anything is written",
           p9b.returncode == 2 and "EXP='wrold'" in p9b.stdout and not os.path.exists(os.path.join(TMP, "f9b")))
@@ -856,7 +891,9 @@ if os.environ.get("STUB_BOOK"):
         fh.write(json.dumps({"tag": tag, "argv": a, "ckpt": {k: v for k, v in os.environ.items() if k.startswith("CKPT_")},
                              "retok": os.environ.get("TOK_RETOK_EVERY"), "cooldown": os.environ.get("FAB_COOLDOWN"),
                              "runpy": os.environ.get("STUB_RUNPY", ""),
-                             "unbuffered": os.environ.get("PYTHONUNBUFFERED", "")}) + "\n")
+                             "unbuffered": os.environ.get("PYTHONUNBUFFERED", ""),
+                             "pins": {k: os.environ.get(k) for k in ("DATA_SYNTH_HOLDOUT", "EVAL_RETENTION_EVERY",
+                                                                      "DATA_TRUST")}}) + "\n")
 time.sleep(float(os.environ.get("STUB_STARTUP", "0")))
 print(f"=== device={os.environ.get('RUN_DEVICE', 'cpu')} amp=off")
 print(f"=== composed: stage=assembled, 0 refusal(s), 0 warning(s); startup took {time.time() - t0:.1f} s (imports and "
@@ -900,6 +937,12 @@ if os.environ.get("STUB_SAVES") == "1" and os.environ.get("CKPT_DIR") and int(os
             json.dump({"entries": [[0, 1]] * (256 + i)}, fh)
         rot(ck + ".dyntok.json", ck + ".prev.dyntok.json")
         time.sleep(float(os.environ.get("STUB_SAVE_SLEEP", "0")))
+# STUB_FINAL_BYTES=n: A RUN WITH A CKPT_DIR LEAVES ONE FINAL CHECKPOINT n BYTES LONG -- sparse, so it takes
+# no disk -- and the smoke's largest checkpoint, which the fleet's disk check sizes every file at, is n.
+if os.environ.get("STUB_FINAL_BYTES") and os.environ.get("CKPT_DIR"):
+    os.makedirs(os.environ["CKPT_DIR"], exist_ok=True)
+    with open(os.path.join(os.environ["CKPT_DIR"], "ckpt.pt"), "wb") as fh:
+        fh.truncate(int(os.environ["STUB_FINAL_BYTES"]))
 ''')
     o10 = os.path.join(TMP, "f10", "gpu_world_out")
     book = os.path.join(TMP, "f10_book.jsonl")
@@ -971,11 +1014,12 @@ if os.environ.get("STUB_SAVES") == "1" and os.environ.get("CKPT_DIR") and int(os
           and not glob.glob(os.path.join(kd10, "*.save[0-9]*")) and not glob.glob(os.path.join(kd10, "*.w50*")),
           f"rc {p10c.returncode}; {kept10.count(' coherent ')} coherent; {p10c.stderr[-300:]!r}")
     b10c = "\n".join(block_of(p10c.stdout) or [])
-    check("F10 ... the block counts them, its resume line carries RUN_SEED, RUN_DEVICE and the stream "
-          "(20 x 189 bytes), the keep directory is stamped with the launch, and SUMMARY records the tree",
+    check("F10 ... the block counts them, its resume line carries RUN_SEED, RUN_DEVICE, the stream "
+          "(20 x 189 bytes) and the fleet's pins, the keep directory is stamped with the launch, and SUMMARY "
+          "records the tree",
           "KEPT: 8 copies of 2 k0 run(s), all coherent" in b10c
           and f"resume one: CKPT_RESUME={kd10}/k0.s0.w11 CKPT_DIR=<NEW dir> OMP_NUM_THREADS=1 RUN_SEED=0 "
-              f"RUN_DEVICE=cpu DATA_STREAM_BYTES=3780 TOK_RETOK_EVERY=0 python3 run.py" in b10c
+              f"RUN_DEVICE=cpu DATA_STREAM_BYTES=3780 TOK_RETOK_EVERY=0 {PINS27} python3 run.py" in b10c
           and launch1 and open(os.path.join(kd10, ".fleet")).read().strip() == launch1
           and "=== §8 1.3 in this tree: counters fab.blackout_windows tok.mint_wait_windows loop.act_seconds "
               "tok.bpt_tail; run.py --flush-bytes yes" in s10,
@@ -2538,6 +2582,177 @@ for _ in range(100):
     check("F24 ... and the launcher's KNOBS name every knob gpu_world.sh and the launcher read with a default "
           "(CTX and CKPT_BYTES are the script's own, assigned before they are read)",
           len(read24) > 20 and read24 <= knobs24, str(sorted(read24 - knobs24)))
+
+    # ---- F27: 04-Q5's pins on every retok run and on its resume line (2026-09-29; F18 on sr0-build) -------
+    # EXP=retok's arms and nuisance margin pair with runs made before SR0's defaults flipped, so the launch
+    # sets DATA_SYNTH_HOLDOUT=0 EVAL_RETENTION_EVERY=0 DATA_TRUST=off on every run it makes -- each only
+    # where the tree declares its lever, so a checkout from before a flip gets no UNREAD name -- SUMMARY.txt
+    # and the block record the pins that ran, and the resume line carries them. F10's launches are read
+    # first; then the script, copied into a tree that declares none of the three and one that declares
+    # DATA_SYNTH_HOLDOUT alone (C1's), launches EXP=retok with the stand-in. SINCE THE FLEET LAYER
+    # (2026-09-27) A LAUNCH COPIES run.py AND THE DASHBOARD INTO $OUT/code, so each stand-in tree carries
+    # both: the dashboard itself, and a run.py the stand-in python answers for and never runs.
+    want27 = dict(p.split("=") for p in PINS27.split())
+    none27 = {k: None for k in want27}
+    rc27 = [json.loads(l) for l in open(os.path.join(TMP, "f10c_book.jsonl"))] \
+        if os.path.exists(os.path.join(TMP, "f10c_book.jsonl")) else []
+    rw27 = [json.loads(l) for l in open(book)] if os.path.exists(book) else []
+    a27 = txt(os.path.join(aside, "ANALYSIS.txt"))
+    check("F27 every run of an EXP=retok launch -- smoke, fleet and rerun, both seeds -- carries the three pins, "
+          "SUMMARY.txt's pins line and the block's shape line record them, and EXP=world carries none",
+          len(rc27) >= 9 and all(r["pins"] == want27 for r in rc27)
+          and {r["tag"] for r in rc27} >= {"k0.s0", "k0.s1", "k10.s0", "k20.s1", "k0_nuis.s1", "k0_rerun.s0"}
+          and "=== pins: DATA_SYNTH_HOLDOUT=0 pinned, EVAL_RETENTION_EVERY=0 pinned, DATA_TRUST=off pinned" in s10
+          and "; pins DATA_SYNTH_HOLDOUT=0 pinned, EVAL_RETENTION_EVERY=0 pinned, DATA_TRUST=off pinned" in b10c
+          and len(rw27) == 9 and all(r["pins"] == none27 for r in rw27),
+          f"{len(rc27)} retok run(s), pins {sorted({json.dumps(r['pins']) for r in rc27})[:2]}; "
+          f"{len(rw27)} world run(s), pins {sorted({json.dumps(r['pins']) for r in rw27})[:2]}")
+    check("F27 ... and ANALYSIS.txt's resume line carries them after EXTRA, as run_job sets them, with no row "
+          "naming a pin the fleet did not record",
+          f"TOK_RETOK_EVERY=0 {PINS27} python3 run.py -- a NEW CKPT_DIR, never a kept copy" in a27
+          and "this checkout's pins" not in a27,
+          str([l for l in a27.splitlines() if "resume one" in l]))
+
+    def tree27(tag, data, ev):
+        """A stand-in checkout: src/'s two lever files as given, this gpu_world.sh, the dashboard, a run.py."""
+        t = os.path.join(TMP, "f27", tag)
+        shutil.rmtree(t, ignore_errors=True)
+        write(os.path.join(t, "src", "data", "levers.py"), data)
+        write(os.path.join(t, "src", "eval", "levers.py"), ev)
+        write(os.path.join(t, "run.py"), "raise SystemExit('the stand-in python answers for this file')\n")
+        os.makedirs(os.path.join(t, "tools"))
+        shutil.copy2(SCRIPT, os.path.join(t, "gpu_world.sh"))
+        shutil.copy2(DASH, os.path.join(t, "tools"))
+        return t
+
+    ev27 = "    curve_every = Lever(\n        2000, 'x', U.Windows)\n"
+    alone27 = ("    resample = Lever(False, 'x', U.FLAG)\n    synth_holdout = Lever(False, 'x', U.FLAG)\n"
+               "    trust_rule = Lever('claims', 'x', U.NAME)\n")
+    for tag27, data27, pins_want, line_want in (
+            ("declares none of the three", "    resample = Lever(False, 'x', U.FLAG)\n", none27, "=== pins: none"),
+            ("declares DATA_SYNTH_HOLDOUT alone (C1's)", alone27, dict(none27, DATA_SYNTH_HOLDOUT="0"),
+             "=== pins: DATA_SYNTH_HOLDOUT=0 pinned")):
+        t27 = tree27(tag27.split()[1], data27, ev27)
+        b27 = os.path.join(t27, "book.jsonl")
+        o27 = os.path.join(t27, "gpu_retok_out")
+        p27 = subprocess.run(["bash", os.path.join(t27, "gpu_world.sh")], cwd=t27, capture_output=True, text=True,
+                             timeout=300, env=clean_env(PATH=env10["PATH"], STUB_BOOK=b27, EXP="retok",
+                                                        KEEP_CKPT=0, DEVICE="cpu", WINDOWS=20, SEEDS="0", PAR=1,
+                                                        SMOKE_WINDOWS=5, OUT=o27))
+        r27 = [json.loads(l) for l in open(b27)] if os.path.exists(b27) else []
+        s27 = txt(os.path.join(o27, "SUMMARY.txt"))
+        check(f"F27 a tree that {tag27}: every retok run carries exactly the pins whose lever it declares, and "
+              f"SUMMARY.txt says so ('{line_want}')",
+              p27.returncode == 0 and len(r27) == 9 and all(r["pins"] == pins_want for r in r27)
+              and line_want + "\n" in s27,
+              f"rc {p27.returncode}; {len(r27)} run(s); {sorted({json.dumps(r['pins']) for r in r27})[:2]}; "
+              f"{[l for l in s27.splitlines() if l.startswith('=== pins')]}; {p27.stdout[-300:]!r}")
+
+    # A FLEET THAT RECORDED NO PIN, READ HERE (the flip's open item, decided at the Stage 3 merge). A fleet
+    # launched before the flip -- the 2026-09-27 retok fleet -- recorded "=== pins: none": its runs had
+    # the three features off. --analyze gives its resume line the pins the reading tree declares, after
+    # EXTRA, in ANALYSIS.txt and the block, and a row says whose they are; the block's shape line still
+    # records no pin, since none ran. Read on this checkout (all three) and on the stand-in tree declaring
+    # DATA_SYNTH_HOLDOUT alone (that one), each on its own copy of F10's first fleet.
+    for tag27, sh27, pins27 in (("this checkout", SCRIPT, PINS27),
+                                ("the tree declaring DATA_SYNTH_HOLDOUT alone",
+                                 os.path.join(TMP, "f27", "DATA_SYNTH_HOLDOUT", "gpu_world.sh"), "DATA_SYNTH_HOLDOUT=0")):
+        pre27 = os.path.join(TMP, "f27", "pre" + str(len(pins27)), "gpu_retok_out")
+        shutil.copytree(aside, pre27, symlinks=True)
+        with open(os.path.join(pre27, "SUMMARY.txt"), "w") as fh:
+            fh.write(re.sub(r"^=== pins: .*$", "=== pins: none", txt(os.path.join(aside, "SUMMARY.txt")), flags=re.M))
+        ap27 = subprocess.run(["bash", sh27, "--analyze"], cwd=os.path.dirname(sh27), capture_output=True, text=True,
+                              timeout=300, env=clean_env(PATH=env10["PATH"], EXP="retok", OUT=pre27))
+        A27 = txt(os.path.join(pre27, "ANALYSIS.txt"))
+        B27 = "\n".join(block_of(ap27.stdout) or [])
+        check(f"F27 a fleet that recorded no pin, read by {tag27}: its resume line carries {pins27} after EXTRA, "
+              f"in ANALYSIS.txt and the block, a row names them as the checkout's, and the shape line claims none",
+              ap27.returncode == 0
+              and f"TOK_RETOK_EVERY=0 {pins27} python3 run.py -- a NEW CKPT_DIR, never a kept copy" in A27
+              and f"(its {pins27} are this checkout's pins, which SUMMARY.txt does not record" in A27
+              and f"TOK_RETOK_EVERY=0 {pins27} python3 run.py" in B27 and "; pins " not in B27,
+              f"rc {ap27.returncode}; {[l for l in A27.splitlines() if 'resume one' in l or 'pins' in l]}; "
+              f"{ap27.stderr[-300:]!r}")
+
+    # ---- F28: the probe's best saves in the disk budget (2026-09-29, the flip's review; F19 on sr0-build) ---
+    # With CKPT_DIR set an armed retention probe writes ckpt.pt.best and ckpt.pt.best.prev (and
+    # CKPT_BEST_KEEP's slots, each with its .prev) beside the ring, and ckpt_files counted the final save
+    # alone. The budget block, cut out of the script by its markers, is run in this tree and in two
+    # stand-in trees -- one whose EVAL_RETENTION_EVERY defaults to 0 (before 04-6.2's flip) and one
+    # declaring none (before SR0) -- over each experiment's pins as the script sets them, with CODE_DIR
+    # the tree (the fleet's code, which the block reads as LEVELS is read).
+    _blk28 = re.search(r"^# >>> THE BEST SAVES' BUDGET.*?^# <<< THE BEST SAVES' BUDGET$", open(SCRIPT).read(),
+                       re.M | re.S)
+    _pins28 = {"world": "", "retok": PINS27,
+               "world_epoch": "TOK_RETOK_EVERY=1000 DATA_DRAW=planned DATA_SYNTH_HOLDOUT=1 EVAL_RETENTION_EVERY=700"}
+    t28 = os.path.join(TMP, "f28")
+    for _d28, _ev28 in (("preflip", "    retention_every = Lever(\n        0, 'x', U.Windows)\n"),
+                        ("presr0", "    curve_every = Lever(\n        2000, 'x', U.Windows)\n")):
+        write(os.path.join(t28, _d28, "src", "eval", "levers.py"), _ev28)
+        write(os.path.join(t28, _d28, "src", "ckpt", "levers.py"), "    best_keep = Lever(0, 'x', U.COUNT)\n")
+
+    def budget28(tree, exp, extra="", **env):
+        """[BEST_FILES, ckpt_files fb_off, k0, k0_nuis] at WINDOWS 20000, KEEP_EVERY 1000."""
+        prog = (f'EXP={exp}; EXTRA="{extra}"; EXP_ENV="{_pins28[exp]}"; WINDOWS=20000; KEEP_EVERY=1000; '
+                f'CODE_DIR="{tree}"\n'
+                + (_blk28.group(0) if _blk28 else "BEST_FILES=?")
+                + '\necho "$BEST_FILES $(ckpt_files fb_off) $(ckpt_files k0) $(ckpt_files k0_nuis)"\n')
+        p = subprocess.run(["bash", "-c", prog], cwd=TMP, env=clean_env(**env), capture_output=True, text=True,
+                           timeout=60)
+        return [int(x) if x.isdigit() else x for x in p.stdout.split()]
+
+    _pf, _ps = os.path.join(t28, "preflip"), os.path.join(t28, "presr0")
+    got28 = {"world": budget28(ROOT, "world"), "world_epoch": budget28(ROOT, "world_epoch"),
+             "retok": budget28(ROOT, "retok"),
+             "EXTRA 0": budget28(ROOT, "world", "EVAL_RETENTION_EVERY=0"),
+             "env 0": budget28(ROOT, "world", EVAL_RETENTION_EVERY="0"),
+             "env keep 2": budget28(ROOT, "world", CKPT_BEST_KEEP="2"),
+             "EXTRA keep 3 over env 1": budget28(ROOT, "world", "CKPT_BEST_KEEP=3", CKPT_BEST_KEEP="1"),
+             "world_epoch pin over EXTRA 0": budget28(ROOT, "world_epoch", "EVAL_RETENTION_EVERY=0"),
+             "preflip world": budget28(_pf, "world"), "preflip world_epoch": budget28(_pf, "world_epoch"),
+             "presr0 world_epoch": budget28(_ps, "world_epoch")}
+    want28 = {"world": [2, 3, 26, 4], "world_epoch": [2, 3, 26, 4], "retok": [0, 1, 24, 2],
+              "EXTRA 0": [0, 1, 24, 2], "env 0": [0, 1, 24, 2], "env keep 2": [6, 7, 30, 8],
+              "EXTRA keep 3 over env 1": [8, 9, 32, 10], "world_epoch pin over EXTRA 0": [2, 3, 26, 4],
+              "preflip world": [0, 1, 24, 2], "preflip world_epoch": [2, 3, 26, 4],
+              "presr0 world_epoch": [0, 1, 24, 2]}
+    check("F28 ckpt_files counts the probe's best saves where a run's probe is armed: 2 more at EXP=world (the "
+          "shipped 1000) and EXP=world_epoch (its pinned 700), 2 + 2N at CKPT_BEST_KEEP=N (EXTRA over the "
+          "environment), none at EXP=retok, at EVAL_RETENTION_EVERY=0 from EXTRA or the environment, on a tree "
+          "whose default is 0 or that declares no probe -- and a pin beats EXTRA, as run_job's order does",
+          got28 == want28, str({k: v for k, v in got28.items() if v != want28.get(k)}))
+    # AND THE LAUNCH SAYS SO: EXP=world at KEEP_CKPT=1, the stand-in leaving a 10 MB final checkpoint --
+    # 5 runs x 3 files x 2 x 10 MB is 0.3 GB, where the final save alone was 0.1 -- and the banner names
+    # the best saves.
+    o28 = os.path.join(TMP, "f28", "gpu_world_out")
+    p28 = subprocess.run(["bash", SCRIPT], cwd=ROOT, capture_output=True, text=True, timeout=300,
+                         env=clean_env(PATH=env10["PATH"], STUB_BOOK=os.path.join(TMP, "f28_book.jsonl"),
+                                       STUB_FINAL_BYTES="10000000", KEEP_CKPT=1, DEVICE="cpu", WINDOWS=20,
+                                       SEEDS="0", PAR=1, SMOKE_WINDOWS=5, OUT=o28))
+    s28 = txt(os.path.join(o28, "SUMMARY.txt"))
+    check("F28 an EXP=world launch at KEEP_CKPT=1 budgets 3 checkpoint files a run -- 0.3 GB for its 5 runs at the "
+          "smoke's 10 MB -- and its banner names the probe's best saves beside the final one",
+          p28.returncode == 0
+          and "=== disk: checkpoints may take about 0.3 GB (10 MB x 2 per file)" in s28
+          and "=== kept checkpoints: ON, one final checkpoint per run under " in s28
+          and "the retention probe's best saves (ckpt.pt.best and .best.prev): up to 3 checkpoint files per run" in s28,
+          f"rc {p28.returncode}; {[l for l in s28.splitlines() if 'disk' in l or 'kept checkpoints' in l]}; "
+          f"{p28.stderr[-300:]!r}")
+    # AND THE LAUNCHER'S DISK CHECK COUNTS THE SAME FILES (the Stage 3 merge: tools/gpu_launch.sh, written before
+    # the probe, counted one final save a run): it runs the script's budget block with the launch's settings.
+    # EXP=world at one seed and CKPT_MB=10 is 5 runs x 3 files x 2 x 10 MB, 0.3 GB; at EVAL_RETENTION_EVERY=0
+    # in EXTRA 5 files, 0.1 GB; EXP=world_epoch's pin arms the probe over the same EXTRA.
+    def disk28(exp, extra=""):
+        p = subprocess.run(["bash", LAUNCHER], cwd=TMP, capture_output=True, text=True, timeout=300,
+                           env=clean_env(PATH=env10["PATH"], EXP=exp, DEVICE="cpu", SEEDS="0", KEEP_CKPT=1,
+                                         CKPT_MB=10, EXTRA=extra, FETCH=0, OUT=os.path.join(TMP, "f28l", exp)))
+        m = re.search(r"the kept checkpoints may need ([\d.]+) GB", p.stdout)
+        return m.group(1) if m else p.stdout[-300:]
+
+    got28l = [disk28("world"), disk28("world", "EVAL_RETENTION_EVERY=0"), disk28("world_epoch", "EVAL_RETENTION_EVERY=0")]
+    check("F28 the launcher's disk check counts the probe's best saves as the script does: 0.3 GB for EXP=world's 5 "
+          "runs at 10 MB, 0.1 GB at EVAL_RETENTION_EVERY=0, and 0.3 GB at EXP=world_epoch, whose pin arms the probe",
+          got28l == ["0.3", "0.1", "0.3"], str(got28l))
 finally:
     # NOTHING THESE CHECKS STARTED OUTLIVES THEM: a process carrying a GW_FLEET_OUT under TMP (a fleet, its
     # runs, its heartbeat) or naming TMP on its command line (a stand-in run, a dashboard) is killed.

@@ -29,20 +29,23 @@ here was never asked, and no counter in any report can say so on its own.
 
 | lever | what it turns off |
 |---|---|
+| `DATA_REHEARSE_PARENT` | At DATA_DRAW=replay, count the areas the resumed lineage drew and this schedule makes live in no phase as faded from window 0, so the draw rehearses them; no effect under 'planned' or 'uniform'. |
 | `DATA_RESAMPLE` | Redraw a fresh stream from the areas at the start of every epoch instead of replaying the same bytes. |
 | `DATA_SEG_CONTIG` | Read each area in order instead of seeking to a random offset every segment, so the only boundaries left are the text's own. |
+| `FAB_CONTRIB` | Measure past-grace experts' marginal contribution on each management pass: the held-out loss without the expert minus the loss with it, folded into Population.contrib at FAB_COMP_EMA. |
 | `FAB_GROW_ON_MEM_PRESSURE` | Let the memory-pressure signal make fabric growth eligible, instead of only being printed. |
 | `FAB_LR_OWN` | Put each expert on its own cyclical learning-rate schedule, clocked from its own use count. |
 | `FAB_NORM_ONLY` | Control arm: keep the fabric's normalization, remove nodes and routing from the forward pass. |
 | `FAB_SOCIETY` | One hop with experts blended at the PREDICTION level, instead of multi-hop chaining through Fabric.forward. |
 | `LM_COMPOSE` | Build each token's vector from its bytes plus a learned residual, instead of storing a free row per token. |
+| `LM_CTX_WIDEN` | Admit a larger LM_CTX than the checkpoint's at an epoch-boundary resume: the learned position table keeps the parent's rows and the appended ones keep this build's initial values. |
 | `LM_MASK_DEAD_ROWS` | Take never-minted and retired vocabulary rows out of the distribution wherever logits become one. |
 | `MEM_WRONG_SWEEP` | Whether the selected wrongness detector DELETES flagged entries or only flags them. |
 | `RUN_BENCH` | Stop immediately after the training loop and print throughput instead of running the eval battery. |
 | `RUN_PROFILE` | Per-component wall-clock attribution of the training step, rendered at the end of the run and in the throughput summary. |
 | `WORLD_FEEDBACK` | Condition the base LM on the forecast (h += world_proj(forecast)) instead of leaving the world model as an unused side head. |
 
-12 levers ship False.
+15 levers ship False.
 
 **Numeric levers that ship 0.** Zero is this tree's documented OFF sentinel in most of these places
 and a legitimate value in some, so the help text is quoted rather than summarised. `spine/lever.py`
@@ -58,6 +61,7 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `CKPT_BEST_KEEP` | count | How many recent local lows in held-out bits/byte to retain as rotating .best1..bestN checkpoints, on top of the single global .best. |
 | `CKPT_EVERY` | Windows | How often a mid-run checkpoint is written, in windows elapsed since the last one; 0 disables periodic saving, leaving the final save and SIGUSR1. |
 | `DATA_PHASE_LIVE` | count | How many areas are live in each phase of the GENERATED schedule; 0 derives it from the area count. |
+| `DATA_REPLAY_NEWEST` | fraction 0..1 | Share of each faded phase's bytes the 'replay' draw gives the newest-arrived live area, the other live areas splitting what is left evenly; 0 is off. Read only at DATA_DRAW=replay. |
 | `FAB_EC_W` | fraction 0..1 | Expert-choice deficit bonus: nudge routing toward experts under their share, by construction rather than by a loss. |
 | `FAB_HOP_SUP` | fraction 0..1 | Weight on per-hop deep supervision: a cross-entropy at every hop, not only at the end of the walk. |
 | `FAB_RESCUE` | fraction 0..1 | Give an expert about to be culled one heavy mutation and a reset use-clock instead of deleting it. |
@@ -78,13 +82,13 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `TOK_MINT_PMIN` | probability | Minimum p(b\|a) for a merge to be accepted as a unit rather than a frequent collision across a boundary; 0 mints on frequency alone. |
 | `TOK_PROBATION_USES` | count | How many appearances a newly minted token must earn before it keeps its place in the match table; below it the merge is undone. |
 
-24 numeric levers ship 0.
+25 numeric levers ship 0.
 
 ---
 
 ## 2. Every lever, by package
 
-268 levers across 13 packages.
+298 levers across 13 packages.
 
 
 ### CAP (7 levers)
@@ -109,14 +113,14 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `CKPT_EVERY` | `0` | Windows |  | How often a mid-run checkpoint is written, in windows elapsed since the last one; 0 disables periodic saving, leaving the final save and SIGUSR1. |
 | `CKPT_RESUME` | `''` | path |  | Checkpoint to continue training from -- a run directory or a .pt file; empty starts from scratch. |
 
-### DATA (18 levers)
+### DATA (40 levers)
 
 | lever | default | unit | accepts | what it is |
 |---|---|---|---|---|
 | `DATA_AREAS` | `'eng,py,num,c'` | name |  | The corpora to stream, in order; their names label every per-area score in the report and across the run boundary. |
 | `DATA_CORPUS_CAP` | `2000000` | bytes |  | Bytes read from disk per area before any holdout split or stream draw; the ceiling on how much of a corpus this run can see. |
 | `DATA_DIR` | `'data'` | path |  | Root of the corpus tree; an area with no '/' is read from DATA_DIR/train/<area>/*, and an area containing '/' is joined under DATA_DIR verbatim (DATA_AREAS="eng,continual/01_rust"). |
-| `DATA_DRAW` | `'planned'` | name | choices `'planned'`, `'uniform'` | How a phase's bytes are allocated across its live areas: 'planned' gives each area its scheduled share and randomises only the order and the offsets; 'uniform' picks an area independently per segment. |
+| `DATA_DRAW` | `'planned'` | name | choices `'planned'`, `'uniform'`, `'replay'` | How a phase's bytes are allocated across its areas: 'planned' gives each live area its scheduled share, 'uniform' picks an area per segment, and 'replay' also gives each faded area a fixed share. |
 | `DATA_EXPOSURE_MAX` | `2.0` | count |  | Whole-run repetition multiple (bytes drawn x epochs / bytes on disk) above which the data plan is flagged before training starts. |
 | `DATA_EXPOSURE_SKEW` | `3.0` | count |  | Max/min exposure ratio across areas above which the data plan is flagged as imbalanced. |
 | `DATA_HOLDOUT_FRAC` | `0.05` | fraction 0..1 | domain (0.0, 1.0) | Fraction of each area held out and never sampled into the training stream. |
@@ -124,12 +128,34 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `DATA_PHASE_LIVE` | `0` | count |  | How many areas are live in each phase of the GENERATED schedule; 0 derives it from the area count. |
 | `DATA_PHASE_SCHED` | `''` | name |  | Explicit phase schedule, pipe-separated phases of comma-separated area indices OR area names ("0\|0,1\|0,1\|1", "eng\|eng\|rust\|rust"); empty generates a rehearsed sliding window from `phases` and... |
 | `DATA_PHASES` | `4` | count |  | How many phases the generated sliding-window schedule has, when no explicit schedule is given. |
+| `DATA_REHEARSE_PARENT` | `False` | on/off |  | At DATA_DRAW=replay, count the areas the resumed lineage drew and this schedule makes live in no phase as faded from window 0, so the draw rehearses them; no effect under 'planned' or 'uniform'. |
+| `DATA_REPLAY_NEWEST` | `0.0` | fraction 0..1 | domain (0.0, 1.0) | Share of each faded phase's bytes the 'replay' draw gives the newest-arrived live area, the other live areas splitting what is left evenly; 0 is off. |
+| `DATA_REPLAY_SHARE` | `0.27` | fraction 0..1 | domain (0.0, 1.0) | Share of each phase's bytes the 'replay' draw gives the areas faded in that phase, split evenly among them; read only at DATA_DRAW=replay. |
 | `DATA_RESAMPLE` | `False` | on/off |  | Redraw a fresh stream from the areas at the start of every epoch instead of replaying the same bytes. |
 | `DATA_SEG_CONTIG` | `False` | on/off |  | Read each area in order instead of seeking to a random offset every segment, so the only boundaries left are the text's own. |
 | `DATA_SEG_MAX` | `1800` | bytes |  | Longest spliced segment drawn from one area before the stream switches. |
 | `DATA_SEG_MIN` | `700` | bytes |  | Shortest spliced segment drawn from one area before the stream switches. |
 | `DATA_SOURCE` | `'synthetic'` | name | choices `'real'`, `'synthetic'` | Which stream the run trains on: `real` splices the corpora under DATA_DIR, `synthetic` generates from Markov processes. |
 | `DATA_STREAM_BYTES` | `120000` | bytes |  | Bytes of stream one epoch draws from the areas. |
+| `DATA_SYNTH_HOLDOUT` | `True` | on/off |  | DEFAULT BEHAVIOUR CHANGE 1 (register 04-Q5, on since 2026-09-29): hold out a block per area on DATA_SOURCE=synthetic, under the real sources' law: min(DATA_HOLDOUT_FRAC x body, DATA_VAL_CAP) bytes, a seeded contiguous block removed from the body. |
+| `DATA_TRUST` | `'observe'` | name | choices `'off'`, `'observe'`, `'loss'`, `'loss+draw'` | DEFAULT BEHAVIOUR CHANGE 3 (register 04-6.3, 'observe' since 2026-09-29): the source-reliability book, 'observe' reading every source's claims, voting, and reporting each source's reliability and t... |
+| `DATA_TRUST_CLAIM` | `'kv'` | name | choices `'kv'`, `'ctx'` | What counts as one claim: 'kv' a normalised (key, value) pair around a DATA_TRUST_DELIMS delimiter, 'ctx' a raw DATA_TRUST_CTX-unit context and the unit after it. |
+| `DATA_TRUST_COPY` | `'off'` | name | choices `'off'`, `'accu'` | Copy detection inside the book's vote (SR6, the ACCU-COPY family): 'off' judges no pair of sources; 'accu' judges every pair sharing DATA_TRUST_MIN_EV conflicted claims for dependence and discounts a dependent pair's later-seen source in the next round of the vote. |
+| `DATA_TRUST_COPY_P` | `0.5` | fraction 0..1 | domain (0.0, 1.0) | Posterior of dependence above which a judged pair of sources is reported dependent and its later-seen source discounted; below it the pair is certified independent; 0 and 1 are refused. |
+| `DATA_TRUST_COPY_PRIOR` | `0.2` | fraction 0..1 | domain (0.0, 1.0) | Prior probability that two sources are dependent before their shared claims are read (the model's alpha); 0 and 1 are refused. |
+| `DATA_TRUST_COPY_RATE` | `0.8` | fraction 0..1 | domain (0.0, 1.0) | Copy rate (the model's c): the share of its values a dependent source copies; a dependent pair's later-seen source votes at 1 - c x P(dependent) on the values it shares with the earlier; 0 is refused. |
+| `DATA_TRUST_CTX` | `5` | tokens | domain (1, ∞) | Key length in TOK units: the most units before a delimiter a 'kv' key reads, or the context length of a 'ctx' claim. |
+| `DATA_TRUST_DELIMS` | `'=\|:\| is \| are \| was \| were '` | name |  | The 'kv' delimiter class, '\|'-separated byte strings: a claim is read around each occurrence. |
+| `DATA_TRUST_EVERY` | `160` | Windows | domain (0, ∞) | Windows between passes of the book over the stream consumed since the last one (0 = epoch-end passes only). |
+| `DATA_TRUST_HOT` | `20` | count | domain (1, ∞) | Count-sketch pre-filter: a claim enters the table once its sketch bucket has counted this many claims. |
+| `DATA_TRUST_MIN` | `0.3` | fraction 0..1 | domain (0.0, 1.0) | Trust floor: the least trust a source is given, however unreliable its claims. |
+| `DATA_TRUST_MIN_EV` | `10` | count | domain (1, ∞) | Conflicted claims a source must take part in before its reliability is reported and its trust set; below it both are ABSENT and trust is 1. |
+| `DATA_TRUST_MIN_N` | `3` | count | domain (1, ∞) | Admission: a source's claim on a key counts only after this many readings of that key from that source. |
+| `DATA_TRUST_RULE` | `'claims'` | name | choices `'claims'` | Which estimator fills the book: 'claims', the model-free reliability-weighted vote over the (key, value) claims sources make; the only one built. |
+| `DATA_TRUST_SELF` | `0.8` | fraction 0..1 | domain (0.0, 1.0) | Admission: a source's claim on a key counts only when its most frequent value holds at least this share of its readings of that key. |
+| `DATA_TRUST_SKETCH` | `4194301` | slots | domain (1, ∞) | Count-sketch size, in int32 buckets; fixed for a lineage. |
+| `DATA_TRUST_TABLE` | `200000` | entries | domain (1, ∞) | Most keys the claim table holds; the least recently claimed is evicted beyond it. |
+| `DATA_TRUST_VAL` | `1` | tokens | domain (1, ∞) | Value length in TOK units: how many units after a 'kv' delimiter the value reads, cut at the first punctuation or delimiter. |
 | `DATA_VAL_CAP` | `4000000` | bytes |  | Maximum bytes of held-out tail kept per area. |
 
 ### DOM (29 levers)
@@ -166,7 +192,7 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `DOM_SUSTAIN` | `2` | Windows |  | Consecutive over-threshold windows required before a boundary is declared; the pending signatures are then averaged into the assign query. |
 | `DOM_TOKC_DECAY` | `0.5` | fraction 0..1 | domain (0.0, 1.0) | What a domain's token histogram keeps when the tokenizer re-segments; applied once per retok. 1.0 restores cumulative-forever. |
 
-### EVAL (17 levers)
+### EVAL (19 levers)
 
 | lever | default | unit | accepts | what it is |
 |---|---|---|---|---|
@@ -181,14 +207,16 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `EVAL_GENERATE` | `True` | on/off |  | Run the GENERATION section: model alone versus model+memory, from the same real seeds. |
 | `EVAL_GENUINE_MIN` | `20` | count |  | Minimum member count before a discovered domain is reported as genuine rather than noise. |
 | `EVAL_GENUINE_SIL` | `0.1` | fraction 0..1 |  | Minimum silhouette (own-centroid similarity minus nearest-other) for a genuine domain. |
-| `EVAL_HOLDOUT_WINDOWS` | `32` | count |  | Held-out windows per domain for the retention probe -- the resolution of the R matrix. |
+| `EVAL_HOLDOUT_WINDOWS` | `32` | count |  | Held-out windows per area for the BOUNDARY reading of the retention probe (the end of the run and a resume's start) -- half from each area's control half, half from its report half. |
 | `EVAL_NULL_DRAWS` | `5` | count |  | Permutation draws used to build the null distribution every 2-sigma verdict is judged against. |
+| `EVAL_RETENTION_EVERY` | `1000` | Windows |  | DEFAULT BEHAVIOUR CHANGE 2 (register 04-6.2, 1000 since 2026-09-29): windows between in-run retention readings on the pinned held-out windows, beside a reading at the first window of every phase (0... |
+| `EVAL_RETENTION_N` | `6` | count | domain (1, ∞) | Held-out windows per arrived area for each in-run retention reading -- split between the area's control and report halves, the odd one to control. |
 | `EVAL_VERIFY_FIT_STEPS` | `3000` | Steps |  | Optimizer steps spent fitting the Reconstructor post hoc on the final settled store. |
 | `EVAL_WINDOWS` | `64` | count |  | Default number of windows an eval Sample draws when it does not declare its own. |
 | `EVAL_WRONG_INJECT` | `8` | entries |  | Synthetic cross-domain wrong entries planted so precision and recall have a denominator. |
 | `EVAL_WRONGNESS` | `True` | on/off |  | Run the WRONGNESS section: self-consistency detection over the settled store, with its precision and recall. |
 
-### FAB (82 levers)
+### FAB (85 levers)
 
 | lever | default | unit | accepts | what it is |
 |---|---|---|---|---|
@@ -205,6 +233,8 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `FAB_CHAIN_K` | `8` | experts |  | How many experts are COMPUTED per hop (top-k by routing mass); per-hop cost is k, not the population size. |
 | `FAB_COMP_EMA` | `0.02` | fraction 0..1 |  | EMA rate for the per-node competence and marginal-contribution signals that gate cull-sparing. |
 | `FAB_COMP_PROTECT` | `True` | on/off |  | Spare a unit from the cull when it models its own material better than the population does, however rarely it is selected. |
+| `FAB_CONTRIB` | `False` | on/off |  | Measure past-grace experts' marginal contribution on each management pass: the held-out loss without the expert minus the loss with it, folded into Population.contrib at FAB_COMP_EMA. |
+| `FAB_CONTRIB_MAX` | `64` | experts | domain (1, ∞) | How many past-grace experts one management pass measures, taken from a cursor that rotates through the population. |
 | `FAB_COOLDOWN` | `400` | Windows |  | Minimum spacing between growth firings, and the window over which recent births are counted for the new_frac budget. |
 | `FAB_CULL_FRAC` | `0.02` | fraction 0..1 | domain (0.0, 1.0) | Fraction of the ELIGIBLE (past-grace) set removed per manage pass, floored at one. |
 | `FAB_DEPTH0` | `1` | count |  | Hop count the chain starts at before staged depth extends it; 0 means start at the full `hops` budget (no curriculum). |
@@ -224,6 +254,7 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `FAB_ERR_FAST` | `0.05` | fraction 0..1 |  | EMA rate of the per-expert FAST error signal. |
 | `FAB_ERR_SLOW` | `0.005` | fraction 0..1 |  | EMA rate of the per-expert SLOW error signal, the baseline the fast one is judged against. |
 | `FAB_EXPLORE` | `0.15` | fraction 0..1 |  | Fraction of rows whose lowest-ranked computed slot is swapped for a randomly chosen low-use expert, on training passes only. |
+| `FAB_FADED_CULL` | `'as_is'` | name | choices `'as_is'`, `'defer'`, `'contrib'` | What the management pass does with a cull or merge whose removed expert mostly served a FADED area: 'as_is' removes it and counts it; 'defer' keeps it and takes every other decision 'as_is' takes;... |
 | `FAB_FAIL_TOL` | `0.15` | fraction 0..1 |  | How far BOTH error EMAs must sit above the population before an expert counts as in sustained failure and is cullable at any occupancy. |
 | `FAB_GRACE` | `48` | Selections |  | How many times an expert must have been SELECTED before the cull may touch it. |
 | `FAB_GROW` | `True` | on/off |  | Master switch for population growth: off freezes the population at n0 while routing, selection, replication and the cull all still run. |
@@ -275,7 +306,7 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `FAB_XOVER` | `0.35` | fraction 0..1 | domain (0.0, 1.0) | Fraction of births assembled from several parents by taking whole rank slices from a second parent. |
 | `FAB_Z` | `4.0` | count |  | How many robust deviations (running MAD) above the slow EMA a loss must sit to count as an unexpected REGRESSION. |
 
-### LM (12 levers)
+### LM (14 levers)
 
 | lever | default | unit | accepts | what it is |
 |---|---|---|---|---|
@@ -284,11 +315,13 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `LM_ARCH` | `'gru'` | name | choices `'gru'`, `'transformer'` | Which base language model is constructed: the GRU (MiniLM) or the transformer (TinyTransformer). |
 | `LM_COMPOSE` | `False` | on/off |  | Build each token's vector from its bytes plus a learned residual, instead of storing a free row per token. |
 | `LM_CTX` | `128` | tokens |  | The model's context width -- how many tokens one training or eval window holds. |
+| `LM_CTX_WIDEN` | `False` | on/off |  | Admit a larger LM_CTX than the checkpoint's at an epoch-boundary resume: the learned position table keeps the parent's rows and the appended ones keep this build's initial values. |
 | `LM_DROPOUT` | `0.0` | probability | domain (0.0, 1.0) | Dropout probability, at three sites: the token embedding, between GRU layers when depth is greater than one, and the READOUT in LM.decode before the head. |
 | `LM_HEADS` | `8` | count |  | Attention heads per transformer block; read only when arch is transformer. |
 | `LM_LAYERS` | `0` | count |  | Depth of the base LM -- transformer blocks or GRU layers; 0 means take the current arm's depth (4 for transformer, 1 for gru). |
 | `LM_MASK_DEAD_ROWS` | `False` | on/off |  | Take never-minted and retired vocabulary rows out of the distribution wherever logits become one. |
 | `LM_NEW_ROW_INIT` | `'mean'` | name | choices `'random'`, `'mean'`, `'last_first'` | How a newly minted token's embedding and head rows are initialized from its two parent tokens. |
+| `LM_POS` | `'learned'` | name | choices `'learned'`, `'alibi'`, `'none'` | Where a token sits in its window: 'learned' adds a learned row per position (both arms), 'alibi' biases the transformer's attention by distance, and 'none' adds nothing on the GRU. |
 | `LM_VOCAB_SLOTS` | `4096` | slots |  | How many vocabulary rows the model preallocates -- emb.weight, head.weight and head.bias are all this tall, and the tokenizer may not mint past it. |
 | `LM_WIDTH` | `128` | count |  | Hidden width of the base LM, and through it the width of every representation keyed off it -- memory keys, expert bodies, the world-model projection. |
 
@@ -323,12 +356,13 @@ DISARMED — which the cadence audit reports as a different state from starved.
 | `MEM_WRONG_READ` | `True` | on/off |  | Whether the wrong flag excludes an entry from every retrieval, or only from the sweep. |
 | `MEM_WRONG_SWEEP` | `False` | on/off |  | Whether the selected wrongness detector DELETES flagged entries or only flags them. |
 
-### OPT (18 levers)
+### OPT (19 levers)
 
 | lever | default | unit | accepts | what it is |
 |---|---|---|---|---|
 | `OPT_ACCUM` | `1` | Backwards |  | Backward passes accumulated before one optimizer step -- with batch_windows, the effective batch, and the only way to reach a large one on a small GPU. |
 | `OPT_BATCH_WINDOWS` | `1` | Windows |  | How many stream windows are accumulated into one forward/backward; this sets the flush cadence the whole loop body runs on. |
+| `OPT_DAMP_SOURCE` | `'off'` | name | choices `'off'`, `'probe'` | Where lr_restart_damp's held-out Reading comes from: 'probe' hands it the held-out retention probe's control mean; 'off' hands it nothing, so no restart is judged. |
 | `OPT_GRAD_CLIP` | `0.0` | fraction 0..1 |  | Global gradient-norm clip applied to the BASE parameter group before each optimizer step. 0.0 is OFF, which is what every recorded number in this project was measured under. |
 | `OPT_HORIZON_REVISE` | `True` | on/off |  | Whether the mid-epoch act re-maps the rest of the LR schedule to the re-measured run length, LR-continuously (Q-OPT-10). |
 | `OPT_LR` | `0.002` | fraction 0..1 |  | Peak learning rate; every rate the system applies is this times a schedule multiplier in 0..1. |

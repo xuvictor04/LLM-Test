@@ -18,11 +18,21 @@ composed table (:1562, :3865) -- which is ISSUES P1-L51, and it is worse than th
 reading L13 gives it: not dead weight, two differently-trained decoders.
 
 RECORD TYPES RETURNED (P4 defines them):
-  LMGeometry   arch, width, layers (RESOLVED, never the sentinel), heads, ctx, pos_max,
+  LMGeometry   arch, width, layers (RESOLVED, never the sentinel), heads, ctx, pos_max, pos,
                vocab_slots, compose, dropout, max_token_bytes, param_estimate,
                layers_from_sentinel
   MintReport   rows_initialised, arm_used, sig_rows_written, composer_rows, residual_ratio
   LoadReport   widened, refused, reason
+  Designation  arch, pos, ctx, route_passed, reason -- parent_designation's admission
+               (2026-09-28, Q-LM-15); its refusal is the raised ContextLockedParent
+
+THE POSITION TABLE IS A DOOR (2026-09-28, register §8 3.6; O17, NEW-13, C43; docs/04_CONTRACT.md
+Q-LM-15). Both arms add a learned row per position before the arch branch, so a model trained with
+the table is locked to its context: `pos` names the scheme ('learned', today's, on both arms; 'alibi'
+on the transformer and 'none' on the GRU, the extrapolating values, OFF), `ctx_widen` declares the one
+widening 'learned' has (the table grows by rows at an epoch-boundary resume), and
+parent_designation refuses, by name and switchably, to designate a context-locked checkpoint B's
+long-lived parent until a context-widening route PASSes on GPU (§8 5.8).
 """
 import dataclasses
 import math
@@ -73,6 +83,71 @@ class GeometryError(ValueError):
     """
 
 
+# ==================================================================================================
+# THE DOOR O17 KEEPS SHUT, AND ITS TWO SWITCHES (2026-09-28, register §8 3.6; docs/04_CONTRACT.md
+# Q-LM-15)
+# ==================================================================================================
+
+REFUSE_CONTEXT_LOCKED_PARENT = True
+"""Whether parent_designation refuses a checkpoint whose position scheme has no PASSED
+context-widening route. True is the shipped state and O17's ruling: "no checkpoint is designated B's
+long-lived parent until a context-widening route PASSes on GPU, and the preset builder refuses the
+designation by name (switchable)".
+
+THE SWITCH IS D17's SHAPE, AND O17 SAYS SO ("The switch follows D17 ... 'If it has a bad effect, we can
+turn off the refusal'"). A module constant, like the five REFUSE_NEGATIVE_PERIODs
+(ckpt/api.py::REFUSE_NEGATIVE_PERIOD carries the alternatives and their prices): turning it off is a
+CODE EDIT, deliberately, and there is no LM_ environment name for it -- a run never designates
+anything, so a lever would be read by no run. False admits every designation and says, in the
+Designation it returns, that the refusal was off; nothing else moves.
+
+WHY IT EXISTS AT ALL. Both LM arms carry the learned position table (_LM builds it, encode adds it,
+O17's correction of the transformer-only premise), so a parent trained with it carries B's learning
+in a context it can never widen without retraining: an irreversible closure under R4 and the owner's
+"nothing frozen or fixed unless absolutely necessary". Nothing is designated today -- none needs to be
+before O4's first deployment -- and a designation that falls due with no passing route goes to the
+owner with both readings (O17's escalation).
+"""
+
+PASSED_WIDENING_ROUTES = frozenset()
+"""The (LM_ARCH, LM_POS) pairs whose context-widening route has PASSED on GPU, and so may be designated
+B's long-lived parent with the refusal on. EMPTY, which is the truth on 2026-09-28: §8 5.8 [GPU] is the
+test that decides it -- arm (A), 'learned' against each arm's extrapolating value ('alibi' on the
+transformer, 'none' on the GRU), and arm (B), 'learned''s row-append widening from 128 to 256 against a
+parent trained at 256 -- and it has not run. §8 3.6's CPU tests establish that the routes OPERATE, and
+a CPU pass is never entered here.
+
+A PAIR, NOT A SCHEME: a route that passes on one arm has not passed on the other. O17 holds the
+designation "until its position scheme has a context-widening route that PASSes on GPU" and escalates
+when one falls due "with no passing route on that arm". Entered by hand, with the GPU reading's
+commit, the way a ruling is. A code edit, like the switch above."""
+
+
+@dataclasses.dataclass(frozen=True)
+class Designation:
+    """parent_designation's admission: the checkpoint's arm, scheme and context, whether its route
+    has passed, and the sentence saying why it was admitted.
+
+    FIELDS ONLY, NO METHODS, for LoadReport's reason (a public method on a public class in an api.py
+    IS an entry point). `route_passed` separates the two admissions a reader must not confuse: a
+    route that PASSED on GPU (PASSED_WIDENING_ROUTES) and the refusal switched OFF
+    (REFUSE_CONTEXT_LOCKED_PARENT = False), which designates a context-locked parent on the owner's
+    say-so and must say so wherever it is recorded.
+    """
+    arch: str
+    pos: str
+    ctx: int
+    route_passed: bool
+    reason: str
+
+
+class ContextLockedParent(ValueError):
+    """A designation refused BY NAME: the checkpoint's position scheme has no passed context-widening
+    route on its arm (O17). Its own class so tools/designate_parent.py -- the stand-in for the
+    preset builder O17 names -- can tell the refusal from a checkpoint it could not read, and exit
+    with the refusal's code having written nothing."""
+
+
 @dataclasses.dataclass(frozen=True)
 class LMGeometry:
     """Every shape decision, RESOLVED, and the record the checkpoint gate compares against.
@@ -93,6 +168,14 @@ class LMGeometry:
     resolve()'s own DID IT FIRE line already promised `lm.resolve.layers_from_sentinel`; this field
     is what lets that promise be kept from a value carried on the record, not a global counted only
     by whoever happened to call resolve() last.
+
+    `pos` IS THE POSITION SCHEME (2026-09-28, Q-LM-15), and it is on the record for the reason `arch`
+    is: it decides which tensors EXIST -- the learned table at 'learned', none at 'alibi' or 'none' --
+    so a checkpoint must carry it for load_state to refuse a change by name. state_dict writes this
+    record field by field, so it reaches the checkpoint without a line of its own; a record written
+    before the field existed reads as 'learned', which is what built it. NOT in the geometry manifest
+    (spine/compose.py::_geometry_manifest): a manifest field an older recording lacks is a refusal
+    at the gate, so adding one would refuse every existing checkpoint.
     """
     arch: str
     width: int
@@ -100,6 +183,7 @@ class LMGeometry:
     heads: int
     ctx: int
     pos_max: int
+    pos: str
     vocab_slots: int
     compose: bool
     dropout: float
@@ -113,6 +197,43 @@ class LMGeometry:
 # about THIS package's constructor in the shared arithmetic module. 0 layers is not a small model,
 # it is a broken constructor, so the sentinel has to resolve to something and the arm is what knows.
 _SENTINEL_DEPTH = {"gru": 1, "transformer": 4}
+
+
+def _alibi_slopes(n_heads):
+    """ALiBi's per-head slopes at LM_POS='alibi' (2026-09-28, Q-LM-15): a list of n_heads floats.
+
+    THE PAPER'S OWN CONSTRUCTION, NOT A TUNED ONE (Press, Smith and Lewis, "Train Short, Test Long",
+    ICLR 2022, and its reference code): for n a power of two, the geometric sequence that starts at
+    2^(-8/n) with that ratio -- 1/2, 1/4, ..., 1/256 at the shipped LM_HEADS=8, exact in float32 --
+    and for any other n the power of two below it, followed by every other slope of the power of two
+    above it. No lever sets them: the extrapolating arm is the scheme the paper measured, and a slope
+    knob would be an arm nobody ruled on. Pure arithmetic on the head count."""
+    n = int(n_heads)
+
+    def _geometric(k):
+        start = 2.0 ** (-(2.0 ** -(math.log2(k) - 3)))
+        return [start * start ** i for i in range(k)]
+
+    if n & (n - 1) == 0:
+        return _geometric(n)
+    below = 2 ** int(math.floor(math.log2(n)))
+    return _geometric(below) + _alibi_slopes(2 * below)[0::2][:n - below]
+
+
+def _alibi_mask(slopes, batch, length, like):
+    """The float attention mask every layer takes at LM_POS='alibi': (batch * heads, L, L).
+
+    Entry [b * heads + h, i, j] is -slope_h x (i - j) for a key j at or before the query i and -inf
+    for a key after it -- the causal cut, carried by the same mask, so no position reads its future.
+    The (batch x heads) order is the one nn.MultiheadAttention indexes a 3-D mask by (it views the
+    (N, L, E) query as N x heads rows). Built per call in `like`'s dtype and device from the slopes
+    buffer, because a precomputed (heads, ctx, ctx) table grows with the square of LM_CTX and a
+    widened context would need a new one."""
+    pos = torch.arange(int(length), device=like.device)
+    lead = (pos[:, None] - pos[None, :]).to(like.dtype)          # i - j: the query's lead on the key
+    bias = -(slopes.to(device=like.device, dtype=like.dtype)[:, None, None] * lead)
+    bias = bias.masked_fill(lead < 0, float("-inf"))
+    return bias.repeat(int(batch), 1, 1)
 
 
 class _LM(nn.Module):
@@ -129,6 +250,13 @@ class _LM(nn.Module):
     `p = torch.arange(L).clamp(max=s.maxlen - 1)` against a hardcoded 512 gave every position past
     511 ONE shared embedding, with no error and no report line. encode() raises instead.
 
+    AND IT EXISTS ONLY AT LM_POS='learned' (2026-09-28, Q-LM-15), where it is built exactly where it
+    always was -- first, before `drop`, the token table and the body -- so the parameter order, and
+    with it build_model's initialisation draws, are the tree's before the lever, bit for bit. At
+    'alibi' there is no table: the per-head slopes are a NON-PERSISTENT buffer (`alibi_slopes`),
+    derived from LM_HEADS alone, so it moves with the module's device and is not checkpoint state --
+    the dead-row mask cache's rule. At 'none' there is neither.
+
     THREE DROPOUT SITES ON THE GRU ARM AND THE READOUT IS NOT ONE OF encode()'s (Q-LM-9 (b)). The
     embedding dropout and the inter-layer dropout live here; the readout dropout is applied in
     decode(), before the head. Arithmetically that is the old `head(drop(h))` exactly. What it buys
@@ -141,7 +269,11 @@ class _LM(nn.Module):
         self.geom = geom
         w, v = geom.width, geom.vocab_slots
         self.compose = geom.compose
-        self.pos = nn.Embedding(geom.pos_max, w)
+        if geom.pos == "learned":
+            self.pos = nn.Embedding(geom.pos_max, w)
+        elif geom.pos == "alibi":
+            self.register_buffer("alibi_slopes", torch.tensor(_alibi_slopes(geom.heads)),
+                                 persistent=False)
         self.drop = nn.Dropout(geom.dropout)
         if not geom.compose:
             self.emb = nn.Embedding(v, w)
@@ -217,8 +349,12 @@ def resolve(lm: Config):
         lever, so that is also where a reader finds out the alternative went on purpose.
       * ctx > d_pos_max -- unreachable while d_pos_max is the local wire from ctx, and ASSERTED so
         that it STAYS unreachable if the wire is ever re-sourced.
+      * pos on the wrong arm (2026-09-28, Q-LM-15): 'alibi' on the GRU, which has no attention to
+        bias, and 'none' on the transformer, a position-free causal transformer that O17 did not
+        name for that arm. Each arm has ONE extrapolating value; `choices=` cannot state a relation
+        between two levers, so this is where it is stated, with both names.
 
-    LEVERS READ: arch, width, layers, heads, ctx, dropout, vocab_slots, compose, anchor_uses
+    LEVERS READ: arch, width, layers, heads, ctx, dropout, vocab_slots, compose, anchor_uses, pos
     WIRES READ: d_pos_max, d_max_token_bytes
     DID IT FIRE: lm.resolve.calls (must be exactly 1 per process),
                  lm.resolve.layers_from_sentinel (1 when cfg.layers == 0 -- proves which number
@@ -232,6 +368,7 @@ def resolve(lm: Config):
     ctx, dropout = int(lm.ctx), float(lm.dropout)
     vocab_slots, compose = int(lm.vocab_slots), bool(lm.compose)
     declared_layers = int(lm.layers)
+    pos = str(lm.pos)
 
     # EVERY REFUSAL CARRIES BOTH NUMBERS AND THE ENVIRONMENT NAME. A Lever has no range facility and
     # `choices=` enumerates rather than bounds, so these cannot be declarations; what they must not
@@ -263,6 +400,16 @@ def resolve(lm: Config):
         bad.append(f"LM_WIDTH={width} is not divisible by LM_HEADS={heads} on the transformer arm. "
                    f"nn.TransformerEncoderLayer raises a bare 'embed_dim must be divisible by "
                    f"num_heads' naming neither knob, on a warm device, after the corpus is pulled.")
+    # ONE EXTRAPOLATING VALUE PER ARM (2026-09-28, register O17; Q-LM-15), and the other arm's is
+    # refused here rather than built as an arm nobody ruled on.
+    if arch == "gru" and pos == "alibi":
+        bad.append("LM_POS='alibi' on LM_ARCH=gru: ALiBi biases attention scores by distance and the "
+                   "GRU arm has no attention to bias. The GRU's extrapolating value is LM_POS='none' "
+                   "(register O17: one extrapolating value per arm, built OFF).")
+    if arch == "transformer" and pos == "none":
+        bad.append("LM_POS='none' on LM_ARCH=transformer: a causal transformer with no position "
+                   "signal is not an arm register O17 named. The transformer's extrapolating value "
+                   "is LM_POS='alibi'; 'learned' is the table both arms carry.")
     if bad:
         raise GeometryError("LM.resolve refuses this geometry:\n  - " + "\n  - ".join(bad))
 
@@ -286,14 +433,14 @@ def resolve(lm: Config):
             f"STAYS unreachable if that wire is ever re-sourced.")
 
     return LMGeometry(
-        arch=arch, width=width, layers=layers, heads=heads, ctx=ctx, pos_max=pos_max,
+        arch=arch, width=width, layers=layers, heads=heads, ctx=ctx, pos_max=pos_max, pos=pos,
         vocab_slots=vocab_slots, compose=compose, dropout=dropout,
         max_token_bytes=max_token_bytes,
-        param_estimate=_param_estimate(arch, width, layers, ctx, vocab_slots, compose),
+        param_estimate=_param_estimate(arch, width, layers, ctx, vocab_slots, compose, pos),
         layers_from_sentinel=layers_from_sentinel)
 
 
-def _param_estimate(arch, width, layers, ctx, vocab_slots, compose):
+def _param_estimate(arch, width, layers, ctx, vocab_slots, compose, pos="learned"):
     """A count for the banner and the manifest, computed from the SHAPES, not from a built module.
 
     AN ESTIMATE AND LABELLED ONE. The authoritative number is compose._n_params over the parameters
@@ -301,9 +448,11 @@ def _param_estimate(arch, width, layers, ctx, vocab_slots, compose):
     allocation and a refusal that cannot say how big the two models were is half a message. Under
     `compose` the token table is the ByteComposer's output and is TIED as input embedding and output
     head, so it is counted once and the ~6.3M dead parameters ISSUES P1-L13 counts do not exist.
+    The position table is counted only at `pos` 'learned' (2026-09-28, Q-LM-15): 'alibi' and 'none'
+    build none, and ALiBi's slopes are a buffer, not a parameter.
     """
     tok_table = 0 if compose else vocab_slots * width       # tied: one table, or none under compose
-    pos = ctx * width
+    pos = ctx * width if pos == "learned" else 0
     if arch == "transformer":
         # 4 * w^2 attention (q,k,v,o) + 8 * w^2 feed-forward at the usual 4x expansion, per layer.
         body = layers * (4 * width * width + 8 * width * width)
@@ -387,6 +536,12 @@ def build_model(lm: Config, geom, *, device, seed):
                  LM_ARCH arms all five were ABSENT, which G4 reads as the build being UNREACHABLE.
                  They are written through _set at the end of this body, into the tally counters()
                  reads (the model has no `counters` attribute).
+                 lm.pos.scheme (2026-09-28, Q-LM-15): a NAMED gauge, a sentence and not a number --
+                 the scheme this build carries and where it stands against O17's door, 'learned:
+                 context-locked (O17: no passed widening route)' on every run until a route is
+                 entered in PASSED_WIDENING_ROUTES. THIS PROCESS's: load_state does not restore it
+                 over the build's own, as it restores neither lm.resolve.* nor lm.build.*, because
+                 the route set is this tree's and a parent's label would be its tree's.
 
     LM_COMPOSE=1 IS REFUSED HERE, AT STARTUP, WITH spine/gate.py::NotBuilt (2026-09-24). The
     compose arm resolves, and until this date it built a model with no emb/head and composed on
@@ -477,7 +632,21 @@ def build_model(lm: Config, geom, *, device, seed):
     _set("lm.build.heads_used", int(geom.heads) if geom.arch == "transformer" else 0)
     _set("lm.build.emb_head_allocated",
          int(getattr(model, "emb", None) is not None or getattr(model, "head", None) is not None))
+    # THE DOOR, SAID ON EVERY RUN (2026-09-28, register O17; Q-LM-15): which position scheme was
+    # built and whether a checkpoint of it could be designated B's long-lived parent. A sentence in
+    # the tally, the way WORLD's `world.built` is, so the report prints it and the integer channel
+    # tests read does not carry it.
+    _set("lm.pos.scheme", _scheme_label(geom.arch, geom.pos))
     return model
+
+
+def _scheme_label(arch, pos):
+    """The lm.pos.scheme sentence for one (arch, pos): the scheme, then its standing at O17's door."""
+    if (str(arch), str(pos)) in PASSED_WIDENING_ROUTES:
+        return f"{pos}: a context-widening route has passed on GPU (O17, PASSED_WIDENING_ROUTES)"
+    if pos == "learned":
+        return "learned: context-locked (O17: no passed widening route)"
+    return f"{pos}: extrapolating, not yet designable (O17: no passed widening route)"
 
 
 def embed(lm: Config, model, x):
@@ -579,6 +748,19 @@ def encode(lm: Config, model, x, *, n_layers=None, extra=None):
     PROBE=0 split at the second logged step (6.1199 vs 6.1125) and never rejoined. A timing probe
     decided the run.
 
+    WHERE A TOKEN SITS IS THE GEOMETRY'S `pos` (2026-09-28, Q-LM-15). At 'learned' the table's first
+    L rows are added to the token vectors before the arch branch -- the statement this function
+    always ran, unchanged, on both arms. At 'none' (GRU) nothing is added: the recurrence is the
+    only order signal. At 'alibi' (transformer) nothing is added either, and every layer's attention
+    takes a FLOAT mask in place of the causal one: -m_h x (i - j) for key j at or before query i,
+    -inf after it, one (L, L) slab per head repeated over the batch in the (batch x heads) order
+    nn.MultiheadAttention indexes a 3-D mask by, and `is_causal=False`, because is_causal is a promise
+    that the mask IS the plain causal mask and this one is not. The -inf half is the same causal
+    cut, so no position ever reads its future on any scheme. AND AT 'alibi' THE LAYERS RUN WITH
+    TORCH's MHA FAST PATH HELD OFF (Q-LM-15's review): that kernel, which a layer takes in eval mode
+    under no_grad, reads a float mask as bool, and an eval pass then scored self-only attention --
+    see the loop below. Every pass, eval or training, computes the one function training trains.
+
     LEVERS READ: ctx (ONLY on the pos-overflow refusal path, to print LM_CTX beside the actual
                  window length in the raised message -- the read is the `int(lm.ctx)` in the raised
                  message below. Every other line in this function reads nothing off `lm` directly:
@@ -592,7 +774,16 @@ def encode(lm: Config, model, x, *, n_layers=None, extra=None):
                  clamp reaching the new tree), lm.encode.extra_applied; and two FLOAT GAUGES
                  written on the same arm, lm.encode.extra_ratio (the latest RMS(extra)/RMS(h),
                  h before the add) and lm.encode.extra_ratio_max (its running max) -- all three
-                 ABSENT when no `extra` is ever passed
+                 ABSENT when no `extra` is ever passed, and all three written ONLY UNDER GRAD
+                 (2026-09-27, Q-LM-14): a no_grad call -- the held-out probe's closures -- adds
+                 `extra` and writes none of them, so they stay the flushes' readings.
+                 lm.encode.calls and key_path_truncated still count every call, eval calls
+                 included; the eval book's own counts say how many were the probe's.
+                 lm.pos.alibi_applied (2026-09-28, Q-LM-15): the calls that built the ALiBi mask,
+                 every call counted as lm.encode.calls is; ABSENT on every arm but
+                 LM_ARCH=transformer LM_POS='alibi', where it equals lm.encode.calls. Each of them
+                 ran its layers with torch's MHA fast path held off (Q-LM-15's review), so it is
+                 also the count of calls the hold covered
     """
     lm = lm.owned_by("LM")
     _bump("lm.encode.calls")
@@ -611,11 +802,25 @@ def encode(lm: Config, model, x, *, n_layers=None, extra=None):
             f"with no error and nothing in the report.")
 
     e = model.token_table()[x] if model.compose else model.emb(x)
-    h = model.drop(e + model.pos.weight[:L].unsqueeze(0))
+    scheme = model.geom.pos
+    if scheme == "learned":
+        h = model.drop(e + model.pos.weight[:L].unsqueeze(0))
+    else:
+        # 'alibi' AND 'none' ADD NO POSITION ROW (Q-LM-15): there is no table to add one from.
+        h = model.drop(e)
     if model.geom.arch == "transformer":
         # CAUSAL, because this is a language model: a window that can see its own future scores a
         # loss no autoregressive decode can reproduce.
-        mask = torch.triu(torch.full((L, L), float("-inf"), device=h.device), diagonal=1)
+        if scheme == "alibi":
+            # THE DISTANCE BIAS CARRIES THE CAUSAL CUT (-inf after the query), so is_causal is False:
+            # it is a promise that the mask IS the plain causal one, and a wrong promise is
+            # documented by torch as incorrect execution.
+            mask = _alibi_mask(model.alibi_slopes, int(h.shape[0]), L, h)
+            causal = False
+            _bump("lm.pos.alibi_applied")
+        else:
+            mask = torch.triu(torch.full((L, L), float("-inf"), device=h.device), diagonal=1)
+            causal = True
         # n_layers RUNS ONLY THE FIRST n BLOCKS, BY A MANUAL LOOP OVER model.body.layers RATHER
         # THAN nn.TransformerEncoder's OWN forward. nn.TransformerEncoder has no depth argument --
         # slicing .layers is the only way to stop early -- and looping by hand is also what buys
@@ -626,7 +831,8 @@ def encode(lm: Config, model, x, *, n_layers=None, extra=None):
         # engages on the plain forward either, because that path requires src_key_padding_mask,
         # which this function never passes -- so a full-depth call through this loop is numerically
         # identical to the old `model.body(h, mask=mask, is_causal=True)` (verified: max|dh|=0.0
-        # between the two on a built model, both arms, several seeds).
+        # between the two on a built model, both arms, several seeds). `causal` is that True at
+        # every scheme but 'alibi' (2026-09-28, Q-LM-15), so the 'learned' call is the call it was.
         n_run = model.geom.layers if n_layers is None else int(n_layers)
         if n_layers is not None:
             # MEM.key_depth's cut. Before this branch existed, n_layers reached this function and
@@ -636,32 +842,66 @@ def encode(lm: Config, model, x, *, n_layers=None, extra=None):
             # the declared counter below could never be nonzero. Measured before this fix:
             # encode(..., n_layers=1) against the full-depth call differed by max|dh|=0.0.
             _bump("lm.encode.key_path_truncated")
-        for i, layer in enumerate(model.body.layers[:n_run]):
-            if i == n_run - 1:
-                # THE LAST LAYER ACTUALLY RUN -- full stack or truncated key path alike -- computed
-                # WITHOUT ITS OWN INTERNAL DROPOUT: the attention-probability dropout inside
-                # self_attn, and the two residual dropouts (dropout1, dropout2), by toggling
-                # eval() for this one call and restoring the layer's prior mode after. nn.GRU
-                # already gives this for free -- torch documents its `dropout=` as applied "to the
-                # output of each GRU layer EXCEPT THE LAST", so the gru arm's `h, _ =
-                # model.body(h)` below was already clean -- but nn.TransformerEncoder has no such
-                # carve-out: every layer it owns drops, INCLUDING the one whose output is this
-                # function's return, and that is a fourth dropout site nobody chose. Measured
-                # before this fix: built at LM_DROPOUT=0.2, arch=transformer, set model.drop.p=0.0
-                # (silencing ONLY the embedding-dropout site) and called encode() twice in train
-                # mode on one input under no_grad -- the two returns still differed; in eval mode
-                # two calls agreed with each other and disagreed with the train-mode value, which
-                # is what proves the leak lived inside TransformerEncoderLayer's own dropout sites
-                # and not in `model.drop`. LayerNorm is unaffected by .eval()/.train(), so toggling
-                # the layer's mode for one call changes nothing but its dropout sites.
-                was_training = layer.training
-                layer.eval()
-                try:
-                    h = layer(h, src_mask=mask, is_causal=True)
-                finally:
-                    layer.train(was_training)
-            else:
-                h = layer(h, src_mask=mask, is_causal=True)
+        # TORCH's MHA FAST PATH IS HELD OFF FOR THIS LOOP AT 'alibi', AND ONLY THERE (2026-09-28,
+        # Q-LM-15's review). The paragraph above is about nn.TransformerEncoder's nested-tensor
+        # path; each LAYER has a fast path of its own, torch._transformer_encoder_layer_fwd, which
+        # nn.TransformerEncoderLayer takes whenever it is in eval mode and no parameter it holds
+        # needs grad -- so on every no_grad pass through here: the retention probe's closures,
+        # EVAL.generate, FAB.contribution's baseline and the memory-on closure's queries, which run
+        # the model in eval, and MEM's key writes, which run it in train mode with the last layer
+        # put in eval below. That kernel's masked softmax reads a float src_mask AS BOOL, every
+        # nonzero entry masked. The causal mask comes through it whole -- its nonzero entries are
+        # its -inf ones, the same cut -- so 'learned' keeps the path it has always taken, and a
+        # default run is the call it was, bit for bit. ALiBi's does not: every earlier key's bias
+        # is nonzero, so each position attended to itself alone, and every eval pass scored a
+        # function training never computes. Driven at 842b8e8 on a built transformer at 'alibi'
+        # (LM_HEADS=8, LM_DROPOUT=0): max|dh| 7.35 between one model's train-mode pass and its eval
+        # pass under no_grad, 0.0 between that eval pass and self-only attention, and every
+        # retention reading of a 100-window run moved (the last memory-off read 6.2588 against
+        # 6.1398 with the fast path off) while its training losses did not; MEM's stored keys sat
+        # 0.106 off the trained function's. A gradient pass takes the Python path whatever the
+        # flag, since grad is on and the parameters need it, so the hold moves nothing a gradient
+        # pass computes; what it moves is every no_grad pass -- the readings and the stored keys --
+        # onto the function training trains: an eval pass under no_grad now equals the train-mode
+        # pass bitwise on CPU at LM_DROPOUT=0 (tests/test_position.py Q4). The flag is torch's,
+        # process-wide: it is lowered only where it was up and put back in a finally, so a caller
+        # that turned it off finds it off.
+        _hold = scheme == "alibi" and torch.backends.mha.get_fastpath_enabled()
+        if _hold:
+            torch.backends.mha.set_fastpath_enabled(False)
+        try:
+            for i, layer in enumerate(model.body.layers[:n_run]):
+                if i == n_run - 1:
+                    # THE LAST LAYER ACTUALLY RUN -- full stack or truncated key path alike --
+                    # computed WITHOUT ITS OWN INTERNAL DROPOUT: the attention-probability dropout
+                    # inside self_attn, and the two residual dropouts (dropout1, dropout2), by
+                    # toggling eval() for this one call and restoring the layer's prior mode after.
+                    # nn.GRU already gives this for free -- torch documents its `dropout=` as
+                    # applied "to the output of each GRU layer EXCEPT THE LAST", so the gru arm's
+                    # `h, _ = model.body(h)` below was already clean -- but nn.TransformerEncoder
+                    # has no such carve-out: every layer it owns drops, INCLUDING the one whose
+                    # output is this function's return, and that is a fourth dropout site nobody
+                    # chose. Measured before this fix: built at LM_DROPOUT=0.2, arch=transformer,
+                    # set model.drop.p=0.0 (silencing ONLY the embedding-dropout site) and called
+                    # encode() twice in train mode on one input under no_grad -- the two returns
+                    # still differed; in eval mode two calls agreed with each other and disagreed
+                    # with the train-mode value, which is what proves the leak lived inside
+                    # TransformerEncoderLayer's own dropout sites and not in `model.drop`.
+                    # LayerNorm is unaffected by .eval()/.train(), so toggling the layer's mode for
+                    # one call changes nothing but its dropout sites -- on the Python path; under
+                    # no_grad eval() also opens the fast path, which the hold above keeps shut at
+                    # 'alibi'.
+                    was_training = layer.training
+                    layer.eval()
+                    try:
+                        h = layer(h, src_mask=mask, is_causal=causal)
+                    finally:
+                        layer.train(was_training)
+                else:
+                    h = layer(h, src_mask=mask, is_causal=causal)
+        finally:
+            if _hold:
+                torch.backends.mha.set_fastpath_enabled(True)
     else:
         h, _ = model.body(h)
         # n_layers IS ACCEPTED AND IGNORED HERE, ON PURPOSE -- a DECLARED GATE, not a silence.
@@ -698,15 +938,24 @@ def encode(lm: Config, model, x, *, n_layers=None, extra=None):
         # 0.74-3.08, so the max is the number that says whether the forecast has started to
         # dominate the readout. Both ABSENT
         # when no `extra` ever arrives (WORLD_FEEDBACK=0, the null world).
-        with torch.no_grad():
-            _ms = torch.stack([extra.detach().float().pow(2).mean(),
-                               h.detach().float().pow(2).mean()]).sqrt().tolist()
-        _ratio = _ms[0] / max(_ms[1], 1e-12)
-        _set("lm.encode.extra_ratio", round(_ratio, 6))
-        _set("lm.encode.extra_ratio_max",
-             round(max(_ratio, float(_COUNTS.get("lm.encode.extra_ratio_max", 0.0))), 6))
+        # ONLY UNDER GRAD, THE THREE OF THEM (2026-09-27, Q-LM-14). The held-out probe's closures
+        # (spine/compose.py::_logits_fn) run this entry point under no_grad beside training, with
+        # the same `extra`; a gauge written by them would report the probe's forecast as the flush's,
+        # and extra_applied would count eval forwards as conditioned flushes, breaking the pair
+        # world.forecasts == lm.encode.extra_applied that WORLD's docstring holds this key to. The
+        # add itself is unconditional: an eval pass scores the path training runs.
+        _train = torch.is_grad_enabled()
+        if _train:
+            with torch.no_grad():
+                _ms = torch.stack([extra.detach().float().pow(2).mean(),
+                                   h.detach().float().pow(2).mean()]).sqrt().tolist()
+            _ratio = _ms[0] / max(_ms[1], 1e-12)
+            _set("lm.encode.extra_ratio", round(_ratio, 6))
+            _set("lm.encode.extra_ratio_max",
+                 round(max(_ratio, float(_COUNTS.get("lm.encode.extra_ratio_max", 0.0))), 6))
         h = h + extra
-        _bump("lm.encode.extra_applied")
+        if _train:
+            _bump("lm.encode.extra_applied")
 
     # UNDROPPED ON THE WAY OUT. Three packages consume this -- MEM as keys, FAB as routing input,
     # LM as the readout source -- and a value three packages consume must not carry one consumer's
@@ -1344,10 +1593,11 @@ def state_dict(lm: Config, model, geom):
     SIG_D or D_MODEL and no prefix of it means anything" (:4678-4684).
 
     IN THE CHECKPOINT: the module; the composer's `born` tensor (without it a resume releases every
-    token's anchor immediately or holds every token forever); the counters; the geometry. NOT in
-    it: the composer's derived byte-index tensors (_idx/_msk/_len/_v -- rebuilt on load, so a
-    resume with a re-segmented vocabulary cannot come back with a stale table) and the dead-row
-    mask cache.
+    token's anchor immediately or holds every token forever); the counters; the geometry, which
+    carries the position scheme `pos` since 2026-09-28 (Q-LM-15). NOT in it: the composer's derived
+    byte-index tensors (_idx/_msk/_len/_v -- rebuilt on load, so a resume with a re-segmented
+    vocabulary cannot come back with a stale table), the dead-row mask cache, and ALiBi's slopes (a
+    non-persistent buffer, derived from LM_HEADS at build).
 
     LEVERS READ: none (everything comes off geom)
     WIRES READ: none
@@ -1405,15 +1655,31 @@ def state_dict(lm: Config, model, geom):
 def load_state(lm: Config, model, geom, saved):
     """Fit a saved checkpoint into the live model, or refuse. Returns a LoadReport.
 
-    WIDENS on vocab_slots only, BY PREFIX: slot i is still slot i and token id i is still token
+    WIDENS on vocab_slots, BY PREFIX: slot i is still slot i and token id i is still token
     id i (:846-877). A resume that cannot widen the softmax cannot add capacity for the area it is
     adding: the run that motivated widen_prefix had the vocabulary full at 2048/2048, so a new
     language got ZERO tokens of its own and was segmented entirely with the previous one's merges.
 
+    AND AT LM_CTX_WIDEN=1 ON THE CONTEXT, THE DECLARED WIDENING (2026-09-28, register §8 3.6, NEW-13
+    and O17; docs/04_CONTRACT.md Q-LM-15). A larger ctx and pos_max than the checkpoint's are
+    admitted, and the learned position table is fitted BY PREFIX the same way: rows [0, saved) are
+    the parent's and rows [saved, live) keep this build's initialisation, so on any window of the
+    parent's width or less the model computes what the parent computed, bit for bit -- no other
+    tensor depends on the context. OPT pads the appended rows' moments with zeros
+    (opt/api.py::_pad_moments), as for any dim-0 widening. A SMALLER context is still refused, and
+    at LM_CTX_WIDEN=0 so is any move: the geometry gate (spine/compose.py::_geometry_manifest)
+    records lm.ctx and lm.pos_max MAY_WIDEN only at 1, and stops a move before this function runs.
+    At LM_POS='alibi' and 'none' there is no table, so a widening appends nothing. The root, not
+    this function, refuses a widening across a continuing mid-epoch resume: the saved cursor
+    counts windows of the parent's width, and nothing here can see a cursor.
+
     REFUSES, by name and with both numbers: any NARROWING of vocab_slots; any change to width,
-    arch, resolved layers, heads, ctx/pos_max or compose; a change to max_token_bytes when compose
-    is on at either end (it sizes only the composer's byte tables, so with compose off at both it
-    is counted and named instead); a missing key the live model has. The old
+    arch, resolved layers, heads or compose; any change to ctx/pos_max but the declared widening
+    above; a change of the position scheme `pos` (2026-09-28, Q-LM-15: it decides which tensors
+    exist -- a record from before the field carries none and reads as 'learned', which built it);
+    a change to max_token_bytes when compose is on at either end (it sizes only the composer's byte
+    tables, so with compose off at both it is counted and named instead); a missing key the live
+    model has. The old
     tree used strict=True on the model while the fabric loaded strict=False for exactly this
     reason, so adding one parameter to the LM made every existing checkpoint unresumable with a raw
     torch error (ISSUES P1-M49). A COMPOSE FLIP IS REFUSED IN BOTH DIRECTIONS and named: under compose
@@ -1424,14 +1690,17 @@ def load_state(lm: Config, model, geom, saved):
     geom.vocab_slots and SAYS WHICH FILE TO LOOK AT -- a tokenizer file carrying its own larger
     vmax is the ZERO-mint failure at :1231-1241.
 
-    LEVERS READ: vocab_slots (via geom)
+    LEVERS READ: vocab_slots (via geom), ctx_widen
     WIRES READ: none
-    DID IT FIRE: lm.ckpt.loaded, lm.ckpt.rows_widened (the count, per tensor), lm.ckpt.refused
-                 (with the reason string, so a refusal is a Reading and not a traceback),
-                 lm.ckpt.max_token_bytes_moved (absent unless it moved with compose off). On a
-                 load that is not refused, the parent's whole ledger (state_dict's "counters")
-                 comes back first, except lm.resolve.* and lm.build.*, which are this process's
-                 own.
+    DID IT FIRE: lm.ckpt.loaded, lm.ckpt.rows_widened (the count, per tensor, of VOCABULARY
+                 widenings), lm.ckpt.refused (with the reason string, so a refusal is a Reading and
+                 not a traceback), lm.ckpt.max_token_bytes_moved (absent unless it moved with
+                 compose off), lm.ckpt.ctx_widened (2026-09-28, Q-LM-15: 1 when THIS restore
+                 admitted a larger context, 0 when it did not; PRESENT on every restore at
+                 LM_CTX_WIDEN=1 and ABSENT at 0, where no widening can be admitted -- never taken
+                 from a parent's ledger, since it describes this restore). On a load that is not
+                 refused, the parent's whole ledger (state_dict's "counters") comes back first,
+                 except lm.resolve.*, lm.build.* and lm.pos.scheme, which are this process's own.
     """
     lm = lm.owned_by("LM")
 
@@ -1464,11 +1733,21 @@ def load_state(lm: Config, model, geom, saved):
     # report's reason, which the root turns into a startup warning.
     _composes = bool(saved_geom.get("compose", False)) or bool(geom.compose)
     mtb_moved = None
+    # THE DECLARED WIDENING (2026-09-28, Q-LM-15): at LM_CTX_WIDEN=1 a ctx and pos_max LARGER than
+    # the checkpoint's are admitted, each noted here, and the table is fitted by prefix below. The
+    # two move together -- pos_max is the local wire from ctx -- and each is judged on its own, so a
+    # doctored record that grows one alone still fits nothing it should not.
+    widen = bool(lm.ctx_widen)
+    ctx_grown = {}
     for field in ("arch", "width", "layers", "heads", "ctx", "pos_max", "compose",
                   "max_token_bytes"):
         if field in saved_geom and saved_geom[field] != getattr(geom, field):
             if field == "max_token_bytes" and not _composes:
                 mtb_moved = (saved_geom[field], getattr(geom, field))
+                continue
+            if (widen and field in ("ctx", "pos_max")
+                    and int(saved_geom[field]) < int(getattr(geom, field))):
+                ctx_grown[field] = (int(saved_geom[field]), int(getattr(geom, field)))
                 continue
             return _refuse(
                 f"{knob.get(field, 'LM_' + field.upper())}: the checkpoint was written at "
@@ -1477,8 +1756,32 @@ def load_state(lm: Config, model, geom, saved):
                 + ("The composer's byte tables are sized by it (compose is on at "
                    f"{'the checkpoint' if saved_geom.get('compose') else 'this run'}), so they do "
                    f"not fit. " if field == "max_token_bytes" else
+                   # THE ONE MOVE THAT HAS A ROUTE IS SAID WHERE IT IS REFUSED (Q-LM-15), IN PLACE
+                   # OF THE GENERIC CLAUSE, WHICH IT CONTRADICTS (Q-LM-15's review): a larger
+                   # context's table IS a prefix that means something -- position p is still
+                   # position p -- but only under the declared widening, and a smaller one never
+                   # is. The clause stood beside this sentence until then and denied it.
+                   ("A larger context is a valid prefix only under LM_CTX_WIDEN=1, which admits "
+                    "it at an epoch-boundary resume, the learned table keeping the parent's rows; "
+                    "a smaller one never is. " if not widen else
+                    "LM_CTX_WIDEN=1 admits a larger context only: a smaller one is never a valid "
+                    "prefix. ") if field in ("ctx", "pos_max") else
                    "The tensors do not fit and no prefix of them means anything. ")
                 + "Resume with the saved value, or start a new run.")
+    # THE POSITION SCHEME DECIDES WHICH TENSORS EXIST (2026-09-28, Q-LM-15), so a move is refused by
+    # its name here, before the missing-tensor refusal below would report the same move as a
+    # nameless tensor list. A record written before the field existed carries none and reads as
+    # 'learned': every model that tree built carried the learned table.
+    saved_pos = str(saved_geom.get("pos", "learned"))
+    if saved_pos != str(geom.pos):
+        return _refuse(
+            f"LM_POS: the checkpoint was written at {saved_pos!r}"
+            + (" (it records no scheme, so it predates LM_POS and its tree built the learned "
+               "table)" if "pos" not in saved_geom else "")
+            + f" and this run resolves {str(geom.pos)!r}. The position scheme decides which "
+              f"tensors exist -- the learned table at 'learned', none at 'alibi' or 'none' -- so "
+              f"the two do not fit, and a model trained on one scheme has learned nothing about "
+              f"the other. Resume with the saved value, or start a new run.")
     saved_slots = int(saved_geom.get("vocab_slots", geom.vocab_slots))
     live_slots = int(geom.vocab_slots)
     if saved_slots > live_slots:
@@ -1503,16 +1806,32 @@ def load_state(lm: Config, model, geom, saved):
             f"the checkpoint is missing {len(missing)} tensor(s) the live model has, first "
             f"{missing[:3]}. That is a model this checkpoint was not written from.")
 
-    # WIDENS ON vocab_slots ONLY, AND BY PREFIX. Slot i is still slot i and token id i is still
+    # WIDENS ON vocab_slots, AND BY PREFIX. Slot i is still slot i and token id i is still
     # token id i (:846-877). A resume that cannot widen the softmax cannot add capacity for the
     # area it is adding: the run that motivated this had the vocabulary full at 2048/2048, so a new
     # language got ZERO tokens of its own.
     widened = 0
     fitted = {}
+    pos_rows = None
     for k, want in live.items():
         got = module[k]
         if tuple(got.shape) == tuple(want.shape):
             fitted[k] = got
+            continue
+        # THE POSITION TABLE, AT THE DECLARED WIDENING ONLY (2026-09-28, Q-LM-15), and matched BY
+        # NAME before the vocabulary rule below, whose dim-0 test would otherwise take the table
+        # for a vocabulary tensor wherever LM_CTX happened to equal LM_VOCAB_SLOTS. Position p is
+        # still position p: rows [0, saved) are the parent's, and every appended row keeps the
+        # initialisation this build drew for it, which is what a run built wide would have held
+        # there before its first step.
+        if (k == "pos.weight" and "pos_max" in ctx_grown and got.dim() == want.dim() == 2
+                and int(got.shape[0]) == ctx_grown["pos_max"][0]
+                and int(want.shape[0]) == ctx_grown["pos_max"][1]
+                and tuple(got.shape[1:]) == tuple(want.shape[1:])):
+            rows = want.clone()
+            rows[:int(got.shape[0])] = got           # THE PARENT'S ROWS. The rest keep their init.
+            fitted[k] = rows
+            pos_rows = ctx_grown["pos_max"]
             continue
         if (got.dim() == want.dim() and got.shape[0] == saved_slots
                 and want.shape[0] == live_slots and live_slots > saved_slots
@@ -1551,8 +1870,12 @@ def load_state(lm: Config, model, geom, saved):
     # lm.ckpt.saved_here IS EXCLUDED TOO (2026-09-27, register LOW-RESUME-SAVED-COUNTERS): it is
     # the process twin of the lineage count lm.ckpt.saved, and the parent's saves are not this
     # process's.
+    # AND TWO MORE SINCE 2026-09-28 (Q-LM-15), each describing THIS process: lm.ckpt.ctx_widened is
+    # this restore's reading (a parent's would say whether ITS restore widened, and would make the
+    # key present at LM_CTX_WIDEN=0), and lm.pos.scheme is this build's sentence against this
+    # tree's route set.
     for key, value in dict(saved.get("counters") or {}).items():
-        if key == "lm.ckpt.saved_here":
+        if key in ("lm.ckpt.saved_here", "lm.ckpt.ctx_widened", "lm.pos.scheme"):
             continue
         if not str(key).startswith(("lm.resolve.", "lm.build.")):
             _COUNTS[key] = value
@@ -1564,10 +1887,99 @@ def load_state(lm: Config, model, geom, saved):
         _bump("lm.ckpt.max_token_bytes_moved")
         note = (f"; TOK_MAX_BYTES (LM.d_max_token_bytes) moved {mtb_moved[0]!r} -> "
                 f"{mtb_moved[1]!r}, which sizes no LM tensor with compose off at both ends")
+    # THE WIDENING'S READING, PRESENT ON EVERY RESTORE THE LEVER ARMS (Q-LM-15): 1 when this restore
+    # admitted a larger context, 0 when the context stood still. At LM_CTX_WIDEN=0 no widening can
+    # be admitted and the key is ABSENT -- the unreachable state, not a measured zero.
+    if widen:
+        _set("lm.ckpt.ctx_widened", 1 if "ctx" in ctx_grown else 0)
+    if "ctx" in ctx_grown:
+        note += (f"; LM_CTX widened {ctx_grown['ctx'][0]} -> {ctx_grown['ctx'][1]} (LM_CTX_WIDEN=1, "
+                 + (f"the learned position table fitted by prefix, {pos_rows[0]} -> {pos_rows[1]} "
+                    f"rows, the appended ones at this build's initialisation)" if pos_rows else
+                    f"LM_POS={str(geom.pos)!r}: no position table to widen)"))
     return LoadReport(widened=widened, refused=False,
                       reason=(f"{widened} tensor(s) widened by prefix, {saved_slots} -> "
-                              f"{live_slots} rows" if widened else "fitted exactly, nothing widened")
+                              f"{live_slots} rows" if widened else
+                              "no vocabulary tensor widened" if "ctx" in ctx_grown else
+                              "fitted exactly, nothing widened")
                              + note)
+
+
+def parent_designation(lm: Config, *, saved_geometry):
+    """May the checkpoint whose LM wrote `saved_geometry` be designated B's long-lived parent?
+    Returns a Designation, or RAISES ContextLockedParent naming the arm and the scheme.
+
+    O17's RULING, AS AN ENTRY POINT (2026-09-28, register §8 3.6 and O17; C43, NEW-13;
+    docs/04_CONTRACT.md Q-LM-15): "No checkpoint on either LM arm is designated B's long-lived parent
+    until its position scheme has a context-widening route that PASSes on GPU, and the preset builder
+    refuses the designation by name (switchable)." A parent trained with the learned table carries
+    B's learning in a context it can never widen without retraining, which is an irreversible
+    closure (R4), weighed before any reversible cost -- and 'alibi' and 'none', which have no table,
+    are refused too, because no route of theirs has PASSED either: §8 3.6's CPU tests say the routes
+    OPERATE, and only §8 5.8 on GPU can say one works.
+
+    THE ANSWER, IN ORDER. The record's (arch, pos) -- pos absent reads as 'learned', which every
+    checkpoint before LM_POS built -- is admitted when it is in PASSED_WIDENING_ROUTES
+    (route_passed True); otherwise it is admitted only with REFUSE_CONTEXT_LOCKED_PARENT switched
+    off (route_passed False, and the reason says the refusal was off); otherwise it is REFUSED,
+    raised as ContextLockedParent. A record that is not an LM geometry at all (no arch, no ctx) is
+    a GeometryError: that is a checkpoint this function cannot read, not a refusal of one.
+
+    A CHECKPOINT'S QUESTION, NOT A RUN'S, SO NO ROW CALLS IT AND THE ROOT LISTS IT DEFERRED.
+    `saved_geometry` is the LMGeometry a checkpoint recorded (payload['LM']['geometry'], which
+    state_dict writes), and nothing in a run's order produces it: the caller is whatever designates
+    a parent -- the continue preset's builder, which is not built, and until it is,
+    tools/designate_parent.py, which reads a checkpoint through CKPT.load, calls this, and exits
+    non-zero having written nothing on the refusal.
+
+    RECEIVES: saved_geometry <- payload['LM']['geometry'] of the checkpoint to designate.
+    RETURNS: Designation(arch, pos, ctx, route_passed, reason).
+
+    LEVERS READ: none (the record is the checkpoint's, and the two switches are this module's
+                 constants in D17's shape, not levers: a run never designates anything)
+    WIRES READ: none
+    DID IT FIRE: nothing is counted -- no run calls it. The raised ContextLockedParent IS the
+                 record of a refusal, and tools/designate_parent.py's exit code carries it; an
+                 admission is the returned Designation, which that tool writes beside the
+                 checkpoint.
+    """
+    lm = lm.owned_by("LM")
+    g = dict(saved_geometry or {})
+    if "arch" not in g or "ctx" not in g:
+        raise GeometryError(
+            f"LM.parent_designation was handed a record with no LM geometry to judge (it carries "
+            f"{sorted(g)[:6]}): payload['LM']['geometry'] of a checkpoint LM.state_dict wrote holds "
+            f"at least arch and ctx. A checkpoint this function cannot read is not refused, it is "
+            f"not judged.")
+    arch, pos, ctx = str(g["arch"]), str(g.get("pos", "learned")), int(g["ctx"])
+    if (arch, pos) in PASSED_WIDENING_ROUTES:
+        return Designation(
+            arch=arch, pos=pos, ctx=ctx, route_passed=True,
+            reason=f"LM_ARCH={arch} LM_POS={pos!r}: its context-widening route is in "
+                   f"PASSED_WIDENING_ROUTES, so the checkpoint is not context-locked in O17's "
+                   f"sense and may be designated B's long-lived parent.")
+    if not REFUSE_CONTEXT_LOCKED_PARENT:
+        return Designation(
+            arch=arch, pos=pos, ctx=ctx, route_passed=False,
+            reason=f"LM_ARCH={arch} LM_POS={pos!r} at LM_CTX={ctx} has NO passed context-widening "
+                   f"route, and it is designated because REFUSE_CONTEXT_LOCKED_PARENT is False (O17's "
+                   f"switch, turned off by a code edit): B's long-lived parent is context-locked at "
+                   f"{ctx} tokens"
+                   + (" for life -- the learned table cannot widen without a route that has passed"
+                      if pos == "learned" else
+                      ", on a scheme no GPU reading has shown to extrapolate")
+                   + ".")
+    raise ContextLockedParent(
+        f"LM_ARCH={arch} LM_POS={pos!r}: REFUSED as B's long-lived parent (register O17, C43). "
+        + ("The learned position table locks this checkpoint to LM_CTX="
+           f"{ctx} for life: " if pos == "learned" else
+           f"'{pos}' builds no position table, and no GPU reading has shown it to extrapolate: ")
+        + "no context-widening route has PASSED on GPU for this arm (PASSED_WIDENING_ROUTES holds "
+        + (", ".join(f"{a}/{p}" for a, p in sorted(PASSED_WIDENING_ROUTES)) or "none")
+        + "; register §8 5.8 decides them). Designating it would carry B's learning in a context it "
+          "can never widen without retraining -- an irreversible closure (R4) that goes to the "
+          "owner with both readings when a designation falls due. The refusal is switchable, O17's "
+          "D17-shaped switch: lm/api.py's REFUSE_CONTEXT_LOCKED_PARENT, a code edit.")
 
 
 

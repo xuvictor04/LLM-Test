@@ -56,9 +56,11 @@ WHAT THIS FILE CANNOT SEE: whether Levels help. Competence is a control signal; 
 unit improves domain management is read on GPU (Proposal 05 U-series family (h), S5 (iii)), and an
 adverse reading there returns the lever to OFF. Everything here is an operation check.
 """
+import atexit
 import math
 import os
 import random
+import shutil
 import struct
 import sys
 import tempfile
@@ -81,7 +83,11 @@ from domains import api as dom_api                                 # noqa: E402
 FAILS = []
 # The resume tests' small base (tests/test_continuation.py's): a tenth-size fabric keeps each compose
 # to a few seconds.
-BASE = {"DATA_STREAM_BYTES": "60000", "SIG_WARMUP": "20", "FAB_N0": "256", "FAB_SLOTS": "512"}
+# GENERATION OFF (2026-09-29): since 04-6.2's flip the shipped retention probe generates after every
+# run's final save, which this file checks nothing of and which costs about a minute a run on the
+# CPU; a CPU suite that tests no EVAL sets it off (docs/04_CONTRACT.md Q-EVAL-12's dated note).
+BASE = {"DATA_STREAM_BYTES": "60000", "SIG_WARMUP": "20", "FAB_N0": "256", "FAB_SLOTS": "512",
+        "EVAL_GENERATE": "0"}
 # THE MANAGE PASS AND THE SPARE MADE REACHABLE in a short run: DOM.manage runs every 100 windows and
 # its cull only examines domains past DOM_GRACE and stale past DOM_CULL_STALE, both 500 by default.
 REACH = {"DOM_GRACE": 50, "DOM_CULL_STALE": 50, "DOM_CULL_FRAC": 0.5}
@@ -374,6 +380,11 @@ check("L5 the report names the unit beside comp_glob",
 
 # ---- L6: the resume stamp -------------------------------------------------------------------------
 TMP = tempfile.mkdtemp(prefix="levels_")
+# THE DIRECTORY GOES AT EXIT (2026-09-29). Nothing removed it, so every run left its checkpoints in
+# /tmp: 241 MB a run before the flip, 605 MB since, where the shipped retention probe writes a .best
+# beside each CKPT_DIR and the source-reliability book's sketch rides in every checkpoint. A run that
+# is killed still leaves it.
+atexit.register(shutil.rmtree, TMP, True)
 _warned = lambda s: [w for w in s.warnings if w.startswith("DOM_LEVELS=") and "Q-DOM-5" in w]  # noqa: E731
 for _plv, _tag, _unit in ((0, "p_off", "token"), (1, "p_on", "build_token")):
     _p = build(DOM_LEVELS=_plv, CKPT_DIR=os.path.join(TMP, _tag))

@@ -5508,6 +5508,473 @@
      "DOM_GRACE",
      "DOM_CULL_STALE"
     ]
+   },
+   {
+    "old_name": "(amendment: DATA_SYNTH_HOLDOUT)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_SYNTH_HOLDOUT",
+    "unit": "on/off",
+    "purpose": "Whether DATA_SOURCE=synthetic holds out a block per area. On: the real sources' held-out law runs on each generated body verbatim -- min(int(body x DATA_HOLDOUT_FRAC), DATA_VAL_CAP) bytes, a seeded contiguous block from rng_for('data.holdout.<key>', seed), removed from the body, with its seam, its overlap reading, the val-cap tally and the 0-byte refusal. Off (the build default until 04-Q5's flip on 2026-09-29, On since): the synthetic source holds nothing out, as it did before 2026-09-27, bit for bit. A resume admits a block where the checkpoint recorded none (key None, size 0), counted per area in data.holdout_admitted, and refuses the reverse.",
+    "reason": "AMENDMENT, 2026-09-27, Proposal 04's SR0 (register row 04-Q5; Proposal 05 \u00a78 3.1), ruled in docs/04_CONTRACT.md Q-DATA-9. There is no ancestor knob: the old synthetic generator held nothing out and had no switch over it, so there is no (family, old_name) key a DEPARTURES entry could be written under and N2 could only be satisfied by amending the census. IT DOES NOT CHANGE THE 328: that figure counts the old _SPEC's knobs and this was never one. WHY: every goal-B number on a synthetic run -- SR0's retention probe, E1's primary reading, every reading on 'focusbed' -- needs held-out text the run never trained on, and one held-out law for both sources makes a synthetic block a sample of the generated text rather than a separately drawn continuation (the judge's variant, rejected in SR0). BUILT OFF, RULED ON: at On every synthetic stream changes and no run before the change pairs with one after it, so 04-Q5's flip lands last and alone, after SR0's bit-identity, and pending fleets that pair with earlier runs pin it to 0 (04-Q5's pin rule). FLIPPED ON 2026-09-29, last and alone with 04-6.2's and 04-6.3's (docs/04_CONTRACT.md Q-DATA-9's dated note).",
+    "couples_with": [
+     "DATA_SOURCE",
+     "DATA_HOLDOUT_FRAC",
+     "DATA_VAL_CAP",
+     "DATA_STREAM_BYTES",
+     "DATA_N_PROCESSES",
+     "DATA_SEG_MAX"
+    ]
+   },
+   {
+    "old_name": "(amendment: EVAL_RETENTION_EVERY)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "EVAL",
+    "new_name": "EVAL_RETENTION_EVERY",
+    "unit": "Windows",
+    "purpose": "Windows between in-run retention readings on the pinned held-out windows; 0 (the build default until 04-6.2's flip on 2026-09-29; 1000 since) turns the whole retention probe off -- no ProbeSet is pinned, no stream is minted, no reading is taken, no consumer is fed and nothing is generated. At a value above 0 each reading scores EVAL_RETENTION_N pinned windows per arrived area through the memory-off closure, a reading is also taken at the first window of every phase, and the control-half mean feeds CKPT's best-model policy, EVAL's blow-up alarm and, at OPT_DAMP_SOURCE='probe', OPT's damping.",
+    "reason": "AMENDMENT, 2026-09-27, Proposal 04's SR0 and NEW-03 (register 04-6.2; Proposal 05 \u00a78 3.1/3.2), ruled in docs/04_CONTRACT.md Q-EVAL-12. There is no ancestor knob: the old tree read held-out text only at the end of a run (holdout_bpb), never on a cadence, so there is no (family, old_name) key a DEPARTURES entry could be written under and N2 could only be satisfied by amending the census. IT DOES NOT CHANGE THE 328. WHY: goal B is decided on held-out readings taken DURING training -- the forgetting curve, the best-by-held-out snapshot, the blow-up alarm -- and none existed. BUILT 0, RULED 1000: the register's 04-6.2 flip landed in its own commit, b1d31b7, after SR0's bit-identity test proved the probe is telemetry (losses, parameters, optimizer state and every counter but the probe's own book equal with it on and off). FLIPPED TO 1000 2026-09-29 (docs/04_CONTRACT.md Q-EVAL-12's dated note).",
+    "couples_with": [
+     "EVAL_RETENTION_N",
+     "EVAL_HOLDOUT_WINDOWS",
+     "DATA_SYNTH_HOLDOUT",
+     "OPT_DAMP_SOURCE",
+     "CKPT_DIR",
+     "CKPT_BEST_KEEP"
+    ]
+   },
+   {
+    "old_name": "(amendment: EVAL_RETENTION_N)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "EVAL",
+    "new_name": "EVAL_RETENTION_N",
+    "unit": "count",
+    "purpose": "Held-out windows per arrived area for each in-run retention reading, split between the area's control and report halves with the odd one to control (6: 3 + 3). A prefix of the one pinned draw per (area, half), so an in-run reading and a boundary reading (EVAL_HOLDOUT_WINDOWS) are paired on the items they share. Domain (1, None).",
+    "reason": "AMENDMENT, 2026-09-27, Proposal 04's SR0 (\u00a71 item 6), ruled in docs/04_CONTRACT.md Q-EVAL-12. There is no ancestor knob: with no in-run reading in the old tree there was nothing to size. IT DOES NOT CHANGE THE 328. WHY: the in-run reading's cost is this number of forwards per arrived area, and the proposal measured 4.3% of wall on the toy at 160 windows; EVAL_HOLDOUT_WINDOWS stays the boundary reading's size (32, Q-EVAL-9).",
+    "couples_with": [
+     "EVAL_RETENTION_EVERY",
+     "EVAL_HOLDOUT_WINDOWS"
+    ]
+   },
+   {
+    "old_name": "(amendment: OPT_DAMP_SOURCE)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "OPT",
+    "new_name": "OPT_DAMP_SOURCE",
+    "unit": "name",
+    "purpose": "Where OPT_LR_RESTART_DAMP's held-out Reading comes from. 'off' (the default): maybe_step drops whatever Reading it is handed before reading it, so no restart is judged. 'probe': the retention probe's control-half mean, Reading(value, seed_count=1, at) -- every losing restart is then REFUSED under PLAN 3.8 and counted in opt.restart.damp_refused_n1, never damped, and a Reading re-delivered with the same `at` is counted once. 'probe' with EVAL_RETENTION_EVERY=0 is refused at startup.",
+    "reason": "AMENDMENT, 2026-09-27, Proposal 04's NEW-03, ruled in docs/04_CONTRACT.md Q-OPT-13. There is no ancestor knob: the old tree read _best_bpb inside the schedule (:7137-7139) with no switch at all. IT DOES NOT CHANGE THE 328. WHY: the Reading is a held-out measurement crossing back into a training decision -- the only one in the system -- and whether it crosses must be a decision somebody makes rather than a consequence of turning the probe on; 'off' lets the probe feed CKPT and EVAL without moving a training number.",
+    "couples_with": [
+     "OPT_LR_RESTART_DAMP",
+     "EVAL_RETENTION_EVERY"
+    ]
+   },
+   {
+    "old_name": "(amendment: FAB_FADED_CULL)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "FAB",
+    "new_name": "FAB_FADED_CULL",
+    "unit": "name",
+    "purpose": "What FAB.manage does with a cull or merge whose removed expert mostly served a FADED area -- one the schedule had live in an earlier phase and not in this one (DATA's Plan.faded), or one the resumed lineage drew and this run schedules nowhere (Plan.parent_faded). 'as_is' (the default): the pass removes what it chose and counts it in fab.culled_faded_area / fab.merged_faded_area; no decision reads an area book. 'defer': such a removal is skipped and counted as an event (fab.cull_faded_deferred, fab.merge_faded_deferred) beside a gauge of the distinct experts deferred, and every other decision of the pass is the one 'as_is' takes -- the rest of the pass reads the population 'as_is' would hold, so a deferred absorbee pairs with nobody else, the pressure gate and the utilization budget are sized without the deferred experts, a deferred utilization-cull victim keeps its budget slot, and the survivor of a pair left apart is ranked by the mass the merge would have given it -- so no live-area expert is merged or culled in a deferred one's place (docs/04_CONTRACT.md Q-FAB-18's review). 'contrib' (2026-09-28, docs/04_CONTRACT.md Q-FAB-19): such a removal goes ahead only where FAB.contribution has MEASURED the expert at or below 0 (Population.contrib_n > 0 and contrib <= 0), counted at 'as_is''s names and as fab.cull_faded_allowed_by_contrib / fab.merge_faded_allowed_by_contrib; every other such removal is kept exactly as 'defer' keeps it, counted fab.cull_faded_refused_by_contrib / fab.merge_faded_refused_by_contrib -- an unmeasured expert is kept. Refused at startup without FAB_CONTRIB=1.",
+    "reason": "AMENDMENT, 2026-09-28, register \u00a78 3.1 (NEW-10, C37, CONTRACT-Q-FAB-5), ruled in docs/04_CONTRACT.md Q-FAB-18. There is no ancestor knob: the old tree culled and merged whatever its ranking named and never asked which area an expert served -- there was no book to ask it with. IT DOES NOT CHANGE THE 328. WHY: at the owner's shape cull and merge are reached (481-1,002 experts past grace, 203-810 cull_fail and 336-648 merges per run) while FAB.contribution, the signal that should spare a useful expert, is not built; C37 rules that the continue preset defers faded-area culls and merges until it is, with training runs unchanged and the deferral an E2 arm, so the switch must exist before E2 can run it. BUILT 'as_is', which is today's pass bit for bit; 'contrib' joins the choices with FAB.contribution (\u00a78 3.5). It joined them on 2026-09-28 (\u00a78 3.5, Q-FAB-19): NEW-10's rule, an expert tied to a faded area may be culled only when FAB.contribution <= 0, with C37's deferral kept for every expert no measurement has reached.",
+    "couples_with": [
+     "FAB_CULL_FRAC",
+     "FAB_MERGE_DIST",
+     "FAB_GRACE",
+     "FAB_MANAGE_EVERY",
+     "DATA_PHASE_SCHED",
+     "FAB_SLOTS",
+     "FAB_CONTRIB"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_REPLAY_SHARE)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_REPLAY_SHARE",
+    "unit": "fraction 0..1",
+    "purpose": "Under DATA_DRAW='replay', the share of each phase's bytes given to the areas faded in that phase -- DATA's Plan.faded, plus Plan.parent_faded from window 0 at DATA_REHEARSE_PARENT=1 -- split evenly among them; the phase's live areas share the rest. data_plan rounds it to whole bytes per phase on the decimal the lever holds, and draw_stream lays such a phase by deficit (the area furthest behind its target share of the bytes laid so far, ties in Plan order) and truncates every segment to its area's target, so the realised split is the planned one byte for byte and the exposure gates stay exact. A phase with no faded area is laid by the 'planned' law and reads no share. Read only under 'replay'; DATA_REPLAY_SHARE + DATA_REPLAY_NEWEST above 1 is refused.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 2 (the fixed-rehearsal control) and register 04-Q1, O16 and \u00a78 3.3, ruled in docs/04_CONTRACT.md Q-DATA-10. There is no ancestor knob: the old tree had no rehearsal law. IT DOES NOT CHANGE THE 328. WHY: 'replay' is the control the self-regulated draw must beat and the literature's goal-B baseline, and on the d3 toy it beat 'planned' at 5 of 5 seeds -- a hypothesis that puts the GPU 'replay' 0.27 against 'planned' pair first among the draw tests (\u00a78 5.3). 0.27 matches the self-regulated arms' measured last-phase rehearsal share on the toy and is PROVISIONAL (NEW-19) until a GPU reading. BUILT OFF: DATA_DRAW stays 'planned' (D8, O16), so no default run reads the lever.",
+    "couples_with": [
+     "DATA_DRAW",
+     "DATA_REPLAY_NEWEST",
+     "DATA_REHEARSE_PARENT",
+     "DATA_PHASE_SCHED",
+     "DATA_STREAM_BYTES"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_REPLAY_NEWEST)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_REPLAY_NEWEST",
+    "unit": "fraction 0..1",
+    "purpose": "Under DATA_DRAW='replay', the share of each faded phase's bytes given to the newest-arrived live area -- the one whose first live phase in this run's schedule is latest, ties to the last in Plan order -- the other live areas splitting what DATA_REPLAY_SHARE and this leave, evenly. 0 (the default) is OFF. A faded phase whose only live area is the newest gives it the whole live remainder. Read only under 'replay'.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 2 and R-3 (register 04-Q1 note (d)), ruled in docs/04_CONTRACT.md Q-DATA-10. There is no ancestor knob. IT DOES NOT CHANGE THE 328. WHY: the self-regulated draw's newest-area gain was measured to be exposure, and a hand-set boost reproduced it -- the critic's replay_late control, 0.34 to the newest and (1 - 0.27 - 0.34) / 4 = 0.0975 to each of the other four live areas -- so E1 needs the boost as an arm of its own. OFF at 0; 0.34 is an E1 arm value, not a default.",
+    "couples_with": [
+     "DATA_DRAW",
+     "DATA_REPLAY_SHARE",
+     "DATA_PHASE_SCHED"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_REHEARSE_PARENT)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_REHEARSE_PARENT",
+    "unit": "on/off",
+    "purpose": "Under DATA_DRAW='replay', the areas the resumed lineage's streams drew (Areas.drawn) that this run declares and makes live in no phase -- a pure-add child's parent areas, Plan.parent_faded -- count as faded from window 0, so every phase gives them DATA_REPLAY_SHARE. No effect under 'planned' or 'uniform', and none on a fresh run. A recorded parent area this run does not declare stays refused at the resume: the replay reservoir that would carry it in the checkpoint (NEW-06) is not built.",
+    "reason": "AMENDMENT, 2026-09-28, register 04-Q4 and O9 (\u00a78 3.3), ruled in docs/04_CONTRACT.md Q-DATA-10. There is no ancestor knob: the old tree had no parent record to rehearse from. IT DOES NOT CHANGE THE 328. WHY: without it a pure-add child has nothing faded -- its own schedule never had the parent's areas live -- so no draw can protect what the parent learned. BUILT OFF, and OFF in every training and measurement run (O9: D2 stands, pure-add is the unprotected measurement arm); the unbuilt continue preset carries it on with 'replay' 0.27, provisional until \u00a78 5.3.",
+    "couples_with": [
+     "DATA_DRAW",
+     "DATA_REPLAY_SHARE",
+     "DATA_AREAS",
+     "DATA_PHASE_SCHED",
+     "CKPT_RESUME"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST",
+    "unit": "name",
+    "purpose": "The source-reliability book's mode: 'off' keeps none (DATA.new_focus allocates nothing and the loop's arm test withholds every DATA.claims_observe call); 'observe' reads every source's (key, value) claims in the training stream, votes over the conflicted ones and reports each source's reliability and trust while changing nothing the run trains on; 'loss' and 'loss+draw' would weight the loss (and the draw) by that trust and are refused at startup with NotBuilt.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8 and SR3 (the source-reliability book), register 04-6.3 and \u00a78 3.4, ruled in docs/04_CONTRACT.md Q-DATA-11. There is no ancestor knob: the old tree kept no book of which source to believe. IT DOES NOT CHANGE THE 328. WHY: the only estimator 04's arms measured moving contested facts consistently, and it reads no model output, so fluency cannot game it. BUILT 'off' so a default run was the tree before the book, bit for bit (SR3's bit-identity, tests/test_trust.py); 04-6.3 rules 'observe' ON after that bit-identity, and the flip lands last and alone: FLIPPED 2026-09-29 (docs/04_CONTRACT.md Q-DATA-11's dated note). Actuation stays OFF: neither 'loss' value may become a default while a truthful source in another format is floored, nor before copy detection (SR6).",
+    "couples_with": [
+     "DATA_TRUST_RULE",
+     "DATA_TRUST_CLAIM",
+     "DATA_TRUST_EVERY",
+     "DATA_SOURCE",
+     "DATA_AREAS"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_RULE)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_RULE",
+    "unit": "name",
+    "purpose": "Which estimator fills the book: 'claims', the model-free reliability-weighted vote over the claims sources make -- the one rule built. Read only at DATA_TRUST != 'off'; a resume that changes it is refused by name.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8 and SR3 (the source-reliability book), register 04-6.3 and \u00a78 3.4, ruled in docs/04_CONTRACT.md Q-DATA-11. There is no ancestor knob: the old tree kept no book of which source to believe. IT DOES NOT CHANGE THE 328. WHY: 04 names three more rule values ('peer', 'residual', 'fluency') as SR5's ablations; a value that is not built is not a choice, so the lever carries one until they are.",
+    "couples_with": [
+     "DATA_TRUST",
+     "DATA_TRUST_CLAIM"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_CLAIM)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_CLAIM",
+    "unit": "name",
+    "purpose": "What counts as one claim: 'kv', a (key, value) pair around a DATA_TRUST_DELIMS delimiter, the key up to DATA_TRUST_CTX TOK units before it and the value DATA_TRUST_VAL units after, both cut at punctuation, case-folded and whitespace-collapsed, so '@EEE=V;' and '@EEE:V;' are one claim; or 'ctx', d3's prototype, a raw DATA_TRUST_CTX-unit context and the unit after it. A claim counts only where one source holds every unit it spans. Read only at DATA_TRUST != 'off'; a resume that changes it is refused by name.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8 and SR3 (the source-reliability book), register 04-6.3 and \u00a78 3.4, ruled in docs/04_CONTRACT.md Q-DATA-11. There is no ancestor knob: the old tree kept no book of which source to believe. IT DOES NOT CHANGE THE 328. WHY: 'kv' is 04's build target (R-5) and is unprototyped -- E5's format-variant world is its acceptance test; 'ctx' measures conformity to the majority's surface form, not truth (a truthful source writing '@EEE:V;' was floored at 2 of 2 seeds), and is kept as the prototype's arm.",
+    "couples_with": [
+     "DATA_TRUST",
+     "DATA_TRUST_CTX",
+     "DATA_TRUST_VAL",
+     "DATA_TRUST_DELIMS"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_CTX)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_CTX",
+    "unit": "tokens",
+    "purpose": "Key length in TOK units: the most units before a delimiter a 'kv' key reads, or the context length of a 'ctx' claim. Read only at DATA_TRUST != 'off'; a resume that changes it is refused by name.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8 and SR3 (the source-reliability book), register 04-6.3 and \u00a78 3.4, ruled in docs/04_CONTRACT.md Q-DATA-11. There is no ancestor knob: the old tree kept no book of which source to believe. IT DOES NOT CHANGE THE 328. WHY: 04 section 6's value, 5, in TOK units and not bytes: after minting five units span more than five bytes, so the testbed's known answer (K = 5 = len('@EEE=')) does not port. PROVISIONAL (NEW-19).",
+    "couples_with": [
+     "DATA_TRUST_CLAIM",
+     "DATA_TRUST_VAL",
+     "TOK_MODE"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_VAL)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_VAL",
+    "unit": "tokens",
+    "purpose": "Value length in TOK units for a 'kv' claim: how many units after the delimiter the value reads, cut at the first punctuation or delimiter. Read only at DATA_TRUST=observe with DATA_TRUST_CLAIM='kv'; a resume that changes it is refused by name.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8 and SR3 (the source-reliability book), register 04-6.3 and \u00a78 3.4, ruled in docs/04_CONTRACT.md Q-DATA-11. There is no ancestor knob: the old tree kept no book of which source to believe. IT DOES NOT CHANGE THE 328. WHY: 04 section 6's value, 1. At one byte-level unit a spaced form ('x = 5') reads the space as its value and makes no claim; stated, not tuned. PROVISIONAL (NEW-19).",
+    "couples_with": [
+     "DATA_TRUST_CLAIM",
+     "DATA_TRUST_CTX",
+     "DATA_TRUST_DELIMS"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_DELIMS)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_DELIMS",
+    "unit": "name",
+    "purpose": "The 'kv' delimiter class, '|'-separated byte strings: '=', ':' and the space-bounded copulas ' is ', ' are ', ' was ', ' were '. An empty entry, a repeated one and one that is a prefix of another are refused by name, the last because a claim must be decidable from the bytes it spans. A resume that changes it is refused by name.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8 and SR3 (the source-reliability book), register 04-6.3 and \u00a78 3.4, ruled in docs/04_CONTRACT.md Q-DATA-11. There is no ancestor knob: the old tree kept no book of which source to believe. IT DOES NOT CHANGE THE 328. WHY: 04 section 6's class, unmeasured on real text; one string because a Lever holds one value.",
+    "couples_with": [
+     "DATA_TRUST_CLAIM",
+     "DATA_TRUST_CTX",
+     "DATA_TRUST_VAL"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_HOT)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_HOT",
+    "unit": "count",
+    "purpose": "The count-sketch pre-filter: a claim enters the claim table once its sketch bucket (zlib.crc32 of its key modulo DATA_TRUST_SKETCH) has counted this many claims.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8 and SR3 (the source-reliability book), register 04-6.3 and \u00a78 3.4, ruled in docs/04_CONTRACT.md Q-DATA-11. There is no ancestor knob: the old tree kept no book of which source to believe. IT DOES NOT CHANGE THE 328. WHY: d3's HOT, 20; a key seen a handful of times across the stream costs no table entry. PROVISIONAL (NEW-19).",
+    "couples_with": [
+     "DATA_TRUST_SKETCH",
+     "DATA_TRUST_TABLE"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_SELF)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_SELF",
+    "unit": "fraction 0..1",
+    "purpose": "Admission: a source's claim on a key counts only when its most frequent value there -- the only most frequent -- holds at least this share of its readings of the key.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8 and SR3 (the source-reliability book), register 04-6.3 and \u00a78 3.4, ruled in docs/04_CONTRACT.md Q-DATA-11. There is no ancestor knob: the old tree kept no book of which source to believe. IT DOES NOT CHANGE THE 328. WHY: d3's SELF, 0.8: a source that contradicts itself about a key makes no claim about it. PROVISIONAL (NEW-19).",
+    "couples_with": [
+     "DATA_TRUST_MIN_N",
+     "DATA_TRUST_MIN_EV"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_MIN_N)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_MIN_N",
+    "unit": "count",
+    "purpose": "Admission: a source's claim on a key counts only after this many readings of that key from that source.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8 and SR3 (the source-reliability book), register 04-6.3 and \u00a78 3.4, ruled in docs/04_CONTRACT.md Q-DATA-11. There is no ancestor knob: the old tree kept no book of which source to believe. IT DOES NOT CHANGE THE 328. WHY: d3's MIN_N, 3. PROVISIONAL (NEW-19).",
+    "couples_with": [
+     "DATA_TRUST_SELF",
+     "DATA_TRUST_MIN_EV"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_MIN_EV)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_MIN_EV",
+    "unit": "count",
+    "purpose": "Conflicted claims -- keys at least two sources claim with at least two values -- a source must take part in before its reliability r is reported and its trust set; below it both are ABSENT and its trust is 1, which is how a new source joins.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8 and SR3 (the source-reliability book), register 04-6.3 and \u00a78 3.4, ruled in docs/04_CONTRACT.md Q-DATA-11. There is no ancestor knob: the old tree kept no book of which source to believe. IT DOES NOT CHANGE THE 328. WHY: d3's MIN_EV, 10: agreement alone says nothing about which source is the more reliable, so only conflict is evidence. PROVISIONAL (NEW-19).",
+    "couples_with": [
+     "DATA_TRUST_MIN",
+     "DATA_TRUST_SELF",
+     "DATA_TRUST_MIN_N"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_MIN)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_MIN",
+    "unit": "fraction 0..1",
+    "purpose": "The trust floor: t = clip(r / max r, this, 1), set only when two or more sources carry evidence. Under 'observe' it multiplies nothing; t is the weight a built actuation would apply.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8 and SR3 (the source-reliability book), register 04-6.3 and \u00a78 3.4, ruled in docs/04_CONTRACT.md Q-DATA-11. There is no ancestor knob: the old tree kept no book of which source to believe. IT DOES NOT CHANGE THE 328. WHY: d3's T_MIN, 0.3. PROVISIONAL (NEW-19).",
+    "couples_with": [
+     "DATA_TRUST_MIN_EV",
+     "DATA_TRUST"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_EVERY)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_EVERY",
+    "unit": "Windows",
+    "purpose": "Windows between passes of the book over the stream the run consumed since its last pass, evaluated once per window after the flush through Cadences.due('data.trust', DATA.trust_period(dat), clock), behind the arm test; the window that rolls an epoch also passes, so the book reads every unit of an epoch, and 0 leaves the epoch-end passes only. A negative is refused by its declared domain.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8 and SR3 (the source-reliability book), register 04-6.3 and \u00a78 3.4, ruled in docs/04_CONTRACT.md Q-DATA-11. There is no ancestor knob: the old tree kept no book of which source to believe. IT DOES NOT CHANGE THE 328. WHY: 04 section 6's 160, the testbed's 10 steps x 16 windows, to be lengthened if E3 measures more than 2% of wall. A Windows cadence like every period in compose._periods, where it is the key 'data.trust'.",
+    "couples_with": [
+     "DATA_TRUST",
+     "RUN_EPOCHS"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_SKETCH)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_SKETCH",
+    "unit": "slots",
+    "purpose": "Count-sketch size in int32 buckets, fixed for a lineage: 16.8 MB at the default, held only at DATA_TRUST != 'off' and checkpointed with the book as DATA's payload, never as a geometry-manifest field. A resume at another size is refused by name at DATA.new_focus.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8 and SR3 (the source-reliability book), register 04-6.3 and \u00a78 3.4, ruled in docs/04_CONTRACT.md Q-DATA-11. There is no ancestor knob: the old tree kept no book of which source to believe. IT DOES NOT CHANGE THE 328. WHY: d3's NB, 4194301, a prime; 04 section 5 fixes it at build.",
+    "couples_with": [
+     "DATA_TRUST_HOT",
+     "DATA_TRUST_TABLE"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_TABLE)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_TABLE",
+    "unit": "entries",
+    "purpose": "The most keys the claim table holds; the least recently claimed key is evicted beyond it, counted in data.trust.table_evictions, and a resume at a smaller bound evicts to fit, counted the same way.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8 and SR3 (the source-reliability book), register 04-6.3 and \u00a78 3.4, ruled in docs/04_CONTRACT.md Q-DATA-11. There is no ancestor knob: the old tree kept no book of which source to believe. IT DOES NOT CHANGE THE 328. WHY: 04 section 6's LRU bound, 200000, unmeasured on real text.",
+    "couples_with": [
+     "DATA_TRUST_HOT",
+     "DATA_TRUST_SKETCH"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_COPY)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_COPY",
+    "unit": "name",
+    "purpose": "Copy detection inside the source-reliability book's vote: 'off' judges no pair of sources; 'accu' judges every pair sharing DATA_TRUST_MIN_EV conflicted claims by the posterior that the later-seen copies the earlier, and discounts a dependent pair's later source in the vote's next round. Read only at DATA_TRUST=observe; observe-only, so it moves the book's truth, r and t and nothing the run trains on.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8's standing actuation rule (2) and SR6 (copy detection, the ACCU-COPY family), register \u00a78 3.7 (operation only; \u00a78 5.12 decides) and 04-Q12, C05 and O5, ruled in docs/04_CONTRACT.md Q-DATA-12. There is no ancestor knob: the old tree kept no book of which source to believe, so it judged no pair of sources. IT DOES NOT CHANGE THE 328. WHY: 04's standing rule (2) asks for copy detection before any trust actuation is proposed, because a source that copies another's values -- false ones included -- doubles that source's vote (majority-false inverted trust at 3 of 3 seeds). Built 'off'; \u00a78 5.12 reads 'accu' on GPU, and O5's lock holds meanwhile.",
+    "couples_with": [
+     "DATA_TRUST",
+     "DATA_TRUST_COPY_PRIOR",
+     "DATA_TRUST_COPY_RATE",
+     "DATA_TRUST_COPY_P",
+     "DATA_TRUST_MIN_EV"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_COPY_PRIOR)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_COPY_PRIOR",
+    "unit": "fraction 0..1",
+    "purpose": "The copy model's alpha: the prior probability that two sources are dependent, before their shared claims are read. The domain is closed and DATA.new_focus refuses 0 and 1 by name, a certainty no count moves. Read only at DATA_TRUST=observe with DATA_TRUST_COPY=accu.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8's standing actuation rule (2) and SR6 (copy detection, the ACCU-COPY family), register \u00a78 3.7 (operation only; \u00a78 5.12 decides) and 04-Q12, C05 and O5, ruled in docs/04_CONTRACT.md Q-DATA-12. There is no ancestor knob: the old tree kept no book of which source to believe, so it judged no pair of sources. IT DOES NOT CHANGE THE 328. WHY: the family's alpha, 0.2, as Proposal 04 cites it (from memory). PROVISIONAL (NEW-19): no toy, CPU or GPU reading is behind it.",
+    "couples_with": [
+     "DATA_TRUST_COPY",
+     "DATA_TRUST_COPY_RATE",
+     "DATA_TRUST_COPY_P"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_COPY_RATE)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_COPY_RATE",
+    "unit": "fraction 0..1",
+    "purpose": "The copy model's c: the share of its values a dependent source copies. It sets the likelihood of a pair's shared-true, shared-false and differing claims under dependence, and the discount -- a dependent pair's later source votes at 1 - c x P on the values it shares with the earlier. The domain is closed and DATA.new_focus refuses 0 by name (Q-DATA-12's review, 2026-09-28): at 0 every judged pair's posterior is the prior, whatever it claims. 1 is legal. Read only at DATA_TRUST=observe with DATA_TRUST_COPY=accu.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8's standing actuation rule (2) and SR6 (copy detection, the ACCU-COPY family), register \u00a78 3.7 (operation only; \u00a78 5.12 decides) and 04-Q12, C05 and O5, ruled in docs/04_CONTRACT.md Q-DATA-12. There is no ancestor knob: the old tree kept no book of which source to believe, so it judged no pair of sources. IT DOES NOT CHANGE THE 328. WHY: the family's c, 0.8, as Proposal 04 cites it (from memory). PROVISIONAL (NEW-19): no toy, CPU or GPU reading is behind it.",
+    "couples_with": [
+     "DATA_TRUST_COPY",
+     "DATA_TRUST_COPY_PRIOR",
+     "DATA_TRUST_COPY_P"
+    ]
+   },
+   {
+    "old_name": "(amendment: DATA_TRUST_COPY_P)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "DATA",
+    "new_name": "DATA_TRUST_COPY_P",
+    "unit": "fraction 0..1",
+    "purpose": "The posterior of dependence above which a judged pair is reported dependent and its later-seen source discounted; below it the pair is certified independent and votes in full; exactly at it, judged and neither. The domain is closed and DATA.new_focus refuses 0 and 1 by name (Q-DATA-12's review, 2026-09-28): no posterior is above 1, so no pair could be dependent, and none below 0, so none could be certified. Read only at DATA_TRUST=observe with DATA_TRUST_COPY=accu.",
+    "reason": "AMENDMENT, 2026-09-28, Proposal 04 \u00a71 item 8's standing actuation rule (2) and SR6 (copy detection, the ACCU-COPY family), register \u00a78 3.7 (operation only; \u00a78 5.12 decides) and 04-Q12, C05 and O5, ruled in docs/04_CONTRACT.md Q-DATA-12. There is no ancestor knob: the old tree kept no book of which source to believe, so it judged no pair of sources. IT DOES NOT CHANGE THE 328. WHY: 0.5, the even-odds line. PROVISIONAL (NEW-19); it is 'SR6's threshold', the first next arm O5 names if \u00a78 5.12 fails.",
+    "couples_with": [
+     "DATA_TRUST_COPY",
+     "DATA_TRUST_COPY_PRIOR",
+     "DATA_TRUST_COPY_RATE"
+    ]
+   },
+   {
+    "old_name": "(amendment: FAB_CONTRIB)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "FAB",
+    "new_name": "FAB_CONTRIB",
+    "unit": "on/off",
+    "purpose": "Whether FAB.contribution runs. On: on each fab.manage pass, before FAB.manage, the root measures up to FAB_CONTRIB_MAX past-grace experts' marginal contribution -- the held-out loss without the expert minus the loss with it, on the retention probe's pinned CONTROL half through the memory-off closure, which is also the baseline -- and FAB folds each into Population.contrib at FAB_COMP_EMA (the first measurement sets it), counting measurements in Population.contrib_n. Off (the shipped default): nothing is measured and FAB.manage reads no contribution -- both contrib > 0 spares and FAB_FADED_CULL='contrib''s rule read Population.contrib only when on (docs/04_CONTRACT.md Q-FAB-19's review) -- so both spares are inert, on a child resumed off from a measuring parent too, which carries the parent's books and fab.contrib_* counts unread; a lineage that never armed it holds contrib 0.0 on every expert and no fab.contrib_* key, and no eval.contrib.* key exists. On needs the retention probe armed (EVAL_RETENTION_EVERY > 0 and a pinned control window); startup refuses it otherwise.",
+    "reason": "AMENDMENT, 2026-09-28, register \u00a78 3.5 (02-R11, C37, NEW-10's contribution-gated cull), ruled in docs/04_CONTRACT.md Q-FAB-19. There is no ancestor knob: the old tree ran the counterfactual on every manage pass it took, gated only on FABRIC and MANAGE (self_organize.py:6949-6994), so there is no (family, old_name) key a DEPARTURES entry could be written under and N2 could only be satisfied by amending the census. IT DOES NOT CHANGE THE 328. WHY: 02-R11 builds FAB.contribution right after NEW-03 with training runs unchanged, and at True the contrib > 0 spares in both culls can fire, which changes what a run culls -- so the measurement ships off and is an arm (E2, with FAB_FADED_CULL='contrib'), not a default. The old tree scored its baseline through a different function from its counterfactuals (ISSUES P1-H11) and its walk never changed (C3); the body refuses the first by construction, checked at every pass, and counts the second as fab.contrib_degenerate, writing nothing. CPU runs establish operation only; efficacy (retention across culls) is a GPU reading.",
+    "couples_with": [
+     "FAB_CONTRIB_MAX",
+     "FAB_COMP_EMA",
+     "FAB_GRACE",
+     "FAB_MANAGE_EVERY",
+     "FAB_FADED_CULL",
+     "EVAL_RETENTION_EVERY",
+     "EVAL_RETENTION_N"
+    ]
+   },
+   {
+    "old_name": "(amendment: FAB_CONTRIB_MAX)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "FAB",
+    "new_name": "FAB_CONTRIB_MAX",
+    "unit": "experts",
+    "purpose": "How many past-grace experts one contribution pass measures, taken from a cursor on Population that rotates through the live pool -- moved with its expert by a cull's swap-with-last, and checkpointed -- so every past-grace expert is reached once per (past-grace count / FAB_CONTRIB_MAX) passes. Each candidate costs one no_grad forward on the looped arm (a reweighted sum of the pass's blend on the society arm). Domain (1, None): 0 would arm a measurement that measures nothing, and is refused at the first read; above the past-grace count every past-grace expert is measured each pass.",
+    "reason": "AMENDMENT, 2026-09-28, register \u00a78 3.5, ruled in docs/04_CONTRACT.md Q-FAB-19. There is no ancestor knob: the old tree measured the experts the flush it rode had routed, capped at FAB_CHAIN_K on the chaining arm (self_organize.py:6949-6994), not a count of its own. IT DOES NOT CHANGE THE 328. WHY: the candidates here are past-grace experts off a rotating cursor -- the population the spares and FAB_FADED_CULL='contrib' judge -- and a pass over all of them would cost one forward per past-grace expert, 481-1,002 at the owner's shape, every FAB_MANAGE_EVERY windows. 64 is PROVISIONAL (NEW-19): it reaches each expert once per 8-16 passes there, about once per 3,800-7,800 windows at FAB_MANAGE_EVERY=500, so 'contrib' mostly meets unmeasured experts and keeps them; E2 sizes it on GPU.",
+    "couples_with": [
+     "FAB_CONTRIB",
+     "FAB_MANAGE_EVERY",
+     "FAB_GRACE",
+     "FAB_SLOTS",
+     "FAB_FADED_CULL"
+    ]
+   },
+   {
+    "old_name": "(amendment: LM_POS)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "LM",
+    "new_name": "LM_POS",
+    "unit": "name",
+    "purpose": "How the base LM is told where a token sits in its window. 'learned' (the default, today's model bit for bit, on both arms): a learned row per position, from a table LM_CTX rows tall, added to the token vectors before the arch branch -- which locks a model trained with it to its context. 'alibi' (LM_ARCH=transformer only): no table; every layer's attention score is biased by -m_h x (query position - key position), m_h the ALiBi paper's per-head geometric slopes, with the causal cut in the same float mask. 'none' (LM_ARCH=gru only): no table; the recurrence is the only order signal. 'alibi' on the GRU and 'none' on the transformer are refused by name at LM.resolve. A checkpoint records the scheme in its LM geometry and a resume that changes it is refused by name at LM.load_state; a record from before the lever reads as 'learned'.",
+    "reason": "AMENDMENT, 2026-09-28, register \u00a78 3.6 (O17, NEW-13, C43), ruled in docs/04_CONTRACT.md Q-LM-15. There is no ancestor knob: the old arch selector implied the scheme and nothing chose between them -- the old MiniLM built NO position table (self_organize.py:1546-1561, this lever's 'none') and the old TinyTransformer a learned one clamped at 512 (:1563-1566) -- so there is no (family, old_name) key a DEPARTURES entry could be written under and N2 could only be satisfied by amending the census. IT DOES NOT CHANGE THE 328. WHY: this tree gave BOTH arms the learned table, and O17 corrects C43's transformer-only premise accordingly -- and rules ONE position lever, 'learned' ON on both arms and an extrapolating value per arm OFF, so that \u00a78 5.8's arm (A) can read 'learned' against each arm's extrapolating value on GPU. Built so a default run is the tree before the lever, bit for bit. CPU tests establish operation only (\u00a78 3.6); which scheme a long-lived parent should carry is a GPU reading.",
+    "couples_with": [
+     "LM_ARCH",
+     "LM_CTX",
+     "LM_HEADS",
+     "LM_CTX_WIDEN"
+    ]
+   },
+   {
+    "old_name": "(amendment: LM_CTX_WIDEN)",
+    "old_default": "(none)",
+    "verdict": "amend",
+    "new_owner": "LM",
+    "new_name": "LM_CTX_WIDEN",
+    "unit": "on/off",
+    "purpose": "Whether a resume may widen the context. Off (the shipped default): lm.ctx is EXACT at the geometry gate, as it always was. On: the gate records lm.ctx and lm.pos_max MAY_WIDEN, so a larger LM_CTX than the checkpoint's is admitted at an epoch-boundary resume and a smaller one is still refused; LM.load_state copies the parent's rows of the learned position table and leaves the appended rows at this build's initialisation (OPT pads their moments with zeros), so on a window of the parent's width or less the model computes what the parent computed; SIG keeps the parent's width. A widening across a continuing mid-epoch resume is refused by name. The resume prints every Windows-unit lever beside spine/derive.py::windows_at_ctx's value -- the same text per period at the new width -- and applies none (N4).",
+    "reason": "AMENDMENT, 2026-09-28, register \u00a78 3.6 (NEW-13, O17, C43), ruled in docs/04_CONTRACT.md Q-LM-15. There is no ancestor knob: the old tree never widened a context across a resume. IT DOES NOT CHANGE THE 328. WHY: NEW-13 keeps lm.ctx EXACT 'until an identity check and a cadence-rescaling known answer exist; then a widening is a declared operation at a resume boundary', and O17 names 'learned''s row-append widening as its route -- \u00a78 5.8's arm (B), 128 -> 256 against a parent trained at 256 on GPU. This switch is the declaration, built OFF so lm.ctx stays EXACT; \u00a78 3.6's CPU known answers (the identity to 1e-6, bitwise on CPU, and the rescaling grid) establish operation only. A widened child is still context-locked in O17's sense until a route passes.",
+    "couples_with": [
+     "LM_CTX",
+     "LM_POS",
+     "CKPT_RESUME",
+     "RUN_EPOCHS"
+    ]
    }
   ]
  }

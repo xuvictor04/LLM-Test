@@ -24,4 +24,9 @@ below are how any copy is verified.
 The fleet's `PASTE_BACK.txt` has the kept-copy form of the same command. Every run in the fleet
 was at commit 319f313. *(Corrected 2026-09-27: the line first written here left out `RUN_DEVICE=cuda`
 and `OMP_NUM_THREADS=1`. `RUN_DEVICE` defaults to `cpu` and a checkpoint loads onto the CPU, so it
-would have continued a CUDA parent on the CPU, which is another experiment.)*
+would have continued a CUDA parent on the CPU, which is another experiment.)* *(2026-09-29, the Stage 3
+merge: a checkout from then on ships the synthetic held-out block, the retention probe and the
+source-reliability book on, and this fleet ran with all three off, so the line there ends
+`DATA_SYNTH_HOLDOUT=0 EVAL_RETENTION_EVERY=0 DATA_TRUST=off python3 run.py`. Without them a kept copy,
+saved mid-epoch, is refused by name, and a final one continues under another configuration.
+`gpu_world.sh --analyze` adds them to its resume line for a fleet that recorded no pins.)*

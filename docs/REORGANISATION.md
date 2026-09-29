@@ -1,7 +1,8 @@
 # The file-structure reorganisation of 2026-09-28: what is done, and what moves after the Stage 3 merge
 
-**Status.** Phase A is done on `rm-predict-DC` (the commits below). Phase B waits for the Stage 3 branch
-(`sr0-build`) to merge, because each of its steps edits files that Stage 3 also edits (B1–B2
+**Status.** Phase A is done on `rm-predict-DC` (the commits below). **Phase B is unblocked** since the
+Stage 3 branch (`sr0-build`) merged on 2026-09-29, the whole suite green on the merge (*At the merge*,
+below). It waited for that merge because each of its steps edits files that Stage 3 also edits (B1–B2
 `docs/04_CONTRACT.md`; B3 `src/ckpt/api.py`, `src/world/levers.py`, `tests/test_assemble.py`, `docs/`
 and `.rework/CENSUS.md`; B4 `run.py`, `src/spine/compose.py`, `tests/test_census.py`,
 `tests/test_ownership.py` and `docs/04_CONTRACT.md`), and editing them on both branches would make the
@@ -113,6 +114,16 @@ phrases find `run.py:73` and `tests/test_census.py:411` and `:716`, which do not
 `e125e9c`, and on a trial merge of `sr0-build` at `d9900c6`, it returns a line of every B4 anchor.
 Read each match against the rule at the top of this page: most of what the searches return stays.
 
+**At the merge (2026-09-29).** The three searches find every anchor below. The second returns 840 lines,
+as at b444456 (the three over e125e9c's 837 are this page's own), and names no live file B3 does not
+list. The third adds three live lines to b444456's, each a test run from the repository root, which stay
+(`tests/test_baseline.py`'s docstring twice, `tests/test_position.py`'s Q6). Stage 3 moved most of the
+numbers below, so re-find each by its quoted text: the contract's B4 line is `:3220`, for one, and
+`sweep_world.sh`'s usage lines are `:56`-`:58` and `:66`, its `set -u` `:70`. The counts Phase B's
+checks compare with, on the merge: N5 one root collision (`data`), N7 336 citations (Stage 3 added
+five), O12 1,461 symbol citations resolved and 279 line citations left alone, O13 1,749 citations
+opened.
+
 ### B1–B2: `sweep_gpu.sh` and `sweep_world.sh` move to `tools/`
 
 A run.py sweep is a tool, and the root keeps what a reader starts from. Both scripts run `python3 run.py`
@@ -128,8 +139,9 @@ and `world_out/` at the checkout's root.
   sweep_world.sh`" → `bash tools/sweep_world.sh` (the same line, so nothing citing the file moves).
 - The root `README.md`: drop the two root lines of *Repository layout*, and the `tools/` line reads
   "gpu_launch.sh (check the box, then launch a fleet), fleet_dash.sh (watch it), read_fleet_archive.sh,
-  sweep_gpu.sh + sweep_world.sh (run.py sweeps); render_wiring.py, render_defaults.py, sync_counts.py
-  (write, or --check, the generated documents)". The run-output sentence stands.
+  sweep_gpu.sh + sweep_world.sh (run.py sweeps); designate_parent.py (...); render_wiring.py,
+  render_defaults.py, sync_counts.py (write, or --check, the generated documents)", `designate_parent.py`
+  as the merge wrote it. The run-output sentence stands.
 - `archive/README.md`: its sentence "The root kept …" loses the two sweeps, and the path table gains a
   row, `sweep_gpu.sh`, `sweep_world.sh` → `tools/<same name>`.
 - Unchanged, because they name the scripts without a path and stay true: `run.py:96`, `run.py:235`,
@@ -237,7 +249,7 @@ from a directory other than its root: `bash tools/sweep_gpu.sh` on a CPU box sto
 refusal, exit 1, having written `sweep_out/SUMMARY.txt` at the clone's root;
 `ONLY=none bash tools/sweep_world.sh` exits 0 at once, having written only `world_out/SUMMARY.txt`
 there. Nothing may land in the directory it was started from. Compare N5, N7, O12 and O13 with the
-merge before Phase B: they should not move.
+merge before Phase B (*At the merge*, above): they should not move.
 
 ## Deliberately not moved
 

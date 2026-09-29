@@ -57,7 +57,12 @@ from sig import api as sig_api                                     # noqa: E402
 FAILS = []
 # A SMALL STREAM, AND ENOUGH WINDOWS FOR THE ROUTER TO MATTER: at 40 windows the pre-repair C2 leak
 # is well above zero, and the whole file runs in well under a minute on one thread.
-BASE = {"DATA_STREAM_BYTES": "60000"}
+# THE RETENTION PROBE OFF (2026-09-29): since 04-6.2's flip the shipped probe reads the model through
+# FAB.forward at the first window of every phase -- at OPT_BATCH_WINDOWS=2 before the first flush,
+# with DOM.nearest's -1 for a would-spawn domain -- and C3's spy takes the first FAB.forward call to be
+# the flush's (measured: domain_id -1 before any flush). Reads are not wanted here, so the probe is off
+# (docs/04_CONTRACT.md Q-EVAL-12's dated note), which takes its generation with it.
+BASE = {"DATA_STREAM_BYTES": "60000", "EVAL_RETENTION_EVERY": "0"}
 TRAIN_WINDOWS = 40
 
 

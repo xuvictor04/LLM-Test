@@ -561,6 +561,8 @@ def forecast(world: Config, w, obs_emb):
     LEVERS READ: feedback
     WIRES READ: none
     DID IT FIRE: World.forecasts -- the count of flushes on which a forecast was actually APPLIED
+    (written under grad only since 2026-09-27, Q-WORLD-11, with world.forecast_rms and the lineage
+    flag: a no_grad call -- the held-out probe's -- returns the forecast and writes neither)
     FOUR MORE KEYS THE BODY WRITES, declared here the way fabric/api.py::grow_check declares its
     own additions: a key a report can read and the contract does not admit to producing is the same
     defect as a declared key nothing writes, and this entry point needs all four to say which of
@@ -736,6 +738,15 @@ def forecast(world: Config, w, obs_emb):
     # difference between a side head and a subsystem. It is also why the off arm above returns
     # before the encoder runs at all rather than after -- an unread forward would still build a
     # graph on the world model's parameters and still be paid for on the backward.
+    # THE THREE WRITES BELOW ARE A TRAINING PASS'S (2026-09-27, Q-WORLD-11). The held-out probe's
+    # closures (spine/compose.py::_logits_fn) call this entry point under no_grad beside training,
+    # on held-out text: the gauge would then report the probe's forecast as the flush's, the fire
+    # counter would break its pairing with lm.encode.extra_applied (which is written under grad
+    # alone for the same reason), and the lineage flag would claim a gradient no eval pass gives.
+    # world.forecast.calls and world.forecast.inert above still count every call, eval calls
+    # included; the eval book's own counts say how many were the probe's.
+    if not torch.is_grad_enabled():
+        return out
     with torch.no_grad():
         # THE MAGNITUDE OF WHAT IS ACTUALLY ADDED, AS A GAUGE. A fire counter cannot distinguish a
         # forecast that conditions the LM from one that is numerically absent, and the collapsed
@@ -1031,7 +1042,9 @@ def load_into(world: Config, w, sd):
                  and 0 when every load restored a trained one; ABSENT on a fresh run and on the
                  null world), world.proj_trained_basis (a string gauge for THIS load: which
                  evidence decided -- the saved `proj_trained` field, or the `world.forecasts`
-                 counter fallback for a blob that predates the field)
+                 counter fallback for a blob that predates the field). The parent's ledger comes
+                 back but for world.state_written_here and world.ctx_tokens, which are this
+                 process's (the second since 2026-09-28, Q-LM-15: a resume may widen LM_CTX)
     """
     world = world.owned_by("WORLD")
 
@@ -1138,8 +1151,11 @@ def load_into(world: Config, w, sd):
     if sd.get("counters"):
         # EVERY KEY BUT THE SAVE COUNT'S PROCESS TWIN (2026-09-27, register
         # LOW-RESUME-SAVED-COUNTERS): the parent's saves are not this process's.
+        # AND BUT world.ctx_tokens (2026-09-28, docs/04_CONTRACT.md Q-LM-15): build wrote THIS run's
+        # LM_CTX there, and at LM_CTX_WIDEN=1 a resume may widen the context, so the parent's value
+        # would report the width this run does not run at. Everywhere else the two are equal.
         w.counters.update({k: v for k, v in sd["counters"].items()
-                           if k != "world.state_written_here"})
+                           if k not in ("world.state_written_here", "world.ctx_tokens")})
     # WRITTEN AFTER THE MERGE, ON BOTH ARMS. The parent's saved counters carry the parent's own
     # values of these keys, so a value written before the update would be overwritten by them and
     # this load would report the PARENT's re-zero (driven in the Q-WORLD-10 design round: a lineage

@@ -170,7 +170,7 @@ def packages():
     answers depending on which file you read.
 
     THESE ARE STAND-INS AND NOT THE REAL PACKAGES, WHICH NOW EXIST -- and the reason is A3, not inertia.
-    src/*/levers.py declares 268 levers across thirteen packages; A3 requires a stated reach for EVERY
+    src/*/levers.py declares 298 levers across thirteen packages; A3 requires a stated reach for EVERY
     declared lever, because an oracle checked only where somebody remembered to check it is not an
     oracle. Nine stand-ins carrying the fourteen fields the coupling table actually names keep that
     requirement meetable and keep the fixture readable. What the stand-ins may NOT do is drift from the
@@ -1239,9 +1239,17 @@ def check_a10_defaults_doc_current():
     Lever, this check passes on a wrong document -- A1 and the K-series are what read the registry
     independently. The oracle is the command a human is told to run, which is A9's rule and the
     reason neither check re-renders anything itself.
+
+    ONE THING ABOUT THE GENERATOR'S OUTPUT IT DOES READ (2026-09-28, Q-DATA-11's review): every
+    table row has its header's cell count, split on the unescaped '|' GitHub-flavoured Markdown
+    splits on -- inside a code span too. render_defaults.py::_cell escaped no pipe, and the first
+    default holding one (DATA_TRUST_DELIMS) rendered a ten-cell row in a five-cell table, the
+    default shown as `'= and the help gone, while this check passed on the file matching its
+    generator.
     """
     findings = []
     n_lines = 0
+    n_rows = 0
     try:
         sys.path.insert(0, os.path.join(ROOT, "tools"))
         import render_defaults
@@ -1249,6 +1257,19 @@ def check_a10_defaults_doc_current():
         have = (io.open(render_defaults.DOC, encoding="utf-8").read()
                 if os.path.isfile(render_defaults.DOC) else "")
         n_lines = len(want.splitlines())
+        width = None
+        for i, ln in enumerate(want.splitlines(), start=1):
+            if not ln.startswith("|"):
+                width = None
+                continue
+            cells = len(re.split(r"(?<!\\)\|", ln.strip())) - 2
+            if width is None:
+                width = cells                     # the header row sets the table's width
+                continue
+            n_rows += 1
+            if cells != width:
+                findings.append(f"generated line {i} splits into {cells} cells in a {width}-cell "
+                                f"table -- an unescaped '|' in a cell: {ln[:120]}")
         if have != want:
             hl, wl = have.splitlines(), want.splitlines()
             diff = [d for d in difflib.unified_diff(hl, wl, "on disk", "regenerated", n=0)
@@ -1261,7 +1282,8 @@ def check_a10_defaults_doc_current():
         findings.append(f"could not run the generator: {type(e).__name__}: {e}")
 
     detail = (f"{n_lines} generated line(s) compared against docs/05_DEFAULTS.md via "
-              f"tools/render_defaults.py::defaults_markdown")
+              f"tools/render_defaults.py::defaults_markdown; {n_rows} table row(s) held to their "
+              f"header's cell count")
     return _report("A10", "the generated defaults document matches the live registry",
                    not findings, detail, findings, vacuous=(n_lines == 0))
 

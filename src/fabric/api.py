@@ -20,14 +20,19 @@ unconditionally while the shipped default was the looped path, which is how "479
 
 RECORD TYPES RETURNED (P4 defines them):
   Population     A, B, cent, n_live, depth_now, and the books born/use/uage/dom_of/ef/es/comp/
-                 contrib/births/rescued/parent/mutscale, the growth machine, the counter ledger
-                 and the package RNG stream
+                 contrib/contrib_n/births/rescued/parent/mutscale/area_use, contribution's
+                 rotating cursor, the growth machine, the counter ledger and the package RNG
+                 stream
   FabricOut      logits or hidden, expert_ids, weights, per_expert_logits, aux_loss, gates,
-                 row_events
+                 row_events, and on the society arm the blend the prediction was formed from
   RowEvents      the (A, B) banks and the rows moved / cleared / re-born since the last training
                  pass, which the root hands to OPT.remap_rows (Q-FAB-13)
   ContribReport  per-expert contribution, distinct_values, positive, negative, degenerate
-  ManageReport   cull_fail, cull_util, spared_*, rescued, deepened, cull_gate arithmetic
+                 (built 2026-09-28 with FAB.contribution's body, Q-FAB-19)
+  ManageReport   cull_fail, cull_util, spared_*, rescued, deepened, cull_gate arithmetic, and the
+                 faded-area removals and deferrals (culled_faded_area, merged_faded_area,
+                 faded_unknown, cull_faded_deferred, merge_faded_deferred, and at
+                 FAB_FADED_CULL='contrib' the removals a measured contribution allowed)
   GrowReport     asked vs grown, per trigger; declined_cap, declined_newfrac, lineage counts, and
                  the blackout state (open/closed and the windows left) the root joins into
                  CAP.observe's `blackout` boolean
@@ -190,9 +195,10 @@ BETTER, and is exactly why the refusal above enumerates every float lever rather
 SET SHRANK AGAIN AND THIS PARAGRAPH SAID OTHERWISE UNTIL 2026-09-24: FAB.manage has a body and runs
 on the fab.manage cadence, so the cull fraction, the merge distance and the two error tolerances
 reach arithmetic too, and four of its levers now have entries of their own above. FAB.contribution
-is deferred, but it reads no float lever that nothing else reads (FAB_COMP_EMA is read by FAB.observe
-as well, and crosses to DOM as DOM.d_comp_ema before this function runs), so no float lever here is
-unread any more. The remaining eleven are the magnitude levers whose nan/+inf refusal build()
+has a body since 2026-09-28 and runs at FAB_CONTRIB=1 (Q-FAB-19); the one float lever it reads,
+FAB_COMP_EMA, is read by FAB.observe as well, and crosses to DOM as DOM.d_comp_ema before this
+function runs (this sentence said "FAB.contribution is deferred" until then), so no float lever here
+is unread any more. The remaining eleven are the magnitude levers whose nan/+inf refusal build()
 already carried.
 
 WHAT THIS DOES NOT SAY, AND MUST NOT BE READ AS SAYING. Refusing nan/+inf/-inf closes FOUR VALUES
@@ -227,6 +233,19 @@ class FabricOut:
     where fabric/api.py::build put it and where fabric/api.py::counters reads it; a second copy on a
     per-pass record is a second source of truth for the same numbers, and the report would then have
     to choose. `gates` is per-pass because a gate's ARITHMETIC is about the pass that evaluated it.
+
+    `blend` IS THE SOCIETY ARM'S OWN ARITHMETIC, AND IT IS THE REST OF WHAT MAKES LEAVE-ONE-OUT A
+    REWEIGHTED SUM (2026-09-28, Q-FAB-19). `per_expert_logits` alone cannot reproduce the prediction:
+    the society arm spends the entry halt mass on the BASE representation, and neither that mass nor
+    the per-row vote weights are on any other field -- `weights` is the routing distribution, whose
+    renormalised top-k is the vote weights in arithmetic and not in the last bit on an eval pass
+    (and on a training pass lacks the slot exploration swapped in). So where the
+    society arm forms its blend, `blend` carries (voters, vote_weights, held, base): the (B, vk)
+    expert ids that voted per row, their (B, vk) weights, the (B,) halt mass spent on the base, and
+    the base representation's (B, L, V) logits; `per_expert_logits[:, :vk]` are the voters' logits
+    in the same order. fabric/api.py::contribution re-forms the prediction from them bit for bit
+    before it removes anyone, and refuses the pass if it cannot. None on the looped arm and wherever
+    no blend was formed; nothing that trains reads it.
     """
     logits: object = None
     hidden: object = None
@@ -238,6 +257,9 @@ class FabricOut:
     # THE ROW EVENTS SINCE THE PREVIOUS TRAINING PASS (a RowEvents, or None when there were none),
     # handed over on training passes only -- see RowEvents for what the root does with them.
     row_events: object = None
+    # THE SOCIETY ARM'S BLEND, (voters, vote_weights, held, base), where one was formed (2026-09-28,
+    # Q-FAB-19); None otherwise. See the docstring.
+    blend: object = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -307,6 +329,21 @@ class ManageReport:
     cull_gate: str = ""
     manage_every: int = 0
     manage_period_flushes: object = None
+    # THIS PASS'S FADED-AREA REMOVALS AND DEFERRALS (2026-09-28, Q-FAB-18), under the ledger's own
+    # names. All 0 when the pass was handed no faded set, which the ledger tells apart from a pass
+    # that removed nothing faded (its keys are ABSENT there); the deferral pair counts the faded
+    # removals this pass KEPT, which happens at FAB_FADED_CULL='defer' and, for the ones no measured
+    # contribution allowed, at 'contrib' -- whose ledger names them fab.*_faded_refused_by_contrib
+    # (Q-FAB-19).
+    culled_faded_area: int = 0
+    merged_faded_area: int = 0
+    faded_unknown: int = 0
+    cull_faded_deferred: int = 0
+    merge_faded_deferred: int = 0
+    # AT FAB_FADED_CULL='contrib' ONLY (2026-09-28, Q-FAB-19): the faded removals this pass carried
+    # out because FAB.contribution had measured the expert at or below 0. 0 at every other value.
+    cull_faded_allowed_by_contrib: int = 0
+    merge_faded_allowed_by_contrib: int = 0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -358,6 +395,44 @@ class GrowReport:
     gates: tuple = ()
 
 
+@dataclasses.dataclass(frozen=True)
+class ContribReport:
+    """What ONE contribution pass measured (2026-09-28, register §8 3.5; Q-FAB-19). FROZEN, for
+    GrowReport's reason: a caller that can write to this can change what the run reported.
+
+    `candidates` AND `values` ARE ONE LIST OF PAIRS WRITTEN AS TWO, in the order measured: slot i
+    was measured at values[i], the counterfactual's mean held-out loss minus `baseline_loss` in the
+    loss's own unit (nats per token, LM.lm_loss's reduction). POSITIVE MEANS LOAD-BEARING -- the
+    material is predicted worse without the expert -- which is the sign both spare rules test.
+    `values` is what the pass MEASURED; what the population now holds is Population.contrib, the
+    EMA at FAB_COMP_EMA those values were folded into, and the two differ from an expert's second
+    measurement on.
+
+    `degenerate` IS THE C3 ALARM TAKEN SERIOUSLY: no candidate's counterfactual logits differed from
+    the baseline's, so the pass carried no information about which expert matters and WROTE
+    NOTHING -- `values` is still the list of zeros it measured, so a reader can see what was not
+    written. `distinct_values` counts the distinct floats in `values`. In the old tree 1 over
+    several candidates was C3 (the walk never changed); this body tests the walk itself, so C3 is
+    `degenerate`, and 1 on a pass that is not degenerate is the float32 mean loss's resolution --
+    the walks moved and every removal read one value (Q-FAB-19's review). A single candidate reads
+    1 by construction.
+
+    `eligible` is the past-grace count at the pass, so len(candidates) / eligible is the pass's
+    coverage (fab.contrib_coverage). `reason` says why nothing was measured where nothing was.
+    NO COUNTER COPY, for FabricOut's reason: the ledger is Population.counters.
+    """
+    candidates: tuple = ()
+    values: tuple = ()
+    baseline_loss: object = None
+    distinct_values: int = 0
+    positive: int = 0
+    negative: int = 0
+    degenerate: bool = False
+    eligible: int = 0
+    reason: str = ""
+    gates: tuple = ()
+
+
 class Population:
     """The preallocated pool and the books. GROWTH NEVER REALLOCATES; only n_live moves.
 
@@ -401,9 +476,12 @@ class Population:
     # comp_glob is the population competence EMA fabric/api.py::observe's docstring requires ("comp
     # per expert and the population EMA comp_glob, both at rate comp_ema") and fabric/api.py::manage's
     # comp_protect spare compares against; the old tree kept it on the assembler (:6932).
+    # `contrib_n` AND `contrib_cursor` (2026-09-28, Q-FAB-19) are CHECKPOINTED with the books:
+    # contrib_n is a book (one of _BOOKS), and the cursor is where the next pass's rotation starts,
+    # so a continuing resume measures the experts the uninterrupted run would have measured.
     __slots__ = ("A", "B", "cent", "n_live", "cap", "depth_now", "born", "use", "uage", "dom_of",
                  "ef", "es", "comp", "contrib", "births", "rescued", "parent", "mutscale",
-                 "growth", "comp_glob",
+                 "area_use", "contrib_n", "contrib_cursor", "growth", "comp_glob",
                  "modules", "counters", "rng", "on", "hop_arm", "gates", "halt_b",
                  "ident", "ident_live", "ident_step", "ident_graph", "halt_ema", "marks",
                  "learn_window", "pass_gates", "row_events")
@@ -441,10 +519,37 @@ class Population:
         self.es = [0.0] * cap
         self.comp = [0.0] * cap
         self.contrib = [0.0] * cap
+        # HOW MANY TIMES FAB.contribution HAS MEASURED EACH EXPERT (2026-09-28, register §8 3.5;
+        # Q-FAB-19). `contrib` alone cannot say it: 0.0 is both "never measured" and "measured, and
+        # the loss did not move", and those are two different verdicts for FAB_FADED_CULL='contrib',
+        # which removes a faded-area expert only on a MEASURED contribution at or below 0 and keeps an
+        # unmeasured one. The first measurement SETS contrib and every later one folds in at
+        # FAB_COMP_EMA -- the old tree's `d if nid not in fab.contrib else EMA` (self_organize.py:6980),
+        # where membership in a dict was this count. One of _BOOKS: it moves with its expert, a
+        # birth clears it, and a merge leaves the survivor's own (the absorbed expert's goes with it).
+        self.contrib_n = [0] * cap
+        # WHERE THE NEXT CONTRIBUTION PASS STARTS ITS WALK (2026-09-28, Q-FAB-19): a slot index, and
+        # the pass takes the next FAB_CONTRIB_MAX past-grace experts from it, wrapping, and leaves it
+        # one past the last. _remove moves it with the expert it points at, so a swap-with-last does
+        # not skip that expert. 0 at build.
+        self.contrib_cursor = 0
         self.births = 0
         self.rescued = 0
         self.parent = [-1] * cap
         self.mutscale = [1.0] * cap
+        # THE AREA BOOK: per expert, {area id: routing mass credited from windows of that area}
+        # (2026-09-28, register §8 3.1, NEW-10 and C37; Q-FAB-18). ONE DICT PER EXPERT, for dom_of's
+        # reason one line up -- the consumer needs the WHOLE distribution (its argmax is the expert's
+        # most-served area) and the ids are spine/derive.py::area_id's 31-bit numbers, which no
+        # dense (cap, n_areas) tensor could be indexed by without a second table mapping them. MASS
+        # AND NOT SELECTIONS, because `use` is the tree's measure of how much of a window the router
+        # spent on an expert (observe's use/uage split), and "most-served" is that question asked
+        # per area. Empty is "no area was ever booked", which FAB.manage counts as fab.faded_unknown
+        # rather than guessing: a founder no window has reached, and every expert of a population
+        # restored from a checkpoint written before the book existed. Nothing in the forward pass
+        # reads it. FAB.manage reads it to COUNT its removals, and to DECIDE them only at
+        # FAB_FADED_CULL='defer'; at the shipped 'as_is' no decision in this package reads it.
+        self.area_use = [dict() for _ in range(cap)]
         # THE GROWTH MACHINE: WATCH -> BURST -> RECOVER, and the two clocks that keep the common
         # event from silencing the rare one. `last` is the spacing clock BOTH legs set; `last_regr`
         # is the REGRESSION's OWN, and it exists because sharing one let a routine stall 772 windows
@@ -667,10 +772,11 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
     carried the identical defect (.rework/audits/sweep_fabric.json): one forward pass, aux_loss nan,
     the composed objective nan, 17-19 of 23 gradient-carrying tensors non-finite, and for four of
     them pop.cent PERMANENTLY non-finite -- a population that correcting the lever afterwards cannot
-    recover. The rule is now over EVERY float lever the package declares (43 of the 82), enumerated
+    recover. The rule is now over EVERY float lever the package declares (43 of the 85), enumerated
     from the declarations through spine/lever.py::Config.keys and ::Config.lever so no second list
-    exists to go stale, with the 26 int and 12 bool levers refused earlier by
-    spine/lever.py::Lever.coerce and the one str lever by its own `choices=`.
+    exists to go stale, with the 27 int and 13 bool levers refused earlier by
+    spine/lever.py::Lever.coerce and the two str levers by their own `choices=` (26 and 12 until
+    FAB_CONTRIB_MAX and FAB_CONTRIB, 2026-09-28).
     THE SECOND IS A FLOOR OF ONE ON SIX COUNTS -- FAB_N0, FAB_SLOTS, FAB_RANK, FAB_DK, FAB_EMB_HID
     and FAB_HOPS -- and no finiteness rule could ever have reached it: all six are finite ints that
     pass every type check, and FAB_RANK=0 builds experts with no parameters and a nan loss, FAB_DK=0
@@ -685,7 +791,8 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
     LEVERS READ: on, norm_only, n0, slots, rank, dk, emb_hid, pressure, grow, halt, lr_own, hop_mode,
                  depth0, hops, balance, ponder, emb_var, ec_w, explore, div_w, hop_sup,
                  ind_w, ae_w, dom_frac, depth_patience, depth_stage_max, manage_every (the last
-                 three for the fab.depth_advance prediction, 2026-09-24),
+                 three for the fab.depth_advance prediction, 2026-09-24), contrib (for the
+                 fab.contrib line, 2026-09-28, Q-FAB-19),
                  alpha, bal_floor, birth_jitter, cent_ema, comp_ema, cull_frac, depth_eps, discover,
                  err_fast, err_slow, fail_tol, halt_max, lr_amin, lr_boost, lr_cycle, lr_gamma,
                  lr_maxr, merge_dist, mut, mut_big, mut_big_p, new_frac, parent_max, plateau,
@@ -824,9 +931,12 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
     # THE INT LEVERS ARE NOT IN THIS SWEEP AND ARE NOT EXEMPT EITHER: spine/lever.py::Lever.coerce
     # resolves an int lever as `int(float(raw))` and refuses nan (ValueError) and +/-inf
     # (OverflowError) by the lever's own owned name before any Config exists, so a second check here
-    # would be an untrippable guard. Bools coerce every spelling and the one str lever (hop_mode)
-    # carries `choices=` plus the NotBuilt refusal above. That accounts for all 82 declarations:
-    # 43 float here, 26 int and 12 bool in coerce, 1 str in choices.
+    # would be an untrippable guard. Bools coerce every spelling and the two str levers carry
+    # `choices=` -- hop_mode with the NotBuilt refusal above, and faded_cull (2026-09-28, Q-FAB-18),
+    # whose three values are all built ('contrib' since Q-FAB-19, refused at startup without
+    # FAB_CONTRIB=1 by the composition root, which holds both). That accounts for all 85
+    # declarations: 43 float here, 27 int and 13 bool in coerce, 2 str in choices (26 int and 12 bool
+    # until FAB_CONTRIB_MAX and FAB_CONTRIB, 2026-09-28).
     _nonfinite = []
     for _field in fab.keys():
         if _field.startswith("d_"):
@@ -1275,6 +1385,33 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
     # an armed growth leg would contradict the family the report then prints ABSENT. `selects` is
     # the one predicate; the default arm's three lines are unchanged.
     selects = on and not norm_only
+    # THE CONTRIBUTION MEASUREMENT'S LINE (2026-09-28, register §8 3.5; Q-FAB-19), a PREDICTION until
+    # FAB.contribution replaces it by name on its first pass -- the cull gate's treatment, for the
+    # cull gate's reason: nothing has been measured yet. UNREACHABLE at FAB_CONTRIB=0 (the shipped
+    # value: the root never calls it and FAB.manage reads no contribution, so both contrib > 0
+    # spares are inert -- on a lineage resumed at 0 from a measuring parent too, whose restored
+    # measurements _refresh_build_predictions names, Q-FAB-19's review) and on the two arms whose
+    # forward reads no expert. THE SENTENCE AT 0 IS TRUE OF BOTH POPULATIONS: it said
+    # "Population.contrib stays 0.0 on every expert", which a restored lineage's books contradict.
+    contrib_on = bool(fab.contrib)
+    _contrib_line = Gate(
+        "fab.contrib", False, value=f"FAB_CONTRIB={contrib_on}", threshold="FAB_CONTRIB=True",
+        reachable=False,
+        reason=("FAB_CONTRIB=0: FAB.contribution is not called and FAB.manage reads no "
+                "contribution, so no expert's marginal contribution is measured and the "
+                "contrib > 0 spare in both culls is inert; FAB_FADED_CULL='contrib' is refused at "
+                "startup without it."
+                if not contrib_on else
+                "FAB_ON=0: no expert is computed, so there is nothing to hold out and nothing is "
+                "measured."
+                if not on else
+                "FAB_NORM_ONLY=1: the control arm's forward reads no expert, so holding one out "
+                "changes nothing and nothing is measured."
+                if norm_only else
+                f"no fab.manage pass has run yet (FAB_MANAGE_EVERY={int(fab.manage_every)} "
+                f"window(s)), so nothing has been measured; each pass measures up to "
+                f"FAB_CONTRIB_MAX past-grace experts off a rotating cursor, on the retention "
+                f"probe's control half, and replaces this line with what it measured."))
     pop.gates = (
         Gate("fab.on", on, on, True,
              reason="" if on else "FAB_ON=0: the forward is the identity, so every gate below this "
@@ -1346,7 +1483,17 @@ def build(fab: Config, *, d_model, signature_dim, device, generator):
                      if not on else
                      "FAB_NORM_ONLY=1: no selection pass runs on the control arm, so the staged-"
                      "depth curriculum it carries never checks")),
+        _contrib_line,
     )
+    # CONTRIBUTION'S DID-IT-FIRE KEYS ARE PRESENT FROM BUILD WHERE IT IS ARMED (2026-09-28,
+    # Q-FAB-19), so "armed, not yet a pass" and "not armed" read differently (G4): 0 on a run
+    # shorter than FAB_MANAGE_EVERY, ABSENT at FAB_CONTRIB=0 and on the two arms whose forward reads
+    # no expert. FAB seeds its own keys here because it owns FAB_CONTRIB -- the root seeds
+    # fab.eval_passes because only the root knows whether the probe is armed.
+    if contrib_on and selects:
+        for _k in ("fab.contrib_passes", "fab.contrib_measured", "fab.contrib_degenerate",
+                   "fab.contrib_nonfinite"):
+            pop.counters.setdefault(_k, 0)
     # THE WIRE IS READ AND COMPARED, not merely touched: d_operating_population is the same
     # derive.operating_population call the counter above makes, computed by the assembly from the
     # same two levers, so a disagreement here means the coupling table and this package are
@@ -1908,9 +2055,15 @@ def _claim_slot(pop, slot, step_n, *, parent=-1, mutscale=1.0):
     pop.es[slot] = 0.0
     pop.comp[slot] = 0.0
     pop.contrib[slot] = 0.0
+    # A NEWBORN IS UNMEASURED (2026-09-28, Q-FAB-19): a recycled slot must not hand it the dead
+    # expert's measurement count, which would read its cleared 0.0 as a measured "not load-bearing".
+    pop.contrib_n[slot] = 0
     pop.dom_of[slot] = set()
     pop.parent[slot] = int(parent)
     pop.mutscale[slot] = float(mutscale)
+    # A NEWBORN HAS SERVED NO AREA (2026-09-28, Q-FAB-18): a recycled slot must not hand it the dead
+    # expert's area book, which would file its first cull under the dead expert's area.
+    pop.area_use[slot] = {}
     pop.n_live = slot + 1
     pop.births += 1
     # THE SLOT'S OPTIMIZER ROWS BELONG TO NOBODY YET: a recycled slot still holds the moments of
@@ -1931,7 +2084,11 @@ def _claim_slot(pop, slot, step_n, *, parent=-1, mutscale=1.0):
 # IT IS A LIST OF NAMES AND NOT A LOOP OVER __slots__, because __slots__ also holds `cap`,
 # `n_live`, the module dict, the RNG and four cache fields, and a renumbering that walked all of
 # them would swap the population's size with an expert's birthday.
-_BOOKS = ("born", "use", "uage", "dom_of", "ef", "es", "comp", "contrib", "parent", "mutscale")
+# `area_use` JOINED ON 2026-09-28 (Q-FAB-18), with the book it names: a cull that renumbered every
+# book but this one would file the survivor's area history under the victim's slot. `contrib_n`
+# JOINED THE SAME DAY (Q-FAB-19), for the same reason about the survivor's measurement count.
+_BOOKS = ("born", "use", "uage", "dom_of", "ef", "es", "comp", "contrib", "parent", "mutscale",
+          "area_use", "contrib_n")
 
 
 def _drain_row_events(pop):
@@ -1971,6 +2128,10 @@ def _remove(pop, slot):
         moved = last
         # THE MOMENTS MUST FOLLOW THE ROWS, and only OPT holds them (RowEvents, Q-FAB-13).
         pop.row_events.append(("move", int(last), int(slot)))
+        # AND SO DOES CONTRIBUTION'S CURSOR (2026-09-28, Q-FAB-19): where it points at the expert
+        # that moves, it moves with it, so the next pass still starts on that expert.
+        if int(pop.contrib_cursor) == last:
+            pop.contrib_cursor = int(slot)
     pop.row_events.append(("clear", int(last)))
     with torch.no_grad():
         pop.A[last] = 0.0
@@ -1979,10 +2140,32 @@ def _remove(pop, slot):
     pop.dom_of[last] = set()
     pop.parent[last] = -1
     pop.mutscale[last] = 1.0
+    # A FRESH DICT AND NOT .clear(): the swap above handed THIS dict object to `slot`, so clearing it
+    # in place would empty the survivor's book (2026-09-28, Q-FAB-18).
+    pop.area_use[last] = {}
     pop.n_live = last
     pop.ident = pop.ident_graph = pop.ident_step = None
     pop.ident_live = -1
     return moved
+
+
+def _drop(lay, slot):
+    """_remove's renumbering, on a list of expert names indexed by slot: the name in the last place
+    moves into place `slot`, or -- `slot` the last place, or a dead row past it, which _remove fills
+    from the last live row -- the last name leaves (2026-09-28, Q-FAB-18's review).
+
+    FAB.manage keeps two such lists through a pass, the population's own and the one
+    FAB_FADED_CULL='as_is' would hold, so that 'defer' can take every decision on the second while
+    it removes from the first. One mirror of _remove's arithmetic, beside it, so the two cannot
+    drift. An EMPTY list stays empty: _remove on an empty population writes row -1 into a dead one
+    and takes n_live below zero, which no name follows (Q-FAB-18's review records the one path that
+    reaches it)."""
+    if not lay:
+        return
+    last = len(lay) - 1
+    if slot < last:
+        lay[slot] = lay[last]
+    lay.pop()
 
 
 def _merge_pairs(sim, merge_dist):
@@ -2049,7 +2232,41 @@ def _merge_into(pop, a, b, rank):
     pop.use[a] = float(pop.use[a]) + float(pop.use[b])
     pop.uage[a] = int(pop.uage[a]) + int(pop.uage[b])
     pop.dom_of[a] = set(pop.dom_of[a]) | set(pop.dom_of[b])
+    # THE AREA BOOKS SUM, as `use` does one line up (2026-09-28, Q-FAB-18): the survivor now carries
+    # the mass both experts served, so its most-served area is read off the merged history.
+    pop.area_use[a] = _sum_books(pop.area_use[a], pop.area_use[b])
     return resid
+
+
+def _sum_books(book_a, book_b):
+    """Two area books summed area by area: a NEW dict, built in ascending area-id order, so the
+    survivor's book does not depend on which of the two was touched first (Q-FAB-18).
+
+    _merge_into gives a merge's survivor this, and FAB.manage's 'defer' arm credits a survivor with
+    it when it keeps the pair apart, so the rest of the pass reads that expert as 'as_is' would
+    (Q-FAB-18's review). One function, so the two sums are one arithmetic."""
+    both = dict(book_a)
+    for k, v in book_b.items():
+        both[k] = float(both.get(k, 0.0)) + float(v)
+    return {k: both[k] for k in sorted(both)}
+
+
+def _faded_kind(book, faded):
+    """Is the most-served area of an expert with area book `book` in `faded`? -> "faded", "live" or
+    "unknown" (Q-FAB-18).
+
+    MOST-SERVED IS THE ARGMAX OF ITS AREA BOOK, the routing mass FAB.observe credited per area, and a
+    tie goes to the SMALLEST area id -- a rule on the numbers, never on a dict's insertion order,
+    which a checkpoint round trip does not promise to keep. "unknown" is an EMPTY book: no window
+    with a known area ever routed to this expert, which is what a population restored from a
+    checkpoint written before the book existed holds, and it is counted as its own outcome rather
+    than filed as live or as faded. It takes the BOOK and not a slot (2026-09-28, Q-FAB-18's
+    review): FAB.manage's 'defer' arm reads some experts by the book 'as_is' would have given them.
+    """
+    if not book:
+        return "unknown"
+    top = min(book, key=lambda k: (-float(book[k]), int(k)))
+    return "faded" if int(top) in faded else "live"
 
 
 def _spawn_check(pop, query, spawn_mult, spawn_floor, step_n):
@@ -2252,13 +2469,15 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                  dom_min, div_w, ind_k, ind_w, dk, rank, emb_hid, emb_var, emb_every, ae_w, spawn,
                  spawn_mult, spawn_floor
     WIRES READ: none
-    DID IT FIRE: ALL 24 KEYS THIS BODY WRITES -- counted against the body in BOTH directions on
-    2026-09-04 and found four short, which is why the last four lines exist. A key written and not
+    DID IT FIRE: ALL 25 KEYS THIS BODY WRITES -- counted against the body in BOTH directions on
+    2026-09-04 and found four short, which is why the last four lines exist, and one more since
+    2026-09-27, fab.eval_passes (Q-FAB-17). A key written and not
     declared is a number in the report that the contract does not admit to producing; a key declared
-    and not written is the opposite and there are none (all 24 below are written, and 19 of them are
+    and not written is the opposite and there are none (all 25 below are written, and 19 of them are
     SEEDED to 0 before any branch decides, so absent never masquerades as zero -- 16 on every routed
     pass and 3, fab.ind_applied, fab.hopsup_applied and fab.halt_spent_on_base, only on the arm
-    that can reach them, so that absent says UNREACHABLE for those three as G4 requires). The count is stated
+    that can reach them, so that absent says UNREACHABLE for those three as G4 requires; the
+    twenty-fifth is seeded by the composition root, on the arm whose held-out probe is armed). The count is stated
     because the previous one was wrong: this body writes 24 keys, not nineteen, and it declared 14
     distinct Gates and not thirteen when that count was taken -- 15 after that, fab.halt_spent_on_base
     being the one added with this reconciliation, and 16 now: fab.ponder (2026-09-24) says what
@@ -2267,6 +2486,16 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     exists to count leave-one-out passes. It used to write fab.route_calls and fab.hops_taken like
     any other pass, so eight candidates on one window read 9 route calls and 27 hops taken for a
     walk that took 3 -- a counterfactual moving the instrument it is measured by.
+    AN EVAL PASS (training=False, no hold_out) WRITES NONE OF THEM EITHER except fab.eval_passes,
+    the twenty-fifth key, which counts eval passes (2026-09-27, Q-FAB-17). Every per-pass tally
+    below -- fab.route_calls, fab.hops_taken, fab.halt_clamped, fab.explored_rows,
+    fab.explore_distinct_targets, fab.discovered, fab.discover_targets, fab.banned_experts,
+    fab.ec_applied, fab.halt_spent_on_base, fab.div_applied, fab.ind_applied, fab.hopsup_applied,
+    and the two arms' fab.forward_identity and fab.norm_only_passes -- is a TRAINING pass's, and they
+    read `solo` (true of an eval pass) until the held-out probe's closures began calling this entry
+    point beside training. fab.eval_passes is seeded 0 by the composition root on the arm whose
+    probe is armed (the tok.due_merged precedent) and is ABSENT everywhere else; the key-seeding
+    loop below still runs on every pass, since setdefault creates a key at zero and moves none.
                  fab.route_calls, fab.hops_taken, fab.halt_mass_train (TRAINING passes only -- the
                  old EMA averaged eval passes in and moved when nothing but HOLDOUT_N changed),
                  fab.halt_clamped, fab.explored_rows, fab.explore_distinct_targets,
@@ -2290,7 +2519,9 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                  collapsed -- so the two counters are the falsifier for that being retied),
                  fab.halt_spent_on_base (the society arm only, and ONLY when halt mass was actually
                  spent: at FAB_HALT=0 the blend is the identity on the vote, and counting that as a
-                 spend was a wrong measurement wearing a counter's name)
+                 spend was a wrong measurement wearing a counter's name),
+                 fab.eval_passes (the eval passes of the held-out probe's closures, which move no
+                 other key -- see the paragraph above the list)
     """
     fab = fab.owned_by("FAB")
     # THE INCOMING CLOCK IS PUT THROUGH units.Windows, exactly as sig/api.py::cadence_due does with
@@ -2330,7 +2561,13 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
                           reason="FAB_ON=0: the forward is the identity, so no expert is computed, "
                                  "no routing distribution exists, and every FAB-side term of the "
                                  "objective is ABSENT rather than zero."))
-        _bump(counters, "fab.forward_identity")
+        # A TRAINING PASS'S COUNT, AND AN EVAL PASS COUNTS ITSELF APART (2026-09-27, Q-FAB-17): the
+        # held-out probe's closures call this entry point with training=False beside training, and
+        # one bump per eval pass here would move the arm's own count by the probe's cadence.
+        if training and hold_out is None:
+            _bump(counters, "fab.forward_identity")
+        elif hold_out is None:
+            _bump(counters, "fab.eval_passes")
         if training and hold_out is None:
             pop.pass_gates = tuple(gates)
         return FabricOut(hidden=h, aux_loss=zero, gates=tuple(gates),
@@ -2351,7 +2588,11 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
         out = h
         for _ in range(max(1, min(hops, 2 + int(pop.n_live) // 2))):
             out = pop.modules["norm"](out)
-        _bump(counters, "fab.norm_only_passes")
+        # TRAINING PASSES ONLY, as at FAB_ON=0 above (Q-FAB-17).
+        if training and hold_out is None:
+            _bump(counters, "fab.norm_only_passes")
+        elif hold_out is None:
+            _bump(counters, "fab.eval_passes")
         gates.append(Gate("fab.forward.routed", False, value="FAB_NORM_ONLY=1",
                           threshold="FAB_NORM_ONLY=0", reachable=False,
                           reason="FAB_NORM_ONLY=1: the control arm keeps the fabric's normalization "
@@ -2555,8 +2796,16 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
         counters.setdefault("fab.hopsup_applied", 0)
     if society and halt_on and head is not None:
         counters.setdefault("fab.halt_spent_on_base", 0)
-    if solo:
+    # A ROUTED CALL IS A TRAINING PASS'S, AND AN EVAL PASS IS COUNTED APART (2026-09-27, Q-FAB-17).
+    # This read `if solo:`, which is True of a no_grad eval pass as well, so the held-out probe's
+    # closures (spine/compose.py::_logits_fn) would have moved fab.route_calls, fab.hops_taken and
+    # the six per-pass tallies below by the probe's cadence -- the leave-one-out case above, one
+    # door over. fab.eval_passes counts those passes instead; the root seeds it at 0 on the arm
+    # whose probe is armed, and it is ABSENT everywhere else.
+    if learn:
         _bump(counters, "fab.route_calls")
+    elif solo:
+        _bump(counters, "fab.eval_passes")
     # DEPTH. society PINS THE WALK AT ONE HOP and keeps per-expert logits, which is what makes
     # leave-one-out a reweighted sum rather than a re-walk -- it is the same forward pass with a
     # different depth and a different return, NOT a second path. The old tree had two, and
@@ -2778,7 +3027,11 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     # fab.holdout_applied, which exists to count counterfactuals: it is not a reading of the routed
     # walk, it is the number of times the walk was interrogated. The seeding loop above stays on both
     # paths because setdefault can create a key at zero and can never move one.
-    if solo:
+    # AND AN EVAL PASS MOVES NONE OF THEM EITHER (2026-09-27, Q-FAB-17): the block read `if solo:`,
+    # true of an ordinary no_grad eval pass, so every held-out read would have added its hops, its
+    # halt clamps and its bans to the training walk's books. fab.eval_passes is the eval pass's one
+    # key, above.
+    if learn:
         _bump(counters, "fab.hops_taken", hops_taken)
         if halt_on:
             _bump(counters, "fab.halt_clamped", halt_clamped)
@@ -2805,10 +3058,19 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     # (self_organize.py:4035-4043). Without this the society arm computes a halt mass and throws it
     # away, which is what the old grounded router did before halt became a real operator.
     logits_out = None
+    blend = None
     spent_on_base = 0
     if society and head is not None and last_hop_lg is not None and entry_halt is not None:
         held = entry_halt[:, None, None]
-        logits_out = (1.0 - held) * last_hop_lg + held * _decode(head, h0)
+        # THE ONE EXPRESSION IT ALWAYS WAS, `(1 - held) * vote + held * decode(base)`, EVALUATED IN
+        # THE SAME ORDER -- the vote term first, then the decode -- with the base's logits kept
+        # (2026-09-28, Q-FAB-19): FabricOut.blend hands FAB.contribution the pieces this prediction
+        # is formed from, so its reweighted leave-one-out re-forms the prediction bit for bit
+        # before it removes anyone. Nothing that trains reads `blend`.
+        _voted = (1.0 - held) * last_hop_lg
+        base_lg = _decode(head, h0)
+        logits_out = _voted + held * base_lg
+        blend = (last_idx[:, :vk], vw, entry_halt, base_lg)
         # THE COUNTER SAYS MASS WAS SPENT, SO IT MAY NOT COUNT A BLEND THAT SPENT NONE. At
         # FAB_HALT=0 the halt column is PINNED at a constant and fabric/api.py::_halt_logit's
         # caller sets ph to zeros, so `held` is exactly 0, this line is the identity
@@ -2820,7 +3082,7 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
         # keeps the two arms one code path. Only the claim is now conditional on the operator being
         # on AND on some row actually halting, and `fab.halt_mass_train` carries how much.
         spent_on_base = 1 if (halt_on and float(entry_halt.detach().max()) > 0.0) else 0
-        if spent_on_base and solo:
+        if spent_on_base and learn:
             _bump(counters, "fab.halt_spent_on_base")
     elif hop_vote and vote is not None:
         logits_out = vote
@@ -2860,7 +3122,10 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
     if div_acc is not None and div_w > 0.0:
         aux = aux + div_w * (div_acc / max(1, hops_taken))
         div_applied = 1
-        _bump(counters, "fab.div_applied")
+        # A TRAINING PASS'S TERM (Q-FAB-17): div_acc is formed on every solo pass, an eval pass's
+        # included, and an eval pass adds no loss to anything.
+        if learn:
+            _bump(counters, "fab.div_applied")
     ind_applied = 0
     if society and ind_w > 0.0 and per_expert is not None and targets is not None:
         # EACH OF ind_k EXPERTS MUST SOLVE THE TASK ALONE, weighted by its routing mass -- which
@@ -2873,7 +3138,7 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
             ce = F.cross_entropy(per_expert[:, j].reshape(-1, vocab), targets.reshape(-1))
             aux = aux + ind_w * share * ce
             ind_applied = 1
-        if ind_applied and solo:
+        if ind_applied and learn:
             _bump(counters, "fab.ind_applied")
     hopsup_applied = 0
     if hop_sup_w > 0.0 and targets is not None and len(hop_logits) > 1:
@@ -2883,7 +3148,7 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
             sup = ce if sup is None else sup + ce
         aux = aux + hop_sup_w * (sup / max(1, len(hop_logits) - 1))
         hopsup_applied = 1
-        if solo:
+        if learn:
             _bump(counters, "fab.hopsup_applied")
     ident_term = 0
     ae_rows = None
@@ -3112,10 +3377,10 @@ def forward(fab: Config, pop, *, h, signature, novelty, head=None, targets=None,
         # counterfactual pass has no backward and must not swallow them.
         logits=logits_out, hidden=h, expert_ids=expert_ids, weights=weights,
         per_expert_logits=per_expert, aux_loss=aux, gates=tuple(gates),
-        row_events=_drain_row_events(pop) if learn else None)
+        row_events=_drain_row_events(pop) if learn else None, blend=blend)
 
 
-def observe(fab: Config, pop, out, *, per_window_loss, domain_id):
+def observe(fab: Config, pop, out, *, per_window_loss, domain_id, area_id=None):
     """Book the outcome of one forward pass against the experts that produced it.
 
     per_window_loss: (B,) cross-entropy per window, from LM.lm_loss. Updates, FOR EVERY WINDOW IN
@@ -3139,6 +3404,16 @@ def observe(fab: Config, pop, out, *, per_window_loss, domain_id):
     another window's domain: measured at OPT_BATCH_WINDOWS=4 over 240 windows, 21 of 60 flushes
     spanned more than one domain and every one of them was booked under one. A scalar is still accepted and is the
     same id for every row, which is exact at OPT_BATCH_WINDOWS=1.
+
+    area_id: None (the default: no area book is touched), one int for the whole batch, or ONE ID
+    PER WINDOW in domain_id's shapes (2026-09-28, register §8 3.1, NEW-10 and C37; Q-FAB-18). The
+    id is spine/derive.py::area_id of the DATA area the window's first token came from, which the
+    root reads off Segmentation.labels; FAB never sees the name. Each computed expert's
+    `area_use[e][area]` is credited the same routing mass `use` is, so an expert's most-served area
+    is the argmax of its book -- the question FAB.manage asks of every expert it removes. A negative
+    id is "this window's area is unknown" and credits nothing. A DOMAIN IS NOT AN AREA and neither
+    stands in for the other: `dom_of` is DOM's learned partition, which merges, splits and culls,
+    while an area is a corpus the schedule fades by name.
 
     THE SPLIT IS A BEHAVIOUR CHANGE WITH NO MEASUREMENT BEHIND IT: grace=48 was set against a clock
     that ticked once per window, and crediting chain_k experts per hop over `hops` hops makes it
@@ -3207,6 +3482,12 @@ def observe(fab: Config, pop, out, *, per_window_loss, domain_id):
         distinction arriving one entry point in.
       fab.comp_glob -- the population competence EMA itself, so the comp_protect spare's threshold
         is on the ledger beside the per-expert numbers it will be compared against.
+    AND ONE MORE SINCE 2026-09-28 (Q-FAB-18):
+      fab.area_windows -- the windows whose area this function booked into `area_use`. ABSENT
+        until a routed call is handed an area_id (so on the two unrouted arms, where no expert is
+        computed, and for a caller that never passes one), PRESENT from then on: a population whose
+        books are empty because nothing fed them reads differently from one fed only windows of
+        unknown area (negative ids), which leave it at 0.
     """
     fab = fab.owned_by("FAB")
     counters = pop.counters
@@ -3272,6 +3553,24 @@ def observe(fab: Config, pop, out, *, per_window_loss, domain_id):
             f"FAB.observe: domain_id carries {len(dom_rows)} id(s) and FabricOut.weights has "
             f"{rows} row(s). One id per window, or one int for the whole batch -- a partial list "
             f"would affiliate the rows past its end with nothing and report them affiliated.")
+    # ONE AREA ID PER ROW, UNDER THE SAME RULE (2026-09-28, Q-FAB-18), or None and no area book is
+    # touched. Refused on a length mismatch for domain_id's reason: a partial list would book the
+    # rows past its end under no area and report the books complete.
+    area_rows = None
+    if area_id is not None:
+        if isinstance(area_id, torch.Tensor):
+            area_rows = [int(a) for a in area_id.reshape(-1).tolist()]
+        elif isinstance(area_id, (list, tuple)):
+            area_rows = [int(a) for a in area_id]
+        else:
+            area_rows = [int(area_id)] * rows
+        if len(area_rows) != rows:
+            raise ValueError(
+                f"FAB.observe: area_id carries {len(area_rows)} id(s) and FabricOut.weights has "
+                f"{rows} row(s). One id per window, or one int for the whole batch -- a partial "
+                f"list would book the rows past its end under no area and report the books "
+                f"complete.")
+        counters.setdefault("fab.area_windows", 0)
 
     # THE COMPUTED SET, AND WHY IT IS RECONSTRUCTED RATHER THAN READ. See the LEVERS READ note
     # above: the per-hop selections do not leave `forward`, `weights` is their renormalised sum, and
@@ -3336,9 +3635,17 @@ def observe(fab: Config, pop, out, *, per_window_loss, domain_id):
             # line is an AttributeError -- the field the frozen docstring specified the write
             # against could not have held it. THIS ROW'S id, not the batch's (see domain_id above).
             pop.dom_of[e].add(dom_rows[r])
+            # THE AREA BOOK, CREDITED THE MASS `use` WAS (2026-09-28, Q-FAB-18): this row's area,
+            # when the root handed one and it is known. Read by FAB.manage and by nothing that
+            # trains.
+            if area_rows is not None and area_rows[r] >= 0:
+                _book = pop.area_use[e]
+                _book[area_rows[r]] = float(_book.get(area_rows[r], 0.0)) + float(m)
             used.add(e)
             if pop.uage[e] >= grace:
                 past.add(e)
+    if area_rows is not None:
+        _bump(counters, "fab.area_windows", sum(1 for a in area_rows if a >= 0))
 
     _bump(counters, "fab.observed_windows", rows)
     counters["fab.experts_with_use"] = len(used)
@@ -3363,8 +3670,77 @@ def observe(fab: Config, pop, out, *, per_window_loss, domain_id):
     return None
 
 
+def _contrib_pick(pop, n, grace, k):
+    """FAB.contribution's default `candidates`: the next `k` past-grace slots from the population's
+    rotating cursor, wrapping once. -> (slots in the order taken, the cursor the next pass starts at).
+
+    THE CURSOR MAKES THE CAP A ROTATION AND NOT A PREFIX (2026-09-28, Q-FAB-19). A cap applied from
+    slot 0 on every pass would measure the same FAB_CONTRIB_MAX experts forever -- the lowest slots,
+    which swap-with-last keeps refilling -- and every other past-grace expert would stay unmeasured,
+    so FAB_FADED_CULL='contrib' would keep it for good. From the cursor, every past-grace expert is
+    reached once per (past-grace count / FAB_CONTRIB_MAX) passes. Fewer past-grace experts than the
+    cap are all taken and the cursor stays: each pass then measures the whole eligible set. A cursor
+    past the population (a pass's culls shrank it) starts at 0."""
+    if n <= 0 or k <= 0:
+        return [], int(pop.contrib_cursor)
+    start = int(pop.contrib_cursor)
+    start = start if 0 <= start < n else 0
+    picked, nxt = [], start
+    for j in range(n):
+        s = (start + j) % n
+        if int(pop.uage[s]) >= grace:
+            picked.append(s)
+            if len(picked) == k:
+                nxt = (s + 1) % n
+                break
+    return picked, nxt
+
+
+def _mean_ce(logits, targets):
+    """LM.lm_loss's mean, written out because FAB may not import LM (O10): cross-entropy with
+    reduction='none', then the mean over each window's positions, then over the windows. THE SAME
+    OPERATIONS IN THE SAME ORDER, so a baseline the root scored through LM.lm_loss is reproduced here
+    bit for bit -- FAB.contribution refuses the pass where it is not."""
+    v = int(logits.shape[-1])
+    flat = F.cross_entropy(logits.reshape(-1, v), targets.reshape(-1), reduction="none")
+    return flat.view(targets.shape).mean(-1).mean()
+
+
+def _reblend(per_expert, blend, held_out, whole):
+    """The society arm's prediction re-formed from its FabricOut.blend with `held_out` removed from
+    every row's vote, the remaining voters renormalised (Q-FAB-19). `held_out` None re-forms the
+    prediction itself, IN forward's OWN ORDER -- each voter's logits times its weight, summed voter by
+    voter, then the halt blend `(1 - held) * vote + held * base` -- so it is `whole` bit for bit, which
+    FAB.contribution checks before trusting any removal. A row the held-out expert did not vote in is
+    `whole`'s own row, untouched; a row it was the only voter of falls back to the base
+    representation alone, the society arm's own reading of "no expert is needed"."""
+    voters, vw, held, base = blend
+    vk = int(voters.shape[1])
+    hv = held[:, None, None]
+    if held_out is None:
+        hop = None
+        for j in range(vk):
+            piece = per_expert[:, j] * vw[:, j][:, None, None]
+            hop = piece if hop is None else hop + piece
+        voted = (1.0 - hv) * hop
+        return voted + hv * base
+    mask = voters == int(held_out)
+    hit = mask.any(-1)
+    if not bool(hit.any()):
+        return whole
+    w2 = vw.masked_fill(mask, 0.0)
+    w2 = w2 / w2.sum(-1, keepdim=True).clamp_min(_FLOOR)
+    hop = None
+    for j in range(vk):
+        piece = per_expert[:, j] * w2[:, j][:, None, None]
+        hop = piece if hop is None else hop + piece
+    re = (1.0 - hv) * hop + hv * base
+    re = torch.where(mask.all(-1)[:, None, None], base, re)
+    return torch.where(hit[:, None, None], re, whole)
+
+
 def contribution(fab: Config, pop, *, h, signature, novelty, head, targets, baseline_loss,
-                 baseline_logits_fn, step_windows, domain_id, live_domains, candidates):
+                 baseline_logits_fn, step_windows, domain_id, live_domains, candidates=None):
     """Marginal contribution by leave-one-out: what the system LOSES without each expert.
 
     On the society arm this is free -- per-expert logits are already separate, so the
@@ -3384,18 +3760,215 @@ def contribution(fab: Config, pop, *, h, signature, novelty, head, targets, base
           per-hop vote blend (ISSUES P1-H11) -- so a fixed offset was added to every contribution and
           contrib's SIGN, the thing both spare rules test, was set by that offset. The baseline is
           now produced by `baseline_logits_fn`, THE SAME CALLABLE that produced `baseline_loss`.
+    (In THIS tree contrib gates the two spare rules and, since 2026-09-28, FAB_FADED_CULL='contrib',
+    all three reading it at FAB_CONTRIB=1 only (Q-FAB-19's review); FAB.grow_check picks
+    replication parents by `use`, and the old tree's contribution-weighted fitness,
+    self_organize.py:2073-2084, is not ported.)
 
-    LEVERS READ: comp_ema, chain_k, society, ens_k
+    THE BODY, WRITTEN 2026-09-28 (register §8 3.5, 02-R11 and C37; docs/04_CONTRACT.md Q-FAB-19),
+    AND BUILT OFF: the root calls it only at FAB_CONTRIB=1, and at the shipped 0 it returns before
+    anything and FAB.manage reads no contribution, so nothing a measurement wrote decides anything.
+    A lineage that never armed it then holds 0.0 on every expert and no fab.contrib_* key; a child
+    resumed at 0 from a measuring parent carries the parent's books and ledger counts, unread
+    (Q-FAB-19's review: both spares read them until then).
+    WHAT IT IS HANDED, AND THE ONE RULE EVERY ARGUMENT OBEYS: the baseline and every counterfactual
+    are ONE FUNCTION of the same inputs. The root (spine/loop.py, inside the fab.manage answer)
+    cuts a batch from the retention probe's pinned CONTROL half -- held-out text the run never
+    trains on -- and hands the memory-off closure bound to that batch as `baseline_logits_fn`, the
+    loss LM.lm_loss gave its logits as `baseline_loss`, and the closure's own FAB.forward inputs as
+    `h`, `signature`, `novelty` (zeros), `domain_id` (DOM.nearest of the first row's signature),
+    `live_domains`, `head` and `step_windows` -- the closure's routing clock, clock.step + 1.
+    `targets` are the batch's shifted ids and are used only to score; the walk is handed
+    targets=None, as the closure's is. So before it removes anyone this function checks, and refuses
+    the pass by name where either fails: `baseline_loss` is what baseline_logits_fn()'s logits score
+    through LM.lm_loss's reduction (the H11 check), and the walk with nothing held out -- one
+    forward on either arm, and on the society arm the reweighted sum re-formed from that pass's
+    blend with no removal as well -- reproduces those logits bit for bit (the offset the H11 repair
+    exists to exclude cannot then enter through the inputs either).
+    `candidates` None (2026-09-28, the default -- a frozen-signature move, Q-FAB-19) is the next
+    FAB_CONTRIB_MAX past-grace experts from the population's rotating cursor (_contrib_pick); a
+    list is measured as given, each slot once, and moves no cursor.
+    WHAT IT WRITES: each candidate's value is the counterfactual's mean loss minus baseline_loss,
+    positive where the material is predicted worse without the expert; the first measurement SETS
+    Population.contrib and each later one folds in at FAB_COMP_EMA, and Population.contrib_n counts
+    them. A candidate whose counterfactual scored non-finite is left unmeasured and counted.
+
+    LEVERS READ: contrib, contrib_max, comp_ema, grace, society, on, norm_only
     WIRES READ: none
-    DID IT FIRE: fab.contrib_measured, fab.contrib_distinct_values (THE C3 ALARM: 1 distinct value
-                 across a pass means the counterfactual removed nothing), fab.contrib_positive /
-                 fab.contrib_negative (a population where EVERY measured expert reads load-bearing
-                 is the H11 offset, not a healthy population), fab.contrib_degenerate
+    DID IT FIRE: fab.contrib_measured, fab.contrib_distinct_values (a gauge, NOT THE C3 ALARM
+                 since the body: this function tests the walk itself, and 1 distinct value across
+                 a pass that is not degenerate is the float32 mean loss's resolution -- the walks
+                 moved and every removal read one value -- Q-FAB-19's review),
+                 fab.contrib_positive / fab.contrib_negative (a population where EVERY measured
+                 expert reads load-bearing is the H11 offset, not a healthy population),
+                 fab.contrib_degenerate (THE C3 ALARM: above 0, a pass whose walks moved no logit,
+                 which wrote nothing) -- and since the body (2026-09-28): fab.contrib_passes (the
+                 calls that WALKED -- a candidate to measure and a finite baseline_loss, each taking
+                 one reference walk with nothing held out, an eval pass -- the gated-call report's
+                 per-call count), fab.contrib_nonfinite (candidates left unmeasured for a non-finite
+                 loss), fab.contrib_coverage (a gauge: this pass's candidates over the past-grace
+                 count) and fab.contrib_measured_live (a gauge: live experts measured at least once).
+                 fab.contrib_measured, _degenerate, _passes and _nonfinite are seeded 0 by
+                 fabric/api.py::build at FAB_CONTRIB=1 on a routed arm and are ABSENT at
+                 FAB_CONTRIB=0 on a lineage that never armed it (a restored ledger carries its
+                 lineage's, Q-FAB-19's review); the five gauges are written by every armed call,
+                 over the finite values it measured (none where it walked nothing).
+                 fab.holdout_applied counts the counterfactuals on both arms, and Gate fab.contrib is
+                 replaced by name with this pass's reading
     """
     fab = fab.owned_by("FAB")
-    raise NotImplementedError(
-        "FAB.contribution: P4 (fabric) fills this in. The contract is frozen here; see "
-        "docs/04_CONTRACT.md, section FAB.")
+    on, norm_only, armed = bool(fab.on), bool(fab.norm_only), bool(fab.contrib)
+    counters = pop.counters
+    if not armed or not on or norm_only:
+        return ContribReport(reason=(
+            "FAB_CONTRIB=0: nothing is measured" if not armed else
+            "FAB_ON=0: no expert is computed, so there is nothing to hold out" if not on else
+            "FAB_NORM_ONLY=1: the control arm's forward reads no expert"))
+    grace, cap_n, comp_ema = int(fab.grace), int(fab.contrib_max), float(fab.comp_ema)
+    society = bool(fab.society)
+    step = U.Windows(step_windows)
+    n = int(pop.n_live)
+    eligible = [i for i in range(n) if int(pop.uage[i]) >= grace]
+    if candidates is None:
+        picked, nxt = _contrib_pick(pop, n, grace, cap_n)
+    else:
+        picked, nxt = [int(c) for c in candidates], None
+        bad = [c for c in picked if not 0 <= c < n]
+        if bad or len(set(picked)) != len(picked):
+            raise ValueError(
+                f"FAB.contribution: candidates {list(candidates)!r} against n_live={n}: "
+                + (f"{bad} name no live expert" if bad else "a slot is named twice")
+                + ". Each candidate is one live slot, measured once; None takes the next "
+                  "FAB_CONTRIB_MAX past-grace experts from the population's cursor.")
+    for _k in ("fab.contrib_passes", "fab.contrib_measured", "fab.contrib_degenerate",
+               "fab.contrib_nonfinite"):
+        counters.setdefault(_k, 0)
+
+    def _gate(fired, value, reason, reachable=True):
+        g = Gate("fab.contrib", fired, value=value,
+                 threshold="a counterfactual whose logits differ from the baseline's",
+                 reachable=reachable, reason=reason)
+        pop.gates = tuple(x for x in pop.gates if x.name != "fab.contrib") + (g,)
+        return g
+
+    def _gauges(values):
+        counters["fab.contrib_distinct_values"] = len(set(values))
+        counters["fab.contrib_positive"] = sum(1 for v in values if v > 0.0)
+        counters["fab.contrib_negative"] = sum(1 for v in values if v < 0.0)
+        counters["fab.contrib_coverage"] = round(len(picked) / max(1, len(eligible)), 6)
+        counters["fab.contrib_measured_live"] = sum(1 for i in range(n) if int(pop.contrib_n[i]) > 0)
+
+    # NOTHING PAST GRACE: nothing to measure, and the eligible set being empty is the reading --
+    # Q-FAB-5's treatment of fabric.cull_eligible, with the arithmetic. The baseline is not scored.
+    if not picked:
+        _gauges([])
+        why = (f"no expert is past grace (FAB_GRACE={grace} selection(s)) among n_live={n}, so "
+               f"there is nothing to hold out; the pass measured nothing and wrote nothing"
+               if not eligible else "no candidate was handed to this pass")
+        g = _gate(False, f"0 of {len(eligible)} past grace measured", why,
+                  reachable=bool(eligible))
+        return ContribReport(eligible=len(eligible), reason=why, gates=(g,))
+    base_loss = float(baseline_loss)
+    if not math.isfinite(base_loss):
+        _bump(counters, "fab.contrib_nonfinite", len(picked))
+        _gauges([])
+        why = (f"baseline_loss is {base_loss!r}: no difference from it means anything, so none of "
+               f"the {len(picked)} candidate(s) was measured and each stays as it was")
+        g = _gate(False, f"0 of {len(picked)} candidate(s) written", why)
+        return ContribReport(candidates=tuple(picked), baseline_loss=base_loss,
+                             eligible=len(eligible), reason=why, gates=(g,))
+    # A PASS IS COUNTED WHERE IT WALKS: from here every call takes exactly one reference walk with
+    # nothing held out (an eval pass, fab.eval_passes), so the root's accounting of that key is
+    # its closure passes plus this count, exactly.
+    _bump(counters, "fab.contrib_passes")
+    with torch.no_grad():
+        base = baseline_logits_fn()
+        # (2) OF THE DOCSTRING, CHECKED AND NOT ASSUMED: the loss handed in is the one the callable's
+        # logits score. A baseline from any other forward -- the training flush's, another batch's --
+        # rebuilds the offset that set contrib's SIGN.
+        again = float(_mean_ce(base, targets))
+        if again != base_loss:
+            raise ValueError(
+                f"FAB.contribution: baseline_loss={base_loss!r}, and the logits "
+                f"baseline_logits_fn() returns score {again!r} through LM.lm_loss's reduction. The "
+                f"baseline must come from the callable that produced its loss (ISSUES P1-H11: a "
+                f"loss from one function and counterfactuals from another add a fixed offset to "
+                f"every contribution and set contrib's sign). Nothing was measured.")
+        # AND THE WALK THE COUNTERFACTUALS TAKE, WITH NOTHING HELD OUT, IS THAT CALLABLE'S -- the
+        # inputs handed here are the ones the baseline was formed from, or the difference below
+        # would be a difference of inputs.
+        out0 = forward(fab, pop, h=h, signature=signature, novelty=novelty, head=head,
+                       targets=None, step_windows=step, domain_id=domain_id,
+                       live_domains=live_domains, training=False)
+        whole = out0.logits if out0.logits is not None else head(out0.hidden)
+        if whole.shape != base.shape or not torch.equal(whole, base):
+            raise ValueError(
+                "FAB.contribution: the walk with nothing held out does not reproduce "
+                "baseline_logits_fn()'s logits bit for bit, so h, signature, novelty, head, "
+                "domain_id, live_domains or step_windows is not what the baseline was formed from. "
+                "Every difference measured against it would then carry that mismatch, the H11 "
+                "offset through the inputs. Nothing was measured.")
+        pe = blend = None
+        if society:
+            pe, blend = out0.per_expert_logits, out0.blend
+            if pe is None or blend is None or not torch.equal(_reblend(pe, blend, None, whole),
+                                                              whole):
+                raise ValueError(
+                    "FAB.contribution: on the society arm the leave-one-out is a reweighted sum of "
+                    "the pass's own blend (FabricOut.blend), and re-forming it with nothing removed "
+                    "does not give the pass's prediction bit for bit. Nothing was measured.")
+        values, moved, finite = [], 0, []
+        for c in picked:
+            if society:
+                lg = _reblend(pe, blend, c, whole)
+                _bump(counters, "fab.holdout_applied")
+            else:
+                out = forward(fab, pop, h=h, signature=signature, novelty=novelty, head=head,
+                              targets=None, step_windows=step, domain_id=domain_id,
+                              live_domains=live_domains, training=False, hold_out=c)
+                lg = out.logits if out.logits is not None else head(out.hidden)
+            if lg is not whole and not torch.equal(lg, whole):
+                moved += 1
+            d = float(_mean_ce(lg, targets)) - base_loss
+            values.append(d)
+            finite.append(math.isfinite(d))
+    degenerate = moved == 0
+    written = []
+    if degenerate:
+        # THE C3 ALARM, AND IT WRITES NOTHING: no candidate's logits moved, so the values are the
+        # zeros of a counterfactual that removed nothing, not a measurement of nothing mattering.
+        _bump(counters, "fab.contrib_degenerate")
+    else:
+        for c, d, ok in zip(picked, values, finite):
+            if not ok:
+                _bump(counters, "fab.contrib_nonfinite")
+                continue
+            pop.contrib[c] = (d if int(pop.contrib_n[c]) == 0
+                              else (1.0 - comp_ema) * float(pop.contrib[c]) + comp_ema * d)
+            pop.contrib_n[c] = int(pop.contrib_n[c]) + 1
+            written.append(c)
+        _bump(counters, "fab.contrib_measured", len(written))
+    if nxt is not None:
+        pop.contrib_cursor = int(nxt)
+    kept = [v for v, ok in zip(values, finite) if ok]
+    _gauges(kept)
+    distinct = len(set(kept))
+    pos, neg = sum(1 for v in kept if v > 0.0), sum(1 for v in kept if v < 0.0)
+    arm = "reweighted sums of the pass's blend" if society else "held-out walks"
+    if degenerate:
+        why = (f"DEGENERATE (the C3 alarm): none of the {len(picked)} {arm} moved the logits, so "
+               f"nothing was written; fab.contrib_degenerate counts such passes")
+    else:
+        why = (f"{len(written)} of {len(picked)} candidate(s) written ({arm}), {pos} load-bearing "
+               f"and {neg} below 0 against baseline_loss {base_loss:.6f}; {len(picked)} of "
+               f"{len(eligible)} past grace, FAB_CONTRIB_MAX={cap_n}"
+               + (f"; {len(picked) - len(written)} left unmeasured, non-finite"
+                  if len(written) < len(picked) else ""))
+    g = _gate(bool(written), f"{len(written)} written, {distinct} distinct value(s)", why)
+    return ContribReport(candidates=tuple(picked), values=tuple(values), baseline_loss=base_loss,
+                         distinct_values=distinct, positive=pos, negative=neg,
+                         degenerate=degenerate, eligible=len(eligible), reason="" if written
+                         else why, gates=(g,))
 
 
 def _depth_gate(pop, *, depth0, hops, patience, stage_max, manage_every, step_n=None,
@@ -3457,7 +4030,7 @@ def _depth_gate(pop, *, depth0, hops, patience, stage_max, manage_every, step_n=
                         f"{tail}{note}"))
 
 
-def manage(fab: Config, pop, *, step_windows, flush_loss=None):
+def manage(fab: Config, pop, *, step_windows, flush_loss=None, faded=None):
     """The selection pass: failure cull, utilization cull, three spares, rescue, staged depth.
 
     ORDER AND GATING, each with its own reason:
@@ -3481,6 +4054,7 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
          be widened to hold the exact sum (`load_state_dict` below: rank is an INNER dimension),
          so the truncation is forced and the RESIDUAL is the honest report of what it cost.
          WHAT MERGES: use[a] += use[b]; uage[a] += uage[b]; dom_of[a] |= dom_of[b];
+         area_use[a] += area_use[b], area by area (2026-09-28, Q-FAB-18);
          cent[a] = normalize(cent_a + cent_b); then remove(b) through the ONE declared renumbering
          list. NOTHING IN MEM MOVES AND NO MEM ENTRY POINT IS MINTED -- the escalation's premise
          that "memory ownership is expert_id % n_own, so merging changes which owner block holds
@@ -3510,9 +4084,14 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
          stale after an in-place write. `rescue` at 5 below already does this; the merge does not
          make it worse and does not fix it, and P4 must not pretend either.
          WHY THE MERGE IS NOT GATED ON `contribution`, which would be the better signal: FAB.contribution
-         is DEFERRED (spine/compose.py) for want of `candidates` and `baseline_logits_fn`, so the
-         output-space redundancy reading does not exist at P4. The weight-space residual is the
-         available second gate, and this note is where the revisit is recorded.
+         was DEFERRED (spine/compose.py) for want of `candidates` and `baseline_logits_fn` when this
+         was written, so the output-space redundancy reading did not exist at P4. It has a body
+         since 2026-09-28 (Q-FAB-19), built OFF, and one merge reads it: at
+         FAB_FADED_CULL='contrib' a faded-area absorbee is merged only on a measured contribution at
+         or below 0 (step 7). Gating EVERY merge on it is a ruling nobody has made -- at the owner's
+         pool a pass measures FAB_CONTRIB_MAX experts, so most absorbees would go unmeasured -- and
+         the weight-space residual stays the second gate; this note is where the revisit is
+         recorded.
       1. FAILURE CULL, AT ANY OCCUPANCY. An expert is failing when BOTH error EMAs sit above the
          population by fail_tol AND the fast one is not above the slow one by shift_tol -- because
          fast >> slow is a SHIFT IN PROGRESS and that expert is adapting. This is the goal-B
@@ -3520,7 +4099,8 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
          "THE POPULATION" IS comp_glob, the flush-mean loss EMA (Q-FAB-12): it was the mean over
          every live expert, never-selected zeros included, which put the bar under every selected
          expert and culled every past-grace expert on its first pass. A load-bearing expert
-         (contrib > 0) is spared here as on the utilization path, which is the old tree's rule.
+         (contrib > 0) is spared here as on the utilization path, which is the old tree's rule --
+         at FAB_CONTRIB=1, the only value that reads a contribution (Q-FAB-19's review).
       2. UTILIZATION CULL, only behind derive.cull_gate_open(n_live, slots, pressure). THAT
          FUNCTION IS CALLED, NOT RESTATED -- it is already replayed against a 216-case oracle, and
          it is TWO conditions (n_live <= 2 is a FLOOR, not a pressure test), which is why people
@@ -3536,8 +4116,9 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
          open gate is a legitimate reported outcome rather than something the code refuses to
          allow. The ratchet is the pattern the DomainAssembler documents as having driven a
          population down to a single member.
-      4. SPARES: contrib > 0 (load-bearing); comp better than comp_glob (comp_protect); and the
-         shift test.
+      4. SPARES: contrib > 0 (load-bearing; read at FAB_CONTRIB=1 only, so at 0 a restored
+         lineage's measurements spare nothing -- Q-FAB-19's review); comp better than comp_glob
+         (comp_protect); and the shift test.
       5. RESCUE: one heavy mutation at mut_big scale and a reset use-clock instead of a deletion,
          once per expert, inside the pressure gate.
       6. maybe_deepen(flush_loss) when the curriculum is on (0 < depth0 < hops). A stage ends
@@ -3549,6 +4130,36 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
          is declared BITS_PER_BYTE and is compared against a cross-entropy in NATS PER TOKEN (:2529
          against :7317). The repair is owed at the COMPARISON, not at the declaration, and the
          report prints the unit it was compared in.
+      7. FADED AREAS (2026-09-28, register §8 3.1, NEW-10 and C37; Q-FAB-18), on every pass the
+         root hands `faded` -- the area ids DATA's schedule has faded at this window's phase, plus
+         the areas the resumed lineage drew and this run schedules nowhere. Every expert the merge
+         absorbs and every expert either cull removes is read against its area book
+         (Population.area_use) AFTER the pass has chosen it: fab.merged_faded_area and
+         fab.culled_faded_area count the removals whose most-served area is faded, and
+         fab.faded_unknown the removals whose book is empty, so a count of 0 over empty books is
+         not read as 0 over read ones. At FAB_FADED_CULL='as_is' (shipped) no decision reads a
+         book, so the pass removes what it removed before the books existed. At 'defer' the pass
+         TAKES EVERY DECISION 'as_is' TAKES AND DROPS ONLY THE FADED REMOVALS (Q-FAB-18's review):
+         a removal the book names faded is SKIPPED -- the pair is not merged, the expert is not
+         culled -- and counted as an event (fab.merge_faded_deferred, fab.cull_faded_deferred), and
+         every later step of the pass reads the population 'as_is' would hold, not the one the
+         deferral kept. So a deferred absorbee pairs with nobody else, the failure cull walks, and
+         the pressure gate and the utilization budget count, the population without the deferred
+         experts, a deferred expert holds its place in the utilization cull's budget, and the
+         survivor of a pair left apart is ranked, paired and read by the use, uage and book the
+         merge would have given it: no live-area expert is merged or culled in a deferred one's
+         place. An empty book is not faded and is removed at
+         every value. `faded=None` (a caller that hands no set) reads nothing and leaves every key
+         of this step ABSENT. At 'contrib' (2026-09-28, register §8 3.5 and NEW-10's rule; Q-FAB-19)
+         such a removal goes ahead where FAB.contribution has MEASURED the expert at or below 0
+         (Population.contrib_n > 0 and contrib <= 0), counted at 'as_is''s names and as
+         fab.cull_faded_allowed_by_contrib / fab.merge_faded_allowed_by_contrib, and is otherwise
+         kept by 'defer''s own machinery -- every other decision 'as_is''s -- and counted
+         fab.cull_faded_refused_by_contrib / fab.merge_faded_refused_by_contrib. A cull's refusal is
+         always an UNMEASURED expert: one measured above 0 was spared as load-bearing (step 4)
+         before its area was read. A merge's can be either, since the merge reads no contribution
+         of its own. The rule reads a measurement at FAB_CONTRIB=1 only, as the spares do; at 0,
+         which startup refuses beside 'contrib', it keeps every faded removal.
 
     THREE STATES, NOT TWO, FOR EVERY GATE ON THIS PASS (Q-FAB-5, RESOLVED 2026-09-02).
     `fabric.cull_eligible` reports `unreachable` -- never "armed but 0" -- when the eligible set is
@@ -3568,7 +4179,8 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
 
     LEVERS READ: grace, cull_frac, pressure, slots, comp_protect, err_fast, err_slow,
                  shift_tol, fail_tol, rescue, mut_big, manage_every, depth0, depth_eps,
-                 depth_patience, depth_stage_max, hops, merge_dist, on, norm_only
+                 depth_patience, depth_stage_max, hops, merge_dist, on, norm_only, faded_cull,
+                 contrib (whether a measured contribution is read at all, Q-FAB-19's review)
     WIRES READ: d_manage_period (recorded on the report beside manage_every, so the WINDOW cadence
                 this function is called on and the FLUSH cadence `contribution` is called on are
                 visible side by side and a cadence that never coincides reads as a zero rather than
@@ -3594,7 +4206,24 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
                  fab.merge_armed_passes (the passes whose per-pass merge gate was reachable: a
                  past-grace expert at entry and FAB_MERGE_DIST > 0), and the two merge gates --
                  fab.merged_last_pass (this pass's verdict) and fab.merged (the ledger's, over
-                 fab.merged and fab.merge_armed_passes)
+                 fab.merged and fab.merge_armed_passes),
+                 step 7 (2026-09-28, Q-FAB-18) -- fab.culled_faded_area, fab.merged_faded_area
+                 and fab.faded_unknown (CUMULATIVE; PRESENT-and-0 from the first pass handed a
+                 faded set, ABSENT while none was), their per-pass gauges
+                 fab.culled_faded_area_last_pass, fab.merged_faded_area_last_pass and
+                 fab.faded_unknown_last_pass (this pass's counts, CONTRACT-Q-FAB-5's "per manage
+                 pass", Q-FAB-18's review), fab.faded_areas_last_pass (a gauge: how many areas this
+                 pass's set held, 0 in a first phase) -- the four gauges written on every pass
+                 handed a set and ABSENT on one handed none -- and at FAB_FADED_CULL='defer' only
+                 fab.cull_faded_deferred and fab.merge_faded_deferred (EVENTS: an expert deferred
+                 again on a later pass counts again) beside fab.faded_deferred_experts (a gauge: the
+                 distinct experts this pass deferred, which is this pass's events, since a deferred
+                 expert leaves the pass's remaining decisions), all three ABSENT at 'as_is'; at
+                 FAB_FADED_CULL='contrib' only (2026-09-28, Q-FAB-19)
+                 fab.cull_faded_allowed_by_contrib, fab.cull_faded_refused_by_contrib,
+                 fab.merge_faded_allowed_by_contrib and fab.merge_faded_refused_by_contrib (EVENTS,
+                 as the deferral pair's are, which stays ABSENT there) beside the same
+                 fab.faded_deferred_experts, the distinct experts this pass kept
     """
     fab = fab.owned_by("FAB")
     period = fab.d_manage_period     # WIRE READ HERE -- both cadences reported side by side
@@ -3609,6 +4238,19 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
     depth_patience = int(fab.depth_patience)
     depth_stage_max = int(fab.depth_stage_max)
     merge_dist = float(fab.merge_dist)
+    faded_cull = str(fab.faded_cull)
+    # A MEASURED CONTRIBUTION IS READ WHERE THE MEASUREMENT IS ARMED AND NOWHERE ELSE (2026-09-28,
+    # Q-FAB-19's review). Population.contrib and contrib_n are lineage books -- checkpointed and
+    # restored on every resume -- so a child resumed at FAB_CONTRIB=0 from a measuring parent holds
+    # the parent's measurements. Both contrib > 0 spares read them unconditionally, so such a
+    # child went on sparing on the parent's frozen values while Gate fab.contrib said the mechanism
+    # was off (driven: one restored contrib of +0.25 spared the least-used victim of a utilization
+    # cull, and the pass removed 1-5 where the same population never measured removes 0-4). At 0
+    # nothing here reads either book: both spares are inert, and 'contrib''s rule -- which startup
+    # refuses at 0 -- keeps every faded removal as unmeasured. At the shipped 0 over a lineage that
+    # never measured every contrib is 0.0, so no decision differs from what the unconditional read
+    # decided.
+    read_contrib = bool(fab.contrib)
     rank = int(pop.B.shape[1])
     counters, where = pop.counters, "FAB.manage"
     step = U.Windows(step_windows)
@@ -3645,7 +4287,98 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
     counters["fab.manage_period_flushes"] = int(period)
     counters["fab.manage_every_windows"] = manage_every
 
+    # ---- 7's STATE, SET UP BEFORE ANY STEP DECIDES (2026-09-28, Q-FAB-18) ----------------------
+    # `fset` is the faded set as ids, None when the caller handed none -- and then nothing below
+    # reads a book and no key of this step exists. `defer` is the arm on which a book DECIDES: at
+    # 'defer' every faded removal is kept, and at 'contrib' (`gated`, 2026-09-28, Q-FAB-19) the ones
+    # FAB.contribution has not measured at or below 0 are (_keeps), the rest going ahead -- one
+    # keeping machinery, 'defer''s, at both values, so a kept removal at 'contrib' takes every
+    # other decision 'as_is' takes exactly as a deferred one does.
+    # SEEDED HERE, BEFORE THE STEPS, for the rule seeded above: a pass handed a set that removes
+    # nothing faded reads 0, not ABSENT. The deferral pair only at 'defer', and the 'contrib' rule's
+    # four keys only at 'contrib'; at 'as_is' neither can move and both stay ABSENT. THE PER-PASS
+    # GAUGES ARE THIS PASS'S OR NOTHING: a pass handed no set drops them, so an earlier pass's numbers
+    # never read as this one's.
+    fset = None if faded is None else frozenset(int(a) for a in faded)
+    gated = fset is not None and faded_cull == "contrib"
+    defer = fset is not None and faded_cull in ("defer", "contrib")
+    culled_faded = merged_faded = faded_unknown = merge_deferred = 0
+    fail_deferred = util_deferred = 0
+    merge_allowed = cull_allowed = 0
+    if fset is not None:
+        for _k in ("fab.culled_faded_area", "fab.merged_faded_area", "fab.faded_unknown"):
+            counters.setdefault(_k, 0)
+        counters["fab.faded_areas_last_pass"] = len(fset)
+        if gated:
+            for _k in ("fab.cull_faded_allowed_by_contrib", "fab.cull_faded_refused_by_contrib",
+                       "fab.merge_faded_allowed_by_contrib", "fab.merge_faded_refused_by_contrib"):
+                counters.setdefault(_k, 0)
+        elif defer:
+            for _k in ("fab.cull_faded_deferred", "fab.merge_faded_deferred"):
+                counters.setdefault(_k, 0)
+    else:
+        for _k in ("fab.faded_areas_last_pass", "fab.culled_faded_area_last_pass",
+                   "fab.merged_faded_area_last_pass", "fab.faded_unknown_last_pass",
+                   "fab.faded_deferred_experts"):
+            counters.pop(_k, None)
+
     n_live = int(pop.n_live)
+    # 'defer' TAKES THE DECISIONS 'as_is' TAKES AND DROPS ONLY THE FADED REMOVALS (2026-09-28,
+    # Q-FAB-18's review). A deferred expert stays in the population, and no later step of the pass
+    # may read it there: the first build let a merge's deferred absorbee pair again and absorb a
+    # live-area expert 'as_is' never pairs it with, sized the pressure gate and the utilization
+    # budget on a population its deferrals had kept large -- a failure-cull deferral took one more
+    # live-area expert through the budget, and a merge deferral opened a gate 'as_is' shut and
+    # culled live-area experts 'as_is' kept -- and ranked the survivor of a pair it had left apart
+    # without the mass the merge would have given it. So every step below reads the population
+    # 'as_is' would hold at that point of the pass. EXPERTS ARE NAMED BY THEIR SLOT AT ENTRY.
+    # `view` is 'as_is''s layout, view[s] the expert it would hold at slot s, renumbered by _drop as
+    # _remove renumbers the population; `real` is the population's own layout and `at` each
+    # expert's slot in it. `asis` holds, for an expert whose 'as_is' use, uage or area book differs
+    # from its row -- the survivor of a pair 'defer' left apart, and whoever absorbs it -- the three
+    # values 'as_is' would give it, and _use/_uage/_book read them first. `deferred` is this pass's
+    # deferred experts: each leaves the pass's remaining decisions, so each is deferred once.
+    # AT 'as_is' THE TWO LAYOUTS ARE ONE LIST, `asis` STAYS EMPTY, and every read below is the read
+    # it was, of the same row, in the same order, so the pass is the one it was before either
+    # existed.
+    view, real = list(range(n_live)), list(range(n_live))
+    at = {e: e for e in range(n_live)}
+    asis, deferred = {}, set()
+
+    def _use(e):
+        return asis[e][0] if e in asis else float(pop.use[at[e]])
+
+    def _uage(e):
+        return asis[e][1] if e in asis else int(pop.uage[at[e]])
+
+    def _book(e):
+        return asis[e][2] if e in asis else pop.area_use[at[e]]
+
+    def _keeps(e):
+        """Is expert e's faded removal kept? Every one at 'defer'; at 'contrib' (2026-09-28,
+        Q-FAB-19) every one FAB.contribution has not MEASURED at or below 0 -- an unmeasured
+        expert (Population.contrib_n 0) is kept, C37's deferral lasting until a measurement exists,
+        and so is one measured above 0, load-bearing. Read off the expert's own row: a merge leaves
+        a survivor's contribution its own, so no 'as_is' value of it differs. At FAB_CONTRIB=0
+        (Q-FAB-19's review) no measurement is read and every one is kept -- 'defer' under the rule's
+        names, the pairing startup refuses."""
+        if not gated:
+            return True
+        i = at[e]
+        return not (read_contrib and int(pop.contrib_n[i]) > 0 and float(pop.contrib[i]) <= 0.0)
+
+    def _cut(slots):
+        """Remove these REAL slots from the population, highest first -- the order every step of
+        this pass removes in, because _remove renumbers by swap-with-last -- keeping `real` and `at`
+        on the experts."""
+        for s in sorted(slots, reverse=True):
+            leaving = real[s] if s < len(real) else (real[-1] if real else None)
+            _remove(pop, s)
+            _drop(real, s)
+            at.pop(leaving, None)
+            if s < len(real):
+                at[real[s]] = s
+
     # ELIGIBLE IS PAST-GRACE, AND EVERY RANKING AND BUDGET ON THIS PASS IS SIZED ON IT. The old
     # budget was a fraction of n_live and removed ten where one was due (523 live / 84 eligible).
     # `grace` is units.Selections and `uage` is the SELECTION count -- the H12/H13 split -- so this
@@ -3680,28 +4413,60 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
         with torch.no_grad():
             cn = torch.nn.functional.normalize(pop.cent[:n_live].float(), dim=-1)
             sim = cn @ cn.t()
-        absorbed = set()
+        # `kept` is the absorbees 'defer' did not merge: consumed for the rest of the scan exactly
+        # as `absorbed` is, because 'as_is' merged them away here (Q-FAB-18's review).
+        absorbed, kept = set(), set()
         # DESCENDING SIMILARITY so the closest pair merges first; a pair already consumed is
         # skipped rather than re-merged into a survivor whose centroid has since moved.
         pairs = _merge_pairs(sim, merge_dist)
         for _sv, i, j in pairs:
-            if i in absorbed or j in absorbed:
+            if i in absorbed or j in absorbed or i in kept or j in kept:
                 continue
-            # `b` IS THE ONE THAT DISAPPEARS AND IT IS THE ONE GRACE TESTS.
-            a, b = (i, j) if int(pop.uage[j]) >= int(pop.uage[i]) else (j, i)
-            a, b = (b, a) if int(pop.uage[b]) < grace and int(pop.uage[a]) >= grace else (a, b)
-            if int(pop.uage[b]) < grace:
+            # `b` IS THE ONE THAT DISAPPEARS AND IT IS THE ONE GRACE TESTS -- on the uage 'as_is'
+            # would have, which is the row's except for the survivor of a pair 'defer' left apart.
+            a, b = (i, j) if _uage(j) >= _uage(i) else (j, i)
+            a, b = (b, a) if _uage(b) < grace and _uage(a) >= grace else (a, b)
+            if _uage(b) < grace:
                 declined_grace += 1
                 continue
+            # 7. THE PASS HAS CHOSEN `b`; ITS BOOK IS READ NOW, before _merge_into and before any
+            # removal, so it is the absorbed expert's own history (Q-FAB-18). At 'as_is' the read
+            # decides nothing and is only counted, after the merge; at 'defer' a faded `b` is not
+            # merged, and the pair's other expert stays free for the rest of the scan.
+            kind = None if fset is None else _faded_kind(_book(b), fset)
+            # WHAT 'as_is' GIVES `a` HERE, where that is not what its row will say: `b` is kept
+            # apart, or either side already carries values the row does not. Taken before
+            # _merge_into writes `a`'s row, in _merge_into's own order (a's, then b's).
+            hold = defer and kind == "faded" and _keeps(b)
+            joint = None
+            if a in asis or b in asis or hold:
+                joint = (_use(a) + _use(b), _uage(a) + _uage(b), _sum_books(_book(a), _book(b)))
+            if hold:
+                merge_deferred += 1
+                deferred.add(b)
+                kept.add(b)
+                asis[a] = joint
+                continue
             resid = _merge_into(pop, a, b, rank)
+            if joint is not None:
+                asis[a] = joint
             residuals.append(resid)
             absorbed.add(b)
             merged += 1
+            if kind == "faded":
+                merged_faded += 1
+                if gated:
+                    merge_allowed += 1
+            elif kind == "unknown":
+                faded_unknown += 1
         # THE REMOVALS HAPPEN AFTER THE WHOLE SCAN AND IN DESCENDING SLOT ORDER, because _remove
         # renumbers by swap-with-last: removing a low slot first would move a later victim's id out
-        # from under the list this loop is walking.
-        for b in sorted(absorbed, reverse=True):
-            _remove(pop, b)
+        # from under the list this loop is walking. 'as_is' removes every absorbee, the kept ones
+        # included, and that is the layout the steps below decide on; the population loses only the
+        # ones merged. No slot has moved yet, so an expert's name is its slot here.
+        for b in sorted(absorbed | kept, reverse=True):
+            _drop(view, b)
+        _cut(absorbed)
         n_live = int(pop.n_live)
     if merged:
         _bump(counters, "fab.merged", merged)
@@ -3744,29 +4509,62 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
     # None BEFORE THE FIRST ATTRIBUTED WINDOW, and then nothing can be judged against it.
     cull_fail = spared_shift = spared_contrib = 0
     fail_base = None if pop.comp_glob is None else float(pop.comp_glob)
+    # WHETHER THE ELIGIBLE LIST BELOW IS RECOUNTED: only after this cull runs. Where it does not --
+    # comp_glob None, no window attributed yet -- the utilization cull ranks the ENTRY list, which a
+    # merge's removals have renumbered (Q-FAB-18's review records it beside this cull's walk).
+    recounted = False
     if n_elig and fail_base is not None:
-        failing = []
-        for i in list(eligible):
-            if i >= n_live:
+        # THE WALK IS OVER THE ENTRY LIST'S SLOTS, READ IN THE LAYOUT 'as_is' HOLDS AFTER THE MERGE
+        # -- Q-FAB-18 records that a slot the merge refilled is judged under its entry's grace, and
+        # at 'defer' it is the expert 'as_is' would have there that is judged, so both values judge
+        # one set. `failing` and `kept_fail` are those layout slots.
+        failing, kept_fail = [], []
+        for s in list(eligible):
+            if s >= len(view):
                 continue          # renumbered away by the merge above
+            e = view[s]
+            i = at[e]
             ef_i, es_i = float(pop.ef[i]), float(pop.es[i])
             if ef_i > fail_base + fail_tol and es_i > fail_base + fail_tol:
                 if ef_i - es_i > shift_tol:
                     spared_shift += 1
-                elif float(pop.contrib[i]) > 0.0:
+                elif read_contrib and float(pop.contrib[i]) > 0.0:
                     # LOAD-BEARING DESPITE THE ERROR, the old tree's failure-path spare
                     # (self_organize.py:2241, `if protect and s.contrib.get(i, 0.0) > 0`). contrib
-                    # stays 0.0 while FAB.contribution is deferred, so this cannot fire today; it
-                    # is here so the day contribution lands both cull paths honour it.
+                    # is written only by FAB.contribution, which runs at FAB_CONTRIB=1 since
+                    # 2026-09-28 (Q-FAB-19), and is read here only there (Q-FAB-19's review): at
+                    # the shipped FAB_CONTRIB=0 this spare is inert, a restored lineage's
+                    # measurements included, and at 1 both cull paths honour it.
                     spared_contrib += 1
                 else:
-                    failing.append(i)
-        for i in sorted(failing, reverse=True):
-            _remove(pop, i)
-            cull_fail += 1
+                    # 7. CHOSEN, THEN READ (Q-FAB-18): counted at 'as_is', and at 'defer' a
+                    # faded-area expert stays -- and leaves the population the rest of the pass
+                    # sizes and ranks, as 'as_is''s removal would take it out of it: this cull has
+                    # no budget, but the utilization cull's budget and the pressure gate are sized
+                    # on what it leaves (Q-FAB-18's review).
+                    kind = None if fset is None else _faded_kind(_book(e), fset)
+                    if defer and kind == "faded" and _keeps(e):
+                        fail_deferred += 1
+                        deferred.add(e)
+                        kept_fail.append(s)
+                        continue
+                    if kind == "faded":
+                        culled_faded += 1
+                        if gated:
+                            cull_allowed += 1
+                    elif kind == "unknown":
+                        faded_unknown += 1
+                    failing.append(s)
+        gone = [at[view[s]] for s in failing]
+        for s in sorted(failing + kept_fail, reverse=True):
+            _drop(view, s)
+        _cut(gone)
+        cull_fail += len(gone)
         n_live = int(pop.n_live)
-        eligible = [i for i in range(n_live) if int(pop.uage[i]) >= grace]
+        # RECOUNTED OVER THE LAYOUT 'as_is' HOLDS, IN ITS SLOT ORDER, as experts.
+        eligible = [e for e in view if _uage(e) >= grace]
         n_elig = len(eligible)
+        recounted = True
 
     # ---- 2. UTILIZATION CULL, behind derive.cull_gate_open ---------------------------------------
     # THAT FUNCTION IS CALLED, NOT RESTATED. It is already replayed against a 216-case oracle, and
@@ -3774,16 +4572,24 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
     # read it as one. THE ARITHMETIC IS RECORDED EVERY PASS whether it opened or not, so a run that
     # was above pressure for most of its length and below it at the end does not print
     # "unreachable".
-    gate_open = _derive.cull_gate_open(n_live, slots, pressure)
+    # ON THE POPULATION 'as_is' WOULD HOLD HERE (Q-FAB-18's review): at 'defer' the experts this pass
+    # kept are not counted toward the pressure, as 'as_is' has removed them, and the reason says how
+    # many stand beside the count. At 'as_is' `n_view` is n_live.
+    n_view = len(view)
+    gate_open = _derive.cull_gate_open(n_view, slots, pressure)
     # THE UNROUNDED RATIO IS PRINTED WHEN THE THREE-PLACE ONE WOULD SIT ON THE OTHER SIDE OF THE
     # SETPOINT, which is build's rounding caveat carried to the gate that now reports the verdict
     # (measured there: FAB_N0=4499 FAB_SLOTS=10000 at FAB_PRESSURE=0.45 prints 0.450 and is shut).
-    _occ = n_live / max(1, slots)
+    _occ = n_view / max(1, slots)
     _flip = (_occ >= pressure) != (float(f"{_occ:.3f}") >= pressure)
-    gate_str = (f"n_live={n_live} / slots={slots} = {_occ:.3f}"
+    gate_str = (f"n_live={n_view} / slots={slots} = {_occ:.3f}"
                 f"{f' (unrounded {_occ!r})' if _flip else ''} against "
                 f"FAB_PRESSURE={pressure} with the n_live<=2 floor: "
-                f"{'OPEN' if gate_open else 'SHUT'}")
+                f"{'OPEN' if gate_open else 'SHUT'}"
+                + (f", over the population FAB_FADED_CULL='as_is' would hold here: the "
+                   f"{n_live - n_view} expert(s) this pass "
+                   f"{'refused to remove' if gated else 'deferred'} stand beside it, uncounted"
+                   if n_live != n_view else ""))
     # THE GATE'S ARITHMETIC GOES ON A Gate AND NOT INTO THE COUNTER LEDGER, and the first driven
     # run of this body is why. `fab.cull_gate` is a DECLARED GATE NAME, and fabric/api.py::counters
     # renders every gate by looking its name up in the ledger and calling int() on what it finds --
@@ -3797,13 +4603,33 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
         # rather than something the code refuses to allow -- the ratchet is the pattern the
         # DomainAssembler documents as having driven a population down to a single member.
         budget = int(cull_frac * n_elig)
-        ranked = sorted(eligible, key=lambda i: float(pop.use[i]))
+        # THE RANKED LIST IS OF REAL SLOTS, in the order 'as_is' would rank them: its recounted
+        # eligible experts, by the use it would give them. Where the failure cull did not run it is
+        # the ENTRY list, as it always was -- read in the population's own layout while that is
+        # 'as_is''s, and otherwise (comp_glob None and a merge deferral: no loop run reaches it,
+        # since the first window to feed an area book sets comp_glob) through 'as_is''s layout,
+        # without the slots past it, which hold no expert (Q-FAB-18's review).
+        if recounted:
+            ranked_from = [at[e] for e in eligible]
+        elif view == real:
+            ranked_from = list(eligible)
+        else:
+            ranked_from = [at[view[s]] for s in eligible if s < len(view)]
+        ranked = sorted(ranked_from,
+                        key=lambda i: _use(real[i]) if i < len(real) else float(pop.use[i]))
         victims = []
+        # A DEFERRED VICTIM HOLDS ITS BUDGET SLOT (2026-09-28, Q-FAB-18): `held` holds them against
+        # the budget beside `victims`, so at 'defer' the walk stops where 'as_is' would have and
+        # never goes on to cull the next-least-used live-area expert in a deferred one's place.
+        # At 'as_is' it stays empty and the walk is the one it was.
+        held = []
         for i in ranked:
-            if len(victims) >= budget:
+            if len(victims) + len(held) >= budget:
                 break
             # THE THREE SPARES, EACH ITS OWN COUNTER BECAUSE EACH IS A DIFFERENT REASON TO SURVIVE.
-            if float(pop.contrib[i]) > 0.0:
+            # The first reads a measured contribution at FAB_CONTRIB=1 only (Q-FAB-19's review), as
+            # the failure cull's does.
+            if read_contrib and float(pop.contrib[i]) > 0.0:
                 spared_contrib += 1
                 continue
             # comp IS A LOSS, SO "BETTER THAN THE POPULATION" IS `<`. It read `>` until 2026-09-24,
@@ -3821,21 +4647,48 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
             if float(pop.ef[i]) - float(pop.es[i]) > shift_tol:
                 spared_shift += 1
                 continue
+            # 7. CHOSEN, THEN READ (Q-FAB-18) -- after the three spares, so a spared expert is
+            # never counted as deferred and a deferral is only ever a victim the walk had named. A
+            # slot past the population is a dead row (the entry list's, above): its book was
+            # cleared, so it reads "unknown" and is never deferred.
+            e = real[i] if i < len(real) else None
+            kind = None if fset is None else _faded_kind(
+                _book(e) if e is not None else pop.area_use[i], fset)
+            if defer and kind == "faded" and _keeps(e):
+                held.append(i)
+                util_deferred += 1
+                deferred.add(e)
+                continue
+            if kind == "faded":
+                culled_faded += 1
+                if gated:
+                    cull_allowed += 1
+            elif kind == "unknown":
+                faded_unknown += 1
             victims.append(i)
-        for i in sorted(victims, reverse=True):
-            _remove(pop, i)
-            cull_util += 1
+        # 'as_is' REMOVES THE VICTIMS AND THE HELD ALIKE, from where its layout holds them -- a dead
+        # row only while the two layouts are one, at the same slot -- and the population loses the
+        # victims.
+        _vslot = {e: s for s, e in enumerate(view)}
+        for s in sorted((_vslot[real[i]] if i < len(real) else i for i in victims + held),
+                        reverse=True):
+            _drop(view, s)
+        _cut(victims)
+        cull_util += len(victims)
         n_live = int(pop.n_live)
 
     # ---- 5. RESCUE: a heavy mutation instead of a deletion, inside the pressure gate -------------
     # ONCE PER EXPERT. `mutscale` carries whether this expert has already been rescued, so a slot
     # cannot be rescued repeatedly into noise -- and the Adam moments on A[i], B[i] are STALE after
     # an in-place write, which this does not fix and must not pretend to.
+    # THE EXPERTS 'as_is' WOULD RESCUE, AT EITHER VALUE (Q-FAB-18's review): its past-grace experts
+    # in its layout, by the use it would give them, so a deferred expert is not rescued -- 'as_is'
+    # removed it -- and a live one 'as_is' rescues is not passed over for it.
     rescued = 0
     if gate_open and rescue_frac > 0.0 and n_elig:
-        worst = sorted([i for i in range(n_live) if int(pop.uage[i]) >= grace],
-                       key=lambda i: float(pop.use[i]))
-        for i in worst[:int(rescue_frac * max(1, n_elig))]:
+        worst = sorted([e for e in view if _uage(e) >= grace], key=_use)
+        for e in worst[:int(rescue_frac * max(1, n_elig))]:
+            i = at[e]
             if float(pop.mutscale[i]) != 1.0:
                 continue
             with torch.no_grad():
@@ -3843,6 +4696,8 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
                     t[i] += torch.randn(t[i].shape, generator=pop.rng.torch_generator(),
                                         device=t.device, dtype=t.dtype) * mut_big * t[i].std()
             pop.use[i], pop.uage[i] = 0.0, 0
+            if e in asis:
+                asis[e] = (0.0, 0, asis[e][2])
             pop.mutscale[i] = float(mut_big)
             rescued += 1
         pop.rescued = int(pop.rescued) + rescued
@@ -3898,6 +4753,34 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
                  ("fab.spared_shift", spared_shift), ("fab.rescued", rescued)):
         if v:
             _bump(counters, k, v)
+    # 7's LEDGER (2026-09-28, Q-FAB-18): the pass's faded-area removals, empty-book removals and, at
+    # 'defer', its deferral events and the distinct experts they fell on (a gauge, this pass's).
+    # THE THREE COUNTS ARE ALSO WRITTEN AS THIS PASS'S GAUGES (Q-FAB-18's review), as
+    # fab.merged_last_pass is beside fab.merged: CONTRACT-Q-FAB-5 asks for the count per manage
+    # pass, and the cumulative keys alone cannot say which pass removed what -- the ManageReport
+    # carrying them goes back to a root that files it nowhere.
+    cull_deferred = fail_deferred + util_deferred
+    if fset is not None:
+        for k, v in (("fab.culled_faded_area", culled_faded),
+                     ("fab.merged_faded_area", merged_faded), ("fab.faded_unknown", faded_unknown)):
+            if v:
+                _bump(counters, k, v)
+        counters["fab.culled_faded_area_last_pass"] = culled_faded
+        counters["fab.merged_faded_area_last_pass"] = merged_faded
+        counters["fab.faded_unknown_last_pass"] = faded_unknown
+        if defer:
+            # AT 'contrib' THE KEPT REMOVALS ARE THE RULE'S REFUSALS, under its own names, beside the
+            # ones a measured contribution allowed (2026-09-28, Q-FAB-19); at 'defer' they are the
+            # deferrals they always were. The distinct-expert gauge is the same at both.
+            for k, v in ((("fab.cull_faded_allowed_by_contrib", cull_allowed),
+                          ("fab.cull_faded_refused_by_contrib", cull_deferred),
+                          ("fab.merge_faded_allowed_by_contrib", merge_allowed),
+                          ("fab.merge_faded_refused_by_contrib", merge_deferred)) if gated else
+                         (("fab.cull_faded_deferred", cull_deferred),
+                          ("fab.merge_faded_deferred", merge_deferred))):
+                if v:
+                    _bump(counters, k, v)
+            counters["fab.faded_deferred_experts"] = len(deferred)
 
     # ---- THREE STATES, NOT TWO, FOR EVERY GATE ON THIS PASS (Q-FAB-5) ---------------------------
     # `fabric.cull_eligible` and `fab.merged` report UNREACHABLE -- never "armed but 0" -- when the
@@ -3909,11 +4792,34 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
     _mean_uage = sum(int(pop.uage[i]) for i in range(n_live)) / max(1, n_live)
     _reach = (f"mean uage {_mean_uage:.1f} at n_live={n_live} after {step_n} window(s); "
               f"grace={grace} selection(s)")
+    # A DEFERRAL IS ITS OWN OUTCOME IN EVERY REASON IT CAN REACH (Q-FAB-18's review): an expert the
+    # failure cull judged failing and 'defer' kept is neither culled nor spared, and a close pair
+    # 'defer' left apart is neither merged nor "not close enough". Each clause is printed where the
+    # deferral is armed -- at 'defer' on this pass, and for the run-scope gate wherever the ledger
+    # holds fab.merge_faded_deferred -- and nowhere else, so an 'as_is' reason reads as it did.
+    # AT 'contrib' THE SAME CLAUSES SAY "refused" AND NAME THE RULE (2026-09-28, Q-FAB-19): a kept
+    # removal there is one no measured contribution at or below 0 allowed -- in a cull always an
+    # unmeasured expert, since a measured one above 0 was spared as load-bearing before its area was
+    # read -- and the removals the rule allowed are named beside them. The 'defer' clauses are
+    # unchanged, word for word.
     _fail_note = (f"failure cull against comp_glob={fail_base:.4f} + FAB_FAIL_TOL={fail_tol}: "
                   f"{cull_fail} culled, {spared_shift} spared as adapting, {spared_contrib} as "
                   f"load-bearing"
+                  + (f", {fail_deferred} refused at FAB_FADED_CULL='contrib' (never measured by "
+                     f"FAB.contribution)" if gated and read_contrib else
+                     f", {fail_deferred} refused at FAB_FADED_CULL='contrib' (FAB_CONTRIB=0: no "
+                     f"measurement is read)" if gated else
+                     f", {fail_deferred} deferred at FAB_FADED_CULL='defer'" if defer else "")
                   if fail_base is not None else
                   "no failure cull: comp_glob is None, so no window has been attributed yet")
+    _kept_note = (f", beside the {len(deferred)} expert(s) FAB_FADED_CULL='contrib' kept "
+                  f"({merge_deferred} merge(s), {fail_deferred} failure cull(s) and "
+                  f"{util_deferred} utilization cull(s) refused, no measured contribution at or "
+                  f"below 0), and {merge_allowed} merge(s) and {cull_allowed} cull(s) of a "
+                  f"faded-area expert it allowed on one" if gated else
+                  f", beside the {len(deferred)} expert(s) FAB_FADED_CULL='defer' kept "
+                  f"({merge_deferred} merge(s), {fail_deferred} failure cull(s) and "
+                  f"{util_deferred} utilization cull(s) deferred)" if defer else "")
     # THE MERGE'S RUN-SCOPE READING, off the ledger alone (2026-09-27, register
     # LOW-FAB-MERGED-REPORT); see the two Gates at the end of this tuple.
     _run_merged = int(counters.get("fab.merged", 0))
@@ -3921,6 +4827,25 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
     _passes = int(counters.get("fab.manage_passes", 0))
     _declined_run = int(counters.get("fab.merge_declined_grace", 0))
     _run_merge_reach = _run_merged > 0 or (merge_dist > 0.0 and _armed_passes > 0)
+    # THE LEDGER'S KEPT PAIRS ARE EITHER VALUE'S, AND A LINEAGE MAY HOLD BOTH (2026-09-28, Q-FAB-19):
+    # 'defer''s deferrals and 'contrib''s refusals, each named where its key is in the ledger.
+    _run_def = counters.get("fab.merge_faded_deferred")
+    _run_ref = counters.get("fab.merge_faded_refused_by_contrib")
+    _run_deferred = (None if _run_def is None and _run_ref is None
+                     else int(_run_def or 0) + int(_run_ref or 0))
+    _run_kept_words = ("deferred over the ledger at FAB_FADED_CULL='defer'" if _run_ref is None else
+                       "refused over the ledger at FAB_FADED_CULL='contrib'" if _run_def is None
+                       else f"kept over the ledger ({int(_run_def)} deferred at "
+                            f"FAB_FADED_CULL='defer' and {int(_run_ref)} refused at "
+                            f"FAB_FADED_CULL='contrib')")
+    _run_def_note = ("" if _run_deferred is None else
+                     f"; {_run_deferred} close pair(s) {_run_kept_words}")
+    _pass_def_note = (f"; {merge_deferred} close pair(s) refused at FAB_FADED_CULL='contrib' and "
+                      f"{merge_allowed} merged on a measured contribution at or below 0"
+                      if gated else
+                      f"; {merge_deferred} close pair(s) deferred at FAB_FADED_CULL='defer'"
+                      if defer else "")
+    _gate_n = n_live if view == real else len(view)
     _gates = tuple(g for g in pop.gates
                    if g.name not in ("fabric.cull_eligible", "fab.merged", "fab.merged_last_pass",
                                      "fab.cull_gate", "fab.depth_advance"))
@@ -3932,7 +4857,8 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
              reason=(f"{n_elig_entry} of the live expert(s) were past grace and rankable at the "
                      f"start of this pass; {merged} merged away, {cull_fail} removed by the "
                      f"failure cull and {cull_util} by the utilization cull, leaving "
-                     f"{n_elig - cull_util} eligible; {_fail_note}; {_reach}"
+                     f"{n_elig - cull_util - util_deferred} eligible{_kept_note}; {_fail_note}; "
+                     f"{_reach}"
                      if n_elig_entry else
                      f"unreachable ({_reach}): NO expert has been SELECTED grace times, so the "
                      f"eligible set is empty and every ranking, budget and spare on this pass is "
@@ -3945,8 +4871,11 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
         # `pressure` -- 2114 vs 0.6 beside 'armed, did not fire' -- a count against a ratio, so a
         # SHUT pass always read as a value far over its threshold. It now renders the ratio the
         # verdict compares, as build's prediction does, and the reason carries the floor.
+        # AT 'defer' THE PAIR IS 'as_is''s POPULATION, the one the verdict was taken on (Q-FAB-18's
+        # review): the population's own count would put the kept experts back into a ratio the gate
+        # never compared. Where the layouts are one -- always at 'as_is' -- it is n_live as it was.
         Gate("fab.cull_gate", gate_open,
-             f"{n_live}/{max(1, slots)}={n_live / max(1, slots):.3f}", pressure, reason=gate_str),
+             f"{_gate_n}/{max(1, slots)}={_gate_n / max(1, slots):.3f}", pressure, reason=gate_str),
         # ONE GATE PER SCOPE, AND EACH GATE'S NAME IS ITS COUNTER'S (2026-09-27, register
         # LOW-FAB-MERGED-REPORT). fabric/api.py::_three_state renders a build or manage gate's count
         # by looking ITS NAME up in the ledger, so a gate that shares a ledger counter's name prints
@@ -3961,17 +4890,27 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
              reason=(f"{merged} pair(s) consolidated on this pass within FAB_MERGE_DIST="
                      f"{merge_dist} cosine; residual p50/p99 "
                      f"{counters.get('fab.merge_residual_p50', 0.0):.4f}/"
-                     f"{counters.get('fab.merge_residual_p99', 0.0):.4f}"
+                     f"{counters.get('fab.merge_residual_p99', 0.0):.4f}{_pass_def_note}"
                      if merged else
                      f"FAB_MERGE_DIST={merge_dist} is 0: merging is off by configuration"
                      if merge_dist <= 0.0 else
+                     # A PASS WHOSE EVERY CLOSE PAIR WAS DEFERRED MERGED NOTHING, AND NOT FOR WANT OF
+                     # A PAIR (Q-FAB-18's review): the sentence below would say none sat within
+                     # FAB_MERGE_DIST.
+                     f"{n_elig_entry} expert(s) were past grace at entry and no pair merged on "
+                     f"this pass: {merge_deferred} close pair(s) with a past-grace absorbee were "
+                     + ("refused at FAB_FADED_CULL='contrib', its most-served area faded and no "
+                        "measured contribution at or below 0, and " if gated else
+                        "deferred at FAB_FADED_CULL='defer', its most-served area faded, and ")
+                     + f"{declined_grace} declined because the absorbed one was inside grace"
+                     if merge_deferred else
                      # ARMED AND DID NOT FIRE IS ITS OWN SENTENCE. With past-grace experts at entry
                      # the reason used to fall through to the 'unreachable' text below, so the
                      # report printed ('armed-but-zero', ..., 'unreachable ...') on one line.
                      f"{n_elig_entry} expert(s) were past grace at entry and no pair with a "
                      f"past-grace member sat within FAB_MERGE_DIST={merge_dist} cosine on this "
                      f"pass; {declined_grace} close pair(s) declined because the absorbed one was "
-                     f"inside grace"
+                     f"inside grace{_pass_def_note}"
                      if n_elig_entry else
                      f"unreachable ({_reach}): the absorbed expert must be past grace and no "
                      f"expert is. {declined_grace} pair(s) were close enough and declined for it")),
@@ -3987,15 +4926,22 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
                      f"{counters.get('fab.merge_residual_p50', 0.0):.4f}/"
                      f"{counters.get('fab.merge_residual_p99', 0.0):.4f} on the last pass that "
                      f"merged; {_declined_run} close pair(s) declined over the ledger because the "
-                     f"absorbed one was inside grace"
+                     f"absorbed one was inside grace{_run_def_note}"
                      if _run_merged else
                      f"FAB_MERGE_DIST={merge_dist} is 0: merging is off by configuration, and "
                      f"nothing merged earlier in the ledger"
                      if merge_dist <= 0.0 else
                      f"{_armed_passes} of the ledger's {_passes} manage pass(es) had a past-grace "
+                     f"expert at entry and none merged: {int(_run_deferred)} close pair(s) with a "
+                     f"past-grace absorbee were {_run_kept_words}, "
+                     f"its most-served area faded, and {_declined_run} declined because the "
+                     f"absorbed one was inside grace"
+                     if _run_merge_reach and _run_deferred else
+                     f"{_armed_passes} of the ledger's {_passes} manage pass(es) had a past-grace "
                      f"expert at entry and on none of them did a pair with a past-grace member sit "
                      f"within FAB_MERGE_DIST={merge_dist} cosine; {_declined_run} close pair(s) "
                      f"declined over the ledger because the absorbed one was inside grace"
+                     f"{_run_def_note}"
                      if _run_merge_reach else
                      f"unreachable: on none of the ledger's {_passes} manage pass(es) was an "
                      f"expert past grace at entry, and the absorbed expert must be (now: "
@@ -4007,7 +4953,11 @@ def manage(fab: Config, pop, *, step_windows, flush_loss=None):
         merge_declined_residual=declined_resid, cull_fail=cull_fail, cull_util=cull_util,
         spared_contrib=spared_contrib, spared_comp=spared_comp, spared_shift=spared_shift,
         rescued=rescued, deepened=deepened, eligible=n_elig_entry, cull_gate=gate_str,
-        manage_every=manage_every, manage_period_flushes=period)
+        manage_every=manage_every, manage_period_flushes=period,
+        culled_faded_area=culled_faded, merged_faded_area=merged_faded,
+        faded_unknown=faded_unknown, cull_faded_deferred=cull_deferred,
+        merge_faded_deferred=merge_deferred, cull_faded_allowed_by_contrib=cull_allowed,
+        merge_faded_allowed_by_contrib=merge_allowed)
 
 
 # ==================================================================================================
@@ -4027,8 +4977,9 @@ _FAST_EMA, _SLOW_EMA, _MAD_EMA = 0.02, 0.002, 0.01
 PORTED VERBATIM AND DELIBERATELY NOT LEVERS. self_organize.py:2997-2999 is
 `s.fast = 0.98*s.fast + 0.02*loss`, `s.slow = 0.998*s.slow + 0.002*loss` and
 `s.dev = 0.99*s.dev + 0.01*d`; the three constants are hardcoded there and the census minted no row
-for any of them. Three reasons they stay constants rather than becoming FABLevers rows 83, 84 and
-85, in the order they bind:
+for any of them. Three reasons they stay constants rather than becoming FABLevers rows 86, 87 and
+88 (this read "83, 84 and 85" until 2026-09-28, when the three census amendments FAB_FADED_CULL,
+FAB_CONTRIB and FAB_CONTRIB_MAX had taken those numbers), in the order they bind:
   1. `z` AND `plateau` ARE EXPRESSED IN THESE UNITS. z is "how many robust deviations above the
      slow EMA" and plateau is "relative improvement OF THE SLOW EMA", so moving a rate silently
      reprograms both triggers without either lever's value changing -- the L1 defect (a lever whose
@@ -4973,6 +5924,13 @@ _PASS_GATE_KEYS = {
 }
 
 
+# THE BUILD AND MANAGE GATES WHOSE COUNT IS A LEDGER KEY OF ANOTHER NAME. fab.depth_advance's since
+# 2026-09-24; fab.contrib's since 2026-09-28 (Q-FAB-19), which FAB.contribution replaces by name on
+# every pass and whose count is fab.contrib_passes, the passes that walked (a candidate to measure
+# and a finite baseline_loss).
+_BUILD_GATE_COUNTS = {"fab.depth_advance": "fab.deepened", "fab.contrib": "fab.contrib_passes"}
+
+
 def _three_state(gates, ledger, keys=None):
     """{name: (state, count, arithmetic)} for every DECLARED gate, in G4's three states.
 
@@ -5002,8 +5960,9 @@ def _three_state(gates, ledger, keys=None):
     for g in (gates or ()):
         if keys is None:
             # fab.depth_advance's fires are fab.deepened: without the alias a curriculum that had
-            # advanced twice rendered ('fired', 0, ...) beside fab.deepened 2.
-            _k = "fab.deepened" if g.name == "fab.depth_advance" else g.name
+            # advanced twice rendered ('fired', 0, ...) beside fab.deepened 2. fab.contrib's count is
+            # fab.contrib_passes, the passes that walked (2026-09-28, Q-FAB-19), for the same reason.
+            _k = _BUILD_GATE_COUNTS.get(g.name, g.name)
             n = int(ledger.get(_k, ledger.get(g.name + ".count", 0)) or 0)
         elif g.name in keys:
             n = int(ledger.get(keys[g.name], 0) or 0)
@@ -5180,7 +6139,10 @@ def state_dict(fab: Config, pop):
     statement about THIS PROCESS's clock and would only ever produce a false refusal if a
     resume restored it -- and `pass_gates`, the last training pass's gate arithmetic, which the
     resumed run's first pass rewrites. `row_events` IS saved (since 2026-09-24): the moves, clears
-    and births no training pass has handed to OPT yet, which a save on a non-flush window holds.
+    and births no training pass has handed to OPT yet, which a save on a non-flush window holds. So
+    is `contrib_cursor` (since 2026-09-28, Q-FAB-19), where FAB.contribution's next pass starts its
+    rotation, beside the `contrib_n` book it counts measurements in: a continuing resume measures the
+    experts the uninterrupted run would have.
 
     LEVERS READ: none
     WIRES READ: none
@@ -5219,7 +6181,19 @@ def state_dict(fab: Config, pop):
             "ef": list(pop.ef), "es": list(pop.es), "comp": list(pop.comp),
             "contrib": list(pop.contrib), "parent": list(pop.parent),
             "mutscale": list(pop.mutscale),
+            # THE AREA BOOK (2026-09-28, Q-FAB-18), one list of [area id, mass] pairs per slot in
+            # ascending id, for dom_of's reason: inspectable without unpickling, and in an order
+            # that does not depend on which area reached an expert first. It is earned history
+            # like `use`, so a resume that dropped it would file every later removal as unknown.
+            "area_use": [[[int(k), float(d[k])] for k in sorted(d)] for d in pop.area_use],
+            # HOW MANY TIMES EACH EXPERT WAS MEASURED (2026-09-28, Q-FAB-19), beside the `contrib`
+            # it qualifies: without it a resumed 0.0 is "unmeasured" and "measured at 0" at once,
+            # and FAB_FADED_CULL='contrib' removes on only one of the two.
+            "contrib_n": list(pop.contrib_n),
         },
+        # WHERE THE NEXT CONTRIBUTION PASS STARTS (2026-09-28, Q-FAB-19), so a continuing resume
+        # measures the experts the uninterrupted run would have measured.
+        "contrib_cursor": int(pop.contrib_cursor),
         # THE GROWTH MACHINE AND THE POPULATION COMPETENCE EMA, SAVED AND NOT RE-EARNED. Both are
         # EARNED STATE in the sense capacity/api.py::new_valve gives the phrase for its lifted cap:
         # they are what the run has learned about its own loss, and rebuilding them on a resume
@@ -5280,10 +6254,13 @@ def load_state_dict(fab: Config, pop, sd, *, sidecar):
     LEVERS READ: slots, n0, rank, dk, emb_hid (compared against the sidecar); pressure,
                  manage_every, depth0, hops, depth_patience, depth_stage_max (to re-render the two
                  build-time prediction gates from the restored population); norm_only (the arm on
-                 which no pass runs and nothing is re-rendered)
+                 which no pass runs and nothing is re-rendered); contrib (the third prediction,
+                 fab.contrib, re-rendered where it is armed, 2026-09-28, and at FAB_CONTRIB=0 over a
+                 lineage that armed it, Q-FAB-19's review)
     WIRES READ: none
     DID IT FIRE: fab.resume_widened, fab.resume_refused; gates fab.cull_gate and
-                 fab.depth_advance re-rendered as RESTORED predictions
+                 fab.depth_advance re-rendered as RESTORED predictions, and fab.contrib at
+                 FAB_CONTRIB=1 -- and at 0 where the restored books or ledger carry a measurement
     """
     fab = fab.owned_by("FAB")
 
@@ -5341,13 +6318,24 @@ def load_state_dict(fab: Config, pop, sd, *, sidecar):
         pop.modules.load_state_dict(sd["modules"])
 
     books = sd.get("books") or {}
-    for name in ("born", "use", "uage", "ef", "es", "comp", "contrib", "parent", "mutscale"):
+    # `contrib_n` (2026-09-28, Q-FAB-19) is absent from a checkpoint written before contribution had
+    # a body, and every expert then keeps build's 0 -- unmeasured, which is what such a parent's
+    # experts were: nothing ever wrote their `contrib`.
+    for name in ("born", "use", "uage", "ef", "es", "comp", "contrib", "parent", "mutscale",
+                 "contrib_n"):
         if books.get(name) is not None:
             cur = getattr(pop, name)
             cur[:len(books[name])] = list(books[name])
     if books.get("dom_of") is not None:
         for i, ids in enumerate(books["dom_of"]):
             pop.dom_of[i] = set(ids)
+    # A CHECKPOINT WRITTEN BEFORE THE AREA BOOK EXISTED CARRIES NONE (2026-09-28, Q-FAB-18), and its
+    # experts keep the empty books `build` gave them: "no area was ever booked", which FAB.manage
+    # counts as fab.faded_unknown until windows fill them. Nothing that trains reads the book, so
+    # such a resume continues exactly.
+    if books.get("area_use") is not None:
+        for i, pairs in enumerate(books["area_use"]):
+            pop.area_use[i] = {int(k): float(v) for k, v in pairs}
     for field in ("n_live", "depth_now", "births", "rescued"):
         if sd.get(field) is not None:
             setattr(pop, field, int(sd[field]))
@@ -5360,6 +6348,8 @@ def load_state_dict(fab: Config, pop, sd, *, sidecar):
         pop.growth["births"] = [tuple(b) for b in (pop.growth.get("births") or ())]
     if "comp_glob" in sd:
         pop.comp_glob = sd["comp_glob"]
+    if sd.get("contrib_cursor") is not None:
+        pop.contrib_cursor = int(sd["contrib_cursor"])
     if "halt_ema" in sd:
         pop.halt_ema = sd["halt_ema"]
     if "learn_window" in sd:
@@ -5384,7 +6374,8 @@ def load_state_dict(fab: Config, pop, sd, *, sidecar):
 
 
 def _refresh_build_predictions(fab, pop):
-    """Re-render the two build-time PREDICTION gates from the RESTORED population (2026-09-24).
+    """Re-render the build-time PREDICTION gates from the RESTORED population (2026-09-24; the
+    third, fab.contrib, since 2026-09-28).
 
     build() predicts fab.cull_gate and fab.depth_advance from the founding population, and the first
     manage pass replaces both by name. A resume builds, THEN restores, so until this process's first
@@ -5394,6 +6385,10 @@ def _refresh_build_predictions(fab, pop):
     deepen past 1"). Only an ON population carries these predictions; the FAB_ON=0 lines stand,
     and so do the FAB_NORM_ONLY=1 lines (2026-09-27): no manage pass runs on that arm, so there is
     no first pass to predict and build's UNREACHABLE reading is still the true one.
+    fab.contrib IS RE-RENDERED AT BOTH VALUES (Q-FAB-19's review): at FAB_CONTRIB=1 as a prediction
+    over what the lineage measured, and at 0 wherever the restored books or ledger carry a
+    measurement, which that value reads nowhere -- build's line at 0 cannot know the lineage
+    measured. A lineage that never armed it keeps build's line.
     """
     if not pop.on or bool(fab.norm_only):
         return
@@ -5409,8 +6404,41 @@ def _refresh_build_predictions(fab, pop):
     depth = _depth_gate(pop, depth0=int(fab.depth0), hops=int(fab.hops),
                         patience=int(fab.depth_patience), stage_max=int(fab.depth_stage_max),
                         manage_every=int(fab.manage_every), restored=True)
-    pop.gates = tuple({"fab.cull_gate": cull, "fab.depth_advance": depth}.get(g.name, g)
-                      for g in pop.gates)
+    swap = {"fab.cull_gate": cull, "fab.depth_advance": depth}
+    # AND CONTRIBUTION'S, WHERE IT IS ARMED (2026-09-28, Q-FAB-19): the restored population may carry
+    # contributions the lineage measured, which build's line cannot know of.
+    _had = sum(1 for i in range(n) if int(pop.contrib_n[i]) > 0)
+    if bool(fab.contrib):
+        swap["fab.contrib"] = Gate(
+            "fab.contrib", False, value=f"FAB_CONTRIB={bool(fab.contrib)}",
+            threshold="FAB_CONTRIB=True", reachable=False,
+            reason=(f"RESTORED from the checkpoint, and no fab.manage pass has run in this process "
+                    f"yet (FAB_MANAGE_EVERY={int(fab.manage_every)} window(s)), so nothing has been "
+                    f"measured here; {_had} of the {n} restored live expert(s) carry a contribution "
+                    f"the lineage measured. The first pass replaces this line with what it "
+                    f"measured."))
+    else:
+        # AND WHERE IT IS NOT, OVER A LINEAGE THAT ARMED IT (Q-FAB-19's review): the books and the
+        # ledger cross a resume, so a child resumed at FAB_CONTRIB=0 from a measuring parent holds
+        # the parent's measurements -- read by nothing, FAB.manage reading a contribution at 1 only
+        # -- and its ledger the parent's fab.contrib_* counts. Build's line was written before the
+        # restore and cannot name either; a lineage that never armed it has neither and keeps it.
+        _walked = pop.counters.get("fab.contrib_passes")
+        if _had or _walked is not None:
+            _ledger = (f"the ledger's fab.contrib_* counts are its -- {int(_walked)} pass(es) "
+                       f"walked before this process"
+                       + (", the gauges its last pass's" if "fab.contrib_coverage" in pop.counters
+                          else "")
+                       if _walked is not None else "the ledger carries no fab.contrib_* count")
+            swap["fab.contrib"] = Gate(
+                "fab.contrib", False, value=f"FAB_CONTRIB={bool(fab.contrib)}",
+                threshold="FAB_CONTRIB=True", reachable=False,
+                reason=(f"FAB_CONTRIB=0: FAB.contribution is not called and FAB.manage reads no "
+                        f"contribution, so this process measures none and the contrib > 0 spare "
+                        f"in both culls is inert. RESTORED from a lineage that armed it: {_had} of "
+                        f"the {n} restored live expert(s) carry a contribution it measured, which "
+                        f"the books carry on unread, and {_ledger}."))
+    pop.gates = tuple(swap.get(g.name, g) for g in pop.gates)
 
 
 def manage_period(fab: Config):
@@ -5418,7 +6446,7 @@ def manage_period(fab: Config):
 
     WHY THIS EXISTS RATHER THAN THE ROOT PASSING cfg.manage_every. Cadences.due states that its
     period "MUST be units.Windows. An int raises; a Flushes raises." -- and Config hands back a bare
-    int for all 35 levers that declare a Clock unit (ISSUES P1-H51), so the row that read
+    int for all 38 levers that declare a Clock unit (ISSUES P1-H51), so the row that read
     `Cadences.due('fab.manage', FAB.manage_every, clock)` was passing an int into a function whose
     contract refuses one. EVAL and CKPT already had typed accessors (curve_period, save_period);
     FAB, DOM and MEM did not, and their three rows were the only ones that would have raised.

@@ -620,23 +620,37 @@ def _touch(part, i, q):
     part.cent[i] = _normalise(CENT_KEEP * part.cent[i] + (1.0 - CENT_KEEP) * q)
 
 
-def _assign(part, q, at, *, accept_rule, spawn_dist, margin, slots):
-    """Re-enter the nearest domain, absorb into it at cap, or mint a new one.
+def _decide(part, q, *, accept_rule, spawn_dist, margin, slots):
+    """What _assign would do with `q`, and nothing done: -> (kind, did, bumps).
 
-    -> (did, spawned, reentered). THREE EXCLUSIVE ARMS (self_organize.py:3504-3558), and the
-    exclusivity is the repair: the old branch order let radius act as a SECOND acceptance test
-    inside the relative branch (`if d1 <= DOM_MARGIN * d2 or (_r is not None and d1 <= _r)`,
-    self_organize.py:3542), so DOM_RELATIVE=1 with DOM_RADIUS=1 was a fourth configuration nobody
-    named. Here `margin` means margin alone, which domains/api.py::observe calls a real behavioural
-    change to that arm and not a relabelling.
+    kind is "reenter" (the nearest accepted it; _assign drags its centroid), "cap" (absorbed into
+    the nearest at d_expert_slots, centroid untouched) or "new" (a spawn; did is None). `bumps` is
+    every counter _assign moves for this decision, in the order it moves them, and n_created is not
+    among them because _new bumps it.
+
+    SPLIT OUT OF _assign ON 2026-09-27 (Q-DOM-6) SO THAT A READING CAN ASK THE QUESTION WITHOUT
+    PAYING FOR THE ANSWER. DOM.nearest is the second caller: the held-out probe
+    (spine/compose.py::_logits_fn) asks which domain a window WOULD be routed to, and every write
+    _assign makes -- the drag, the counters, a newborn's books -- would be a reading moving the
+    partition it reads. ONE DECISION, TWO APPLIERS, so the probe's answer and the training path's
+    cannot drift apart: a second copy of the three arms below is exactly the shape DOM_RELATIVE=1
+    with DOM_RADIUS=1 took before the enumeration named it.
+
+    THE THREE EXCLUSIVE ARMS (self_organize.py:3504-3558), and the exclusivity is the repair: the
+    old branch order let radius act as a SECOND acceptance test inside the relative branch
+    (`if d1 <= DOM_MARGIN * d2 or (_r is not None and d1 <= _r)`, self_organize.py:3542), so
+    DOM_RELATIVE=1 with DOM_RADIUS=1 was a fourth configuration nobody named. Here `margin` means
+    margin alone, which domains/api.py::observe calls a real behavioural change to that arm and not
+    a relabelling.
     """
     if not part.cent:
-        return _new(part, q, at), True, False
+        return "new", None, ()
 
     ids = part._live()
     sims = torch.stack([part.cent[i] for i in ids]) @ q
     j = int(sims.argmax())
     d1 = 1.0 - float(sims[j])
+    bumps = []
 
     if accept_rule == "radius":
         # THREE THRESHOLDS ON ONE ARM, AND TWO COUNTERS, BECAUSE THERE ARE THREE STATES. A measured
@@ -655,15 +669,13 @@ def _assign(part, q, at, *, accept_rule, spawn_dist, margin, slots):
         if r <= 0.0:
             r = float(part.radp)
             if r > 0.0:
-                _bump(part, "part.n_bootstrap_radius")
+                bumps.append("part.n_bootstrap_radius")
         if r <= 0.0:
             r = spawn_dist
-            _bump(part, "part.n_bootstrap_spawn_dist")
+            bumps.append("part.n_bootstrap_spawn_dist")
         if d1 <= r:
-            _touch(part, ids[j], q)
-            _bump(part, "part.n_reentered")
-            _bump(part, "part.n_reentered_by_radius")
-            return ids[j], False, True
+            bumps += ["part.n_reentered", "part.n_reentered_by_radius"]
+            return "reenter", ids[j], tuple(bumps)
     elif accept_rule == "margin":
         if len(ids) < 2:
             # NO RUNNER-UP, SO NO ANSWER, SO A SPAWN. Under the enumeration the arms are exclusive,
@@ -672,32 +684,105 @@ def _assign(part, q, at, *, accept_rule, spawn_dist, margin, slots):
             # the nearest is decisively nearer than the second has nothing to compare against when
             # there is no second. Counted, because it is the whole behaviour of this arm on a
             # one-domain population and reads as "margin never fires" otherwise.
-            _bump(part, "part.n_margin_no_runner_up")
+            bumps.append("part.n_margin_no_runner_up")
         else:
             top2 = torch.topk(sims, 2)
             j = int(top2.indices[0])
             d1 = 1.0 - float(top2.values[0])
             d2 = 1.0 - float(top2.values[1])
             if d1 <= margin * d2:
-                _touch(part, ids[j], q)
-                _bump(part, "part.n_reentered")
-                _bump(part, "part.n_reentered_by_margin")
-                return ids[j], False, True
+                bumps += ["part.n_reentered", "part.n_reentered_by_margin"]
+                return "reenter", ids[j], tuple(bumps)
     elif d1 < spawn_dist:
-        _touch(part, ids[j], q)
-        _bump(part, "part.n_reentered")
-        return ids[j], False, True
+        bumps.append("part.n_reentered")
+        return "reenter", ids[j], tuple(bumps)
 
     if len(part.cent) >= slots:
         # AT CAP: ABSORBED INTO THE NEAREST, WITHOUT DRAGGING ITS CENTROID
         # (self_organize.py:3556-3557).
         # A forced far match must not pollute the cluster it lands in -- the id namespace is full, so
         # this window has to go somewhere, but _touch here would move a centroid toward material the
-        # rule has already declared too far to belong to it. THIS IS THE ONE READ SITE OF
-        # d_expert_slots in the package.
-        _bump(part, "part.n_capped")
-        return ids[j], False, True
-    return _new(part, q, at), True, False
+        # rule has already declared too far to belong to it. `slots` IS d_expert_slots, READ BY
+        # observe AND nearest AND HANDED IN: this is its one use in the package.
+        bumps.append("part.n_capped")
+        return "cap", ids[j], tuple(bumps)
+    return "new", None, tuple(bumps)
+
+
+def _assign(part, q, at, *, accept_rule, spawn_dist, margin, slots):
+    """Re-enter the nearest domain, absorb into it at cap, or mint a new one.
+
+    -> (did, spawned, reentered). THE DECISION IS _decide'S and this body only applies it: the drag
+    toward `q` on a re-entry, then the decision's counters in the order it listed them, then a
+    newborn's books on a spawn. Until 2026-09-27 the three arms were written here; they moved whole,
+    with their comments, so that DOM.nearest could ask the same question without the writes
+    (Q-DOM-6). The drag now runs before the bootstrap counters on the radius arm rather than after;
+    the two touch disjoint state, so no number differs.
+    """
+    kind, i, bumps = _decide(part, q, accept_rule=accept_rule, spawn_dist=spawn_dist,
+                             margin=margin, slots=slots)
+    if kind == "reenter":
+        _touch(part, i, q)
+    for name in bumps:
+        _bump(part, name)
+    if kind == "new":
+        return _new(part, q, at), True, False
+    return i, False, True
+
+
+def nearest(dom: Config, part, *, signature):
+    """The domain id this window's signature WOULD be routed to, with nothing written.
+
+    -> int. The id _assign would re-enter; the nearest at d_expert_slots, where _assign absorbs;
+    -1 where _assign would mint a new domain, the empty partition included, because there is no id
+    to name until the mint happens and inventing one would hand FAB a domain nothing owns; and 0 at
+    DOM_ENABLED=0, which is the id observe returns for every window on that arm.
+
+    WHY IT EXISTS (Q-DOM-6, 2026-09-27). The held-out probe (spine/compose.py::_logits_fn) routes a
+    window it did not train on, and routing needs a domain. observe cannot give it one: observe
+    ADVANCES the boundary clock, drags a centroid, feeds the reservoir and counts the visit, so a
+    reading through it would move the partition it reads, and the probe's G7 rule (a reading may not
+    move what it measures) forbids exactly that. The decision is _decide's -- the one _assign
+    applies -- so the answer here and the training path's cannot drift apart.
+
+    THE BOUNDARY TEST IS NOT RUN. A probe window is not the next window of the stream, so "is this a
+    boundary" has no meaning for it; nearest answers the question observe asks AT a boundary, on this
+    one signature, with no pending average.
+
+    IT WRITES, BUMPS AND DRAWS NOTHING: not part.counters, not a centroid, not part.rng. The caller
+    books the -1 answers (eval.holdout.domain_spawn), because a count here would be a reading moving
+    this package's ledger.
+
+    LEVERS READ: enabled, accept_rule, spawn_dist, margin
+    WIRES READ: d_expert_slots
+    DID IT FIRE: none; it writes nothing, and the caller counts its -1 answers.
+    """
+    dom = dom.owned_by("DOM")
+    if not bool(dom.enabled):
+        return 0
+    slots = int(dom.d_expert_slots)
+    accept_rule, spawn_dist = str(dom.accept_rule), float(dom.spawn_dist)
+    margin = float(dom.margin)
+    if accept_rule not in ("radius", "margin", "constant"):
+        raise LeverError(
+            f"DOM_ACCEPT_RULE={accept_rule!r} is not a re-entry rule this package implements; the "
+            f"three legal values are 'radius', 'margin' and 'constant' (DOM.observe names each). "
+            f"nearest applies _decide, the one decision observe applies, and refuses rather than "
+            f"answer under an arm nobody named.")
+    sig = signature if torch.is_tensor(signature) else \
+        torch.as_tensor(signature, dtype=torch.float32)
+    _got = tuple(int(n) for n in sig.shape)
+    if sig.dim() == 2 and int(sig.shape[0]) == 1:
+        sig = sig[0]
+    if sig.dim() != 1 or int(sig.shape[0]) != int(part.sig_dim):
+        raise ValueError(
+            f"DOM.nearest was handed a signature of shape {_got} against a partition built at "
+            f"sig_dim={int(part.sig_dim)}. ONE WINDOW PER CALL, as DOM.observe: the accepted shapes "
+            f"are ({int(part.sig_dim)},) and (1, {int(part.sig_dim)}).")
+    q = _normalise(sig.detach().to(torch.float32))
+    kind, i, _bumps = _decide(part, q, accept_rule=accept_rule, spawn_dist=spawn_dist,
+                              margin=margin, slots=slots)
+    return -1 if kind == "new" else int(i)
 
 
 def observe(dom: Config, part, *, signature, sample_window, tokens, now):
@@ -2115,7 +2200,7 @@ def manage_period(dom: Config):
 
     WHY THIS EXISTS RATHER THAN THE ROOT PASSING cfg.manage_every. Cadences.due states that its
     period "MUST be units.Windows. An int raises; a Flushes raises." -- and Config hands back a bare
-    int for all 35 levers that declare a Clock unit (ISSUES P1-H51), so the row that read
+    int for all 38 levers that declare a Clock unit (ISSUES P1-H51), so the row that read
     `Cadences.due('dom.manage', DOM.manage_every, clock)` was passing an int into a function whose
     contract refuses one. EVAL and CKPT already had typed accessors (curve_period, save_period);
     FAB, DOM and MEM did not, and their three rows were the only ones that would have raised.

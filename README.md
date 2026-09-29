@@ -328,8 +328,10 @@ src/                 the new tree
                      sig tok train world), each levers.py (declarations) + api.py (the surface)
 tests/               the suite of record, one file per topic: python3 tests/test_<topic>.py, exit 0 = pass
 tools/               gpu_launch.sh (check the box, then launch a fleet), fleet_dash.sh (watch it),
-                     read_fleet_archive.sh (a fleet archive's extra reads); render_wiring.py,
-                     render_defaults.py, sync_counts.py (write, or --check, the generated documents)
+                     read_fleet_archive.sh (a fleet archive's extra reads); designate_parent.py (ask
+                     whether a checkpoint may be B's long-lived parent: refused by name, O17);
+                     render_wiring.py, render_defaults.py, sync_counts.py (write, or --check, the
+                     generated documents)
 docs/                04_CONTRACT (the frozen surface and the FOR THE OWNER questions), 05_DEFAULTS and
                      03_WIRING (generated), 02_OPERATIONS (the machines and the working agreement, to
                      2026-08-29), proposals/ (01-04 designs; 05_DECISIONS, the register and test plan),

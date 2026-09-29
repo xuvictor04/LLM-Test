@@ -2483,7 +2483,7 @@ def check_o11_no_unnamed_clock_arithmetic(mods):
         here -- which is what the opt defect actually looked like, so this check would have caught it
         only through the `d_effective_batch_windows` operand. Both operands are examined for that
         reason.
-      * the reason the whole class is possible: Config hands back a bare int for all 35 levers that
+      * the reason the whole class is possible: Config hands back a bare int for all 38 levers that
         declare a Clock unit (ISSUES P1-H51), so the kind is metadata at the read site. Enforced between
         packages, advisory within one. This check is the within-one half, done by AST because the
         type system cannot do it.

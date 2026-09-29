@@ -72,7 +72,8 @@ RECORD TYPES RETURNED (P4 defines them):
                rev_base, frozen at load_state and checkpointed, so a session's pricing never
                re-reads the OPT_LR_CONTINUE levers once it has begun; and horizon_declined
                (2026-09-27, C01) -- the revisions OPT_HORIZON_REVISE=False declined, checkpointed
-               apart from the log and applied only to a continued run's;
+               apart from the log and applied only to a continued run's; reading_at (2026-09-27,
+               Q-OPT-13) -- the `at` of the last held-out Reading counted, checkpointed;
   Horizon      run_steps, warmup, wavelength, n_cycles
   StepOutcome  stepped, lr, restart, damped
   LoadReport   restored, refused, reason
@@ -245,6 +246,13 @@ class OptState:
     # session's closed form is FROZEN there and a same-length resume continues it exactly without
     # re-reading a lever. _schedule prices every step past `anchor` through it.
     continuation: dict = None
+    # THE `at` OF THE LAST READING COUNTED (2026-09-27, OPT_DAMP_SOURCE, Q-OPT-13), or None. The
+    # root hands the SAME Reading over on every flush until the probe reads again, so a Reading
+    # whose `at` equals this is that measurement re-delivered and opt.restart.readings does not
+    # count it twice -- the opt.shift.notifications rule, one runtime argument over. Checkpointed,
+    # so a resumed process does not count a restored Reading again; a blob without it restores
+    # None.
+    reading_at: object = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1809,7 +1817,8 @@ def maybe_step(opt: Config, st, *, best_bpb=None, shift_at=None):
          opt.grad_clip DEFAULTS TO 0.0 = OFF, so nothing in any recorded result moves; see Q-OPT-3
          in docs/04_CONTRACT.md for what measurement settles the default.
 
-    RECEIVES: best_bpb <- EVAL, a Reading carrying (value, seed_count) or None; shift_at <- the
+    RECEIVES: best_bpb <- EVAL, a Reading carrying (value, seed_count, at) or None -- the root's
+    System.probe_reading since 2026-09-27 (Q-OPT-13); shift_at <- the
     composition root, the optimizer step of the last self-inflicted shift (epoch resample, retok,
     added area). Both are runtime arguments; the old code read `_shift_at` as a CLOSURE VARIABLE
     written by DATA's resample branch (:6518-6521), which is the L2 violation this replaces. Until
@@ -1828,8 +1837,9 @@ def maybe_step(opt: Config, st, *, best_bpb=None, shift_at=None):
     multi-cycle horizon, a structural fact about a horizon the rate no longer follows -- read it
     that way on a continued run, not as restarts that happened.
 
-    LEVERS READ: accum, lr, lr_restart_damp, lr_restarts, lr_sched, grad_clip (plus everything the
-                 schedule reads, through the shared unpack in _priced)
+    LEVERS READ: accum, lr, lr_restart_damp, lr_restarts, lr_sched, grad_clip, damp_source (the
+                 Reading's gate, 2026-09-27) (plus everything the schedule reads, through the
+                 shared unpack in _priced)
     WIRES READ: none
     DID IT FIRE: opt.step (BASE optimizer steps -- the encoder's are sig.train_stepped and live in
                  SIG), opt.step.not_due, opt.step.refused_nonfinite (a due step refused because its
@@ -1859,11 +1869,17 @@ def maybe_step(opt: Config, st, *, best_bpb=None, shift_at=None):
                  damping, not a refusal, and formerly counted as the second),
                  opt.restart.readings (ADDED BY P4, 2026-09-03: the mirror of
                  opt.shift.notifications on the other runtime argument. compose.py's LOOP_ORDER row
-                 states that best_bpb HAS NO PRODUCER, so opt.restart.damped and
-                 opt.restart.damp_refused_n1 are "UNREACHABLE, not zero" -- and with only those two
+                 then stated that best_bpb HAD NO PRODUCER, so opt.restart.damped and
+                 opt.restart.damp_refused_n1 were "UNREACHABLE, not zero" -- and with only those two
                  counters nothing at RUNTIME can tell a run where no Reading ever arrived from a
                  run where every Reading said the cycle paid. This is the count that makes that
-                 declared UNREACHABLE checkable instead of asserted),
+                 declared UNREACHABLE checkable instead of asserted. SINCE 2026-09-27 (Q-OPT-13)
+                 THE PRODUCER EXISTS: the row hands System.probe_reading, the retention probe's
+                 last forwarded control mean, re-delivered on every flush until the next reading,
+                 and this counts ONE PER DISTINCT `at` -- one per measurement, not per delivery;
+                 a Reading with no `at` counts on every arrival. At the shipped
+                 OPT_DAMP_SOURCE='off' the Reading is dropped before it is read and this stays 0.
+                 This entry still said "HAS NO PRODUCER" until Q-EVAL-12's review),
                  opt.lr.writes.base and opt.lr.writes.encoder (each must equal opt.step -- the
                  rate is written to both optimizers on every step; the old single counter said
                  "must equal opt.step, on BOTH optimizers" and could not distinguish a missing
@@ -1889,6 +1905,15 @@ def maybe_step(opt: Config, st, *, best_bpb=None, shift_at=None):
     opt = opt.owned_by("OPT")
     schedule_live = str(opt.lr_sched) != "none"
 
+    # OPT_DAMP_SOURCE (2026-09-27, Q-OPT-13): AT 'off' THE READING IS DROPPED BEFORE _reading READS
+    # IT, so nothing below sees one -- not the arrival count, not the damping, not cycle_best -- and
+    # the damping gate's reason names the lever. The root hands System.probe_reading over whenever
+    # the probe runs, and the probe feeding CKPT and EVAL must not become a training decision by
+    # being switched on. 'probe' lets it through; `choices=` refuses anything else at startup.
+    damp_source = str(opt.damp_source)
+    if damp_source == "off":
+        best_bpb = None
+
     # THE READING IS COUNTED ON ARRIVAL, WHICH IS WHAT MAKES IT THE MIRROR ITS OWN DID IT FIRE LINE
     # CLAIMS. opt.restart.readings used to be incremented inside `if restart:`, so it counted
     # Readings CONSUMED and read 0 on every run where no restart had yet fired no matter how many
@@ -1903,7 +1928,17 @@ def maybe_step(opt: Config, st, *, best_bpb=None, shift_at=None):
     # on EVERY call rather than only on restart steps, which is the direction that refusal wants.
     value, seeds = _reading(best_bpb)
     if value is not None:
-        st.counters["opt.restart.readings"] += 1
+        # ONE COUNT PER MEASUREMENT, NOT PER DELIVERY (2026-09-27, Q-OPT-13). A Reading that carries
+        # an `at` equal to the last one counted is the same measurement re-delivered -- the root
+        # hands System.probe_reading over on every flush until the probe reads again -- and counting
+        # each call would make opt.restart.readings a count of flushes, the defect the shift stamp
+        # below was repaired of on 2026-09-24. A Reading with no `at` (a (value, seed_count) pair)
+        # is counted on every arrival, as before.
+        _at = getattr(best_bpb, "at", None)
+        if _at is None or st.reading_at is None or int(_at) != int(st.reading_at):
+            st.counters["opt.restart.readings"] += 1
+        if _at is not None:
+            st.reading_at = int(_at)
 
     # THE SHIFT IS STAMPED WHETHER OR NOT A STEP IS DUE. A self-inflicted shift lands on a WINDOW,
     # and the flush that notices it may not be a due one; recording it only on due flushes would
@@ -2396,7 +2431,8 @@ def counters(opt: Config, st):
     LEVERS READ: accum, batch_windows, lr_sched, lr_restarts, lr_decay, lr_shift_warm,
                  weight_decay, lr_restart_damp, grad_clip, lr_wavelength, lr_min_frac,
                  horizon_revise (Gate opt.horizon.revise), lr_continue (the asked regime, printed
-                 beside the one in force on a resume), lr (the first resumed step's fraction of peak)
+                 beside the one in force on a resume), lr (the first resumed step's fraction of peak),
+                 damp_source (Gate opt.lr.restart_damp's source arm, 2026-09-27)
     WIRES READ: d_effective_batch_windows
     DID IT FIRE: this call IS the DID IT FIRE surface for the package
     """
@@ -2482,6 +2518,7 @@ def counters(opt: Config, st):
     n_cycles = int(st.horizon.n_cycles)
     decay = float(opt.lr_decay)
     damp = float(opt.lr_restart_damp)
+    damp_source = str(opt.damp_source)               # LEVER READ HERE -- the damping gate's arm
     shift_warm = int(opt.lr_shift_warm)
     wd = float(opt.weight_decay)
     clip = float(opt.grad_clip)
@@ -2828,6 +2865,19 @@ def counters(opt: Config, st):
                               f"seed-count refusal sits INSIDE the same branch, so "
                               f"opt.restart.damp_refused_n1 cannot move either -- its 0 is this "
                               f"lever's value, not a verdict on any Reading's seed count.")))
+    elif damp_source == "off":
+        # THE SOURCE SWITCH, AHEAD OF THE ARRIVAL COUNT (2026-09-27, Q-OPT-13). At 'off' maybe_step
+        # drops the Reading before _reading reads it, so readings == 0 below would be TRUE and would
+        # send a reader to EVAL for a Reading OPT itself declined. The lever is the cause and the
+        # reason names it.
+        gates.append(Gate("opt.lr.restart_damp", False, damp, "< 1.0 on a losing cycle",
+                          reachable=False,
+                          reason=_stale_note(
+                              st, "opt.restart.damped",
+                              f"OPT_DAMP_SOURCE='off': maybe_step drops the held-out Reading "
+                              f"before reading it, so no cycle is judged and "
+                              f"OPT_LR_RESTART_DAMP={damp} has nothing to act on. 'probe' hands it "
+                              f"the retention probe's control mean (EVAL_RETENTION_EVERY > 0).")))
     elif readings == 0:
         # THE SENTENCE IS TRUE NOW AND WAS NOT BEFORE. opt.restart.readings counted Readings
         # CONSUMED by a detected restart, so it read 0 on every run where no restart had yet fired
@@ -3184,7 +3234,8 @@ def state_dict(opt: Config, st):
     this run stepped at, and the continuation record (the regime a continued run was anchored
     under, or None -- Q-OPT-12; without it a same-length resume of a 'plateau' session would find
     no anchor, and re-anchoring there would restart the ramp from wherever the rate had got to),
-    and the revisions OPT_HORIZON_REVISE=False declined (2026-09-27, C01; load_state says why).
+    and the revisions OPT_HORIZON_REVISE=False declined (2026-09-27, C01; load_state says why), and
+    reading_at, the last held-out Reading's `at` (2026-09-27, Q-OPT-13).
 
     param_group_shape WAS MISSING FROM THIS ENUMERATION UNTIL 2026-09-02 (Q-OPT-4) AND load_state
     REFUSES ON IT. A refusal armed against a value nothing writes is untrippable: the L50 guard --
@@ -3262,6 +3313,9 @@ def state_dict(opt: Config, st):
         # cross the save so a crash-resume keeps declining against them and a continued child
         # prices as the logged parent this run would have been.
         "horizon_declined": [list(r) for r in st.horizon_declined],
+        # THE LAST HELD-OUT READING'S `at` (2026-09-27, Q-OPT-13), or None: a resumed process does
+        # not count the restored Reading a second time.
+        "reading_at": st.reading_at,
     }
 
 
@@ -3463,6 +3517,9 @@ def load_state(opt: Config, st, saved, *, continuing=False):
     # THE OFF ARM'S DECLINED REVISIONS (2026-09-27, C01). A checkpoint written before they were kept
     # carries none, and restores exactly as it did.
     st.horizon_declined = [tuple(int(v) for v in r) for r in saved.get("horizon_declined", ())]
+    # THE LAST READING'S `at` (2026-09-27, Q-OPT-13). A checkpoint written before it existed carries
+    # no key and restores None: the first Reading after the resume is then counted, as it should be.
+    st.reading_at = saved.get("reading_at")
 
     # THE COUNTERS COME BACK, EXCEPT THE ONES THAT DESCRIBE THIS PROCESS'S CONSTRUCTION. A mechanism
     # that fired 4,000 times before the boundary must not read "armed but 0" after it; but
