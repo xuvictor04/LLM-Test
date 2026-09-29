@@ -1226,7 +1226,7 @@ def check_a10_defaults_doc_current():
     """The generated defaults document on disk equals what tools/render_defaults.py produces today.
 
     THE SAME CHECK AS A9 OVER A DIFFERENT GENERATOR, AND IT IS HERE BECAUSE THE FAILURE IT GUARDS
-    HAS ALREADY HAPPENED ONCE IN THIS REPOSITORY, TO THE FILE IT REPLACES. notes/CURRENT_DEFAULTS.md
+    HAS ALREADY HAPPENED ONCE IN THIS REPOSITORY, TO THE FILE IT REPLACES. archive/notes/CURRENT_DEFAULTS.md
     opens "GENERATED FILE -- do not edit" and regenerates from `_SPEC` in self_organize.py, and its
     own header records why it exists: "the notes have been wrong about the defaults twice at real
     cost -- once telling the user a built mechanism did not exist, once stating FAB_N0=3 in nine

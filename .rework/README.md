@@ -16,17 +16,18 @@ as documentation. Part of it is live now: the tests read `census.json`, `ISSUES.
 | `survey/` | record | one JSON file per surveyed area, from 16 reader agents over rm-predict @ aee4a52: facts with file:line evidence, levers, bugs, junk, carry-forward, open questions. Agent output, not verified truth; `ISSUES.md` and `PLAN.md` were built from it |
 | `questions/` | record | the raw output of the p3-questions workflow on 38 contract questions (its own `README.md`); each question's heading in `docs/04_CONTRACT.md` now carries its ruling. It stays here and not in `archive/` because N7 reads its citations of `ISSUES.md` ids and does not read `archive/` |
 | `reviews.json` | record | three adversarial reviews: two of the P1 spine, one of the P2 census |
-| `COMMIT_RECORD.md` | record | the commit history of 2026-07-21 .. 2026-08-28, rebuilt from `notes/_evidence/commit_log.txt` (before 2026-08-15, where git history begins) and from git |
+| `COMMIT_RECORD.md` | record | the commit history of 2026-07-21 .. 2026-08-28, rebuilt from `archive/notes/_evidence/commit_log.txt` (before 2026-08-15, where git history begins) and from git |
 | `COMPACTION_SUMMARIES.md` | record | the four compaction summaries; D6 makes them the record of the lost 2026-08-15 .. 08-17 window |
 
 The survey areas: so-config, so-fabric, so-model, so-loop, so-report (the five regions of the
 9,859-line `self_organize.py`), subsys (memory/tokenizer/datastream/world_model), harness (`longrun.sh`
 and the shell scripts), tests, tools, notes-num, notes-research, archive, chat-a/b/c (the session's
-transcript, 8,072 entries) and chat-early (2026-07-21 .. 08-15, from `notes/_evidence/chat/`, whose raw
+transcript, 8,072 entries) and chat-early (2026-07-21 .. 08-15, from `archive/notes/_evidence/chat/`, whose raw
 transcript no longer exists). Totals: 1,149 facts, 558 lever records, 475 bug records, 196 junk,
 305 carry-forward, 174 questions. Each carries its own evidence pointer, and anything load-bearing is
 checked against the source before it is written into documentation. The files the survey read at the
-root are in `archive/old-tree/` since 2026-09-28.
+root are in `archive/old-tree/` since 2026-09-28, and those it read in `notes/` are in `archive/notes/`
+since 2026-09-29.
 
 Moved out on 2026-09-28: `QUESTIONS.md`, the owner questions Q1–Q7, ruled on 2026-08-28 as `DECISIONS.md`
 D1–D7, is `archive/rework/QUESTIONS.md`. Its closing environment block is still open, as

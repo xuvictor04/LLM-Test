@@ -1235,7 +1235,7 @@ def new_retention(ckpt: Config, *, restored=None):
         same reading save_period's guard gives a negative period.
     NEITHER REFUSAL CAN FIRE ON A CONFIGURATION THIS REPOSITORY SHIPS, checked rather than assumed
     on 2026-09-15: `grep -rn BEST_KEEP` over the tree finds longrun.sh:421 (BEST_KEEP=2),
-    longrun.sh:430 (BEST_KEEP=4), longrun.sh:519-521 and notes/CURRENT_DEFAULTS.md
+    longrun.sh:430 (BEST_KEEP=4), longrun.sh:519-521 and archive/notes/CURRENT_DEFAULTS.md
     (BEST_KEEP=0, BEST_KEEP_TOL=0.02) -- every one of them in range.
     """
     ckpt = ckpt.owned_by("CKPT")

@@ -334,17 +334,16 @@ docs/                04_CONTRACT (the frozen surface and the FOR THE OWNER quest
                      03_WIRING (generated), 02_OPERATIONS (the machines and the working agreement, to
                      2026-08-29), proposals/ (01-04 designs; 05_DECISIONS, the register and test plan),
                      REORGANISATION (this layout, and what moves after the Stage 3 merge)
-notes/               OWNER_BRIEF.md (the owner's page), AGENT_STATE.md (the agent's state after a reset);
-                     the rest is the 2026-08 notes corpus about the old tree (00_INDEX.md first) and
-                     CURRENT_DEFAULTS.md, the old tree's generated defaults
+notes/               OWNER_BRIEF.md (the owner's page), AGENT_STATE.md (the agent's state after a reset)
 data/                the tracked corpus, DATA_DIR's default: train/ (eng py num c), continual/, ood/
 results/             dated evidence, one folder per workflow or GPU fleet; README.md indexes them
 .rework/             the rework's ledgers (DECISIONS, CENSUS.md + census.json, ISSUES, PLAN), the oracle/
                      tests/test_derive.py replays, and the records they were built from; README.md
                      indexes them
 archive/             frozen records, never current; README.md says what each was and why it is kept:
-                     old-tree/ (the old system, at the root until 2026-09-28), rework/, garry/, legacy/,
-                     handoff/, docs/, agent-transcripts/, STATE.md, CL_TESTBED.md
+                     old-tree/ (the old system, at the root until 2026-09-28), notes/ (the 2026-08
+                     notes corpus and the old tree's defaults), rework/, garry/, legacy/, handoff/,
+                     docs/, agent-transcripts/, STATE.md, CL_TESTBED.md
 ```
 
 Run output is not tracked, and lands at the root of the checkout: a fleet's `gpu_<exp>_out/`, its

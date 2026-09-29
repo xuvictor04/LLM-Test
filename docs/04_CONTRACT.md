@@ -3917,7 +3917,7 @@ group~~ — **DONE**, `World.parameters()`, and the startup warning is gone; (2)
 or born random and allowed to disrupt — which costs nothing to answer while there is no caller and
 is expensive to answer after; (3) only then a call site, at which point `world.forecast_rms` beside
 `lm.encode.extra_applied` prices what it contributes. Until (2), this is **BUILT BUT NOT WIRED, ON
-PURPOSE**, and that is a third state beside `notes/07_WIP.md`'s three — worth naming, because the
+PURPOSE**, and that is a third state beside `archive/notes/07_WIP.md`'s three — worth naming, because the
 other two ways to leave it (no body, or a body and a call site) are both worse than this one.
 
 **THE RULING, 2026-09-24.** Step (2) is settled as **born-an-identity** and step (3) is done:

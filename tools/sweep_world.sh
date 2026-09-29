@@ -49,7 +49,7 @@
 # columns. The headline is the mean of the last TAIL progress lines rather than loss_last, because
 # loss_last is ONE flush -- measured on this tree, adjacent
 # progress lines swing by more than 0.5 while the arm-to-arm gap is around 0.05, so a single-flush
-# comparison reads noise. Seeds are the only defence and three is not many: notes/07_WIP.md records
+# comparison reads noise. Seeds are the only defence and three is not many: archive/notes/07_WIP.md records
 # a measured seed spread of 1.227 b/B on one arm, LARGER than the gap between any two architectures
 # ever compared in this project. TREAT A SEPARATION SMALLER THAN THE SEED SPREAD AS NOTHING.
 #
@@ -218,7 +218,7 @@ print()
 print("A '~' beside a number means fewer progress lines than TAIL asked for; a '!' means none at")
 print("all, so that row is loss_last -- ONE flush, and exactly the noise the tail mean averages out.")
 print()
-print("A separation smaller than the within-arm spread is NOTHING. notes/07_WIP.md records a")
+print("A separation smaller than the within-arm spread is NOTHING. archive/notes/07_WIP.md records a")
 print("measured seed spread of 1.227 b/B on a single arm, larger than the gap between any two")
 print("architectures ever compared in this project.")
 PY

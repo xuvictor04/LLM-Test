@@ -132,3 +132,10 @@ code and prose describe an older system — `garry/self_organize.py` still reads
 **CORRECTION 2026-09-28.** `../ARCHIVE.md`, named above as the list of frozen directories, is now
 `../archive/README.md`: it moved into the folder it describes, with `git mv`. Its table says what each
 archived record is, and resolves every path that has moved since this corpus was written.
+
+**CORRECTION 2026-09-29.** This corpus moved with `git mv` from `notes/` to `archive/notes/`, with its
+`_evidence/` and `CURRENT_DEFAULTS.md`; `notes/` keeps the two live pages, `OWNER_BRIEF.md` and
+`AGENT_STATE.md`. It is a record of the old tree, and "Read this before anything else in the
+repository" above is history: the root `README.md` maps the repository now, and `docs/` documents the
+system that runs. The paths above are of their day: `notes/<file>` is `archive/notes/<file>`, and
+`../archive/README.md`, named in the correction above, is `../README.md` from here.

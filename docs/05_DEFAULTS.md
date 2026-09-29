@@ -4,7 +4,7 @@
 registry in `src/*/levers.py`; `tests/test_assemble.py`'s A10 fails if what is on disk is not what
 the generator would write today. Nothing below this paragraph is typed by hand.
 
-`notes/CURRENT_DEFAULTS.md` is the same idea for `self_organize.py` — the ARCHIVED tree. Every knob
+`archive/notes/CURRENT_DEFAULTS.md` is the same idea for `self_organize.py` — the ARCHIVED tree. Every knob
 in that file is one this system no longer reads, under a name it no longer generates. This file is
 about `src/`.
 

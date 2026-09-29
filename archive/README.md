@@ -11,8 +11,8 @@ This file says what each item was, why it is kept, how to run the old tree, and 
 went. It was the root's `ARCHIVE.md` until 2026-09-28 and moved here with `git mv`, so
 `git log --follow archive/README.md` keeps its history. `garry/`, `legacy/`, `handoff/`, `docs/`,
 `STATE.md` and `CL_TESTBED.md` moved here from the root on 2026-08-27, so that a repository-wide grep does
-not return them beside live code; the old tree and `.rework/QUESTIONS.md` followed on 2026-09-28, and
-`agent-transcripts/` was committed here directly. Nothing in `src/`, `tests/` or `tools/`, nor `run.py`
+not return them beside live code; the old tree and `.rework/QUESTIONS.md` followed on 2026-09-28, the
+2026-08 notes corpus on 2026-09-29, and `agent-transcripts/` was committed here directly. Nothing in `src/`, `tests/` or `tools/`, nor `run.py`
 or `gpu_world.sh`, imports or executes any of it; the old tree runs when someone runs it (below), and
 `.rework/capture_oracle.py`, the P0 capture of the oracle `tests/test_derive.py` replays, reads
 `old-tree/self_organize.py` if it is ever run again.
@@ -20,6 +20,7 @@ or `gpu_world.sh`, imports or executes any of it; the old tree runs when someone
 | path | what it was | why it is kept | frozen since |
 |---|---|---|---|
 | `old-tree/` | the old system, at the repository root until 2026-09-28: `self_organize.py` (9,859 lines; its `_SPEC` holds 328 knobs), the modules it imports by bare name (`memory.py`, `verification.py`, `world_model.py`, `datastream.py`, `tokenizer.py`), its harness (`longrun.sh`, `selftest.sh`, `rerun.sh`, `equiv.sh`, `preflight.sh`, ...), its tests (`*_test.py`, `harness_test.sh`, `notes_check.py`), probes, fetchers, and the run registry `runs.py` + `runs.csv`: 51 files, and a `data` link | the only system that has ever trained at scale: every recorded result was measured under it, and `src/`, `docs/` and `tests/` cite it by line (`self_organize.py:NNNN`), which a move that changes no byte keeps true | 2026-08-28 (D5 froze branch `rm-predict`; every file here but `notes_check.py` and `equiv.sh` is byte-identical to it) |
+| `notes/` | the 2026-08 notes corpus about the old tree, in `notes/` until 2026-09-29: `00_INDEX.md` (read it first) through `10_HISTORY_FINDINGS.md`, `DOC_PLAN.md`, the research and literature briefs, `_evidence/` (the session transcript and the commit log of 2026-07-21 to 08-15, a literature review, a runs snapshot), and `CURRENT_DEFAULTS.md`, the old tree's defaults, which `old-tree/notes_check.py` generates from `_SPEC` | what was believed and measured under the old tree, and when: `src/`, `docs/` and `.rework/` cite it (`07_WIP.md:485`, `05_ERRORS.md:602-607`), `.rework/COMMIT_RECORD.md` was rebuilt from its commit log, and `notes_check.py` still checks it (below) | 2026-08-26, its last entry; dated corrections since (rule 3) |
 | `rework/` | `QUESTIONS.md`: the first owner questions, Q1–Q7, with their options and recommendations, and a closing environment block; `.rework/QUESTIONS.md` until 2026-09-28 | the questions `.rework/DECISIONS.md` D1–D7 answer, as they were put (D1 records a correction against the evidence Q1 offered). What is open now is in `docs/04_CONTRACT.md`'s `FOR THE OWNER` sections, `docs/proposals/05_DECISIONS.md` and `notes/OWNER_BRIEF.md`; the environment block's unknowns are `docs/02_OPERATIONS.md` §5 | 2026-08-28 |
 | `garry/` | a working snapshot of the whole system at milestone T33: a 957-line `self_organize.py`, against the old tree's 9,859 | the known-good reference its own `GARRY.md` promised; `src/memory/api.py` cites its `self_organize.py` by line | 2026-07 |
 | `legacy/` | the pre-rewrite package, a different architecture with the same vocabulary | where the vocabulary came from; its `build_continual_data.py` wrote `data/continual/`, and `docs/04_CONTRACT.md` (Q-DATA-4) cites it | 2026-07 |
@@ -36,8 +37,8 @@ or `gpu_world.sh`, imports or executes any of it; the old tree runs when someone
 `FAB_N0` (`src/fabric/levers.py`). A repo-wide grep for `FAB_N0` returns all three, and the wrong one is in
 a file that looks exactly like the right one.
 
-That is not hypothetical: nine files in `notes/` stated `FAB_N0=3` as the current default a week after it
-changed, and it was `00_INDEX`'s "five things to know before spending any GPU time" item #1. Separately,
+That is not hypothetical: nine files of the notes corpus stated `FAB_N0=3` as the current default a week
+after it changed, and it was `00_INDEX`'s "five things to know before spending any GPU time" item #1. Separately,
 `02_IDEAS` filed a built mechanism as NEVER IMPLEMENTED and its own correction records the cost — "it was read
 during the 0.75 GB planning and used to tell the user the mechanism did not exist".
 
@@ -45,22 +46,23 @@ during the 0.75 GB planning and used to tell the user the mechanism did not exis
 
 - **Defaults of the system that runs now:** `docs/05_DEFAULTS.md`, generated from the lever registry by
   `tools/render_defaults.py`; `tests/test_assemble.py`'s A10 fails if it drifts.
-- **Defaults of the old tree:** `notes/CURRENT_DEFAULTS.md`, generated from `self_organize.py`'s `_SPEC`
-  by `old-tree/notes_check.py` (in `selftest.sh`), which fails if that file drifts, if `README.md` or
-  any `notes/*.md` states a default `_SPEC` contradicts without saying it is history, or if this file
-  is missing.
+- **Defaults of the old tree:** `archive/notes/CURRENT_DEFAULTS.md`, generated from `self_organize.py`'s
+  `_SPEC` by `old-tree/notes_check.py` (in `selftest.sh`), which fails if that file drifts, if the root
+  `README.md`, a `notes/*.md` or an `archive/notes/*.md` states a default `_SPEC` contradicts without
+  saying it is history, or if this file is missing. Of `archive/` it scans `archive/notes/` alone.
 - **Current behaviour:** `src/`, run by `run.py`; its surface is `docs/04_CONTRACT.md`.
-- **What was true before:** everything in this directory, and the 2026-08 notes corpus in `notes/`
-  (`notes/00_INDEX.md` first). Correct as records. Where one has since been overtaken, it carries a dated
-  correction rather than an edit.
+- **What was true before:** everything in this directory, the 2026-08 notes corpus among it
+  (`archive/notes/00_INDEX.md` first). Correct as records. Where one has since been overtaken, it
+  carries a dated correction rather than an edit.
 
 ## Rules
 
 1. Do not edit anything under `archive/`. `archive/garry/GARRY.md` said this already; it applies to all of it.
    The exceptions are recorded here, never made silently: this README, the label, which is updated
-   whenever something is archived or moves; and the edits that let two old-tree files run from their new
-   place, listed under *Running the old tree*. `notes_check.py` fails if `archive/` exists without this
-   README, so the label cannot quietly go missing.
+   whenever something is archived or moves; the edits to two old-tree files, listed under *Running the
+   old tree*; and in the notes corpus, here since 2026-09-29, the dated corrections rule 3 appends and
+   `CURRENT_DEFAULTS.md`, which `notes_check.py --write` regenerates. `notes_check.py` fails if
+   `archive/` exists without this README, so the label cannot quietly go missing.
 2. Do not cite them for what the system does now.
 3. When a note is overtaken, append a dated correction. Do not rewrite the original — the record of a wrong
    belief is the most useful thing in the corpus, and this project has re-learned that twice.
@@ -132,7 +134,10 @@ What the old tree left at the root before the move stays there, and is reached l
   it describes). At the move it was made to find `self_organize.py` beside itself and the repository's
   `README.md`, `notes/` and `archive/` two directories up, to require this README instead of
   `ARCHIVE.md`, and to print its own path in the commands it prints. It checks the same 22 files and
-  still writes `notes/CURRENT_DEFAULTS.md`.
+  still writes `notes/CURRENT_DEFAULTS.md`. When the notes corpus moved here on 2026-09-29, it was made
+  to scan `archive/notes/` beside `notes/` and to write `archive/notes/CURRENT_DEFAULTS.md`: still 22
+  files (the root `README.md`, the two pages left in `notes/` and the corpus's 19), and a default
+  planted in either folder is still caught.
 - `equiv.sh`, at the move: it takes the checkout from `git rev-parse --show-toplevel` rather than from
   its own directory, runs `self_organize.py` wherever the commit under test has it (the root before
   2026-09-28, `archive/old-tree/` after), so it still compares across the move, and names `fetch_big.py`
@@ -165,6 +170,7 @@ index; the agent transcripts; and the commit messages. This table resolves them.
 | the old tree at the root, all 51 files: `bench_gpu.sh` `blowup_test.py` `cap_test.py` `cl_bench.py` `compare.py` `compare_test.py` `corpus_test.py` `curve_test.py` `datastream.py` `domain_test.py` `equiv.sh` `fetch_40g.sh` `fetch_big.py` `fetch_data.sh` `fetch_local.py` `growth_test.py` `harness_test.sh` `holdout.py` `keystone_probe.py` `levers.py` `longrun.sh` `lr_test.py` `mem_evict_test.py` `memory.py` `notes_check.py` `preflight.sh` `probe_ckpt_geometry.py` `probe_signature.py` `probe_stability.py` `proj_test.py` `prompt.py` `ramp_test.py` `rerun.sh` `rescue_ckpt.py` `resume_test.py` `run_cl_test.sh` `run_full_unfrozen.sh` `run_verify_test.py` `runs.csv` `runs.py` `self_organize.py` `selftest.sh` `sweep_domain_grid.sh` `sweep_domain_report.py` `sweep_domains.sh` `tok_test.py` `tokenizer.py` `verification.py` `verify_console_test.py` `vocab.py` `world_model.py` | `archive/old-tree/<same name>` | 2026-09-28 |
 | `.rework/QUESTIONS.md` | `archive/rework/QUESTIONS.md` | 2026-09-28 |
 | `sweep_gpu.sh`, `sweep_world.sh`, at the root | `tools/<same name>` | 2026-09-29 |
+| the 2026-08 notes corpus in `notes/`, 66 files: `00_INDEX.md` `01_TIMELINE.md` `02_IDEAS.md` `03_EXPERIMENTS.md` `04_RESULTS.md` `05_ERRORS.md` `06_CONTINUAL_LEARNING.md` `07_WIP.md` `08_GLOSSARY.md` `09_COMMENT_AUDIT.md` `10_HISTORY_FINDINGS.md` `DOC_PLAN.md` `EXTERNAL_RESEARCH_BRIEF.md` `LITREVIEW_FINDINGS.md` `RESEARCH_BRIEF_DIFFERENTIATION.md` `research_continual_memory.md` `research_experts_routing.md` `research_lr_schedules.md` `research_tokenizer.md`, `CURRENT_DEFAULTS.md` and `_evidence/` (46 files) | `archive/notes/<same path>` | 2026-09-29 |
 
-The root kept `README.md`, `LICENSE`, `requirements.txt`, `run.py` and `gpu_world.sh`: a root file a
-record names that is not in this table is where it was.
+The root kept `README.md`, `LICENSE`, `requirements.txt`, `run.py` and `gpu_world.sh`, and `notes/` kept
+`OWNER_BRIEF.md` and `AGENT_STATE.md`: a path a record names that is not in this table is where it was.

@@ -242,7 +242,7 @@ class WORLDLevers(LeverSet):
     # That is the fact that governs this whole group. The world model has run in exactly ONE shape, and
     # the standing hypothesis for the only failure it has ever shown -- the collapsed latent, std
     # 0.03-0.15 against the code's own "want ~1" -- is that it is a sizing problem nobody has been
-    # allowed to test (notes/07_WIP.md:485). Dropping any of these would foreclose the cheapest
+    # allowed to test (archive/notes/07_WIP.md:485). Dropping any of these would foreclose the cheapest
     # explanation of that failure. "Never set" is the argument FOR keeping them, not against.
     #
     # ALL THREE ARE CHECKPOINT GEOMETRY THAT IS WRITTEN AND NEVER CHECKED (H22). lat, hid, n, nmax,
