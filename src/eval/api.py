@@ -394,7 +394,12 @@ def retention_period(ev: Config):
     this package's typed accessor and spine/compose.py::_periods carries it under the key
     'retention' (2026-09-27, Q-EVAL-12). 0 is the probe OFF: Cadences.due answers False for every
     period <= 0, and the loop's arm test (EVAL_RETENTION_EVERY > 0 and a pinned ProbeSet) runs
-    before the gate is ever asked, so at 0 the ledger reads 'retention' with zero checks.
+    before the gate is ever asked, so at 0 the ledger reads 'retention' with zero checks. THE PERIOD
+    IS THE CADENCE ALONE, and the cadence audit says so in a line the root words for this key
+    (spine/compose.py::_retention_audit, the flip's review, 2026-09-29): an armed probe also reads at
+    every phase start, at a resume's start and at R, so a run too short for its period is told the
+    PERIODIC reading cannot fire, beside the reads that still run; and a probe that pinned nothing is
+    told DISARMED whatever this returns, since the arm test fails before the gate is asked.
 
     A NEGATIVE IS REFUSED, under this file's REFUSE_NEGATIVE_PERIOD, exactly as curve_period
     refuses EVAL_CURVE_EVERY < 0: Cadences.due would DISARM the gate on it, which is an undeclared

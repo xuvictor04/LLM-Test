@@ -52,7 +52,7 @@
 #     ARCH_ALSO=transformer bash gpu_world.sh             # + fb_off/fb_on at LM_ARCH=transformer
 #     LONG=100000 bash gpu_world.sh                       # + one fb_on/fb_off pair (seed 0) that long
 #     PAR=12 MPS=0 FILL=0 bash gpu_world.sh               # manual parallelism, no MPS, no extra seeds
-#     KEEP_CKPT=1 bash gpu_world.sh                       # + one final checkpoint per run (below)
+#     KEEP_CKPT=1 bash gpu_world.sh                       # + each run's final and best checkpoints (below)
 #     bash gpu_world.sh --status                          # progress and time left; changes nothing
 #     bash gpu_world.sh --analyze                         # re-analyse what is on disk, paste back, pack
 #     cat gpu_world_out/SUMMARY.txt
@@ -65,10 +65,16 @@
 # CHECKPOINTS ARE OFF BY DEFAULT AND ON AT EXP=retok (KEEP_CKPT; Proposal 05 §8 1.5, register note
 # retok fleet (1)). Saving is the most expensive operation in the loop and nothing EXP=world measures
 # needs a resume, so there CKPT_DIR stays unset unless KEEP_CKPT=1 asks for one final checkpoint per
-# run. At EXP=retok every run gets CKPT_DIR=$OUT/ckpt/<arm>.s<seed>: the act arms save once, at the
-# end (CKPT_EVERY 0); k0, k0_nuis and k0_rerun save every KEEP_EVERY windows (default: the gcd of the
-# act cadences, 1000); and k0's saves are HARD-LINKED ASIDE as $OUT/ckpt/keep/k0.s<seed>.w<step>,
-# with the vocabulary beside each as k0.s<seed>.w<step>.dyntok.json, because CKPT's ring keeps only
+# run -- AND, SINCE 04-6.2's FLIP (2026-09-29), THE RETENTION PROBE'S BEST SAVES BESIDE IT: with
+# CKPT_DIR set an armed probe writes a full checkpoint at every new best reading, the first always
+# one, as ckpt.pt.best with ckpt.pt.best.prev behind it (and CKPT_BEST_KEEP's slots), so at
+# EXP=world and EXP=world_epoch a run leaves up to three checkpoint files at the shipped settings.
+# The disk check counts them (ckpt_files, BEST_FILES) and the banner says so; EXP=retok's pins turn
+# the probe off, and its runs write none. At EXP=retok every run gets
+# CKPT_DIR=$OUT/ckpt/<arm>.s<seed>: the act arms save once, at the end (CKPT_EVERY 0); k0, k0_nuis
+# and k0_rerun save every KEEP_EVERY windows (default: the gcd of the act cadences, 1000); and k0's
+# saves are HARD-LINKED ASIDE as $OUT/ckpt/keep/k0.s<seed>.w<step>, with the vocabulary beside each
+# as k0.s<seed>.w<step>.dyntok.json, because CKPT's ring keeps only
 # ckpt.pt and ckpt.pt.prev (src/ckpt/api.py::save). A periodic save lands on the window an act of that
 # cadence fires at (j x K + 1) and leaves the run's losses bit-identical (tests/test_continuation.py
 # S11), so arm - k0 pairs a saving control with arms that save only at the end. The kept copies are
@@ -164,7 +170,9 @@
 # reads SR0's retention probe on a synthetic held-out block -- DATA_SYNTH_HOLDOUT=1 and
 # EVAL_RETENTION_EVERY=PROBE_EVERY (700: 04-6.2's cap, the shortest phase's windows / 5 at k3000 on the
 # 3.78 MB shape, written as a number, never computed at run time), and every run writes its reading
-# series beside its curve (run.py --probe-series). 04-Q5's pin rule does not apply here: the arms pair
+# series beside its curve (run.py --probe-series). With KEEP_CKPT=1 each run's final save is joined by
+# the probe's best saves, ckpt.pt.best and .best.prev (and CKPT_BEST_KEEP's slots), which the disk
+# check budgets (the flip's review, 2026-09-29). 04-Q5's pin rule does not apply here: the arms pair
 # only with each other, in one commit. SR0 IS BUILT (2026-09-29) AND THE GUARD STAYS, RETARGETED: the
 # re-run is five arms (fb_off, fb_on, skip, world_off and detached; §8 6.5), after O13's two WORLD
 # levers are built with CPU known answers -- the forecast bound (WORLD_FORECAST_BOUND) and the
@@ -348,15 +356,49 @@ ckpt_env() {  # name seed base-dir [smoke]
   esac
   echo "CKPT_DIR=$3/$1.s$2 CKPT_EVERY=$every"
 }
+# >>> THE BEST SAVES' BUDGET (2026-09-29, the flip's review). tests/test_gpu_world.py F19 execs this
+# block by its two marker lines, with EXP, EXTRA, EXP_ENV, WINDOWS and KEEP_EVERY set, in a tree of its own.
+# THE RETENTION PROBE'S BEST SAVES ARE CHECKPOINTS TOO (register R22; docs/04_CONTRACT.md Q-EVAL-12).
+# Wherever a run's CKPT_DIR is set and its probe is armed, CKPT.Retention saves a full checkpoint at
+# every new best reading -- the first reading always one -- as ckpt.pt.best, the one before it rotated
+# onto ckpt.pt.best.prev, each with its vocabulary beside the directory; and CKPT_BEST_KEEP=N adds the
+# slots .best1 ... .bestN, each rotating onto its own .prev (src/ckpt/api.py::save): 2 + 2N files at
+# most. The probe is armed where this tree declares EVAL_RETENTION_EVERY and a run's value is above 0:
+# the last one run_job sets -- EXTRA's, then EXP_ENV's (EXP=retok's pin is 0, EXP=world_epoch's
+# PROBE_EVERY) -- else this environment's, else the lever's declared default, read off src/ at launch
+# as LEVELS is. So EXP=world counts them at the shipped 1000 and EXP=world_epoch at its pin, EXP=retok
+# never, and a checkout from before 04-6.2's flip, whose default is 0, not at EXP=world either. A value
+# this cannot read is counted armed, and a probe that pins nothing writes none: at most, as ckpt_files
+# is. The count is of checkpoint files, as the ring's is; the small vocabulary files ride with them.
+_setting() {  # NAME -> the value a run sees: the last NAME= in EXTRA and EXP_ENV, else the environment's
+  local v
+  v=$(echo " $EXTRA $EXP_ENV " | tr ' ' '\n' | sed -n "s/^$1=//p" | tail -1)
+  if [[ -n "$v" ]]; then echo "$v"; else printenv "$1" 2>/dev/null; fi
+}
+BEST_FILES=0
+BEST_KEEP=0
+if grep -qE "^ +retention_every = Lever\(" src/eval/levers.py 2>/dev/null; then
+  _pe=$(_setting EVAL_RETENTION_EVERY)
+  [[ -n "$_pe" ]] || _pe=$(sed -n '/^ *retention_every = Lever(/{s/.*Lever( *\([0-9][0-9]*\).*/\1/p;n;s/^ *\([0-9][0-9]*\) *,.*/\1/p;}' \
+                             src/eval/levers.py 2>/dev/null | head -1)
+  if ! [[ "$_pe" =~ ^[0-9]+$ ]] || (( 10#$_pe > 0 )); then
+    BEST_KEEP=$(_setting CKPT_BEST_KEEP)
+    [[ -n "$BEST_KEEP" ]] || BEST_KEEP=$(sed -n 's/^ *best_keep = Lever( *\([0-9][0-9]*\).*/\1/p' src/ckpt/levers.py 2>/dev/null | head -1)
+    [[ "$BEST_KEEP" =~ ^[0-9]+$ ]] && BEST_KEEP=$(( 10#$BEST_KEEP )) || BEST_KEEP=0
+    BEST_FILES=$(( 2 + 2 * BEST_KEEP ))
+  fi
+fi
 # HOW MANY CHECKPOINT FILES A RUN LEAVES AT MOST: k0 its kept saves plus the ring's two, the rest of
-# the k0 family the ring's two, every other run its one final save.
+# the k0 family the ring's two, every other run its one final save -- each with the probe's best saves
+# beside them, BEST_FILES, 0 where no probe is armed (at EXP=retok, whose pins turn it off, always).
 ckpt_files() {  # name
   case "$1" in
-    k0) echo $(( (11 * WINDOWS + 10 * KEEP_EVERY - 1) / (10 * KEEP_EVERY) + 2 )) ;;
-    k0_nuis|k0_rerun) echo 2 ;;
-    *) echo 1 ;;
+    k0) echo $(( (11 * WINDOWS + 10 * KEEP_EVERY - 1) / (10 * KEEP_EVERY) + 2 + BEST_FILES )) ;;
+    k0_nuis|k0_rerun) echo $(( 2 + BEST_FILES )) ;;
+    *) echo $(( 1 + BEST_FILES )) ;;
   esac
 }
+# <<< THE BEST SAVES' BUDGET
 
 plan_banner() {  # the fleet's shape, as SUMMARY records it and the EXP=world_epoch guard prints it
   echo "=== $WINDOWS windows per run, DATA_STREAM_BYTES=$BYTES, seeds: $SEEDS, EXTRA='$EXTRA'"
@@ -365,6 +407,11 @@ plan_banner() {  # the fleet's shape, as SUMMARY records it and the EXP=world_ep
   if [[ "$KEEP_CKPT" == 1 && "$EXP" == retok ]]; then
     echo "=== kept checkpoints: ON, k0 family CKPT_EVERY=$KEEP_EVERY, act arms final only;" \
          "k0's saves hard-linked under $OUT/ckpt/keep"
+  elif [[ "$KEEP_CKPT" == 1 && "$BEST_FILES" -gt 0 ]]; then
+    echo "=== kept checkpoints: ON, one final checkpoint per run under $OUT/ckpt, and beside it the" \
+         "retention probe's best saves (ckpt.pt.best and .best.prev$( (( BEST_KEEP > 0 )) &&
+         echo ", and CKPT_BEST_KEEP=$BEST_KEEP's slots, each with its .prev")): up to" \
+         "$(( 1 + BEST_FILES )) checkpoint files per run, all counted in the disk check"
   elif [[ "$KEEP_CKPT" == 1 ]]; then
     echo "=== kept checkpoints: ON, one final checkpoint per run under $OUT/ckpt"
   else
@@ -1913,6 +1960,8 @@ if [[ "$EXP" == world_epoch && "$GO_WORLD_EPOCH" != 1 ]]; then
   echo "    commit, 5 paired seeds, every run reading one whole epoch (all four phases) with the pins above:"
   echo "    TOK_RETOK_EVERY and DATA_DRAW, and SR0's DATA_SYNTH_HOLDOUT ON and retention probe ON at"
   echo "    EVAL_RETENTION_EVERY=$PROBE_EVERY (04-6.2's cap, written as a number), each run writing its reading series."
+  echo "    Its checkpoints (KEEP_CKPT=1): each run's final save and the probe's best saves beside it --"
+  echo "    ckpt.pt.best and .best.prev$( (( BEST_KEEP > 0 )) && echo ", and CKPT_BEST_KEEP=$BEST_KEEP's slots") -- up to $(( 1 + BEST_FILES )) checkpoint files a run, all budgeted."
   echo "    It waits for O13's two WORLD levers, built with CPU known answers before it (operation only;"
   echo "    provisional names, 'detached' the input gradient's fifth arm): in this tree $_o13."
   echo "    Rule: WORLD_FEEDBACK flips ON only if fb_on beats fb_off on the time-integrated all-area"

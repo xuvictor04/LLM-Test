@@ -40,10 +40,14 @@
 #                   world.forecast.inert == calls and world.forecasts / lm.encode.extra_ratio are
 #                   ABSENT; on `shipped`, world.forecasts == lm.encode.extra_applied == flushes.
 #
-# WHAT IT MEASURES AND WHAT IT CANNOT. There is no held-out number in the loop: run.py prints a
-# TRAINING loss and the EVAL battery is not wired, so every column below is training loss and must
-# not be quoted as bits/byte on held-out text. The headline is the mean of the last TAIL progress
-# lines rather than loss_last, because loss_last is ONE flush -- measured on this tree, adjacent
+# WHAT IT MEASURES AND WHAT IT CANNOT. Every column below is TRAINING loss and must not be quoted as
+# bits/byte on held-out text. Until 2026-09-29 run.py printed no held-out number at all (the EVAL
+# battery is not wired). Since then (register 04-6.2's flip, docs/04_CONTRACT.md Q-EVAL-12) each run
+# also takes the retention probe's held-out readings at the shipped EVAL_RETENTION_EVERY and prints
+# them, bits/byte, as eval.holdout.* in its log; this sweep sets no EVAL_RETENTION_EVERY, so every
+# log here carries them, and nothing below reads them: they are another instrument, not these
+# columns. The headline is the mean of the last TAIL progress lines rather than loss_last, because
+# loss_last is ONE flush -- measured on this tree, adjacent
 # progress lines swing by more than 0.5 while the arm-to-arm gap is around 0.05, so a single-flush
 # comparison reads noise. Seeds are the only defence and three is not many: notes/07_WIP.md records
 # a measured seed spread of 1.227 b/B on one arm, LARGER than the gap between any two architectures
@@ -81,7 +85,8 @@ _have() { [[ ",$ONLY," == *",$1,"* ]]; }
 {
   echo "=== WORLD arms: $ONLY"
   echo "=== $WINDOWS windows max, DATA_STREAM_BYTES=$BYTES, seeds: $SEEDS, tail=$TAIL progress lines"
-  echo "=== TRAINING loss. There is no held-out number in the loop; do not quote these as b/B."
+  echo "=== TRAINING loss; do not quote these as b/B. The logs' held-out readings (eval.holdout.*, since"
+  echo "    2026-09-29) are not read here."
   echo
 } | tee -a "$S"
 

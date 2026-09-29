@@ -58,7 +58,9 @@ were written while both shipped at 0, and each names the arm it reads; the book 
   P7  OPT_DAMP_SOURCE: a planted non-improving Reading series of seed count 1 under 'probe' refuses every
       losing restart (damp_refused_n1 = restarts - 1, restart_amp 1.0) and counts one Reading per `at`;
       seed count 2 damps; 'off' reads nothing and its gate names the lever. In-run, 'probe' and 'off'
-      train the same losses; 'probe' at EVAL_RETENTION_EVERY=0 is refused at startup.
+      train the same losses; 'probe' at EVAL_RETENTION_EVERY=0 is refused at startup, and since the
+      flip's review over a probe that pinned nothing too -- no block, or no half with room -- at the
+      second stop, as FAB_CONTRIB=1 is; at the shipped values, whose probe pins every area, it composes.
   P8  EVAL.blowup IS blowup_test.py's CALL-SITE RULE: fire for fire on its curves (:95-141) and at
       test_derive.py's threshold (:944-949); the all-area series re-arms at an arrival, in-run too.
   P9  GENERATION: its sizes; two runs identical; both closures identical at MEM_BLEND_MAX=0; each
@@ -89,6 +91,17 @@ were written while both shipped at 0, and each names the arm it reads; the book 
       under 04-Q5's three pins -- reproduce the records made before the probe existed
       (tests/test_baseline.py, run from here). Until the flip this read B1, B3, B3r and B5 at the
       shipped defaults; since, those are the flipped tree's own records, compared before every commit.
+  P16 THE CADENCE AUDIT'S LINE FOR 'retention' IS THE ROOT'S (spine/compose.py::_retention_audit, the
+      flip's review, 2026-09-29). Armed with a period past the run -- every shipped-default run of
+      506-937 windows -- it says the PERIODIC reading cannot fire, beside the phase-start, resume-start
+      and R reads and generation that still run, and names 1000 as 04-6.2's interim value, never
+      RUN's "Whatever it gates does not happen" or its advice to shorten the period; over a probe that
+      pinned nothing it is DISARMED with the ProbeSet's reason, and where the period fits the run it
+      is ADDED, at the key's place, or replaces RUN's "every declared gate can fire"; at 0 RUN's
+      DISARMED line stands, and an armed probe the run can reach gets none. Every other line is the
+      one _trust_audit handed on. And the reads the armed line promises run: at the shipped 1000 a
+      12-window run reads one phase start, which CKPT's retention consumes, and R's two, the gate
+      asked 12 times and firing never.
 
 WHAT THIS FILE CANNOT SEE: whether a reading means anything. CPU runs establish operation only; the
 probe's readings, the best checkpoints it orders and the retention it reports are GPU questions.
@@ -507,6 +520,36 @@ try:
         check("P7 OPT_DAMP_SOURCE='probe' at EVAL_RETENTION_EVERY=0 is refused at startup, naming both",
               e.stage == "refuse" and any("OPT_DAMP_SOURCE" in r and "EVAL_RETENTION_EVERY" in r
                                           for r in e.refusals), str(e.refusals)[:300])
+    # AND OVER A PROBE THAT PINNED NOTHING (2026-09-29, the flip's review; Q-OPT-13): the same source
+    # that can never produce, known only once pin_holdout has run, so it is refused at the 'probe' stage
+    # and raised at the second stop with CAP's -- as FAB_CONTRIB=1 is. The gap is as old as the probe
+    # (the `refuse` stage tests the period alone); the flip moved where it is reached, since 'probe'
+    # composes at the shipped 1000 with no EVAL_RETENTION_EVERY set, over a stream with no block or
+    # with no half long enough for a window behind its prefix as readily as over one that pins.
+    for _t7, _e7, _w7 in (("with no block (DATA_SYNTH_HOLDOUT=0)", {"EVAL_RETENTION_EVERY": 1000},
+                           "DATA_SYNTH_HOLDOUT=0"),
+                          ("whose halves cannot hold a window behind its prefix (DATA_STREAM_BYTES=20000)",
+                           dict(H, EVAL_RETENTION_EVERY=1000, DATA_STREAM_BYTES="20000"), "DATA_HOLDOUT_FRAC")):
+        try:
+            build(OPT_DAMP_SOURCE="probe", **_e7)
+            check(f"P7 OPT_DAMP_SOURCE='probe' over a probe {_t7} is refused", False, "composed")
+        except RefusedRun as e:
+            check(f"P7 OPT_DAMP_SOURCE='probe' over a probe {_t7} is refused at the second stop "
+                  f"('valve'), naming the lever, that nothing was pinned, and the ProbeSet's reason "
+                  f"({_w7})",
+                  e.stage == "valve" and any("OPT_DAMP_SOURCE='probe'" in r and "nothing was pinned" in r
+                                             and _w7 in r for r in e.refusals), str(e.refusals)[:300])
+    _lever._reopen_assembly()
+    rng.reset_issued()
+    lm_api._COUNTS.clear()
+    _sd7 = compose(environ=dict({k: v for k, v in BASE.items()
+                                 if k not in ("EVAL_RETENTION_EVERY", "DATA_SYNTH_HOLDOUT")},
+                                OPT_DAMP_SOURCE="probe"))
+    check("P7 at the shipped values -- neither lever set, the probe at 1000 pinning every area -- 'probe' "
+          "composes: the flip's consequence for it, named beside FAB_CONTRIB=1's",
+          _sd7.stage == "assembled" and not _sd7.refusals
+          and sorted(_sd7.probe_set.items) == ["c", "eng", "num", "py"], f"stage {_sd7.stage}")
+    del _sd7
 
     # =============================================================================================
     # P1 (the off arms): nothing pinned, drawn, read or counted, and the report says why
@@ -569,7 +612,120 @@ try:
           and all(set(v) == {"control", "report"} and all(v.values()) for v in _ss.probe_set.items.values()),
           f"period {int(eval_api.retention_period(_ss.configs['EVAL']))}, "
           f"synth_holdout {_ss.configs['DATA'].synth_holdout!r}, items {sorted(_ss.probe_set.items)}")
+
+    # =============================================================================================
+    # P16: the cadence audit's line for 'retention' is the root's
+    # =============================================================================================
+    # RUN's sentences are a cadence's, and the probe's arm test is the root's pinned ProbeSet: an armed
+    # probe reads at every phase start, at a resume's start and at R beside its cadence, and one that
+    # pinned nothing is never asked. So the root words that key's line (spine/compose.py::
+    # _retention_audit, after _trust_audit), compared here against RUN.cadence_audit called afresh on
+    # the same mapping. The join is fetched by name, so this file still runs, and these checks fail, on
+    # a tree without it.
+    from spine import compose as _C16
+    from spine.compose import _periods as _p16, _run_windows as _rw16
+    from train import api as _run16
+    rtag = "cadence audit: 'retention' "
+    _ra16 = getattr(_C16, "_retention_audit", None)
+
+    def audit16(s):
+        """{'ours': the audit's 'retention' lines, 'theirs': RUN's, 'rw': the run's length, 'n': the
+        audit's line count, 'n_run': RUN's, 'chain': whether the audit is RUN -> _trust_audit ->
+        _retention_audit, 'rest': whether every line but the probe's is the one _trust_audit handed on,
+        'audit': the whole audit}"""
+        rw = _rw16(s)
+        audit = [w for w in s.warnings if w.startswith("cadence audit:")]
+        theirs = _run16.cadence_audit(s.configs["RUN"], run_windows=rw, periods=_p16(s))
+        trusted = _C16._trust_audit(s, theirs, run_windows=rw, periods=_p16(s))
+        return {"ours": [w for w in audit if w.startswith(rtag)],
+                "theirs": [w for w in theirs if w.startswith(rtag)], "rw": int(rw), "n": len(audit),
+                "n_run": len(theirs), "audit": audit,
+                "chain": _ra16 is not None and _ra16(s, trusted, run_windows=rw, periods=_p16(s)) == audit,
+                "rest": [w for w in audit if not w.startswith(rtag)]
+                == [w for w in trusted if not w.startswith(rtag)]}
+
+    _a16 = {"shipped": audit16(_ss)}
     del _ss
+    for _l16, _e16 in (("off", {}),
+                       ("noblock", {"EVAL_RETENTION_EVERY": 1000}),
+                       ("noroom", dict(H, EVAL_RETENTION_EVERY=1000, DATA_STREAM_BYTES="20000")),
+                       ("noblock20", {"EVAL_RETENTION_EVERY": 20}),
+                       ("armed20", dict(H, EVAL_RETENTION_EVERY=20))):
+        _s16 = build(**_e16)
+        _a16[_l16] = audit16(_s16)
+        if _l16 == "noblock20":
+            _nb20 = _s16
+        del _s16
+    _sh = _a16["shipped"]
+    _ln = (_sh["ours"] or [""])[0]
+    check("P16 at the shipped values (armed, a 1000-window period past the run) the audit's one "
+          "'retention' line is the root's: the PERIODIC reading cannot fire once, beside the phase-start, "
+          "resume-start and R reads and generation that still run, the period named as 04-6.2's interim "
+          "value -- never RUN's 'Whatever it gates does not happen' or its advice to shorten the period",
+          len(_sh["ours"]) == 1 and len(_sh["theirs"]) == 1
+          and f"has a period of 1000 windows and this run is {_sh['rw']} windows long" in _ln
+          and "PERIODIC reading CANNOT FIRE ONCE" in _ln and "first window of every phase" in _ln
+          and "both closures at R" in _ln and "resume's start" in _ln
+          and "generates after the final save" in _ln and "EVAL_RETENTION_EVERY=1000" in _ln
+          and "04-6.2 ships 1000" in _ln and "Shorten the period" not in _ln
+          and "Whatever it gates does not happen" not in _ln
+          and "Shorten the period" in _sh["theirs"][0] and _sh["n"] == _sh["n_run"],
+          _ln[:300])
+    _off = _a16["off"]
+    check("P16 at EVAL_RETENTION_EVERY=0 (the file's arm) RUN's DISARMED line stands, word for word: "
+          "there nothing is pinned, read or generated, and a period of 1 or more is what arms the probe",
+          len(_off["ours"]) == 1 and _off["ours"] == _off["theirs"]
+          and "DISARMED rather than starved" in _off["ours"][0] and _off["n"] == _off["n_run"],
+          str(_off["ours"])[:200])
+    _nb, _nr = _a16["noblock"], _a16["noroom"]
+    check("P16 over a probe that pinned nothing at a period past the run -- no block (DATA_SYNTH_HOLDOUT=0), "
+          "and no half with room (DATA_STREAM_BYTES=20000) -- the line is DISARMED with the ProbeSet's "
+          "reason, the phase-start and R reads withheld too, and no advice to shorten the period",
+          all(len(a["ours"]) == 1 and len(a["theirs"]) == 1 and a["n"] == a["n_run"]
+              and "is DISARMED although its period is 1000 windows (EVAL_RETENTION_EVERY=1000)" in a["ours"][0]
+              and "the probe pinned nothing" in a["ours"][0] and "the phase starts'" in a["ours"][0]
+              and "Shorten the period" not in a["ours"][0] for a in (_nb, _nr))
+          and "DATA_SYNTH_HOLDOUT=0" in _nb["ours"][0] and "DATA_HOLDOUT_FRAC" in _nr["ours"][0],
+          f"{str(_nb['ours'])[:160]} || {str(_nr['ours'])[:160]}")
+    _n20, _a20 = _a16["noblock20"], _a16["armed20"]
+    _order = list(_p16(_nb20))
+    _before = [w for w in _n20["audit"] if not w.startswith(rtag)
+               and any(w.startswith(f"cadence audit: '{k}' ") for k in _order[:_order.index("retention")])]
+    check("P16 over a probe that pinned nothing at a period the run can reach, RUN wrote no 'retention' "
+          "line, and the root ADDS its one, at the key's place in the mapping's order; an armed probe at "
+          "such a period gets none",
+          _n20["theirs"] == [] and len(_n20["ours"]) == 1 and _n20["n"] == _n20["n_run"] + 1
+          and "is DISARMED although its period is 20 windows" in _n20["ours"][0]
+          and _n20["audit"].index(_n20["ours"][0]) == len(_before)
+          and _a20["ours"] == [] and _a20["theirs"] == [] and _a20["n"] == _a20["n_run"],
+          f"{_n20['audit']}")
+    _pos = ["cadence audit: every declared gate can fire at this run length -- 8 gate(s) checked "
+            f"against a run of {_n20['rw']}."]
+    _rep = None if _ra16 is None else _ra16(_nb20, _pos, run_windows=_rw16(_nb20), periods=_p16(_nb20))
+    check("P16 ... and where RUN's whole audit was 'every declared gate can fire', which the probe that "
+          "pinned nothing makes false, the root's line replaces it",
+          _rep == _n20["ours"], str(_rep)[:200])
+    check("P16 in all six configurations the audit is RUN's lines through _trust_audit and "
+          "_retention_audit, and every line but the probe's is the one _trust_audit handed on",
+          all(a["chain"] and a["rest"] for a in _a16.values()),
+          str({k: (a["chain"], a["rest"]) for k, a in _a16.items()}))
+    del _nb20
+    # THE READS THE ARMED LINE PROMISES, DRIVEN at the shipped 1000 over 12 windows (generation off, for
+    # wall time): one phase-start read, fed to CKPT's retention, and R's two, while the gate is asked
+    # every window and fires never. (The pinned-nothing line's withholding is P1's off arms, above.)
+    _s16 = build(EVAL_RETENTION_EVERY=1000, EVAL_GENERATE=0, **H)
+    _r16 = loop.run(_s16, max_windows=12, progress=False)
+    _b16 = book(_r16)
+    check("P16 at the shipped 1000 a 12-window run reads as the armed line says: a phase-start read that "
+          "CKPT's retention consumes, and R's two through both closures, while 'retention' is asked 12 "
+          "times and fires never",
+          _b16.get("eval.holdout.phase_reads") == 1 and _b16.get("eval.holdout.boundary_reads") == 2
+          and _b16.get("eval.holdout.cadence_reads") == 0 and _b16.get("eval.holdout.calls") == 3
+          and _s16.retention.counters().get("probes_seen") == 1
+          and tuple(_r16.cadence_ledger["retention"][:2]) == (12, 0),
+          f"book {({k: _b16.get(k) for k in ('eval.holdout.phase_reads', 'eval.holdout.boundary_reads', 'eval.holdout.cadence_reads')})}; "
+          f"retention {_s16.retention.counters()}; ledger {_r16.cadence_ledger['retention']}")
+    del _s16, _r16
 
     # ---- P4 (pure): a half with no room pins nothing, draws nothing, mints nothing ---------------
     ev20p = configs(EVAL_RETENTION_EVERY=20)["EVAL"]

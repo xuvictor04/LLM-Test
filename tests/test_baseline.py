@@ -6,14 +6,19 @@ floor between two runs of the SAME tree; it holds no record of an earlier tree. 
 (S0b's mid-epoch act first) promises that a default run with the new mechanism disarmed reproduces the
 tree it started from. That promise needs a stored trace from the base commit.
 
-THE WORKLOADS (the WORKLOADS table below): six shapes, each held three ways since 2026-09-29.
+THE WORKLOADS (the WORKLOADS table below): since 2026-09-29, six shapes, each held twice -- at the shipped
+defaults and under the pins -- and B5 a third time, unpinned against its pre-SR0 record (B5u).
   B1 ... B6r   the six shapes at the SHIPPED DEFAULTS, recorded at the commit after 444ecca -- the one
                that flipped register 04-Q5's, 04-6.2's and 04-6.3's defaults (DATA_SYNTH_HOLDOUT on,
                EVAL_RETENTION_EVERY 1000 with a read at every phase start, DATA_TRUST 'observe';
-               DEFAULT BEHAVIOUR CHANGES 1-3). Every synthetic stream changed there, and each default
-               run now also reads the pinned held-out windows, generates after its final save and keeps
-               the source-reliability book. Those records are the flipped tree's own runs, recorded
-               when it was committed: a change after it is held to them.
+               DEFAULT BEHAVIOUR CHANGES 1-3). Every synthetic stream changed there, and every default
+               run now keeps the source-reliability book; each one whose held-out halves can hold a
+               window behind its routing prefix also reads them and generates after its final save.
+               B6 and B6r's 20,000-byte stream pins nothing, so their records carry no eval.* key
+               (eval.holdout.calls reads 3 in B1, 6 in B3 and 4 in B5, and 5 in B3r's parent and 10 in
+               its child, the lineage's total).
+               Those records are the flipped tree's own runs, recorded when it was committed: a change
+               after it is held to them.
   B1p ... B6rp THE SAME SIX, EACH UNDER PRE_SR0_PINS, AGAINST THE RECORD MADE BEFORE THE FLIP (the files
                *_pre_sr0.json, the six fixtures as they stood, moved unchanged): "the pinned tree is
                the previous tree", 04-Q5's pin rule, made a test. See PINS below.

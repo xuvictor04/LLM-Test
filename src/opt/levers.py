@@ -765,7 +765,11 @@ class OPTLevers(LeverSet):
     #     next read; a Reading whose `at` equals the last one is the same measurement re-delivered
     #     and is counted once (the opt.shift.notifications rule).
     #   'probe' WITH EVAL_RETENTION_EVERY=0 IS REFUSED AT STARTUP (spine/compose.py, RefusedRun): a
-    #     source that can never produce is the armed-but-inert state this tree refuses by name.
+    #     source that can never produce is the armed-but-inert state this tree refuses by name. SO IS
+    #     'probe' OVER A PROBE THAT PINNED NOTHING (2026-09-29, the flip's review) -- no area holding a
+    #     held-out block, or no half long enough for a window behind its routing prefix -- at compose's
+    #     'probe' stage, where that is first known, as FAB_CONTRIB=1 is. The gap is as old as the probe;
+    #     04-6.2's flip put it within reach of 'probe' alone, which composes at the shipped 1000.
 
     lr_decay = Lever(1.0, "Strength of a monotone envelope over successive restart peaks, so each cycle "
                           "keeps its own high phase while the ceiling comes down.", U.FRACTION,

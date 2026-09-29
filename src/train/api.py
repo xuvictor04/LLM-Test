@@ -1324,12 +1324,17 @@ def cadence_audit(run: Config, *, run_windows, periods):
     refuses any other kind at both ends.
 
     IT COVERS EIGHT GATES SINCE 2026-09-28 ('data.trust', DATA.trust_period, reported DISARMED at
-    DATA_TRUST='off', the shipped value until 04-6.3's flip on 2026-09-29 -- the one key whose line
-    the root rewords, spine/compose.py::_trust_audit, since Q-DATA-11's review: DATA_TRUST arms that
-    book and no period does, and at 'observe' the loop passes it beside its gate at each epoch's end
-    and a stop's tail, so the two sentences below, written for a gate that is its cadence alone, were
-    wrong about it), SEVEN FROM 2026-09-27 ('retention', EVAL.retention_period, reported DISARMED at
-    0, the shipped value until 04-6.2's flip on 2026-09-29), AND SIX,
+    DATA_TRUST='off', the shipped value until 04-6.3's flip on 2026-09-29 -- one of the TWO keys whose
+    line the root rewords, spine/compose.py::_trust_audit, since Q-DATA-11's review: DATA_TRUST arms
+    that book and no period does, and at 'observe' the loop passes it beside its gate at each epoch's
+    end and a stop's tail, so the two sentences below, written for a gate that is its cadence alone,
+    were wrong about it), SEVEN FROM 2026-09-27 ('retention', EVAL.retention_period, reported
+    DISARMED at 0, the shipped value until 04-6.2's flip on 2026-09-29 -- the other,
+    spine/compose.py::_retention_audit, since the flip's review: the probe's arm test is the root's
+    pinned ProbeSet, and an armed probe reads at every phase start, at a resume's start and at R
+    beside its gate, so the starved sentence below was false on every shipped-default run of 506-937
+    windows at the shipped 1000, and neither sentence reaches a probe that pinned nothing; the
+    DISARMED sentence stands at 0, where it is true), AND SIX,
     NOT FIVE, FROM 2026-09-02. The sixth is 'progress', whose period is this module's
     PROGRESS_WINDOWS constant (Q-RUN-1). It is deliberately 100 Windows so that it FIRES at the
     shipped defaults and never joins the list above: a progress/ETA meter that prints zero times is

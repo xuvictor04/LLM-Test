@@ -64,7 +64,8 @@ shipped, and each names the arm it reads; everything else runs at its shipped va
       line at DATA_TRUST_EVERY=1, a period that arms nothing there -- and never RUN's "Set a period
       of 1 or more"; at 'observe' a period of 0, or one the run is too short for, is reported with
       the epoch-end and tail passes that still run, and a period the run can reach gets no line;
-      every other audit line is RUN's, unchanged. And the passes the line promises run: at
+      every other audit line is RUN's, unchanged, but the probe's, which the root words too since
+      the flip's review (tests/test_probe.py P16). And the passes the line promises run: at
       DATA_TRUST_EVERY=0 a whole run passes once, at its finishing roll, over every unit it
       consumed, and a stopped one once, at its tail.
 
@@ -995,7 +996,12 @@ def _main(tmp):
     # The join is fetched by name, so this file still runs, and these checks fail, on a tree
     # without it.
     tag = "cadence audit: 'data.trust' "
+    # THE PROBE'S LINE IS THE ROOT'S TOO (2026-09-29, the flip's review): the audit stage hands
+    # _trust_audit's lines on to _retention_audit, whose line for 'retention' tests/test_probe.py P16
+    # reads. Here that line is set aside beside the book's, and the chain is what the audit equals.
+    rtag = "cadence audit: 'retention' "
     _trust_audit = getattr(C, "_trust_audit", lambda s, lines, **kw: None)
+    _retention_audit = getattr(C, "_retention_audit", lambda s, lines, **kw: list(lines))
     seen = {}
     for label, env in (("off", {}), ("off1", {"DATA_TRUST_EVERY": "1"}),
                        ("obs0", {"DATA_TRUST": "observe", "DATA_TRUST_EVERY": "0"}),
@@ -1005,11 +1011,12 @@ def _main(tmp):
         rw = _run_windows(s)
         audit = [w for w in s.warnings if w.startswith("cadence audit:")]
         theirs = run_api.cadence_audit(s.configs["RUN"], run_windows=rw, periods=_periods(s))
+        ours = _trust_audit(s, theirs, run_windows=rw, periods=_periods(s))
         seen[label] = ([w for w in audit if w.startswith(tag)], int(rw),
-                       [w for w in audit if not w.startswith(tag)]
-                       == [w for w in theirs if not w.startswith(tag)]
-                       and len(audit) == len(theirs)
-                       and _trust_audit(s, theirs, run_windows=rw, periods=_periods(s)) == audit)
+                       [w for w in audit if not w.startswith((tag, rtag))]
+                       == [w for w in theirs if not w.startswith((tag, rtag))]
+                       and len(audit) == len(theirs) and ours is not None
+                       and _retention_audit(s, ours, run_windows=rw, periods=_periods(s)) == audit)
     off_l, off1_l = seen["off"][0], seen["off1"][0]
     check("T9 at 'off' (the file's arm) the audit's one 'data.trust' line is the root's: DISARMED by "
           "DATA_TRUST='off', DATA_TRUST='observe' named as what arms the book, never RUN's 'Set a "
@@ -1032,8 +1039,8 @@ def _main(tmp):
           and all("rolls each epoch" in ln and "once more at the end" in ln
                   and "Whatever it gates" not in ln for ln in obs0 + obs_long), f"{obs0} {obs_long}")
     check("T9 a period the run can reach gets no 'data.trust' line, and in all five configurations "
-          "every other audit line is RUN's own, the count unchanged: the root rewords one line and "
-          "adds none",
+          "every audit line but the book's and the probe's (tests/test_probe.py P16) is RUN's own, the "
+          "count unchanged: the root rewords the book's line and adds none",
           seen["obs10"][0] == [] and all(v[2] for v in seen.values()),
           str({k: v[2] for k, v in seen.items()}))
     # THE PASSES THE LINE PROMISES, DRIVEN at DATA_TRUST_EVERY=0 on a 12,000-byte real stream: a whole

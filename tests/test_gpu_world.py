@@ -100,6 +100,12 @@ is pinned here, on a fleet whose every number is chosen.
       carries them after EXTRA, and EXP=world carries none; on a tree that declares none of the three
       levers, and on one that declares DATA_SYNTH_HOLDOUT alone, each run carries exactly the pins whose
       lever the tree declares.
+  F19 THE PROBE'S BEST SAVES ARE IN THE DISK BUDGET (2026-09-29, the flip's review): wherever a run's
+      probe is armed ckpt_files counts ckpt.pt.best and .best.prev beside its other files, 2 + 2N at
+      CKPT_BEST_KEEP=N -- at EXP=world (the shipped 1000) and EXP=world_epoch (its pin), never at
+      EXP=retok (its pins) or at EVAL_RETENTION_EVERY=0, nor on a tree whose default is 0 or that
+      declares no probe; the settings read in run_job's order. An EXP=world launch at KEEP_CKPT=1
+      budgets 3 files a run and its banner names them.
 """
 import glob
 import json
@@ -778,6 +784,12 @@ if os.environ.get("STUB_SAVES") == "1" and os.environ.get("CKPT_DIR") and int(os
             json.dump({"entries": [[0, 1]] * (256 + i)}, fh)
         rot(ck + ".dyntok.json", ck + ".prev.dyntok.json")
         time.sleep(float(os.environ.get("STUB_SAVE_SLEEP", "0")))
+# STUB_FINAL_BYTES=n: A RUN WITH A CKPT_DIR LEAVES ONE FINAL CHECKPOINT n BYTES LONG -- sparse, so it takes
+# no disk -- and the smoke's largest checkpoint, which the fleet's disk check sizes every file at, is n.
+if os.environ.get("STUB_FINAL_BYTES") and os.environ.get("CKPT_DIR"):
+    os.makedirs(os.environ["CKPT_DIR"], exist_ok=True)
+    with open(os.path.join(os.environ["CKPT_DIR"], "ckpt.pt"), "wb") as fh:
+        fh.truncate(int(os.environ["STUB_FINAL_BYTES"]))
 ''')
     o10 = os.path.join(TMP, "f10", "gpu_world_out")
     book = os.path.join(TMP, "f10_book.jsonl")
@@ -1446,6 +1458,69 @@ esac
               and line_want + "\n" in s18,
               f"rc {p18.returncode}; {len(r18)} run(s); {sorted({json.dumps(r['pins']) for r in r18})[:2]}; "
               f"{[l for l in s18.splitlines() if l.startswith('=== pins')]}; {p18.stderr[-300:]!r}")
+
+    # ---- F19: the probe's best saves in the disk budget (2026-09-29, the flip's review) ----------------
+    # With CKPT_DIR set an armed retention probe writes ckpt.pt.best and ckpt.pt.best.prev (and
+    # CKPT_BEST_KEEP's slots, each with its .prev) beside the ring, and ckpt_files counted the final save
+    # alone. The budget block, cut out of the script by its markers, is run in this tree and in two
+    # stand-in trees -- one whose EVAL_RETENTION_EVERY defaults to 0 (before 04-6.2's flip) and one
+    # declaring none (before SR0) -- over each experiment's pins as the script sets them.
+    _blk19 = re.search(r"^# >>> THE BEST SAVES' BUDGET.*?^# <<< THE BEST SAVES' BUDGET$", open(SCRIPT).read(),
+                       re.M | re.S)
+    _pins19 = {"world": "", "retok": PINS18,
+               "world_epoch": "TOK_RETOK_EVERY=3000 DATA_DRAW=planned DATA_SYNTH_HOLDOUT=1 EVAL_RETENTION_EVERY=700"}
+    t19 = os.path.join(TMP, "f19")
+    for _d19, _ev19 in (("preflip", "    retention_every = Lever(\n        0, 'x', U.Windows)\n"),
+                        ("presr0", "    curve_every = Lever(\n        2000, 'x', U.Windows)\n")):
+        write(os.path.join(t19, _d19, "src", "eval", "levers.py"), _ev19)
+        write(os.path.join(t19, _d19, "src", "ckpt", "levers.py"), "    best_keep = Lever(0, 'x', U.COUNT)\n")
+
+    def budget19(tree, exp, extra="", **env):
+        """[BEST_FILES, ckpt_files fb_off, k0, k0_nuis] at WINDOWS 20000, KEEP_EVERY 1000."""
+        prog = (f'EXP={exp}; EXTRA="{extra}"; EXP_ENV="{_pins19[exp]}"; WINDOWS=20000; KEEP_EVERY=1000\n'
+                + (_blk19.group(0) if _blk19 else "BEST_FILES=?")
+                + '\necho "$BEST_FILES $(ckpt_files fb_off) $(ckpt_files k0) $(ckpt_files k0_nuis)"\n')
+        p = subprocess.run(["bash", "-c", prog], cwd=tree, env=clean_env(**env), capture_output=True, text=True,
+                           timeout=60)
+        return [int(x) if x.isdigit() else x for x in p.stdout.split()]
+
+    _pf, _ps = os.path.join(t19, "preflip"), os.path.join(t19, "presr0")
+    got19 = {"world": budget19(ROOT, "world"), "world_epoch": budget19(ROOT, "world_epoch"),
+             "retok": budget19(ROOT, "retok"),
+             "EXTRA 0": budget19(ROOT, "world", "EVAL_RETENTION_EVERY=0"),
+             "env 0": budget19(ROOT, "world", EVAL_RETENTION_EVERY="0"),
+             "env keep 2": budget19(ROOT, "world", CKPT_BEST_KEEP="2"),
+             "EXTRA keep 3 over env 1": budget19(ROOT, "world", "CKPT_BEST_KEEP=3", CKPT_BEST_KEEP="1"),
+             "world_epoch pin over EXTRA 0": budget19(ROOT, "world_epoch", "EVAL_RETENTION_EVERY=0"),
+             "preflip world": budget19(_pf, "world"), "preflip world_epoch": budget19(_pf, "world_epoch"),
+             "presr0 world_epoch": budget19(_ps, "world_epoch")}
+    want19 = {"world": [2, 3, 26, 4], "world_epoch": [2, 3, 26, 4], "retok": [0, 1, 24, 2],
+              "EXTRA 0": [0, 1, 24, 2], "env 0": [0, 1, 24, 2], "env keep 2": [6, 7, 30, 8],
+              "EXTRA keep 3 over env 1": [8, 9, 32, 10], "world_epoch pin over EXTRA 0": [2, 3, 26, 4],
+              "preflip world": [0, 1, 24, 2], "preflip world_epoch": [2, 3, 26, 4],
+              "presr0 world_epoch": [0, 1, 24, 2]}
+    check("F19 ckpt_files counts the probe's best saves where a run's probe is armed: 2 more at EXP=world (the "
+          "shipped 1000) and EXP=world_epoch (its pinned 700), 2 + 2N at CKPT_BEST_KEEP=N (EXTRA over the "
+          "environment), none at EXP=retok, at EVAL_RETENTION_EVERY=0 from EXTRA or the environment, on a tree "
+          "whose default is 0 or that declares no probe -- and a pin beats EXTRA, as run_job's order does",
+          got19 == want19, str({k: v for k, v in got19.items() if v != want19.get(k)}))
+    # AND THE LAUNCH SAYS SO: EXP=world at KEEP_CKPT=1, the stand-in leaving a 10 MB final checkpoint --
+    # 5 runs x 3 files x 2 x 10 MB is 0.3 GB, where the final save alone was 0.1 -- and the banner names
+    # the best saves.
+    o19 = os.path.join(TMP, "f19", "gpu_world_out")
+    p19 = subprocess.run(["bash", SCRIPT], cwd=ROOT, capture_output=True, text=True, timeout=300,
+                         env=clean_env(PATH=env10["PATH"], STUB_BOOK=os.path.join(TMP, "f19_book.jsonl"),
+                                       STUB_FINAL_BYTES="10000000", KEEP_CKPT=1, DEVICE="cpu", WINDOWS=20,
+                                       SEEDS="0", PAR=1, SMOKE_WINDOWS=5, OUT=o19))
+    s19 = open(os.path.join(o19, "SUMMARY.txt")).read() if os.path.exists(os.path.join(o19, "SUMMARY.txt")) else ""
+    check("F19 an EXP=world launch at KEEP_CKPT=1 budgets 3 checkpoint files a run -- 0.3 GB for its 5 runs at the "
+          "smoke's 10 MB -- and its banner names the probe's best saves beside the final one",
+          p19.returncode == 0
+          and "=== disk: checkpoints may take about 0.3 GB (10 MB x 2 per file)" in s19
+          and "=== kept checkpoints: ON, one final checkpoint per run under " in s19
+          and "the retention probe's best saves (ckpt.pt.best and .best.prev): up to 3 checkpoint files per run" in s19,
+          f"rc {p19.returncode}; {[l for l in s19.splitlines() if 'disk' in l or 'kept checkpoints' in l]}; "
+          f"{p19.stderr[-300:]!r}")
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
 

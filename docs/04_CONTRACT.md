@@ -1445,6 +1445,7 @@ training path and 1 byte on the eval path with every check green.
 | `_area_ids` / `_window_areas` / `_faded_ids` | `area_id` (`FAB.observe`: one per window, its first token's area), `areas` (`MEM.write`: one per position, beside `positions`) and `faded` (`FAB.manage`: `Plan.faded` at the window's phase plus `Plan.parent_faded`), each as `spine/derive.py::area_id` numbers over `Stream.area_names` — Q-FAB-18, Q-MEM-16. |
 | `_trust_units(sysm, lo, hi)` | `units` and `sources` (`DATA.claims_observe`): each TOK unit's **bytes** over this epoch's `ids[lo:hi]`, cut out of `Stream.bytes` at `Segmentation.byte_pos`, and each unit's source name off `Stream.sources`/`Stream.source_names` — `None` where a source run starts inside the unit. It replaces 04's `ids` plus a root-composed `decode` (DATA may not import TOK) — Q-DATA-11. |
 | `_trust_audit(sysm, lines, *, run_windows, periods)` | the `audit` stage's warnings: `RUN.cadence_audit`'s lines, the one for `'data.trust'` in the root's words and every other as RUN wrote it. At `DATA_TRUST='off'` it names `DATA_TRUST='observe'` as what arms the book, since no period does; at `'observe'` a period of 0, or one the run is too short for, is reported with the epoch-end and tail passes that still run. Compose-side, beside `_probe_notices` — Q-DATA-11's review. |
+| `_retention_audit(sysm, lines, *, run_windows, periods)` | the same warnings after `_trust_audit`, the line for `'retention'` in the root's words wherever RUN's would be false: an armed probe (`_probe_armed`) with a period past the run is told its PERIODIC reading cannot fire, beside the phase-start, resume-start and R reads (and generation) that still run, the period named as 04-6.2's interim value rather than a fault; a probe that pinned nothing is DISARMED with the `ProbeSet`'s reason at any period — the one line the root adds, at the key's place, where RUN wrote none. At `EVAL_RETENTION_EVERY=0` RUN's DISARMED line stands, true there. Compose-side, as `_trust_audit` is — Q-EVAL-12, the flip's review. |
 
 What is deliberately **not** there, because writing it would be inventing a producer rather than
 naming one: an `improving` EMA pair (FAB already keeps one, and a second would be two mechanisms
@@ -1560,7 +1561,7 @@ Every periodic row names a period a package **declares**, evaluated through
 | `fab.manage` | `FAB.manage_period(fab)` ← `FAB.manage_every` | FAB |
 | `dom.rekey` | **`MEM.rekey_period(mem)`** ← `MEM.rekey_every` | MEM — delivered by the spine, with the `SIG.mode == "learned"` arm also evaluated here, because the old line made *two foreign reads in one line* (`:6688-6689`) |
 | `ckpt` | `CKPT.save_period(ck)` ← `CKPT.every` | CKPT |
-| `retention` | `EVAL.retention_period(ev)` ← `EVAL.retention_every` | EVAL — the retention probe, since 2026-09-27 (Q-EVAL-12); its arm test is asked first, so at 0 — the shipped value until 04-6.2's flip, 2026-09-29 — the key reads `checks == 0`; at the shipped 1000 it is asked every window and a shipped-default run (506-937 windows) reads fires 0, its reads the phase starts' |
+| `retention` | `EVAL.retention_period(ev)` ← `EVAL.retention_every` | EVAL — the retention probe, since 2026-09-27 (Q-EVAL-12); its arm test (a pinned `ProbeSet`) is asked first, so at 0 — the shipped value until 04-6.2's flip, 2026-09-29 — and wherever the probe pinned nothing the key reads `checks == 0`; at the shipped 1000 an armed probe's gate is asked every window and a shipped-default run (506-937 windows) reads fires 0, its reads the phase starts' and R's — which the audit's line for the key, **the root's** since the flip's review (`compose.py::_retention_audit`), says beside the periodic reading that cannot fire, where RUN's starved sentence called them never reached; a probe that pinned nothing is DISARMED there at any period |
 | `data.trust` | `DATA.trust_period(dat)` ← `DATA.trust_every` at `DATA_TRUST='observe'`, **0** at `'off'` | DATA — the source-reliability book, since 2026-09-28 (Q-DATA-11); its arm test (`DATA_TRUST != 'off'`) is asked first, so at `'off'` — the shipped value until 04-6.3's flip, 2026-09-29 — the key reads `checks == 0` at period 0, which the audit reports DISARMED — **in the root's line for the key** (`compose.py::_trust_audit`, Q-DATA-11's review), naming `DATA_TRUST='observe'` as the arm, where RUN's own advice, a period of 1 or more, arms nothing. At `'observe'` the book also passes on the window that rolls each epoch and at a stop's tail, so a period of 0, or one the run is too short for, is reported with those passes |
 | `progress` | `RUN.PROGRESS_WINDOWS`, a module constant written `units.Windows` | RUN — the progress/ETA line (Q-RUN-1); no lever and no row of its own |
 | MEM's probe/rekey | `MEM.probe_every`, `MEM.rekey_every`, compared inside `maintain` against a Windows `now` | MEM — **NOT ledger gates**, see below |
@@ -7206,11 +7207,12 @@ flip gives the synthetic source), reads memory-off at every phase start and on t
 reaches it — a shipped-default run of 506-937 windows never does, so `eval.holdout.cadence_reads` reads
 PRESENT-and-0 — reads its R boundary through both closures, feeds `CKPT.Retention.consider` each finite
 control mean (with `CKPT_DIR` set, a `.best` save at every new best, the first reading always one: a
-full checkpoint each, frequent early in training, which an owner fleet with `CKPT_DIR` budgets), runs
-`EVAL.blowup`, inert at 1000 (80 readings without a new best is 80,000 windows), and generates after
-the final save; OPT reads none of it at the shipped `OPT_DAMP_SOURCE='off'`. The root prints its two
-startup notices, above 160 and a phase projected below five readings, and the cadence audit's line for
-'retention'. **Nothing a run trains on moves:** P1 re-run at the new defaults — the book at its shipped
+full checkpoint each, frequent early in training, which an owner fleet with `CKPT_DIR` budgets —
+`gpu_world.sh` since the review below), runs `EVAL.blowup`, inert at 1000 (80 readings without a new
+best is 80,000 windows), and generates after the final save; OPT reads none of it at the shipped
+`OPT_DAMP_SOURCE='off'`. The root prints its two startup notices, above 160 and a phase projected
+below five readings, and the cadence audit's line for 'retention' (the root's since the review
+below). **Nothing a run trains on moves:** P1 re-run at the new defaults — the book at its shipped
 'observe' in both arms, the block on — passes, and on the real source B5u reproduces the record made
 before the flip on every loss and every counter but P1's exempt set (`tests/test_baseline.py`), which
 moves by the reads beside training: at B5's 200 windows `lm.encode.calls` 606 → 924, `lm.decode.calls`
@@ -7236,6 +7238,54 @@ off, composes at the shipped defaults, whose probe pins a control half in every 
 refusals stand at their arms, and `tests/test_contribution.py` C-7 names those arms). **What CPU
 establishes:** operation only.
 
+**AMENDED 2026-09-29 — THE FLIP'S REVIEW.** Five findings against the flip, each measured on the flipped
+tree (CPU, operation only). Three moved behaviour or a budget and are held by tests that fail on the
+flipped tree before them; two were prose, corrected where they stood.
+* **The cadence audit's line for `'retention'` is the root's** (§3.0.2, `compose.py::_retention_audit`;
+  the ruling on the line the note above lists among what a default run prints). At the shipped 1000
+  every shipped-default run of 506-937 windows got RUN's starved sentence — "CANNOT FIRE ONCE. Whatever
+  it gates does not happen in this run … Shorten the period, or lengthen the run" — while the same run
+  read at its phase starts and at R, fed `CKPT.Retention` and generated: B1's record at the flip reads
+  `eval.holdout.calls` 3 (one phase-start read and R's two), `cadence_reads` 0 and 16 continuations;
+  and the advice named 04-6.2's ruled interim value as the fault. RUN's sentences are a cadence's, the
+  probe's arm test is the root's (a pinned `ProbeSet`), and the reads beside the cadence are the loop's,
+  so the root words the line, after `_trust_audit` (Q-DATA-11's review, the same shape): armed with a
+  period past the run, the probe's PERIODIC reading cannot fire once, beside the phase-start,
+  resume-start and R reads (and generation) that still run, the period named as the cadence alone and
+  1000 as 04-6.2's interim telemetry value, with a period at or below the run's length named as what
+  adds a periodic reading. Over a probe that pinned nothing — no block, or no half with room (B6's
+  20,000-byte stream) — the line is DISARMED with the `ProbeSet`'s reason at any period: RUN's advice
+  to shorten the period reached nothing, and where the period fits the run RUN wrote no line for a gate
+  the arm test never asks, so there the root ADDS its one line, at the key's place in the mapping's
+  order (and in place of RUN's "every declared gate can fire" where that was the whole audit — the one
+  addition, in the one state RUN cannot see). At `EVAL_RETENTION_EVERY=0` RUN's DISARMED line stands:
+  nothing is pinned, read or generated there, and a period of 1 or more is what arms the probe. An armed
+  probe whose period the run can reach gets no line, as before. `tests/test_probe.py` P16, which also
+  drives the reads the armed line promises (at the shipped 1000, 12 windows: one phase-start read that
+  `CKPT.Retention` consumes and R's two, the gate asked 12 times and firing never); `tests/test_trust.py`
+  T9 sets the probe's line aside beside the book's.
+* **`OPT_DAMP_SOURCE='probe'` over a probe that pinned nothing is refused** (Q-OPT-13's dated note), at
+  the `probe` stage beside `FAB_CONTRIB=1`'s pinned-nothing refusal. The flip's consequence for it,
+  named beside `FAB_CONTRIB=1`'s above: `'probe'`, refused at startup while the probe shipped off,
+  composes at the shipped defaults, whose probe pins a control half in every area, and is refused where
+  the probe pins none.
+* **`gpu_world.sh` budgets the probe's best saves.** "Which an owner fleet with `CKPT_DIR` budgets", above,
+  was not true of the owner's script: at `KEEP_CKPT=1` every EXP=world and EXP=world_epoch run has a
+  `CKPT_DIR` (its final save only, `CKPT_EVERY=0`) and an armed probe, and `ckpt_files` counted one file
+  a run where the run leaves three — driven at 200 windows on a 60,000-byte stream, the tenth-size
+  fabric: four saves, and `ckpt.pt`, `ckpt.pt.best` and `ckpt.pt.best.prev` on disk (51.5, 50.9 and 49.9
+  MB) with their three vocabulary files beside the directory. `ckpt_files` now adds `BEST_FILES`, 2 + 2N
+  at `CKPT_BEST_KEEP=N`, wherever a run's probe is armed — its `EVAL_RETENTION_EVERY` above 0, read in
+  `run_job`'s order (EXTRA, then the experiment's pins, else the environment, else the lever's declared
+  default off `src/`), so never at EXP=retok, whose pins turn the probe off; the banner, the header and
+  EXP=world_epoch's pre-registration say so. `tests/test_gpu_world.py` F19.
+* **Prose.** `tests/test_baseline.py`'s docstring held six shapes "three ways" and had every default run
+  reading and generating: the six shapes are held twice, at the shipped defaults and under the pins,
+  and B5 a third time (B5u), and B6 and B6r pin nothing, so their records carry no `eval.*` key.
+  `sweep_world.sh` said, and wrote into its SUMMARY, that "there is no held-out number in the loop":
+  since the flip every run it launches prints the probe's readings, and the sentence is dated, its
+  columns still training loss.
+
 ### Q-OPT-13 — where the restart damping's held-out Reading comes from — **RESOLVED 2026-09-27 (Proposal 04 NEW-03): `OPT_DAMP_SOURCE`, BUILT `'off'`; `'probe'` HANDS IT THE RETENTION PROBE'S CONTROL MEAN; `st.reading_at` CHECKPOINTED. ⚠ ONE NEW LEVER, A CENSUS AMENDMENT. NO SIGNATURE MOVES, NO WIRE**
 `OPT.maybe_step`'s `best_bpb` is the one held-out measurement that crosses back into a training
 decision, and it had no producer. It has one now (`System.probe_reading`, Q-EVAL-12), and whether
@@ -7258,6 +7308,20 @@ reading and, under `'probe'`, departed at the first restart inside that gap; the
 a source that can never produce is the armed-but-inert state this tree refuses by name. The backward
 edge is written in the `maybe_step` row's note, not in `ROW_ARGUMENTS_ELSEWHERE`: `maybe_step` has
 no required parameter, so K10 would report an entry there stale.
+
+**AMENDED 2026-09-29 — THE FLIP'S REVIEW (Q-EVAL-12's review note): `'probe'` OVER A PROBE THAT PINNED
+NOTHING IS REFUSED TOO.** The `refuse` stage tests the period alone, so `'probe'` composed over an armed
+probe that pinned no window — no area holding a block (`DATA_SYNTH_HOLDOUT=0` on the synthetic
+source), or no half long enough for a window behind its prefix — where the arm test fails, no reading
+is taken and `System.probe_reading` stays None: the same source that can never produce. The gap is as
+old as the probe; 04-6.2's flip moved where it is reached, since `'probe'` alone now composes at the
+shipped 1000 — driven on the flipped tree, `{OPT_DAMP_SOURCE: probe, DATA_STREAM_BYTES: 20000}`
+composed at stage `'assembled'` with `probe_set.items` empty where `FAB_CONTRIB=1` in the same shape was
+refused. **Ruled:** refused at the `probe` stage, where it is first known, beside `FAB_CONTRIB=1`'s
+pinned-nothing refusal, and raised with it at the second stop (`valve`, CAP's), the refusal naming the
+`ProbeSet`'s reason and what gives a half room. At the shipped defaults, whose probe pins a control
+half in every area, `'probe'` composes — the flip's consequence for it, as for `FAB_CONTRIB=1`.
+`tests/test_probe.py` P7.
 
 ### Q-DOM-6 — the domain a held-out window would be routed to, asked read-only — **RESOLVED 2026-09-27 (Q-EVAL-12): `DOM.nearest(dom, part, *, signature)`, `_assign`'s DECISION FACTORED INTO ONE PURE HELPER. NO LEVER, NO WIRE**
 The closures route windows the run did not train on, and `DOM.observe` advances the boundary clock,

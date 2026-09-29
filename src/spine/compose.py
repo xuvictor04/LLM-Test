@@ -863,7 +863,13 @@ ASSEMBLY_ORDER = (
                                               "stop's tail, beside its gate), "
                                               "seven from 2026-09-27, when "
                                               "'retention' joined (EVAL.retention_period, off at 0 "
-                                              "and so reported DISARMED), and six before that, "
+                                              "and so reported DISARMED -- and in a line the root "
+                                              "words, _retention_audit, since the flip's review, "
+                                              "wherever the probe is armed or pinned nothing: RUN's "
+                                              "starved sentence called an armed probe's phase-start "
+                                              "and R reads a mechanism never reached, and its advice "
+                                              "to shorten the period named 04-6.2's 1000 as the "
+                                              "fault), and six before that, "
                                               "since the cadence stage was repaired to pass "
                                               "_periods(sysm): the sixth was "
                                               "'progress', whose period is RUN.PROGRESS_WINDOWS, "
@@ -2813,7 +2819,8 @@ def compose(environ=None, *, restored=None):
     # two packages' frozen Configs, so it is the root's and it is taken here, before any tensor.
     # OPT_DAMP_SOURCE='probe' asks OPT to judge restarts on the retention probe's control mean, and
     # at EVAL_RETENTION_EVERY=0 there is no probe -- the armed-but-inert state this tree refuses
-    # rather than runs.
+    # rather than runs. (Over an armed probe that pinned no window it is refused at the 'probe'
+    # stage, where that can be known, since the flip's review, 2026-09-29.)
     if str(opt.damp_source) == "probe" and int(ev.retention_every) <= 0:
         sysm.refusals.append(
             f"OPT_DAMP_SOURCE='probe' with EVAL_RETENTION_EVERY={int(ev.retention_every)}: the "
@@ -3209,6 +3216,22 @@ def compose(environ=None, *, restored=None):
             f"half, and nothing was pinned -- {sysm.probe_set.reason} Raise DATA_HOLDOUT_FRAC or "
             f"the stream's length (on the synthetic source DATA_SYNTH_HOLDOUT=1 is what holds a "
             f"block out), or leave FAB_CONTRIB=0.")
+    # AND SO IS OPT_DAMP_SOURCE='probe' (2026-09-29, the flip's review; Q-OPT-13). The `refuse` stage
+    # refuses it at EVAL_RETENTION_EVERY=0, and an armed probe that pinned nothing is the same source
+    # that can never produce: the arm test fails, no reading is taken, and System.probe_reading stays
+    # None, so the damping would run judging nothing on every restart. The gap is as old as the probe
+    # -- the `refuse` stage tests the period alone -- and the flip moved where it is reached: until
+    # 04-6.2's flip 'probe' composed only where EVAL_RETENTION_EVERY was set by hand, and since, at
+    # the shipped 1000, so a stream whose halves hold no window -- or a synthetic one at
+    # DATA_SYNTH_HOLDOUT=0 -- composed with OPT_DAMP_SOURCE='probe' as the only setting. Stops at the
+    # second stop point, with FAB_CONTRIB's and CAP's.
+    if str(opt.damp_source) == "probe" and int(ev.retention_every) > 0 and not sysm.probe_set.items:
+        sysm.refusals.append(
+            f"OPT_DAMP_SOURCE='probe': the damping would judge every restart on the retention "
+            f"probe's control mean, and nothing was pinned -- {sysm.probe_set.reason} So no "
+            f"Reading can ever arrive. Raise DATA_HOLDOUT_FRAC or the stream's length (on the "
+            f"synthetic source DATA_SYNTH_HOLDOUT=1 is what holds a block out), or leave "
+            f"OPT_DAMP_SOURCE at 'off'.")
 
     sysm.stage = "fabric"
     sysm.fabric = fab_api.build(
@@ -3653,10 +3676,17 @@ def compose(environ=None, *, restored=None):
     # flags is written for a gate that is its cadence and nothing more, and 'data.trust' is armed by
     # DATA_TRUST and passes beside its cadence at each epoch's end and a stop's tail -- both this
     # file's loop's -- so _trust_audit words that one line and returns the rest as RUN wrote them.
+    # AND SO IS THE PROBE'S (2026-09-29, the flip's review; Q-EVAL-12): its arm test is this file's
+    # pinned ProbeSet, and an armed probe reads at every phase start, at a resume's start and at R
+    # beside its cadence, so RUN's starved sentence was false on every shipped-default run of 506-937
+    # windows and its advice named 04-6.2's 1000 as the fault. _retention_audit words that key's line
+    # after _trust_audit, and RUN's own DISARMED line stands at EVAL_RETENTION_EVERY=0, where it is
+    # true.
     sysm.stage = "audit"
     _rw = _run_windows(sysm)
-    sysm.warnings.extend(_trust_audit(
-        sysm, run_api.cadence_audit(run, run_windows=_rw, periods=periods),
+    sysm.warnings.extend(_retention_audit(
+        sysm, _trust_audit(sysm, run_api.cadence_audit(run, run_windows=_rw, periods=periods),
+                           run_windows=_rw, periods=periods),
         run_windows=_rw, periods=periods))
 
     # -- 12. persistence: the one predicate, then the retention policy and the save signal --------
@@ -4538,7 +4568,9 @@ def _probe_armed(sysm):
     reads zero checks. AN AREA IN items HOLDS A WINDOW (2026-09-27, Q-EVAL-12's review): until
     pin_holdout left out an area neither of whose halves could hold one, a ProbeSet of blocks too
     short for any window carried every area with two empty halves, and this test counted a probe
-    armed that could never read."""
+    armed that could never read. THE CADENCE AUDIT READS THE SAME TEST (_retention_audit, the flip's
+    review): an armed probe's line names the reads beside its cadence, and one that pinned nothing
+    is DISARMED whatever its period."""
     ps = sysm.probe_set
     return ps is not None and bool(ps.items)
 
@@ -4696,6 +4728,87 @@ def _trust_audit(sysm, lines, *, run_windows, periods):
                    f"windows long, so the book's PERIODIC pass CANNOT FIRE ONCE {beside} Shorten "
                    f"DATA_TRUST_EVERY for a pass every that many windows as well.")
     return [own if str(ln).startswith(tag) else ln for ln in lines]
+
+
+def _retention_audit(sysm, lines, *, run_windows, periods):
+    """RUN.cadence_audit's `lines` (after _trust_audit), with the line for 'retention' in the root's
+    words wherever RUN's would be false (2026-09-29, the flip's review; Q-EVAL-12). -> list of str,
+    every other line as it was handed in.
+
+    RUN'S TWO SENTENCES ARE WRITTEN FOR A GATE THAT IS ITS CADENCE AND NOTHING MORE, and the probe is
+    not: its arm test is the root's (_probe_armed, a pinned ProbeSet) and the loop asks it before
+    the gate, and an armed probe reads beside its cadence -- at the first window of every phase, at a
+    resume's start and at R through both closures -- and generates after the final save. So RUN's
+    line was false two ways once 04-6.2's flip shipped 1000:
+      * ARMED, WITH A PERIOD THE RUN IS TOO SHORT FOR -- every shipped-default run of 506-937
+        windows -- RUN said the gate "CANNOT FIRE ONCE. Whatever it gates does not happen in this
+        run ... Shorten the period", and B1's record at the flip (`run.py --max-windows 80` at
+        DATA_STREAM_BYTES=120000) reads eval.holdout.calls 3, one phase-start read and R's two,
+        cadence_reads 0, and 16 continuations generated; the advice named 04-6.2's ruled interim
+        value as the fault;
+      * WITH EVAL_RETENTION_EVERY ABOVE 0 AND NOTHING PINNED -- no area holding a block, or no half
+        long enough for a window behind its prefix (B6's 20,000-byte stream) -- the arm test
+        withholds every reading, the phase starts' and R's with the cadence's, so RUN's advice to
+        shorten the period reaches nothing, and where the period fits the run RUN wrote no line at
+        all, or its "every declared gate can fire", for a gate the loop never asks.
+    At EVAL_RETENTION_EVERY=0 RUN's DISARMED line is true and stands: nothing is pinned, read or
+    generated, and a period of 1 or more is what arms the probe. An armed probe whose period the run
+    can reach gets no line, as before. The root's line replaces RUN's, found by the key RUN opens
+    each line with; where RUN wrote none -- a positive period over a probe that pinned nothing, the
+    one state RUN cannot see -- ONE line is added, at the key's place in the mapping's order, in
+    place of RUN's "every declared gate can fire" when that was the whole audit. The mapping RUN
+    audits is the one new_cadences was given: this words one key's line, it is not a second audit."""
+    key = "retention"
+    tag = f"cadence audit: {key!r} "
+    if key not in periods:
+        return list(lines)
+    ev = sysm.configs["EVAL"]
+    every, n, run_n = int(ev.retention_every), int(periods[key]), int(run_windows)
+    ps = sysm.probe_set
+    have = any(str(ln).startswith(tag) for ln in lines)
+    if every <= 0:
+        return list(lines)
+    if _probe_armed(sysm):
+        if not have:
+            return list(lines)
+        gen = ", and it generates after the final save" if bool(ev.generate) else ""
+        own = (f"cadence audit: {key!r} has a period of {n} windows and this run is {run_n} windows "
+               f"long, so the probe's PERIODIC reading CANNOT FIRE ONCE -- but the probe is armed, "
+               f"and it is not idle: it still reads at the first window of every phase, and those "
+               f"readings are what CKPT's best-model retention, the blow-up alarm and, at "
+               f"OPT_DAMP_SOURCE='probe', OPT's damping read; it reads through both closures at R "
+               f"and at a resume's start{gen}. A report of those readings is a report of a "
+               f"mechanism that ran. The period is EVAL_RETENTION_EVERY={every}, the cadence alone "
+               f"(04-6.2 ships 1000, the interim telemetry value until E6 picks); one at or below "
+               f"{run_n} adds a periodic reading as well.")
+    else:
+        why = (ps.reason if ps is not None and ps.reason else
+               "the retention probe pinned no window on this run.")
+        own = (f"cadence audit: {key!r} is DISARMED although its period is {n} windows "
+               f"(EVAL_RETENTION_EVERY={every}): the probe pinned nothing -- {why} The loop's arm "
+               f"test withholds every reading before this gate is asked -- the phase starts', R's "
+               f"and a resume's start's with the cadence's -- so no period reaches it: nothing is "
+               f"read, generated or handed to CKPT's best-model retention, the blow-up alarm or OPT, "
+               f"and a report that says the probe did nothing is reporting a mechanism that was "
+               f"never armed.")
+    if have:
+        return [own if str(ln).startswith(tag) else ln for ln in lines]
+    if lines and all(str(ln).startswith("cadence audit: every declared gate can fire")
+                     for ln in lines):
+        return [own]
+    order = list(periods)
+    head = "cadence audit: '"
+    out, placed = [], False
+    for ln in lines:
+        s = str(ln)
+        k = s[len(head):].split("'", 1)[0] if s.startswith(head) else None
+        if not placed and k in order and order.index(k) > order.index(key):
+            out.append(own)
+            placed = True
+        out.append(ln)
+    if not placed:
+        out.append(own)
+    return out
 
 
 def _probe_notices(sysm, ev):
@@ -5108,6 +5221,10 @@ def _periods(sysm):
         "fab.manage": fab_api.manage_period(r["FAB"]),
         "dom.rekey": mem_api.rekey_period(r["MEM"]),
         "ckpt": ckpt_api.save_period(r["CKPT"]),
+        # THE RETENTION PROBE'S CADENCE (2026-09-27, Q-EVAL-12): EVAL_RETENTION_EVERY, 0 the probe
+        # off. The audit's line for this key is _retention_audit's wherever the probe is armed or
+        # pinned nothing, since the reads beside the cadence and the arm test are this file's (the
+        # flip's review, 2026-09-29).
         "retention": eval_api.retention_period(r["EVAL"]),
         # THE SOURCE-RELIABILITY BOOK'S CADENCE (2026-09-28, Q-DATA-11): DATA_TRUST_EVERY at
         # DATA_TRUST='observe', and 0 -- disarmed, which the audit says -- at 'off'. The audit's

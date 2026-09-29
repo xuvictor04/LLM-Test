@@ -29,7 +29,8 @@ Updated 2026-09-27 (e8628e4).
   the held-out probe and keeps the source-reliability book, neither of which changes what it trains
   on. A fleet started on an earlier commit is not pulled mid-fleet; the retok block and its resume
   line carry the three settings that keep it comparable with earlier runs; and the whole-epoch WORLD
-  re-run now waits only on O13's two WORLD settings.
+  re-run now waits only on O13's two WORLD settings. With `KEEP_CKPT=1`, a WORLD fleet's runs also keep
+  the probe's best checkpoints (up to three files a run), and the script's disk check counts them.
 - **A — universal-capable.** Kept open: media and modality work is designed (Proposals 01-03b) and
   waits behind B, as the priority says.
 - **The unreliability belief.** Honoured as a hypothesis: it decides which experiments run first;
