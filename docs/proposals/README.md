@@ -1,8 +1,9 @@
-# Proposals — designs agreed in principle, not yet built
+# Proposals — designs agreed in principle
 
-Everything here is **future work with an owner's decision behind it and no implementation**. Each
-document gets its own git branch when it starts; none of them is on `rm-predict-DC`, and nothing in
-`src/` implements any of it.
+Everything here has an owner's decision behind it, and most of it is **future work with no
+implementation**. Two are partly built on `rm-predict-DC`, and their status lines say what: 03b's
+first stage, the mid-epoch act (S0b), and 04's SR0 with SR3's observe-mode book and SR6's copy
+detection, built on the branch `sr0-build` and merged in edb90de (2026-09-29).
 
 A proposal here is *not* a question. The questions live in `docs/04_CONTRACT.md` under **FOR THE
 OWNER** and are about the system as it stands. These are about the system as it is meant to become,
@@ -15,8 +16,8 @@ page — and raise the questions that only the design work can surface.
 | 01 | [Modalities](01_MODALITIES.md) — image, audio and video, read and generated, through the common router | *not yet cut* | design only |
 | 02 | [Router recursion](02_ROUTER_RECURSION.md) — stacked independent routers, experts at the leaves, results passed up | *not yet cut* | design only |
 | 03 | [Audio and video](03_AUDIO_VIDEO.md) — understand and generate, codecs learned from scratch, synthetic first; supersedes 01's build order for audio and video | *not yet cut* | design, reviewed (sound with fixes, all adopted in its §0) |
-| 03b | [Nothing frozen: live codec, measured rate](03b_LIVE_CODEC.md) — binding over 03: the codec never freezes, the Hz is measured per run, and the mid-epoch act (Q-RUN-8) makes text and media tokenization live | *not yet cut* | design, reviewed and checked |
-| 04 | [Self-regulation](04_SELF_REGULATION.md) — the run chooses its focus (retention-paced draw, fixed replay as control), weighs its sources (source tags; claim-level reliability in observe mode) and shows what emerged; built behind levers, GPU E1 decides | *not yet cut* | design, reviewed and checked; honest headline: at toy scale self-regulated focus ties one hand-set replay rate |
+| 03b | [Nothing frozen: live codec, measured rate](03b_LIVE_CODEC.md) — binding over 03: the codec never freezes, the Hz is measured per run, and the mid-epoch act (Q-RUN-8) makes text and media tokenization live | *not yet cut* | design, reviewed and checked; S0b built |
+| 04 | [Self-regulation](04_SELF_REGULATION.md) — the run chooses its focus (retention-paced draw, fixed replay as control), weighs its sources (source tags; claim-level reliability in observe mode) and shows what emerged; built behind levers, GPU E1 decides | `sr0-build`, merged in edb90de | design, reviewed and checked; partly built (register §8 Stage 3); honest headline: at toy scale self-regulated focus ties one hand-set replay rate |
 | 05 | [Decision register](05_DECISIONS.md) — every open decision in 01-04 and the contract ruled under the owner's fundamentals (B: keep learning after training, bounded risk, above A: universal-capable), the 45 conflicts, 19 new decisions the frame requires, the owner-only decisions O1-O20 and a staged test plan | *none (no code)* | register, critic-reviewed, then checked in four rounds; evidence in `results/decisions_2026-09-26/` |
 
 **They are one change wearing two names, and the order matters.** Proposal 02 is what makes 01

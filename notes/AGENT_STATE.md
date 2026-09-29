@@ -1,16 +1,8 @@
 # Agent state — read this first after a session reset
 
-Updated 2026-09-29 (the Stage 3 merge: SR0 built on `sr0-build`, reviewed and merged, its three defaults on and 04-Q5's pins carried into the new gpu_world.sh; the reorganisation's Phase B unblocked) on `rm-predict-DC` (the only branch pushed to; no PRs unless asked).
+Updated 2026-09-29 (the Stage 3 merge and its review: SR0 built on `sr0-build`, reviewed and merged, its three defaults on and 04-Q5's pins carried into the new gpu_world.sh; the reorganisation's Phase B unblocked) on `rm-predict-DC` (the only branch pushed to; no PRs unless asked).
 
 ## Where things stand
-- **Stage 3 (SR0) is built, reviewed and merged** (2026-09-29; register §8 3.1-3.7, `sr0-build`'s 22
-  commits a605b59..951c7f0 merged onto b444456 in edb90de): the retention probe, the synthetic held-out
-  block, the observe-mode source-reliability book, the 'replay' draw, FAB.contribution, O17's position
-  lever and SR6's copy detection, each built OFF with its review; then DATA_SYNTH_HOLDOUT on,
-  EVAL_RETENTION_EVERY 1000 with a read at every phase start and DATA_TRUST 'observe' (b1d31b7, the
-  flip). 298 levers, 151 entry points (10 stubs, 18 deferred). A fleet that pairs with pre-flip runs
-  pins all three (EXP=retok does); EXP=world_epoch waits on O13's two WORLD levers. No GPU test is
-  ready: E2's held-out re-read, E6 and the WORLD re-run need their scripts, the re-run O13's levers too.
 - **WORLD_FEEDBACK ships False** (d97779d) on the 20k-window GPU fleet: the forecast was within
   noise (docs/04_CONTRACT.md Q-WORLD-10, results/gpu_world_2026-09-24/ANALYSIS.txt). WORLD stays enabled.
 - **GPU slowdown repaired** (4feb65f): FAB.manage's scalar merge scan was n^2/2 device syncs from
@@ -234,6 +226,14 @@ Updated 2026-09-29 (the Stage 3 merge: SR0 built on `sr0-build`, reviewed and me
   relative bar); the cooldown fleet kept no checkpoint and gives §8 6.1 no parent (NEW-20, O20); the
   WORLD re-run reads its time-integrated gaps from 20% of the stream on, phase 1 reported only, its
   seeds from the measured spread (note WORLD 4, §8 6.5).
+- 2026-09-27/29, STAGE 3 (SR0) BUILT, REVIEWED AND MERGED (register §8 3.1-3.7, `sr0-build`'s 22
+  commits a605b59..951c7f0 merged onto b444456 in edb90de): the retention probe, the synthetic held-out
+  block, the observe-mode source-reliability book, the 'replay' draw, FAB.contribution, O17's position
+  lever and SR6's copy detection, each built OFF with its review; then DATA_SYNTH_HOLDOUT on,
+  EVAL_RETENTION_EVERY 1000 with a read at every phase start and DATA_TRUST 'observe' (b1d31b7, the
+  flip). 298 levers, 151 entry points (10 stubs, 18 deferred). A fleet that pairs with pre-flip runs
+  pins all three (EXP=retok does); EXP=world_epoch waits on O13's two WORLD levers. No GPU test is
+  ready: E2's held-out re-read, E6 and the WORLD re-run need their scripts, the re-run O13's levers too.
 - 2026-09-29, THE STAGE 3 MERGE (edb90de, `git merge --no-ff sr0-build`; its message has the detail):
   conflicts in gpu_world.sh, tests/test_gpu_world.py, the register and the brief, both sides kept. In
   the new gpu_world.sh the pins and the probe's disk budget are read off the fleet's code copy
@@ -247,6 +247,13 @@ Updated 2026-09-29 (the Stage 3 merge: SR0 built on `sr0-build`, reviewed and me
   (no default-cadence workload reaches window 1000, so TOK_RETOK_EVERY's move reaches none), and b444456
   reproduces the six pre-SR0 records unpinned. The whole suite and --mutants pass. NEXT: Phase B
   (docs/REORGANISATION.md), the owed items under Known low items, then Stage 4.
+- 2026-09-29, REVIEW OF THE STAGE 3 MERGE (edb90de, 0729af8; 6 findings, each checked against the files,
+  fixed in the commit after 0729af8): a retok final is a finished epoch, which RUN_EPOCHS=1 refuses on
+  the fleet's checkout and every later one, so CHECKPOINTS.md's resume line adds RUN_EPOCHS=2
+  DATA_RESAMPLE=1 to the pins (run on CPU against 319f313's tree); the Stage 3 bullet left the head of
+  this file, whose owner quotes the register cites by line (a working rule below); 04, 03b and the
+  proposals index say what is built; the contract's §6 lists K14-K16; results/README.md and
+  REORGANISATION's *At the merge* are corrected.
 0. Proposal 05 §8 orders everything: Stage 0 (owner rulings O1-O20; the fleet-archive reads; the
    k0_nuis pair; phase-traversal resizing), then Stage 1's small builds (vocab `.prev` rotation, DOM
    Levels, counters, OPT_LR_CONTINUE 'as_logged', gpu_world.sh kept checkpoints) before the owner's
@@ -300,3 +307,5 @@ Updated 2026-09-29 (the Stage 3 merge: SR0 built on `sr0-build`, reviewed and me
 - OMP_NUM_THREADS=1. Stage explicit paths, never `git add -A`. test_determinism rewrites
   tests/_noise_floor.json: `git checkout` it afterwards.
 - The runs/ folder is never overwritten.
+- The register cites this file by line: the owner's words at 16-17, 47, 89-95, 113-122 and 135-136, the
+  D-1..D-10 record at 30-43. An edit above `## Next` keeps its line count; new state goes under `## Next`.

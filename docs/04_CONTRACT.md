@@ -9158,6 +9158,9 @@ their fixtures with the same new-counter lists as 842b8e8's tree.
 | K11 | no `produces` entry names a value its entry point does not return | certify a six-field record as the whole geometry comparison by writing the bare token `geometry` in a column |
 | K12 | every deferral reason names **every** required argument that has no producer | defer `FAB.contribution` with a reason listing two of the four arguments nothing supplies |
 | K13 | every **number the prose writes about a countable thing** equals the tree's number, and no `### Q-` heading says a thing is **absent** that the tree declares | write a field count for the manifest that is one short of the live one, or head a question *"nothing in this system clips gradients"* while `OPT.grad_clip` is declared |
+| K14 | no order-table row supplies an argument under a spelling that argument's consumer **explicitly refuses** in its own docstring | name `live_size` for `LM.decode`'s `live_vocab`, which its docstring says is `Vocabulary.size()` and NOT `live_size` — the `vocab` and `judge_probation` rows both did |
+| K15 | a Gate's `reason` names a lever that **exists**, a value that lever can hold, a rendered value that is that lever's own, no impossibility on a Gate the source declares reachable, and no literal for the lever it prints on a branch that admits a range of it | a reason that names `DATA_STREAM_BYTE`, spells a value outside the lever's declared choices, or calls a Gate built reachable "structurally unreachable" |
+| K16 | a Gate whose printed `(value vs threshold)` is one clause of the verdict that decided it turns on **no clause that pair does not show**, unless a reason says so | `fab.cull_gate` printing "armed, did not fire (2/2=1.000 vs 0.45)" with no reason: a value meeting its own threshold beside the words for a condition tested and not met |
 
 **K6 is the check K4 is not, and the gap was 56 entry points wide.** K4 asks whether some stub's
 docstring *names* a lever; K6 asks whether that stub is ever *called*. K4 passed at 257 named / 2
@@ -9175,7 +9178,7 @@ defaults to `selfcon`. Only reading the docstring can, which is why that one is 
 hand. It is also blind to `MEM.blend`'s `model_probs`, which it drops as "the package's own live
 object" — MEM's live object is `store`, and `blend` is the one entry point that does not take it.
 
-**K13 is the one that stops a recurrence rather than a class of defect**, and it is the youngest.
+**K13 is the one that stops a recurrence rather than a class of defect.**
 Counts in this document's prose have been wrong **six** times: the geometry manifest's field count
 (written 15 and 16, against twenty); `WORLD.geometry`'s width (five, against six);
 `CKPT.check_geometry`'s argument count ("two", against four); the size of the frozen signature set
@@ -9190,12 +9193,12 @@ searched for and the ones it did not**, because a prose check over English is a 
 heuristic that will not say what it missed is worse than no check: it cannot read a number written
 in **words** (which is exactly how "the four accessors" and §3.6's "fourteen" survived it), it
 skips any claim in a past-tense sentence and prints the list of what it skipped, and it sees only
-the shapes in its table. Arm (b) reads the 39 `### Q-` headings and nothing else. **It fails when it
+the shapes in its table. Arm (b) reads the `### Q-` headings and nothing else. **It fails when it
 finds nothing**, because "no claims found" and "no claims wrong" are the same output from a check
 that has stopped reading.
 
 Each carries a `_report()` line printing **the size of the population it examined**, and
-`selftest()` trips every one of the thirteen against a synthetic tree in a temp directory. That is not
+`selftest()` trips every one of the sixteen but K14 against a synthetic tree in a temp directory. That is not
 ceremony: this repository has **sixty** untrippable guards on record, and one of them was written
 into `tests/test_ownership.py` *by the patch that was fixing `tests/test_ownership.py`*. A check
 nobody has watched fail is indistinguishable from a check that cannot fail.

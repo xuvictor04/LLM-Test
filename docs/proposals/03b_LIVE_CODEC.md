@@ -1,6 +1,6 @@
 # Proposal 03b — Nothing frozen: the live codec and the measured rate
 
-**Status: design, reviewed and checked, not built.** This document is binding over
+**Status: design, reviewed and checked; its first stage built.** *(2026-09-29: S0b, the mid-epoch act, is built on `rm-predict-DC` (54378b8, c8d8e33, c5768be; register 03b-16.15); the stages after it are not.)* This document is binding over
 [Proposal 03](03_AUDIO_VIDEO.md). Its §0b replaces 03's §0 wherever the two disagree. §6 is
 replaced whole. §7, §10, §11, §12, §13 and §16 take the deltas below, and everything else in 03
 stands. The section numbers below are 03's.

@@ -1,6 +1,6 @@
 # Proposal 04 — Self-regulation: the run chooses its focus, weighs its sources, and shows what emerged
 
-**Status: design, judged, reviewed (sound with fixes), reproduced, revised. Not built.** It adds to
+**Status: design, judged, reviewed (sound with fixes), reproduced, revised; partly built.** *(2026-09-29: SR0 (all but 'focusbed' and the `note_windows` books), SR3's observe-mode book and SR6's copy detection are built, register §8 3.1-3.4 and 3.7, merged in edb90de; the three default changes below have been on since b1d31b7.)* It adds to
 the tree and replaces nothing. Every mechanism enters behind a lever. At the shipped defaults the
 tree changes in three places, listed in §6 as default behaviour changes:
 - the retention probe reads held-out windows as telemetry;

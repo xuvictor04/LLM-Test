@@ -1500,7 +1500,7 @@ creep and r (legend), set by the manager under the owner's delegation (O2, O5); 
 - `.rework/DECISIONS.md` (D2 at lines 94-106, D3 at 34-42, D4 at 44-52, D8 at 108-131, D16 at
   388-432, D17 at 433-435, Q-CAP-2 at 612); `.rework/ISSUES.md` (P1-C3, P1-C4/C5,
   P1-C11, P1-H15, P1-H52, P1-H55); `notes/AGENT_STATE.md` (the owner's words at 16-17, 47, 89-95,
-  113-122 and 134-135); `notes/OWNER_BRIEF.md` (the owner channel); `notes/05_ERRORS.md`;
+  113-122 and 135-136); `notes/OWNER_BRIEF.md` (the owner channel); `notes/05_ERRORS.md`;
   `notes/06_CONTINUAL_LEARNING.md`; `docs/05_DEFAULTS.md`.
 
 **Code** (lines as cited in the text): `src/opt/api.py` (468-473, 540-561, 642-672, 2864-2874),

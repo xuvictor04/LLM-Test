@@ -114,15 +114,16 @@ phrases find `run.py:73` and `tests/test_census.py:411` and `:716`, which do not
 `e125e9c`, and on a trial merge of `sr0-build` at `d9900c6`, it returns a line of every B4 anchor.
 Read each match against the rule at the top of this page: most of what the searches return stays.
 
-**At the merge (2026-09-29).** The three searches find every anchor below. The second returns 840 lines,
-as at b444456 (the three over e125e9c's 837 are this page's own), and names no live file B3 does not
-list. The third adds three live lines to b444456's, each a test run from the repository root, which stay
-(`tests/test_baseline.py`'s docstring twice, `tests/test_position.py`'s Q6). Stage 3 moved most of the
-numbers below, so re-find each by its quoted text: the contract's B4 line is `:3220`, for one, and
-`sweep_world.sh`'s usage lines are `:56`-`:58` and `:66`, its `set -u` `:70`. The counts Phase B's
-checks compare with, on the merge: N5 one root collision (`data`), N7 336 citations (Stage 3 added
-five), O12 1,461 symbol citations resolved and 279 line citations left alone, O13 1,749 citations
-opened.
+**At the merge (2026-09-29).** The whole suite, `tests/test_baseline.py --mutants` and the three tools'
+`--check` pass. The three searches find every anchor below. The second returns 840 lines, as at b444456
+(the three over e125e9c's 837 are this page's own), and names no live file B3 does not list. The third
+adds three live lines to b444456's, which stay: two are a test run from the repository root
+(`tests/test_baseline.py`'s docstring and its `planted_tree`'s), and one names N5's collision, the root's
+`data/` (`tests/test_position.py`'s Q6). Stage 3 moved most of the numbers below, so re-find each by
+its quoted text: the contract's B4 line is `:3220`, for one, and `sweep_world.sh`'s usage lines are
+`:56`-`:58` and `:66`, its `set -u` `:70`. The counts Phase B's checks compare with, on the merge: N5
+one root collision (`data`), N7 336 citations (Stage 3 added five), O12 1,461 symbol citations resolved
+and 279 line citations left alone, O13 1,749 citations opened.
 
 ### B1–B2: `sweep_gpu.sh` and `sweep_world.sh` move to `tools/`
 

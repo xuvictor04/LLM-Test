@@ -19,14 +19,21 @@ below are how any copy is verified.
 **Resume one.** Unpack a file so that `ckpt/` sits under a directory `<d>`, then run, on the GPU box:
 
     CKPT_RESUME=<d>/ckpt/k1000.s0 CKPT_DIR=<new dir> OMP_NUM_THREADS=1 RUN_SEED=0 RUN_DEVICE=cuda \
-        DATA_STREAM_BYTES=3780000 TOK_RETOK_EVERY=1000 python3 run.py
+        DATA_STREAM_BYTES=3780000 TOK_RETOK_EVERY=1000 RUN_EPOCHS=2 DATA_RESAMPLE=1 \
+        DATA_SYNTH_HOLDOUT=0 EVAL_RETENTION_EVERY=0 DATA_TRUST=off python3 run.py
 
-The fleet's `PASTE_BACK.txt` has the kept-copy form of the same command. Every run in the fleet
-was at commit 319f313. *(Corrected 2026-09-27: the line first written here left out `RUN_DEVICE=cuda`
+That continues a final into a second epoch, drawn fresh. A kept copy continues the epoch it was saved
+in, so its line has no `RUN_EPOCHS` or `DATA_RESAMPLE`: the fleet's `PASTE_BACK.txt` has it without the
+last three settings, and `gpu_world.sh --analyze` prints it with them. Every run in the fleet was at
+commit 319f313. *(Corrected 2026-09-27: the line first written here left out `RUN_DEVICE=cuda`
 and `OMP_NUM_THREADS=1`. `RUN_DEVICE` defaults to `cpu` and a checkpoint loads onto the CPU, so it
-would have continued a CUDA parent on the CPU, which is another experiment.)* *(2026-09-29, the Stage 3
-merge: a checkout from then on ships the synthetic held-out block, the retention probe and the
-source-reliability book on, and this fleet ran with all three off, so the line there ends
-`DATA_SYNTH_HOLDOUT=0 EVAL_RETENTION_EVERY=0 DATA_TRUST=off python3 run.py`. Without them a kept copy,
-saved mid-epoch, is refused by name, and a final one continues under another configuration.
-`gpu_world.sh --analyze` adds them to its resume line for a fleet that recorded no pins.)*
+would have continued a CUDA parent on the CPU, which is another experiment.)* *(Corrected 2026-09-29:
+a final is the save of a run that read its whole epoch, and at the default `RUN_EPOCHS=1` the fleet's
+checkout and every later one refuse it as finished, so the line as first written resumed none;
+`RUN_EPOCHS=2 DATA_RESAMPLE=1` continue it. From edb90de on, a checkout ships the synthetic held-out
+block, the retention probe and the source-reliability book on, and this fleet ran with all three off:
+the last three settings keep them off (an older checkout declares none of them and warns that each is
+unread). Without them the second epoch admits a held-out block of text the parent trained on, and a
+kept copy is refused by name. On CPU, operation only, at a toy shape: from a final written by
+319f313's tree the line's settings train the second epoch that tree trains, loss for loss, and a kept
+copy continues its epoch exactly.)*
