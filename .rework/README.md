@@ -22,12 +22,12 @@ as documentation. Part of it is live now: the tests read `census.json`, `ISSUES.
 The survey areas: so-config, so-fabric, so-model, so-loop, so-report (the five regions of the
 9,859-line `self_organize.py`), subsys (memory/tokenizer/datastream/world_model), harness (`longrun.sh`
 and the shell scripts), tests, tools, notes-num, notes-research, archive, chat-a/b/c (the session's
-transcript, 8,072 entries) and chat-early (2026-07-21 .. 08-15, from `archive/notes/_evidence/chat/`, whose raw
-transcript no longer exists). Totals: 1,149 facts, 558 lever records, 475 bug records, 196 junk,
-305 carry-forward, 174 questions. Each carries its own evidence pointer, and anything load-bearing is
-checked against the source before it is written into documentation. The files the survey read at the
-root are in `archive/old-tree/` since 2026-09-28, and those it read in `notes/` are in `archive/notes/`
-since 2026-09-29.
+transcript, 8,072 entries) and chat-early (2026-07-21 .. 08-15, from `archive/notes/_evidence/chat/`,
+whose raw transcript no longer exists). Totals: 1,149 facts, 558 lever records, 475 bug records,
+196 junk, 305 carry-forward, 174 questions. Each carries its own evidence pointer, and anything
+load-bearing is checked against the source before it is written into documentation. The files the
+survey read at the root are in `archive/old-tree/` since 2026-09-28, and those it read in `notes/` are
+in `archive/notes/` since 2026-09-29.
 
 Moved out on 2026-09-28: `QUESTIONS.md`, the owner questions Q1–Q7, ruled on 2026-08-28 as `DECISIONS.md`
 D1–D7, is `archive/rework/QUESTIONS.md`. Its closing environment block is still open, as

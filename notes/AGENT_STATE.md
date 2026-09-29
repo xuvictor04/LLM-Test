@@ -1,6 +1,6 @@
 # Agent state — read this first after a session reset
 
-Updated 2026-09-29 (the Stage 3 merge and its review: SR0 built on `sr0-build`, reviewed and merged, its three defaults on and 04-Q5's pins carried into the new gpu_world.sh; the reorganisation's Phase B unblocked) on `rm-predict-DC` (the only branch pushed to; no PRs unless asked).
+Updated 2026-09-29 (the Stage 3 merge and its review: SR0 built on `sr0-build`, reviewed and merged, its three defaults on and 04-Q5's pins carried into the new gpu_world.sh; the reorganisation's Phase B done) on `rm-predict-DC` (the only branch pushed to; no PRs unless asked).
 
 ## Where things stand
 - **WORLD_FEEDBACK ships False** (d97779d) on the 20k-window GPU fleet: the forecast was within
@@ -254,6 +254,14 @@ Updated 2026-09-29 (the Stage 3 merge and its review: SR0 built on `sr0-build`, 
   this file, whose owner quotes the register cites by line (a working rule below); 04, 03b and the
   proposals index say what is built; the contract's §6 lists K14-K16; results/README.md and
   REORGANISATION's *At the merge* are corrected.
+- 2026-09-29, THE REORGANISATION'S PHASE B (62f67d5, 61d106f, 0431282; docs/REORGANISATION.md has what
+  was checked): the run.py sweeps are tools/sweep_gpu.sh and tools/sweep_world.sh, run from any directory,
+  their output still at the root; the 2026-08 notes corpus, its _evidence/ and the old tree's
+  CURRENT_DEFAULTS.md are in archive/notes/, so notes/ holds this file and OWNER_BRIEF.md alone
+  (notes_check.py scans both folders, still 22 files); the lines in Stage 3 files that placed the old
+  tree at the root are dated. The brief has one line for both moves. The whole suite passes, and N5, N7,
+  O12 and O13 count what they counted at the merge. NEXT: the owed items under Known low items, then
+  Stage 4.
 0. Proposal 05 §8 orders everything: Stage 0 (owner rulings O1-O20; the fleet-archive reads; the
    k0_nuis pair; phase-traversal resizing), then Stage 1's small builds (vocab `.prev` rotation, DOM
    Levels, counters, OPT_LR_CONTINUE 'as_logged', gpu_world.sh kept checkpoints) before the owner's

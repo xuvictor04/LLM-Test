@@ -12,10 +12,10 @@ went. It was the root's `ARCHIVE.md` until 2026-09-28 and moved here with `git m
 `git log --follow archive/README.md` keeps its history. `garry/`, `legacy/`, `handoff/`, `docs/`,
 `STATE.md` and `CL_TESTBED.md` moved here from the root on 2026-08-27, so that a repository-wide grep does
 not return them beside live code; the old tree and `.rework/QUESTIONS.md` followed on 2026-09-28, the
-2026-08 notes corpus on 2026-09-29, and `agent-transcripts/` was committed here directly. Nothing in `src/`, `tests/` or `tools/`, nor `run.py`
-or `gpu_world.sh`, imports or executes any of it; the old tree runs when someone runs it (below), and
-`.rework/capture_oracle.py`, the P0 capture of the oracle `tests/test_derive.py` replays, reads
-`old-tree/self_organize.py` if it is ever run again.
+2026-08 notes corpus on 2026-09-29, and `agent-transcripts/` was committed here directly. Nothing in
+`src/`, `tests/` or `tools/`, nor `run.py` or `gpu_world.sh`, imports or executes any of it; the old
+tree runs when someone runs it (below), and `.rework/capture_oracle.py`, the P0 capture of the oracle
+`tests/test_derive.py` replays, reads `old-tree/self_organize.py` if it is ever run again.
 
 | path | what it was | why it is kept | frozen since |
 |---|---|---|---|
@@ -38,9 +38,9 @@ or `gpu_world.sh`, imports or executes any of it; the old tree runs when someone
 a file that looks exactly like the right one.
 
 That is not hypothetical: nine files of the notes corpus stated `FAB_N0=3` as the current default a week
-after it changed, and it was `00_INDEX`'s "five things to know before spending any GPU time" item #1. Separately,
-`02_IDEAS` filed a built mechanism as NEVER IMPLEMENTED and its own correction records the cost — "it was read
-during the 0.75 GB planning and used to tell the user the mechanism did not exist".
+after it changed, and it was `00_INDEX`'s "five things to know before spending any GPU time" item #1.
+Separately, `02_IDEAS` filed a built mechanism as NEVER IMPLEMENTED and its own correction records the
+cost — "it was read during the 0.75 GB planning and used to tell the user the mechanism did not exist".
 
 ## Where to look instead
 
@@ -133,8 +133,8 @@ What the old tree left at the root before the move stays there, and is reached l
 - `notes_check.py` changed on this branch on 2026-09-22 (`3ff859e`: its generated file says which tree
   it describes). At the move it was made to find `self_organize.py` beside itself and the repository's
   `README.md`, `notes/` and `archive/` two directories up, to require this README instead of
-  `ARCHIVE.md`, and to print its own path in the commands it prints. It checks the same 22 files and
-  still writes `notes/CURRENT_DEFAULTS.md`. When the notes corpus moved here on 2026-09-29, it was made
+  `ARCHIVE.md`, and to print its own path in the commands it prints. It checked the same 22 files and
+  still wrote `notes/CURRENT_DEFAULTS.md`. When the notes corpus moved here on 2026-09-29, it was made
   to scan `archive/notes/` beside `notes/` and to write `archive/notes/CURRENT_DEFAULTS.md`: still 22
   files (the root `README.md`, the two pages left in `notes/` and the corpus's 19), and a default
   planted in either folder is still caught.

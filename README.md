@@ -304,7 +304,7 @@ is numerically identical, so a units defect is invisible. The full generated ref
 | `.rework/DECISIONS.md` | anyone about to re-litigate | the owner's rulings, dated |
 | `.rework/README.md` | anyone looking for a ledger | what each file and folder in `.rework/` is, and which are live |
 | `archive/README.md` | anyone reading history | what is frozen, why each record is kept, how to run the old tree, and where every moved path went |
-| `docs/REORGANISATION.md` | whoever finishes the reorganisation | the rules of this layout, what moved on 2026-09-28, and Phase B: what moves after the Stage 3 merge, with every reference to update |
+| `docs/REORGANISATION.md` | whoever moves a file next | the rules of this layout, and what moved in its two phases, 2026-09-28 and 2026-09-29, with every reference each updated and what was checked |
 
 ## Repository layout
 
@@ -333,7 +333,7 @@ tools/               gpu_launch.sh (check the box, then launch a fleet), fleet_d
 docs/                04_CONTRACT (the frozen surface and the FOR THE OWNER questions), 05_DEFAULTS and
                      03_WIRING (generated), 02_OPERATIONS (the machines and the working agreement, to
                      2026-08-29), proposals/ (01-04 designs; 05_DECISIONS, the register and test plan),
-                     REORGANISATION (this layout, and what moves after the Stage 3 merge)
+                     REORGANISATION (this layout, and what moved on 2026-09-28 and 2026-09-29)
 notes/               OWNER_BRIEF.md (the owner's page), AGENT_STATE.md (the agent's state after a reset)
 data/                the tracked corpus, DATA_DIR's default: train/ (eng py num c), continual/, ood/
 results/             dated evidence, one folder per workflow or GPU fleet; README.md indexes them

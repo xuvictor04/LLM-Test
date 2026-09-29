@@ -1,14 +1,14 @@
-# The file-structure reorganisation of 2026-09-28: what is done, and what moves after the Stage 3 merge
+# The file-structure reorganisation: Phase A (2026-09-28) and Phase B (2026-09-29), both done
 
-**Status.** Phase A is done on `rm-predict-DC` (the commits below). **Phase B is unblocked** since the
-Stage 3 branch (`sr0-build`) merged on 2026-09-29 (edb90de), the whole suite green on the merge (*At the
-merge*, below). It waited for that merge because each of its steps edits files that Stage 3 also edits
-(B1–B2 `docs/04_CONTRACT.md`; B3 `src/ckpt/api.py`, `src/world/levers.py`, `tests/test_assemble.py`,
-`docs/` and `.rework/CENSUS.md`; B4 `run.py`, `src/spine/compose.py`, `tests/test_census.py`,
-`tests/test_ownership.py` and `docs/04_CONTRACT.md`), and editing them on both branches would make the
-merge conflict. The lines of B4's kind in files Stage 3 does not touch were fixed in Phase A instead (B4
-lists them). This page is the plan for Phase B, with every reference it has to update, written down so
-that it is not lost. When Phase B lands, mark it done here and in the root `README.md`.
+**Status.** Both phases are done on `rm-predict-DC`: Phase A on 2026-09-28, and Phase B on 2026-09-29,
+after the Stage 3 branch (`sr0-build`) merged (edb90de). *Phase A: done* and *Phase B: done*, below, list
+the commits and what was checked. Phase B waited for that merge because each of its steps edits files
+that Stage 3 also edits (B1–B2 `docs/04_CONTRACT.md`; B3 `src/ckpt/api.py`, `src/world/levers.py`,
+`tests/test_assemble.py`, `docs/` and `.rework/CENSUS.md`; B4 `run.py`, `src/spine/compose.py`,
+`tests/test_census.py`, `tests/test_ownership.py` and `docs/04_CONTRACT.md`), and editing them on both
+branches would have made the merge conflict. The lines of B4's kind in files Stage 3 does not touch were
+fixed in Phase A instead (B4 lists them). The plan for Phase B is kept below as it was written, with every
+reference it updated; its line numbers and counts are of their day.
 
 Line numbers below are at `fac6aa8` (Phase A's last move). Of the files Phase B edits, Phase A touched
 only its own (`README.md`, `archive/README.md`, `.rework/README.md`, `notes/00_INDEX.md`,
@@ -33,14 +33,14 @@ written into the repository root, a test run from the repository root, N5's coll
 
 ## The layout, and the rules it follows
 
-- **The root holds what a reader or the owner starts from.** After Phase A: `README.md`, `LICENSE`,
-  `requirements.txt`, `run.py`, `gpu_world.sh`, the two run.py sweeps (until Phase B) and `.gitignore`.
+- **The root holds what a reader or the owner starts from:** `README.md`, `LICENSE`, `requirements.txt`,
+  `run.py`, `gpu_world.sh` and `.gitignore`; Phase B moved the two run.py sweeps to `tools/`.
   Everything else is a folder with one job; the root `README.md`'s *Repository layout* maps them.
 - **One archive folder, `archive/`, with a README** that says what each record was, why it is kept, how
   to run the old tree, and where every moved path went (its path table). Records keep the paths of their
   day; the path table resolves them. Nothing is rewritten to follow a move.
 - **An archived item is named for where it came from:** `archive/old-tree/` (the repository root),
-  `archive/rework/` (`.rework/`), and in Phase B `archive/notes/` (`notes/`). Lower case, hyphenated like
+  `archive/rework/` (`.rework/`) and `archive/notes/` (`notes/`). Lower case, hyphenated like
   `archive/agent-transcripts/`.
 - **A folder that needs an index gets a `README.md`:** `archive/`, `.rework/`, `results/`, as
   `docs/proposals/` already had.
@@ -80,6 +80,36 @@ has what it showed); `sweep_domain_grid.sh` started by path from the root; B3's 
 without its `mkdir`; B1–B2 applied to a trial merge, each sweep started from another directory as the
 checks for Phase B below describe.
 
+## Phase B: done (2026-09-29)
+
+| commit | what it did |
+|---|---|
+| `62f67d5` | B1–B2: `sweep_gpu.sh` and `sweep_world.sh` → `tools/`, two renames, each with one `cd` to the checkout's root after `set -u`; their usage lines, the contract's Q-WORLD-10 command, the root `README.md`'s layout and `archive/README.md`'s path table |
+| `61d106f` | B3: the 19 corpus files, `CURRENT_DEFAULTS.md` and `_evidence/` → `archive/notes/`, 66 files (64 pure renames; a dated correction appended to `00_INDEX.md`; `CURRENT_DEFAULTS.md` regenerated, one line); `notes_check.py` scans `archive/notes/` beside `notes/` (22 files, 189 lines); `docs/05_DEFAULTS.md` regenerated; every live reference on its own line; the root and `archive/` READMEs |
+| `0431282` | B4: `run.py`, `src/spine/compose.py` (its six lines rewrapped), `tests/test_census.py` (the `memory` shadow's reason, N5's docstring with a dated note, the self-test's comments), `tests/test_ownership.py` and `docs/04_CONTRACT.md`; one line in `notes/OWNER_BRIEF.md` for both moves |
+| the commit after `0431282` | this page, the root `README.md`'s Documents row and `docs/` line, and a state entry in `notes/AGENT_STATE.md`; lines B3 left over-long in `archive/README.md` and `.rework/README.md` rewrapped |
+
+Found beyond the lists, by the searches or beside their anchors, and fixed in the same commits:
+`notes_check.py`'s comment on "what notes/ is for", `.rework/README.md`'s sentence on where the survey's
+files are now, and `archive/README.md`'s "nine files in `notes/`". Left as they are:
+`src/spine/assemble.py`'s "notes 05_ERRORS" (the optional item; it names no path) and every line that
+names a sweep or a corpus file without a path.
+
+What was checked, on CPU (operation only): the whole suite (all 30 `tests/test_*.py`, with
+`tests/test_baseline.py --mutants` and `tests/_state_digest.py`; `test_determinism.py` last, then
+`tests/_noise_floor.json` restored) and the three tools' `--check`, with N5 one collision (`data`), N7
+336, O12 1,461 and 279, and O13 1,749, as at the merge; from `archive/old-tree/`, `notes_check.py` (22
+files) and `selftest.sh --quick` (16 of 16), and on a scratch copy `notes_check.py` catching a default
+planted in `notes/`, in `archive/notes/` or appended to a corpus file, and not scanning one planted
+elsewhere in `archive/`. On scratch clones, each command started from a directory outside the clone:
+`bash tools/sweep_gpu.sh` stops at its no-CUDA refusal (exit 1) and `ONLY=none bash tools/sweep_world.sh`
+exits 0, each writing only its `SUMMARY.txt` at the clone's root, and two arms of `sweep_world.sh` at one
+seed and 24 windows run to its summary there; the owner's commands' dry paths, from the clone and by path
+from elsewhere: `EXP=retok bash tools/gpu_launch.sh` (the CPU box's three FAILs; none, and a ready line,
+at `DEVICE=cpu KEEP_CKPT=0`), `bash tools/fleet_dash.sh --once` and `EXP=retok bash gpu_world.sh --status`
+(NO FLEET, exit 2 by design), and `bash tools/read_fleet_archive.sh` on the 2026-09-24 archive, whose
+block matches the committed `archive_reads.txt`. `git log --follow` reaches each moved file's history.
+
 ## The owner's commands
 
 | | before | after |
@@ -92,12 +122,12 @@ checks for Phase B below describe.
 
 Nothing outside the repository follows the move by itself: a workflow script, a note or a pasted command
 that calls an old-tree file at the root (`python3 notes_check.py`, `bash selftest.sh`) needs the form
-above, and the two sweeps change in Phase B. Inside the repository the same holds for the old tree's own
+above, and the two sweeps changed in Phase B. Inside the repository the same holds for the old tree's own
 printed commands: they name paths relative to `archive/old-tree/`, and the requirements they name are
 `../../requirements.txt` from there (`archive/README.md`, *Running the old tree*). `notes/OWNER_BRIEF.md`
-is not edited before the merge (see B4).
+has one line on both moves (B4).
 
-## Phase B, after the Stage 3 merge
+## Phase B, as planned before the Stage 3 merge
 
 Do it on `rm-predict-DC` after `sr0-build` has merged and the suite is green there, in three commits:
 B1–B2, B3, B4. Run the searches first:
@@ -261,7 +291,7 @@ merge before Phase B (*At the merge*, above): they should not move.
 - `.rework/` and its name: the tests name it by path. `.rework/questions/` stays in it, because it
   holds 10 of the citations N7 counts and N7 does not read `archive/`. `.rework/survey/` and
   `.rework/COMMIT_RECORD.md` stay too: `.rework/PLAN.md:12-13` names both, inside the lines
-  `docs/proposals/05_DECISIONS.md:1625` cites (`PLAN.md:11-14`), and the census names the survey
+  `docs/proposals/05_DECISIONS.md:1671` cites (`PLAN.md:11-14`), and the census names the survey
   (`.rework/CENSUS.md:414`, `census.json:5085`).
 - `data/`: `DATA_DIR`'s default is `data`, relative to where a run starts, and the owner ruled the
   corpus is input that stays tracked (`.gitignore`).
@@ -285,8 +315,8 @@ merge before Phase B (*At the merge*, above): they should not move.
   call; no check depends on it (the launcher and the fleet look only at tracked changes).
 - **The root `README.md`'s other stale claims** (the entry-point and lever counts in *Current state*,
   "no training loop", "The full generated reference is `docs/04_CONTRACT.md`" where it is
-  `docs/05_DEFAULTS.md`) were outside this move. Stage 3 changes the counts again, so refresh them after
-  its merge.
+  `docs/05_DEFAULTS.md`) were outside this move. Stage 3 changed the counts again, and they are still to
+  be refreshed.
 - **Found while checking, not caused by the move, left as it is:** the old tree's
   `sweep_domain_grid.sh` refuses its own dry run (`DRY=1 SKIP_GPU_CHECK=1`) with "these knobs are NOT
   read by self_organize.py" at the root before the move too, and `compare.py --help` needs the arms'
