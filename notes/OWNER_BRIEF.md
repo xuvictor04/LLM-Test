@@ -4,7 +4,7 @@ The one page for the owner. Everything else — how decisions were made, the evi
 rules — is in the repo for reference (`docs/proposals/05_DECISIONS.md`, `docs/04_CONTRACT.md`,
 `results/`, `notes/AGENT_STATE.md`) and is not brought up here.
 
-Updated 2026-09-27 (e8628e4).
+Updated 2026-09-29 (6dd6d98).
 
 ## How we work
 - **Owner:** leads and monitors, keeps the goals from drifting, adds ideas, expands the project, and
@@ -24,7 +24,7 @@ Updated 2026-09-27 (e8628e4).
   The path: small builds (all six built and reviewed) → the retokenization fleet → SR0 (probe, best checkpoint; built) →
   the continue preset (chained learning sessions with a gate) → GPU tests of forgetting and
   plasticity.
-- **SR0 is built and its three defaults are on (2026-09-29, the commit after 444ecca).** Synthetic
+- **SR0 is built and its three defaults are on (2026-09-29, b1d31b7).** Synthetic
   training streams change at that commit (each area holds out a block), and every run now also reads
   the held-out probe and keeps the source-reliability book, neither of which changes what it trains
   on. A fleet started on an earlier commit is not pulled mid-fleet; the retok block and its resume

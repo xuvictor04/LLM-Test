@@ -271,10 +271,12 @@ _WHY = {
 # THE CALL SITES THAT ARE GATED, AND THE COUNTER THAT SAYS WHETHER THE GATE OPENED.
 # A DRIVER THAT CALLS AN ENTRY POINT ONLY WHEN AN EVENT FIRES HAS NOT CALLED IT ON A RUN WHERE THE
 # EVENT DID NOT, AND A REPORT THAT SAYS "0 NOT CALLED" IS THE SAME OVERSTATEMENT `skipped` EXISTS
-# TO PREVENT, ONE LAYER IN. Three B rows stand behind gates that are UNREACHABLE at the shipped
+# TO PREVENT, ONE LAYER IN. Two B rows stand behind gates that are UNREACHABLE at the shipped
 # defaults (TOK_PROBATION_USES=0 turns the whole probation family off, and its cadence is never
 # even asked), so printing "0 with no call site" and stopping there would say a run judged
-# probation when nothing did.
+# probation when nothing did. (This said "Three" until 2026-09-29: the third event-gated row,
+# TOK.mint_burst, is ARMED at the shipped TOK_MODE=online and TOK_GROW_EVERY=200, as a default
+# run's GATED CALL SITES block reads, and the module docstring and run.py count two.)
 # THE THREE STATES ARE THE TREE'S OWN, read off the counter dicts by the convention every package
 # in it states: an ABSENT key means the mechanism was UNREACHABLE on the arm this run took, a key
 # PRESENT AND 0 means it was armed and did not fire, and a positive value is a fire count. So this

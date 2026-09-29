@@ -490,7 +490,7 @@ Each section: purpose, public surface, what it receives and from whom, state, ch
 The full prose — every measured defect, every line number — lives in the stub docstrings, which are
 the normative text. This is the index.
 
-### DATA — `src/data/api.py` (40 levers)
+### DATA — `src/data/api.py` (40 levers, twenty-three of them census amendments — `DATA_DRAW`, `DATA_SYNTH_HOLDOUT`, §8 3.3's three, 3.4's fourteen and 3.7's four)
 
 Owns the only bytes the system sees and the only split it is honestly measured on. Goal B needs a
 **non-stationary** stream: `phase_sched` is not a parameter of the continual-learning experiment, it
@@ -6516,7 +6516,7 @@ byte changed in the training body restores); a digest-stripped record compared a
 doctored digest refused. H5: the pair ABSENT on the shipped continuation. H8 (new): every DATA stub's `LEVERS READ:`
 names exactly the levers its body reads, through the helpers it hands `dat` to.
 
-**THE FLIP, 2026-09-29 (register 04-Q5; §8 3.1's owed flip, in the commit after 444ecca, last and alone
+**THE FLIP, 2026-09-29 (register 04-Q5; §8 3.1's owed flip, in b1d31b7, last and alone
 with 04-6.2's and 04-6.3's, Q-EVAL-12's and Q-DATA-11's dated notes) — `DATA_SYNTH_HOLDOUT` SHIPS
 `True`: DEFAULT BEHAVIOUR CHANGE 1.** The lever's help says so, and `docs/05_DEFAULTS.md` no longer
 lists it among the levers that ship False. (i) *What moves.* Every synthetic-source stream: each
@@ -7199,7 +7199,7 @@ prose are corrected where they stood:
   `System.probe_reading`, counted once per `at`); and EVAL's negative-period switch, which governs
   `EVAL_RETENTION_EVERY` as well as `EVAL_CURVE_EVERY`.
 
-**THE FLIP, 2026-09-29 (register 04-6.2; SR0's bit-identity passed; in the commit after 444ecca, last
+**THE FLIP, 2026-09-29 (register 04-6.2; SR0's bit-identity passed; in b1d31b7, last
 and alone with 04-Q5's and 04-6.3's, Q-DATA-9's and Q-DATA-11's dated notes) — `EVAL_RETENTION_EVERY`
 SHIPS 1000, WITH A READ AT THE FIRST WINDOW OF EVERY PHASE: DEFAULT BEHAVIOUR CHANGE 2.** The lever's
 help says so. At the shipped defaults a run pins both halves of every area's block (the block 04-Q5's
@@ -8468,7 +8468,7 @@ the count of startup warnings: the default's `'data.trust'` line is reworded, no
 book's reason moves only where an 'off' run resumed one, and `docs/05_DEFAULTS.md` moves one row. B1,
 B3, B3r, B5, B6 and B6r reproduce their fixtures.
 
-**THE FLIP, 2026-09-29 (register 04-6.3; SR3's bit-identity passed; in the commit after 444ecca, last
+**THE FLIP, 2026-09-29 (register 04-6.3; SR3's bit-identity passed; in b1d31b7, last
 and alone with 04-Q5's and 04-6.2's, Q-DATA-9's and Q-EVAL-12's dated notes) — `DATA_TRUST` SHIPS
 `'observe'`: DEFAULT BEHAVIOUR CHANGE 3. ACTUATION STAYS OFF.** The lever's help says so. A default run
 now allocates the book — the int32 sketch, `DATA_TRUST_SKETCH` buckets, 16.8 MB at 4194301, carried in

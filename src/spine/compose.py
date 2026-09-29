@@ -1866,11 +1866,13 @@ LOOP_ORDER = (
 #   accessors (live_size, at_cap, blen), and RUN.Timing's two.
 # (Until 2026-09-27 this paragraph counted twenty-four entries, FIFTEEN by argument and NINE by
 # caller with "four of Vocabulary's five" -- which was stale twice by then: the table held
-# twenty-three, and three Vocabulary accessors, since TOK.Vocabulary.size left it. It counted
-# eighteen, TEN by argument or scope, until FAB.contribution left on 2026-09-28, and seventeen, NINE
-# by argument or scope, until LM.parent_designation arrived the same day.) The count is not
-# cosmetic -- this table's whole claim is that every orphan is enumerated, and an enumeration whose
-# own total is wrong is one no reader re-checks.
+# twenty-three, and three Vocabulary accessors, since TOK.Vocabulary.decode left it on 2026-09-26
+# (Q-MEM-13's re-cut, 24 -> 23; until 2026-09-29 this sentence named TOK.Vocabulary.size, whose
+# leaving is what made the count four). It counted eighteen, TEN by argument or scope, until
+# FAB.contribution left on 2026-09-28, and seventeen, NINE by argument or scope, until
+# LM.parent_designation arrived the same day.) The count is not cosmetic -- this table's whole claim
+# is that every orphan is enumerated, and an enumeration whose own total is wrong is one no reader
+# re-checks.
 # SOME OF THOSE NOW HAVE A CALLER THAT IS NOT A ROW, AND THEIR ENTRIES SAY SO (2026-09-24):
 # FAB.Population.parameters and WORLD.World.parameters are called by _base_parameters on every
 # compose(), and RUN.Timing's two by spine/loop.py. They stay listed because K6 credits only a row,
@@ -1886,7 +1888,7 @@ LOOP_ORDER = (
 # contribution and no informed contrib > 0 spare. The deferral does not remove a mechanism, it stops
 # the tables claiming one, and it names the producer each mechanism is waiting on.
 DEFERRED_ENTRY_POINTS = {
-    # THE TWO Population ACCESSORS AND FOUR OF Vocabulary'S FIVE. They arrived with their records in
+    # THE TWO Population ACCESSORS AND THREE OF Vocabulary'S FIVE. They arrived with their records in
     # P4's FAB and TOK slices, one increment before the rows that call them, for the same reason
     # RUN.Timing's two did: TOK.build_vocabulary has to RETURN a Vocabulary and FAB.build a
     # Population, and the contract's RECORD TYPES block names these accessors as those objects'
@@ -1894,7 +1896,9 @@ DEFERRED_ENTRY_POINTS = {
     # block it headed: the contract names five -- decode, blen, size, live_size, at_cap -- and all
     # five were here. TOK.Vocabulary.size LEFT, correctly, when the `vocab` row named it as
     # live_vocab, which is the STALE half of K6's two-way read doing its job; the two FAB.Population
-    # entries then arrived above the comment. Four of the five, plus two that are not Vocabulary's.) They are accessors on a record other packages receive as an argument and
+    # entries then arrived above the comment. Four of the five, plus two that are not Vocabulary's --
+    # and three since 2026-09-26, when a row named TOK.Vocabulary.decode (Q-MEM-13); this heading
+    # said FOUR until 2026-09-29.) They are accessors on a record other packages receive as an argument and
     # call methods on -- which the contract states is not an import -- so their callers are LM's
     # embedding rows, TOK's own minting rows and EVAL's decode, none of which have bodies yet. Every
     # one of them takes only `self` (or an id), so there is no argument without a producer: what is
