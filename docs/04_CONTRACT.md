@@ -7520,6 +7520,14 @@ pinned-nothing refusal, and raised with it at the second stop (`valve`, CAP's), 
 half in every area, `'probe'` composes — the flip's consequence for it, as for `FAB_CONTRIB=1`.
 `tests/test_probe.py` P7.
 
+**AMENDED 2026-10-02 — A BOUNDARY ROW CARRIES ITS PAIRING (register §8 5.3a).** `HoldoutReading.paired` was
+computed and never written, and 5.1's per-window SD is its report half. `spine/loop.py::_reading_row` now
+writes it as `paired`, `{area: {half: [n, mean, SD]}}`, on a `resume` or `boundary` row whose reading paired
+with an earlier one: a resume's start against the parent's R, and the R after it against that start. A run
+that resumed nothing pairs its R with nothing, and a cadence row's pairing stays unwritten, so its series is
+the one it wrote before (each EXP=heldout run's). Telemetry only: nothing reads it in-run.
+`tests/test_probe.py` P1 and P3.
+
 ### Q-DOM-6 — the domain a held-out window would be routed to, asked read-only — **RESOLVED 2026-09-27 (Q-EVAL-12): `DOM.nearest(dom, part, *, signature)`, `_assign`'s DECISION FACTORED INTO ONE PURE HELPER. NO LEVER, NO WIRE**
 The closures route windows the run did not train on, and `DOM.observe` advances the boundary clock,
 drags a centroid, feeds the reservoir and counts the visit — a reading through it would move the

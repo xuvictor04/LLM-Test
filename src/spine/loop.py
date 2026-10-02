@@ -2425,15 +2425,26 @@ def _reading_from_state(d):
 
 
 def _reading_row(rd, kind):
-    """One RunResult.probe_series entry: a reading as a JSON-ready dict."""
-    return {"step": int(rd.step), "kind": kind, "closure": rd.closure,
-            "control": None if rd.control_mean is None else float(rd.control_mean.value),
-            "report": None if rd.report_mean is None else float(rd.report_mean.value),
-            "windows": int(rd.windows), "nonfinite": int(rd.nonfinite),
-            "paired_sd": rd.paired_sd,
-            "areas": {a: {"control": row.get("control_mean"), "report": row.get("report_mean"),
-                          "seen_by_parent": bool(row.get("seen_by_parent", False))}
-                      for a, row in rd.areas.items()}}
+    """One RunResult.probe_series entry: a reading as a JSON-ready dict.
+
+    A BOUNDARY READING PAIRED WITH AN EARLIER ONE ALSO CARRIES ITS PAIRING (2026-10-02, register §8
+    5.3a; Q-EVAL-12): `paired`, {area: {half: [n, mean, SD]}} of its per-window differences, as
+    HoldoutReading.paired holds them -- on a resume's start read, against the parent's R read, and on
+    the R read after it, against that start: the per-window SD 5.1 sizes the probe with. Only there:
+    the R read of a run that resumed nothing pairs with nothing, and a cadence reading's pairing is
+    left out, so every row such a run writes (each EXP=heldout run's) is the row it wrote before."""
+    row = {"step": int(rd.step), "kind": kind, "closure": rd.closure,
+           "control": None if rd.control_mean is None else float(rd.control_mean.value),
+           "report": None if rd.report_mean is None else float(rd.report_mean.value),
+           "windows": int(rd.windows), "nonfinite": int(rd.nonfinite),
+           "paired_sd": rd.paired_sd,
+           "areas": {a: {"control": row.get("control_mean"), "report": row.get("report_mean"),
+                         "seen_by_parent": bool(row.get("seen_by_parent", False))}
+                     for a, row in rd.areas.items()}}
+    if kind in ("resume", "boundary") and rd.paired:
+        row["paired"] = {a: {h: [int(v[0]), v[1], v[2]] for h, v in halves.items()}
+                         for a, halves in rd.paired.items()}
+    return row
 
 
 def _probe_rows(sysm, armed, book, last_read, boundary, series, gen, ev_cfg):

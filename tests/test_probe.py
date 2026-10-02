@@ -22,10 +22,12 @@ were written while both shipped at 0, and each names the arm it reads; the book 
       (tests/_state_digest.py) but LOOP.eval and RUN.cadences' 'retention' key; every integer counter
       equal but the exempt set; OPT's reading_at None on both (OPT_DAMP_SOURCE='off'). The ON run reads
       at every phase start, on the cadence the ledger fired (>= 10 on the full epoch), once at R through
-      both closures, and generates. THE OFF ARMS -- 0, 20 with no block, and 20 where no held-out half
-      can hold a window behind its routing prefix (DATA_STREAM_BYTES=20000) -- pin, draw, read and
-      count nothing, and every EVAL row and gate says why. THE SHIPPED VALUES since the flip are 1000
-      and 1: a System composed with neither lever reads a 1000-window period and pins every area.
+      both closures, and generates; no row of its series carries a pairing (2026-10-02: its R read pairs
+      with nothing and a cadence row's is not written), so the series is the one it wrote before. THE OFF
+      ARMS -- 0, 20 with no block, and 20 where no held-out half can hold a window behind its routing
+      prefix (DATA_STREAM_BYTES=20000) -- pin, draw, read and count nothing, and every EVAL row and gate
+      says why. THE SHIPPED VALUES since the flip are 1000 and 1: a System composed with neither lever
+      reads a 1000-window period and pins every area.
   P2  THE EXEMPT SET MOVES BY THE BOOK'S OWN COUNTS, EXACTLY: tok.segment_remap by eval.holdout.cuts;
       fab.eval_passes, lm.embed.*, world.forecast.calls (and .inert where the forecast is off) by the
       forwards; lm.decode.calls by the decodes; sig.encode_calls and .encode_windows by the SIG encodes;
@@ -39,7 +41,10 @@ were written while both shipped at 0, and each names the arm it reads; the book 
       cadence reading at 41 (the step+1 routing clock); every memory-off reading after 41 is the
       uninterrupted run's, float for float, pairing included (the memory-on R reading reads a store
       that departs after any continuing resume -- MEM's rekey snapshot, recorded before the probe in
-      tests/_state_digest.py); a boundary resume's start read is the parent's R read.
+      tests/_state_digest.py); a boundary resume's start read is the parent's R read. THE ROW CARRIES THE
+      PAIRING (2026-10-02, register §8 5.3a: 5.1's per-window SD): the child's start rows and its R rows
+      write HoldoutReading.paired, [n, mean, SD] per area and half, through a JSON round trip, and no in-run
+      row and no row of the uninterrupted run does.
   P4  THE HALVES: each window and its routing prefix inside its half, no start drawn twice, the bytes
       the block's; the control and report streams issued by name; the cadence reading's windows a prefix
       of the boundary reading's (P3); consumers read the control half only -- the retention best, the
@@ -108,6 +113,7 @@ probe's readings, the best checkpoints it orders and the retention it reports ar
 """
 import contextlib
 import copy
+import json
 import os
 import re
 import shutil
@@ -372,6 +378,13 @@ def pair(tag, env, every, max_windows=None, cadence_min=None, gen=True):
           f"{bk.get('eval.holdout.cadence_reads')} time(s) on the cadence"
           + (f" (>= {cadence_min})" if cadence_min else "") + ", and once at R through both closures",
           ok_reads, str({k: v for k, v in bk.items() if k.endswith("_reads") or k.endswith("calls")}))
+    # A RUN THAT RESUMED NOTHING WRITES THE ROWS IT WROTE BEFORE 2026-10-02 (register §8 5.3a): the pairing is
+    # written on a boundary row paired with an earlier one, and this run's R read pairs with nothing.
+    _keys = {"step", "kind", "closure", "control", "report", "windows", "nonfinite", "paired_sd", "areas"}
+    check(f"P1 {tag}: no row of the ON run's series carries a pairing -- every row holds the nine keys it held "
+          f"before 2026-10-02",
+          bool(r1.probe_series) and all(set(e) == _keys for e in r1.probe_series),
+          str(sorted({k for e in r1.probe_series for k in e} - _keys)))
     if gen:
         g = r1.report.get("EVAL(generate)")
         check(f"P1 {tag}: the ON run generated through both closures",
@@ -899,6 +912,20 @@ try:
           "per area and half",
           _same and _zero and all(rd.paired for _, rd in _cs),
           f"closures {[rd.closure for _, rd in _cs]}")
+    # THE ROW CARRIES THE PAIRING (2026-10-02, register §8 5.3a: the per-window SD 5.1 sizes the probe with).
+    def _as_row(rd):
+        return {a: {h: [v[0], v[1], v[2]] for h, v in hs.items()} for a, hs in rd.paired.items()}
+    _bnd_c = [(e, rd) for e, rd in zip(sc, rd_c) if e["kind"] in ("resume", "boundary")]
+    check("P3 THE ROW CARRIES THE PAIRING: the child's start rows and its R rows write HoldoutReading.paired, "
+          "[n, mean, SD] per area and half -- the start's 16 exact zeros against the parent's R, R's against the "
+          "start -- through a JSON round trip; no cadence or phase row writes one, and no row of the uninterrupted "
+          "run, which resumed nothing",
+          len(_bnd_c) == 4 and all(e.get("paired") == _as_row(rd) and rd.paired for e, rd in _bnd_c)
+          and all(e["paired"][a][h] == [16, 0.0, 0.0] for e, _ in _bnd_c[:2] for a in e["paired"]
+                  for h in ("control", "report"))
+          and not any("paired" in e for e in sc if e["kind"] not in ("resume", "boundary"))
+          and not any("paired" in e for e in su) and json.loads(json.dumps(sc)) == list(sc),
+          str([(e["step"], e["kind"], e["closure"], sorted(e.get("paired") or {})) for e in sc]))
     _pre = all(per_window(_cs[0][1])[a][0][:3] == per_window(_u41)[a][0]
                and per_window(_cs[0][1])[a][1][:3] == per_window(_u41)[a][1] for a in _u41.areas)
     check("P3 THE ROUTING CLOCK: the start read's first three windows per half are the uninterrupted "
