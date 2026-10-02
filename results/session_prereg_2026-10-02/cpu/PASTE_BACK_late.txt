@@ -1,0 +1,32 @@
+==== PASTE THIS BACK ====
+gpu_world.sh EXP=session  commit cc17cc3  launched 2026-10-02T22:29:37Z  synthetic source  as_logged
+card: no GPU listed; torch 2.14.0+cu130, CUDA 13.0; NCPU 4; PAR 4; MPS off; device=cpu
+shape: 300 windows/run, DATA_STREAM_BYTES=56700, seeds 0 1, EXTRA='TOK_GROW_EVERY=20 FAB_SLOTS=2200'; cap 300; CAL 600; LM_CTX 128; kept ckpts ON; pins DATA_DRAW=planned pinned, DATA_SYNTH_HOLDOUT=1 pinned, EVAL_RETENTION_EVERY=50 pinned, EVAL_HOLDOUT_WINDOWS=256 pinned, EVAL_RETENTION_N=24 pinned, EVAL_GENERATE=0 pinned, TOK_MINT_NOVEL=0 pinned
+runs: 7 of 7 ended rc=0, every one
+parents: k100 at seeds 0 1, a parents stage first: one whole epoch each (window cap 900), these pins and TOK_RETOK_EVERY=100, finals kept under gpu_session_out/parents/ckpt
+F per old area at R - start (memory-off, report half), per parent: P | P_parent; then x5 at R
+  seed      eng      py     num       c |     eng      py     num       c |        P P_parent
+  s0    +0.3204 +1.9162 +2.8416 -0.1823 | -0.9288 +0.2471 +1.1899 -0.8892 |   4.2913   4.6000
+  s1    +1.9019 +2.5549 +0.0978 +1.5584 | -1.7776 -1.0999 +0.0059 +0.4301 |   4.1180   4.2468
+ANCHOR (O2): the resume start against the parent's R, item for item: equal in 7 of 7 session(s)
+RULE (§8 5.3a; O2, O9): ε 0.05 bits/byte; per old area (4), F = R - start over the parents, each look (7 parents; a top-up's pooled 11) at 0.025: mean [lower at t(1 - a/4), Holm's a across P and P_parent; one-sided upper at t(0.975)]
+  P n=2 a=0.0125: eng +1.1112 [-79.4274,+11.1581] py +2.2355 [-30.2877,+6.2927] num +1.4697 [-138.2657,+18.9013] c +0.6881 [-87.9608,+11.7467] -> UNRESOLVED
+  P_parent n=2 a=0.025: eng -1.3532 [-22.9627,+4.0387] py -0.4264 [-34.7213,+8.1308] num +0.5979 [-29.5482,+8.1198] c -0.2296 [-33.8215,+8.1522] -> UNRESOLVED
+O9 (the new area): x5 at R, P_parent - P paired by parent: +0.2187 [-0.9238,+1.3612] n=2, one-sided at t(0.975); below 0 favours P_parent
+DECISION: UNRESOLVED at 2 parent(s): P and P_parent are UNRESOLVED; top up to the cap of 11 on this card and torch with the command below (its parents stage trains the new parents first), then paste back the top-up's block, which reads both fleets (ε 0.05 bits/byte per old area, 2 parent(s))
+  top-up: EXP=session SEEDS='2 3 4 5 6 7 8 9 10' FILL=0 WINDOWS=300 EXTRA='TOK_GROW_EVERY=20 FAB_SLOTS=2200' PARENT_ARM=k100 PROBE_EVERY=50 SESSION_WINDOWS=300 DEVICE=cpu PAR=4 OUT=/tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/t23/fix/c1/gpu_session_topup_out POOL_WITH=/tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/t23/fix/c1/gpu_session_out bash /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/t23/fix/c1/tools/gpu_launch.sh --go
+REPORTED, DECIDES NOTHING:
+  the parents' ids minted after their last cut (s0 24 | s1 24): the start at 7 of 7 session(s)' own first cut - at the parent's last, mean [min, max]: eng +0.0000 [+0.0000,+0.0000] py -0.2268 [-0.4371,-0.0691] num -0.1474 [-0.2027,-0.0737] c +0.0000 [+0.0000,+0.0000]; F leaves it out
+  x5's learning (its first in-run reading -> R, mean over parents): P 16.5566 -> 4.2047 | P_parent 16.6010 -> 4.4234 | P_twin 16.5566 -> 4.1815
+  5.1's SDs per old area (NEW-02): between-run from the twins, RMS(P_twin - P)/√2; per-window from R - start item by item (report half); one session's SD, √(between² + per-window²/n), against the single-run gate's ε/(z(1 - 0.05/4) + 0.84) = 0.0162, K 4:
+    eng: between 0.1174 (n=2) | per-window 0.0687 | one session 0.1175: the between-run SD alone exceeds it: O10's second-seed replay
+    py: between 0.4266 (n=2) | per-window 0.1098 | one session 0.4267: the between-run SD alone exceeds it: O10's second-seed replay
+    num: between 0.0905 (n=2) | per-window 0.1731 | one session 0.0918: the between-run SD alone exceeds it: O10's second-seed replay
+    c: between 0.0584 (n=2) | per-window 0.0789 | one session 0.0588: the between-run SD alone exceeds it: O10's second-seed replay
+  W (NEW-20) at the parent s0, FAB_SLOTS 4248 (its n_live 2200 + 2048; its slots 2200): W - P F eng -0.1889 py -0.5611 num -0.0198 c -0.0736, x5 -0.0095; n_live at the end W 2476 (276 past the parent's 2200 slots), P 2200; births W 428, P 152; fab.resume_widened 3
+  opt.continue.pricing (each session's rate, CONTRACT-Q-DATA-7): 'logged parent: floor' 7 of 7
+  data.rehearse_parent FIRED (O9's rehearsal): P 0 of 2 | P_parent 2 of 2 | P_twin 0 of 2 | W 0 of 1
+  windows/s per session: P 0.98 [0.98-0.99] | P_parent 1.16 [0.98-1.33] | P_twin 1.18 [0.99-1.37] | W 1.21 [1.21-1.21]
+  this fleet: 2,100 session windows in 741 s of the sessions' wall = 2.83 windows/s aggregate; the parents stage 161 s; ETA by waves 289 s, took 902 s: 3.12x
+archive: gpu_session_2026-10-02.tgz beside gpu_session_out (logs, curves, SUMMARY, ANALYSIS, this block; no checkpoints) -- keep it
+==== END ====

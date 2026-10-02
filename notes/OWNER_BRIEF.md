@@ -98,17 +98,18 @@ Each model test 4 kept learns a new, fifth area for 5,000 windows: once alone an
 rehearsed. A third copy differs only by one part in ten thousand in its learning rate, to measure the
 noise, and the model with the most experts runs once more with room to grow. It reads whether each older
 area stays within budget, and which of the two ways to learn to keep. Run it after test 4's blocks (its
-top-up's too) are pasted back, from any provider:
+top-up's too) are pasted back, from any provider (`R` is the checkout's path; set it to yours):
 ```bash
 R=/workspace/LLM-Test
+# on a new box, first: git clone https://github.com/xuvictor04/LLM-Test "$R"
+# and unpack test 4's finals: mkdir -p "$R/gpu_heldout_out" && tar -xf <test 4's _finals.tar> -C "$R/gpu_heldout_out"
 cd "$R" && git fetch origin rm-predict-DC && git checkout rm-predict-DC && git pull --ff-only
 EXP=session SEEDS='0 1 2 3 4 5 6' FILL=0 PARENTS="$R/gpu_heldout_out" bash "$R/tools/gpu_launch.sh" --go
 ```
 - If test 4's DECISION shipped `TOK_MINT_NOVEL` 1.0, put `PARENT_ARM=k1000_mn` before `bash`.
-- The launcher checks test 4's kept models against their `FINALS.sha256` before anything starts. On a new
-  box, unpack test 4's `_finals.tar` into a directory and set `PARENTS` to it, or leave `PARENTS` out: the
-  fleet then trains the seven models again first. It also checks the disk: the sessions' kept checkpoints
-  need about 20 GB beside test 4's (`KEEP_CKPT=0` keeps none).
+- The launcher checks test 4's kept models against their `FINALS.sha256` before anything starts. Without
+  them (`PARENTS` left out) the fleet trains the seven models again first. It also checks the disk: the
+  sessions' kept checkpoints need about 20 GB beside test 4's (`KEEP_CKPT=0` keeps none).
 - **Time:** 22 sessions. On the H100 PCIe box they run as one wave, about 15-20 minutes from launch to
   block; about 30-35 without `PARENTS`. On the H200 box, two waves, about 10-15 minutes; about 20-25
   without `PARENTS`.

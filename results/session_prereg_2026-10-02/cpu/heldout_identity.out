@@ -8,3 +8,15 @@ $ bash heldout_identity.sh "$BEFORE" "$AFTER" "$CLONE"
 (3) --analyze, FINALS.sha256: identical at cce2d39 and 80135f1
 (3) --analyze, stdout: identical at cce2d39 and 80135f1
 (exit 0)
+
+2026-10-02, the review's fix: the same fleet at cce2d39 and at cc17cc3, the commit that changed spine/loop.py and gpu_world.sh
+$ bash heldout_identity.sh "$BEFORE" "$AFTER" "$CLONE" cc17cc3
+(1) 21 curve, flush-bytes and probe-series files: 21 byte-identical
+    FINALS.sha256 identical: 4 final checkpoint and vocabulary files byte for byte
+(2) ANALYSIS.txt: 4 line(s) carry the commit, the launch or measured seconds; every other line identical (0 differing)
+(2) PASTE_BACK.txt: 5 line(s) carry the commit, the launch or measured seconds; every other line identical (0 differing)
+(3) --analyze, ANALYSIS.txt: identical at cce2d39 and cc17cc3
+(3) --analyze, PASTE_BACK.txt: identical at cce2d39 and cc17cc3
+(3) --analyze, FINALS.sha256: identical at cce2d39 and cc17cc3
+(3) --analyze, stdout: identical at cce2d39 and cc17cc3
+(exit 0)

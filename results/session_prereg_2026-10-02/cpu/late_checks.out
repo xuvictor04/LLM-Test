@@ -1,0 +1,10 @@
+$ python3 late_checks.py "$C/gpu_session_out" "$C/gpu_session_p_out"
+PASS D: every run ended rc=0 (14), every loss and probe value finite -- [] []
+PASS D2: every run ended rc=0 (11), every loss and probe value finite -- [] []
+PASS D: SUMMARY's ids minted after each parent's last cut, read off its final ({0: 24, 1: 24}), are the ones its run counted at its end ({0: 24, 1: 24}), and D2 reads the same off the same finals -- {0: 24, 1: 24} {0: 24, 1: 24} {0: 24, 1: 24}
+PASS D and D2: every session whose parent minted after its last cut reads its start at the parent's last cut and again at its own first cut ('resume', then 'resume_own', both closures, at the parent's step), and none other does; the 'resume' rows are the parent's R rows, item for item; each pairing is against the reading before it, R's against the session's own start -- []
+PASS D: the block's F per old area is R minus each session's start at its own first cut, at all 7 sessions, and it reports the parents' ids minted after their last cut beside what they moved at the 7 sessions whose first cut held them --   the parents' ids minted after their last cut (s0 24 | s1 24): the start at 7 of 7 session(s)' own first cut - at the parent's last, mean [min, max]: eng +0.0000 [+0.0000,+0.0000] py -0.2268 [-0.4371,-0.0691] num -0.1474 [-0.2027,-0.0737] c +0.0000 [+0.0000,+0.0000]; F leaves it out
+PASS D: before W has run, W's files are priced at the parents' smoke final x (2200 + 2048) / 2200; D2, from PARENTS, at the smoke's W, larger than every other session's, and its disk line prices 6 sessions' files at theirs and W's at W's --   smoke checkpoints: the largest but W's was 91 MB, W's priced at 175 MB, the parent's x (2200 + 2048) / 2200 slots; deleted |   smoke checkpoints: the largest but W's was 94 MB, W's 145 MB; deleted | === disk: checkpoints may take about 4.3 GB (94 MB x 2 per file, W's 145 MB x 2)
+PASS D2: launched with PARENTS=D's parents, every session's loss curve, flush bytes and probe series equal D's byte for byte -- [('P.s0', True), ('P.s1', True), ('P_parent.s0', True), ('P_parent.s1', True), ('P_twin.s0', True), ('P_twin.s1', True), ('W.s0', True)]
+    ok
+(exit 0)

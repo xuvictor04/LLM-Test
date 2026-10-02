@@ -1,0 +1,16 @@
+$ bash latecut.sh "$BEFORE" "$AFTER" "$WORK"      # BEFORE at b2dba7c, AFTER at cc17cc3
+k100.s1 rc=0
+b_rate rc=0
+b_lr0 rc=0
+a_rate rc=0
+a_lr0 rc=0
+WARNING: loop: 24 token(s) were minted AFTER THE LAST RE-SEGMENTATION and cannot appear in this run's training
+a_lr0 (against b_lr0): training byte for byte True; 'resume' rows equal True; every later row equal but R's pairing True; rows ['resume', 'resume_own', 'phase', 'boundary']
+  F against 'resume' (b2dba7c's)  c -0.0000 eng +0.0000 num -0.0737 py -0.4371
+  F against 'resume_own' (now)    c -0.0000 eng +0.0000 num -0.0000 py -0.0000
+  resume_own - resume             c +0.0000 eng +0.0000 num -0.0737 py -0.4371 (its pairing's report half, py: n 128, SD 0.1139)
+a_rate (against b_rate): training byte for byte True; 'resume' rows equal True; every later row equal but R's pairing True; rows ['resume', 'resume_own', 'phase', 'boundary']
+  F against 'resume' (b2dba7c's)  c -0.0049 eng +0.0015 num -0.0754 py -0.4270
+  F against 'resume_own' (now)    c -0.0049 eng +0.0015 num -0.0018 py +0.0101
+  resume_own - resume             c +0.0000 eng +0.0000 num -0.0737 py -0.4371 (its pairing's report half, py: n 128, SD 0.1139)
+(exit 0)

@@ -305,6 +305,18 @@ Updated 2026-10-02 (test 4, E2's retok part as its own fleet, register §8 6.3a:
   series and finals byte for byte, its blocks differing only in the commit, the launch and measured seconds
   (cpu/heldout_identity.out). NEXT: read test 4's block, then test 5's; E2's shape (b) on real text (§8
   6.3), whose finals are 6.1's parents.
+- 2026-10-02, REVIEW OF b4174c2..b2dba7c (test 5; 3 findings, each checked against the code, fixed in cc17cc3
+  and the commit after it; none is wrong). F subtracted the start read at the parent's last cut, but a session cuts
+  its epoch at the restored vocabulary, which holds the ids its parent minted after that cut (6, 24, 0, 0, 6, 0, 6
+  at seeds 0-6 at test 4's shape; up to 10.9% of c's held-out bytes), in no window either trained: a toy session
+  that learned nothing read py -0.437. spine/loop.py now reads a resume's start again at its own first cut
+  where that is another view ('resume_own', Q-EVAL-12's amendment), F subtracts it, and the block reports each
+  parent's count and what they moved (sessreplay.py counts them; cpu/latecut.out: that session reads 0.000;
+  cpu/late_checks.out: a CPU fleet whose parents mint after their last cut, end to end).
+  gpu_world.sh prices W's checkpoints at W's own size (it priced every file at W's: about 26 GB where the
+  launcher passed at 19.9), the launcher W's at (slots + W_HEADROOM) / slots. The brief's test 5 block has test
+  4's clone line, "set R to yours" and a line that unpacks test 4's finals. EXP=heldout's output is byte for
+  byte cce2d39's at the fix (cpu/heldout_identity.out): test 4, running at cce2d39, is untouched.
 0. Proposal 05 §8 orders everything: Stage 0 (owner rulings O1-O20; the fleet-archive reads; the
    k0_nuis pair; phase-traversal resizing), then Stage 1's small builds (vocab `.prev` rotation, DOM
    Levels, counters, OPT_LR_CONTINUE 'as_logged', gpu_world.sh kept checkpoints) before the owner's
@@ -351,6 +363,9 @@ Updated 2026-10-02 (test 4, E2's retok part as its own fleet, register §8 6.3a:
   :2382 hold its fix (and at TOK_MINT_PMIN 0 the fail-open never runs). Code: a FILL guard for a capped
   seed count at EXP=retok (EXP=heldout's FILL is 0; elsewhere a capped command passes FILL=0); per-area
   cells in analyze_retok (EXP=heldout reads per area).
+- OWED (EXP=session, low): without PARENTS the disk check prices the sessions' files at the parents' smoke
+  checkpoint (91 MB at cpu/late_checks' shape, where a session's is 94) and W's at its bound; the sessions' smoke
+  after the parents stage could re-price both before the sessions start.
 - Next hunt classes: lever isolation, efficacy vs labels, long-horizon mechanisms, SIGUSR1 saves.
 
 ## Working rules this repo has taught

@@ -1,9 +1,9 @@
 #!/bin/bash
 # EXP=heldout UNCHANGED BY THIS BUILD (operation only): test 4 runs at cce2d39, and its top-up pools only with
 # that commit's fleet, so the code shared with EXP=session must leave its fleet's output as it was.
-#     bash heldout_identity.sh BEFORE AFTER CLONE
+#     bash heldout_identity.sh BEFORE AFTER CLONE [COMMIT]
 # BEFORE and AFTER are one tiny CPU fleet's OUT, run in CLONE (a clone of the checkout, at one path) at
-# cce2d39 and then at 80135f1, the last commit of this build to change code:
+# cce2d39 and then at COMMIT: 80135f1, the last commit of this build to change code, or the review's fix after it:
 #     EXP=heldout DEVICE=cpu WINDOWS=150 SEEDS=0 PAR=4 FILL=0 PIN_RETOK=40 PROBE_EVERY=50 \
 #         EXTRA='TOK_GROW_EVERY=20' HB_EVERY=0 bash gpu_world.sh
 # (1) every curve, flush-bytes and probe-series file, the smoke's too, and the finals' sha256 are compared
@@ -12,6 +12,7 @@
 # read only): every file the analysis writes.
 set -u
 BEFORE=$(cd "$1" && pwd) && AFTER=$(cd "$2" && pwd) && CLONE=$(cd "$3" && pwd) || exit 2
+V=${4:-80135f1}
 n=0; bad=0
 for f in $(cd "$BEFORE" && find curves smoke -type f -name '*.json' | sort); do
   n=$((n + 1)); cmp -s "$BEFORE/$f" "$AFTER/$f" || { bad=$((bad + 1)); echo "  DIFFERS $f"; }
@@ -27,7 +28,7 @@ for f in ANALYSIS.txt PASTE_BACK.txt; do
   echo "(2) $f: $(grep -Ec "$TIMED" "$BEFORE/$f") line(s) carry the commit, the launch or measured seconds; every other line identical ($d differing)"
 done
 T=$(mktemp -d) && mkdir -p "$T/gpu_heldout_out" "$T/res" || exit 2
-for v in cce2d39 80135f1; do
+for v in cce2d39 "$V"; do
   rm -rf "$T/gpu_heldout_out" "$T"/*.tgz; mkdir "$T/gpu_heldout_out"
   (cd "$BEFORE" && tar -cf - --exclude=./ckpt --exclude=./code .) | (cd "$T/gpu_heldout_out" && tar -xf -)
   ln -s "$BEFORE/ckpt" "$T/gpu_heldout_out/ckpt"
@@ -37,7 +38,7 @@ for v in cce2d39 80135f1; do
   for f in ANALYSIS.txt PASTE_BACK.txt FINALS.sha256; do cp "$T/gpu_heldout_out/$f" "$T/res/$v.$f"; done
 done
 for f in ANALYSIS.txt PASTE_BACK.txt FINALS.sha256 stdout; do
-  cmp -s "$T/res/cce2d39.$f" "$T/res/80135f1.$f" && echo "(3) --analyze, $f: identical at cce2d39 and 80135f1" \
+  cmp -s "$T/res/cce2d39.$f" "$T/res/$V.$f" && echo "(3) --analyze, $f: identical at cce2d39 and $V" \
     || echo "(3) --analyze, $f: DIFFERS"
 done
 rm -rf "$T"

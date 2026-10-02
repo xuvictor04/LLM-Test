@@ -2411,6 +2411,12 @@ From those parents named as PARENTS, the same sessions reproduce byte for byte. 
 EXP=heldout fleet's finals at cce2d39 read their anchor exactly too; that parent's one act did not change
 its epoch's length, so they price as 'no-log parent: re-priced'.
 
+**2026-10-02, the review of 5.3a: F'S START IS THE SESSION'S OWN FIRST CUT.** F subtracted the start read at the
+parent's last cut. A session's first cut also holds the ids its parent minted after that cut, which no window of
+either trained, so F counted what they move as the session's: py −0.437 at one window of `OPT_LR` 1e-12. F now
+subtracts the start read at the session's own first cut (Q-EVAL-12's `resume_own`). The parent-view start stays O2's
+anchor, and the difference between the two starts is reported (`results/session_prereg_2026-10-02/cpu/latecut.out`).
+
 ### Q-DATA-6 — the held-out split becomes a seeded random block — **RESOLVED 2026-09-02: (b) CONFIRMED, PLUS ONE REPAIR THE QUESTION DID NOT CONTAIN — ONE HOLD-OUT RNG STREAM PER AREA, KEYED BY NAME. ⚠ EVERY HISTORICAL HELD-OUT NUMBER BECOMES NON-COMPARABLE**
 `holdout_frac` currently takes the **last** fraction of each area, which is a sample only if the
 corpus was written in no particular order. Measured: py held out at **5.061 ± 0.560** against 2.922
@@ -7556,7 +7562,7 @@ pairing against the `resume` row is what the view alone moved, and the R read pa
 on every area). Where the views are equal (a continuing resume, a parent that minted nothing after its last cut)
 nothing is added; a fresh run reads no start. Such runs' series are the ones they wrote before (each EXP=heldout
 run's), and the session's curve and flush bytes are byte-identical with and without the read.
-`tests/test_probe.py` P3.
+`tests/test_probe.py` P3; `results/session_prereg_2026-10-02/cpu/latecut.out`.
 
 ### Q-DOM-6 — the domain a held-out window would be routed to, asked read-only — **RESOLVED 2026-09-27 (Q-EVAL-12): `DOM.nearest(dom, part, *, signature)`, `_assign`'s DECISION FACTORED INTO ONE PURE HELPER. NO LEVER, NO WIRE**
 The closures route windows the run did not train on, and `DOM.observe` advances the boundary clock,

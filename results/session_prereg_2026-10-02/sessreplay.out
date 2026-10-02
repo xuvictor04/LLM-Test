@@ -1,24 +1,66 @@
 $ OMP_NUM_THREADS=1 python3 sessreplay.py 0 0 5000
-seed 0 TOK_MINT_NOVEL=0: parent 16212 windows; session 5000 windows; the four old held-out blocks byte for byte the parent's with x5 appended: True (eng 94500 B, py 94500 B, num 94500 B, c 94500 B); x5's block in alphabet 4 alone: True; the session's mints by area {'num': 5, 'c': 2, 'py': 2, 'x5': 141} (42s)
-  eng: held-out tokens at the parent's view 48724, at the session's last-cut view 48724; bytes in session-minted tokens 0.0%
-  py : held-out tokens at the parent's view 41864, at the session's last-cut view 41748; bytes in session-minted tokens 0.5%
-  num: held-out tokens at the parent's view 40117, at the session's last-cut view 39755; bytes in session-minted tokens 1.5%
-  c  : held-out tokens at the parent's view 52414, at the session's last-cut view 51717; bytes in session-minted tokens 1.3%
-$ OMP_NUM_THREADS=1 python3 sessreplay.py 0 1.0 5000
-seed 0 TOK_MINT_NOVEL=1.0: parent 17080 windows; session 5000 windows; the four old held-out blocks byte for byte the parent's with x5 appended: True (eng 94500 B, py 94500 B, num 94500 B, c 94500 B); x5's block in alphabet 4 alone: True; the session's mints by area {'num': 6, 'x5': 144} (45s)
-  eng: held-out tokens at the parent's view 56026, at the session's last-cut view 56026; bytes in session-minted tokens 0.0%
-  py : held-out tokens at the parent's view 57735, at the session's last-cut view 57735; bytes in session-minted tokens 0.0%
-  num: held-out tokens at the parent's view 40998, at the session's last-cut view 40816; bytes in session-minted tokens 1.0%
-  c  : held-out tokens at the parent's view 48271, at the session's last-cut view 48271; bytes in session-minted tokens 0.0%
+seed 0 TOK_MINT_NOVEL=0: parent 16212 windows, its last cut at view 992 and its vocabulary 998 at its end: 6 id(s) minted after its last cut; session 5000 windows, its mints by area {'num': 5, 'c': 2, 'py': 2, 'x5': 141}, R's view 1142; the four old held-out blocks byte for byte the parent's with x5 appended: True (eng 94500 B, py 94500 B, num 94500 B, c 94500 B); x5's block in alphabet 4 alone: True (44s)
+  eng: held-out tokens at the parent's last cut 48724, at the session's first cut 48724 (bytes in the parent's late ids 0.0%), at R's view 48724 (late ids 0.0%, session-minted 0.0%)
+  py : held-out tokens at the parent's last cut 41864, at the session's first cut 41864 (bytes in the parent's late ids 0.0%), at R's view 41748 (late ids 0.0%, session-minted 0.5%)
+  num: held-out tokens at the parent's last cut 40117, at the session's first cut 39951 (bytes in the parent's late ids 0.9%), at R's view 39755 (late ids 0.9%, session-minted 1.5%)
+  c  : held-out tokens at the parent's last cut 52414, at the session's first cut 52038 (bytes in the parent's late ids 1.2%), at R's view 51717 (late ids 1.1%, session-minted 1.3%)
 $ OMP_NUM_THREADS=1 python3 sessreplay.py 1 0 5000
-seed 1 TOK_MINT_NOVEL=0: parent 15940 windows; session 5000 windows; the four old held-out blocks byte for byte the parent's with x5 appended: True (eng 94500 B, py 94500 B, num 94500 B, c 94500 B); x5's block in alphabet 4 alone: True; the session's mints by area {'num': 11, 'c': 4, 'x5': 135} (42s)
-  eng: held-out tokens at the parent's view 50358, at the session's last-cut view 50358; bytes in session-minted tokens 0.0%
-  py : held-out tokens at the parent's view 39158, at the session's last-cut view 39158; bytes in session-minted tokens 0.0%
-  num: held-out tokens at the parent's view 40129, at the session's last-cut view 39155; bytes in session-minted tokens 3.1%
-  c  : held-out tokens at the parent's view 55648, at the session's last-cut view 51697; bytes in session-minted tokens 2.1%
+seed 1 TOK_MINT_NOVEL=0: parent 15940 windows, its last cut at view 962 and its vocabulary 986 at its end: 24 id(s) minted after its last cut; session 5000 windows, its mints by area {'num': 11, 'c': 4, 'x5': 135}, R's view 1112; the four old held-out blocks byte for byte the parent's with x5 appended: True (eng 94500 B, py 94500 B, num 94500 B, c 94500 B); x5's block in alphabet 4 alone: True (43s)
+  eng: held-out tokens at the parent's last cut 50358, at the session's first cut 50358 (bytes in the parent's late ids 0.0%), at R's view 50358 (late ids 0.0%, session-minted 0.0%)
+  py : held-out tokens at the parent's last cut 39158, at the session's first cut 39158 (bytes in the parent's late ids 0.0%), at R's view 39158 (late ids 0.0%, session-minted 0.0%)
+  num: held-out tokens at the parent's last cut 40129, at the session's first cut 39808 (bytes in the parent's late ids 1.8%), at R's view 39155 (late ids 1.6%, session-minted 3.1%)
+  c  : held-out tokens at the parent's last cut 55648, at the session's first cut 52334 (bytes in the parent's late ids 10.9%), at R's view 51697 (late ids 10.6%, session-minted 2.1%)
+$ OMP_NUM_THREADS=1 python3 sessreplay.py 2 0 5000
+seed 2 TOK_MINT_NOVEL=0: parent 16119 windows, its last cut at view 992 and its vocabulary 992 at its end: 0 id(s) minted after its last cut; session 5000 windows, its mints by area {'c': 6, 'num': 7, 'x5': 137}, R's view 1142; the four old held-out blocks byte for byte the parent's with x5 appended: True (eng 94500 B, py 94500 B, num 94500 B, c 94500 B); x5's block in alphabet 4 alone: True (43s)
+  eng: held-out tokens at the parent's last cut 49076, at the session's first cut 49076 (bytes in the parent's late ids 0.0%), at R's view 49076 (late ids 0.0%, session-minted 0.0%)
+  py : held-out tokens at the parent's last cut 40346, at the session's first cut 40346 (bytes in the parent's late ids 0.0%), at R's view 40346 (late ids 0.0%, session-minted 0.0%)
+  num: held-out tokens at the parent's last cut 40095, at the session's first cut 40095 (bytes in the parent's late ids 0.0%), at R's view 39766 (late ids 0.0%, session-minted 1.4%)
+  c  : held-out tokens at the parent's last cut 53308, at the session's first cut 53308 (bytes in the parent's late ids 0.0%), at R's view 52280 (late ids 0.0%, session-minted 2.8%)
+$ OMP_NUM_THREADS=1 python3 sessreplay.py 3 0 5000
+seed 3 TOK_MINT_NOVEL=0: parent 16108 windows, its last cut at view 992 and its vocabulary 992 at its end: 0 id(s) minted after its last cut; session 5000 windows, its mints by area {'num': 9, 'c': 4, 'py': 2, 'x5': 135}, R's view 1142; the four old held-out blocks byte for byte the parent's with x5 appended: True (eng 94500 B, py 94500 B, num 94500 B, c 94500 B); x5's block in alphabet 4 alone: True (45s)
+  eng: held-out tokens at the parent's last cut 49584, at the session's first cut 49584 (bytes in the parent's late ids 0.0%), at R's view 49584 (late ids 0.0%, session-minted 0.0%)
+  py : held-out tokens at the parent's last cut 40714, at the session's first cut 40714 (bytes in the parent's late ids 0.0%), at R's view 40587 (late ids 0.0%, session-minted 0.7%)
+  num: held-out tokens at the parent's last cut 39448, at the session's first cut 39448 (bytes in the parent's late ids 0.0%), at R's view 39079 (late ids 0.0%, session-minted 2.0%)
+  c  : held-out tokens at the parent's last cut 53209, at the session's first cut 53209 (bytes in the parent's late ids 0.0%), at R's view 52631 (late ids 0.0%, session-minted 1.8%)
+$ OMP_NUM_THREADS=1 python3 sessreplay.py 4 0 5000
+seed 4 TOK_MINT_NOVEL=0: parent 16244 windows, its last cut at view 992 and its vocabulary 998 at its end: 6 id(s) minted after its last cut; session 5000 windows, its mints by area {'num': 9, 'c': 3, 'x5': 138}, R's view 1142; the four old held-out blocks byte for byte the parent's with x5 appended: True (eng 94500 B, py 94500 B, num 94500 B, c 94500 B); x5's block in alphabet 4 alone: True (45s)
+  eng: held-out tokens at the parent's last cut 50744, at the session's first cut 50744 (bytes in the parent's late ids 0.0%), at R's view 50744 (late ids 0.0%, session-minted 0.0%)
+  py : held-out tokens at the parent's last cut 40019, at the session's first cut 40019 (bytes in the parent's late ids 0.0%), at R's view 40019 (late ids 0.0%, session-minted 0.0%)
+  num: held-out tokens at the parent's last cut 41235, at the session's first cut 41053 (bytes in the parent's late ids 0.9%), at R's view 40594 (late ids 0.9%, session-minted 2.3%)
+  c  : held-out tokens at the parent's last cut 53215, at the session's first cut 52866 (bytes in the parent's late ids 1.1%), at R's view 52419 (late ids 1.1%, session-minted 1.4%)
+$ OMP_NUM_THREADS=1 python3 sessreplay.py 5 0 5000
+seed 5 TOK_MINT_NOVEL=0: parent 16195 windows, its last cut at view 992 and its vocabulary 992 at its end: 0 id(s) minted after its last cut; session 5000 windows, its mints by area {'c': 9, 'num': 6, 'py': 3, 'x5': 132}, R's view 1142; the four old held-out blocks byte for byte the parent's with x5 appended: True (eng 94500 B, py 94500 B, num 94500 B, c 94500 B); x5's block in alphabet 4 alone: True (43s)
+  eng: held-out tokens at the parent's last cut 50393, at the session's first cut 50393 (bytes in the parent's late ids 0.0%), at R's view 50393 (late ids 0.0%, session-minted 0.0%)
+  py : held-out tokens at the parent's last cut 40868, at the session's first cut 40868 (bytes in the parent's late ids 0.0%), at R's view 40654 (late ids 0.0%, session-minted 0.9%)
+  num: held-out tokens at the parent's last cut 39073, at the session's first cut 39073 (bytes in the parent's late ids 0.0%), at R's view 38716 (late ids 0.0%, session-minted 2.0%)
+  c  : held-out tokens at the parent's last cut 54370, at the session's first cut 54370 (bytes in the parent's late ids 0.0%), at R's view 52775 (late ids 0.0%, session-minted 4.9%)
+$ OMP_NUM_THREADS=1 python3 sessreplay.py 6 0 5000
+seed 6 TOK_MINT_NOVEL=0: parent 16233 windows, its last cut at view 992 and its vocabulary 998 at its end: 6 id(s) minted after its last cut; session 5000 windows, its mints by area {'c': 3, 'num': 8, 'x5': 138, 'py': 1}, R's view 1142; the four old held-out blocks byte for byte the parent's with x5 appended: True (eng 94500 B, py 94500 B, num 94500 B, c 94500 B); x5's block in alphabet 4 alone: True (43s)
+  eng: held-out tokens at the parent's last cut 48471, at the session's first cut 48471 (bytes in the parent's late ids 0.0%), at R's view 48471 (late ids 0.0%, session-minted 0.0%)
+  py : held-out tokens at the parent's last cut 40485, at the session's first cut 40485 (bytes in the parent's late ids 0.0%), at R's view 40437 (late ids 0.0%, session-minted 0.2%)
+  num: held-out tokens at the parent's last cut 40582, at the session's first cut 40321 (bytes in the parent's late ids 1.1%), at R's view 40017 (late ids 1.0%, session-minted 2.2%)
+  c  : held-out tokens at the parent's last cut 54106, at the session's first cut 53886 (bytes in the parent's late ids 0.9%), at R's view 53409 (late ids 0.9%, session-minted 2.0%)
+$ OMP_NUM_THREADS=1 python3 sessreplay.py 0 1.0 5000
+seed 0 TOK_MINT_NOVEL=1.0: parent 17080 windows, its last cut at view 1022 and its vocabulary 1022 at its end: 0 id(s) minted after its last cut; session 5000 windows, its mints by area {'num': 6, 'x5': 144}, R's view 1172; the four old held-out blocks byte for byte the parent's with x5 appended: True (eng 94500 B, py 94500 B, num 94500 B, c 94500 B); x5's block in alphabet 4 alone: True (45s)
+  eng: held-out tokens at the parent's last cut 56026, at the session's first cut 56026 (bytes in the parent's late ids 0.0%), at R's view 56026 (late ids 0.0%, session-minted 0.0%)
+  py : held-out tokens at the parent's last cut 57735, at the session's first cut 57735 (bytes in the parent's late ids 0.0%), at R's view 57735 (late ids 0.0%, session-minted 0.0%)
+  num: held-out tokens at the parent's last cut 40998, at the session's first cut 40998 (bytes in the parent's late ids 0.0%), at R's view 40816 (late ids 0.0%, session-minted 1.0%)
+  c  : held-out tokens at the parent's last cut 48271, at the session's first cut 48271 (bytes in the parent's late ids 0.0%), at R's view 48271 (late ids 0.0%, session-minted 0.0%)
 $ OMP_NUM_THREADS=1 python3 sessreplay.py 1 1.0 5000
-seed 1 TOK_MINT_NOVEL=1.0: parent 16609 windows; session 5000 windows; the four old held-out blocks byte for byte the parent's with x5 appended: True (eng 94500 B, py 94500 B, num 94500 B, c 94500 B); x5's block in alphabet 4 alone: True; the session's mints by area {'x5': 145, 'c': 2, 'num': 3} (46s)
-  eng: held-out tokens at the parent's view 59271, at the session's last-cut view 59271; bytes in session-minted tokens 0.0%
-  py : held-out tokens at the parent's view 54824, at the session's last-cut view 54824; bytes in session-minted tokens 0.0%
-  num: held-out tokens at the parent's view 40270, at the session's last-cut view 40049; bytes in session-minted tokens 0.6%
-  c  : held-out tokens at the parent's view 48614, at the session's last-cut view 46797; bytes in session-minted tokens 0.8%
+seed 1 TOK_MINT_NOVEL=1.0: parent 16609 windows, its last cut at view 992 and its vocabulary 1010 at its end: 18 id(s) minted after its last cut; session 5000 windows, its mints by area {'x5': 145, 'c': 2, 'num': 3}, R's view 1142; the four old held-out blocks byte for byte the parent's with x5 appended: True (eng 94500 B, py 94500 B, num 94500 B, c 94500 B); x5's block in alphabet 4 alone: True (45s)
+  eng: held-out tokens at the parent's last cut 59271, at the session's first cut 59271 (bytes in the parent's late ids 0.0%), at R's view 59271 (late ids 0.0%, session-minted 0.0%)
+  py : held-out tokens at the parent's last cut 54824, at the session's first cut 54824 (bytes in the parent's late ids 0.0%), at R's view 54824 (late ids 0.0%, session-minted 0.0%)
+  num: held-out tokens at the parent's last cut 40270, at the session's first cut 40156 (bytes in the parent's late ids 0.6%), at R's view 40049 (late ids 0.6%, session-minted 0.6%)
+  c  : held-out tokens at the parent's last cut 48614, at the session's first cut 47033 (bytes in the parent's late ids 6.2%), at R's view 46797 (late ids 6.2%, session-minted 0.8%)
+$ OMP_NUM_THREADS=1 python3 sessreplay.py 2 1.0 5000
+seed 2 TOK_MINT_NOVEL=1.0: parent 16954 windows, its last cut at view 992 and its vocabulary 1016 at its end: 24 id(s) minted after its last cut; session 5000 windows, its mints by area {'c': 5, 'num': 1, 'x5': 143, 'py': 1}, R's view 1142; the four old held-out blocks byte for byte the parent's with x5 appended: True (eng 94500 B, py 94500 B, num 94500 B, c 94500 B); x5's block in alphabet 4 alone: True (45s)
+  eng: held-out tokens at the parent's last cut 57628, at the session's first cut 57628 (bytes in the parent's late ids 0.0%), at R's view 57628 (late ids 0.0%, session-minted 0.0%)
+  py : held-out tokens at the parent's last cut 55919, at the session's first cut 55919 (bytes in the parent's late ids 0.0%), at R's view 55543 (late ids 0.0%, session-minted 0.8%)
+  num: held-out tokens at the parent's last cut 41650, at the session's first cut 41609 (bytes in the parent's late ids 0.4%), at R's view 41559 (late ids 0.4%, session-minted 0.2%)
+  c  : held-out tokens at the parent's last cut 50336, at the session's first cut 47884 (bytes in the parent's late ids 9.4%), at R's view 47460 (late ids 9.4%, session-minted 1.9%)
+$ OMP_NUM_THREADS=1 python3 sessreplay.py 3 1.0 5000
+seed 3 TOK_MINT_NOVEL=1.0: parent 16875 windows, its last cut at view 992 and its vocabulary 1016 at its end: 24 id(s) minted after its last cut; session 5000 windows, its mints by area {'c': 5, 'num': 2, 'x5': 142, 'py': 1}, R's view 1142; the four old held-out blocks byte for byte the parent's with x5 appended: True (eng 94500 B, py 94500 B, num 94500 B, c 94500 B); x5's block in alphabet 4 alone: True (44s)
+  eng: held-out tokens at the parent's last cut 58395, at the session's first cut 58395 (bytes in the parent's late ids 0.0%), at R's view 58395 (late ids 0.0%, session-minted 0.0%)
+  py : held-out tokens at the parent's last cut 54966, at the session's first cut 54966 (bytes in the parent's late ids 0.0%), at R's view 54697 (late ids 0.0%, session-minted 1.1%)
+  num: held-out tokens at the parent's last cut 41431, at the session's first cut 41173 (bytes in the parent's late ids 0.8%), at R's view 41088 (late ids 0.8%, session-minted 0.7%)
+  c  : held-out tokens at the parent's last cut 50686, at the session's first cut 48830 (bytes in the parent's late ids 7.1%), at R's view 48346 (late ids 7.1%, session-minted 1.5%)

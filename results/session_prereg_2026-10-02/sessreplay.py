@@ -1,15 +1,19 @@
 """Model-free replay (CPU, operation only) of TOK through a parent's whole epoch at TOK_RETOK_EVERY 1000, then a
 pure-add session onto a fifth synthetic area x5 (epoch 1, DATA_RESAMPLE=1, 4,725,000 bytes over 5 processes) for
 <nsess> windows with acts every 1000, as spine/loop.py orders them (on_window per window; the mint at the flush; the
-act after it). It answers two questions register §8 5.3a's pre-registration rests on: do the four old held-out blocks
-stay byte for byte the parent's when x5 is appended at this stream length, and how much of each old area's held-out
-block does the session's last-cut view segment with tokens the session minted (text a pure-add session never trains
-in context)?
+act after it). It answers what register §8 5.3a's pre-registration rests on: do the four old held-out blocks stay
+byte for byte the parent's when x5 is appended at this stream length, and how much of each old area's held-out block
+is segmented with ids neither the parent nor a pure-add session trained in context -- the ids the PARENT minted
+after its last cut, which the session's first cut (at the restored vocabulary, compose's epoch-boundary cut) holds,
+and the ids the SESSION mints, which its last-cut view (R's) holds?
 
-    python3 sessreplay.py <seed> <TOK_MINT_NOVEL> [<session windows>]       # sessreplay.out: 0 and 1, 0 and 1.0, 5000
+    python3 sessreplay.py <seed> <TOK_MINT_NOVEL> [<session windows>]
+    # sessreplay.out: seeds 0-6 at TOK_MINT_NOVEL 0 and seeds 0-3 at 1.0, 5000 session windows
 
 Run it in place, by its path, from any directory but the checkout's root (it finds src/ two folders up). Adapted from
-the judge's scratch replay of 2026-10-02 (merge/sessreplay.py), which read the same numbers at seed 0."""
+the judge's scratch replay of 2026-10-02 (merge/sessreplay.py); the parent's ids minted after its last cut were added
+on 2026-10-02 from the review of 5.3a (its stranded.py), which found that the first version counted session mints
+alone."""
 import collections
 import os
 import sys
@@ -50,6 +54,7 @@ def setup(env):
 
 
 def walk(tok, vocab, seg, stream, ctx, step0, limit, mints, tag):
+    """The windows, their mints and acts; returns the segmentation, the windows walked and the last cut's view."""
     last = tok_api.view_of(vocab)
     i = 0
     while i < limit:
@@ -81,6 +86,9 @@ stream = data_api.draw_stream(data, areas, plan, epoch=0, seed=seed)
 seg = tok_api.tokenize(tok, vocab, stream.bytes, stream.labels, regularize=True, seed=seed)
 mints = []
 seg, n0, pview = walk(tok, vocab, seg, stream, int(lm.ctx), 0, 10 ** 9, mints, "parent")
+# THE SESSION'S FIRST CUT IS THE PARENT'S VOCABULARY AT ITS END, every id it minted after its last cut included.
+fview = tok_api.view_of(vocab)
+late = {mid for tag, _, mid in mints if tag == "parent" and mid >= pview[0]}
 # THE SESSION: x5 appended at 4,725,000 bytes over 5 processes (945,000 a process, the parent's), pure-add, epoch 1
 # redrawn, cut at the parent's vocabulary. A second assembly in one process: the session's levers.
 _lever._reopen_assembly()
@@ -97,16 +105,22 @@ stream2 = data_api.draw_stream(data2, areas2, plan2, epoch=1, seed=seed)
 seg2 = tok_api.tokenize(tok2, vocab, stream2.bytes, stream2.labels, regularize=True, seed=seed)
 seg2, n1, sview = walk(tok2, vocab, seg2, stream2, int(lm2.ctx), n0, nsess, mints, "session")
 sm = collections.Counter(ar for tag, ar, _ in mints if tag == "session")
-print(f"seed {seed} TOK_MINT_NOVEL={novel}: parent {n0} windows; session {n1} windows; the four old held-out blocks "
-      f"byte for byte the parent's with x5 appended: {all(same.values())} "
-      f"({', '.join(f'{a} {len(areas.holdout[a])} B' for a in same)}); x5's block in alphabet 4 alone: {x5_alpha}; "
-      f"the session's mints by area {dict(sm)} ({time.time() - t0:.0f}s)")
+print(f"seed {seed} TOK_MINT_NOVEL={novel}: parent {n0} windows, its last cut at view {pview[0]} and its vocabulary "
+      f"{fview[0]} at its end: {len(late)} id(s) minted after its last cut; session {n1} windows, its mints by area "
+      f"{dict(sm)}, R's view {sview[0]}; the four old held-out blocks byte for byte the parent's with x5 appended: "
+      f"{all(same.values())} ({', '.join(f'{a} {len(areas.holdout[a])} B' for a in same)}); x5's block in alphabet 4 "
+      f"alone: {x5_alpha} ({time.time() - t0:.0f}s)")
 sess_ids = {mid for tag, _, mid in mints if tag == "session"}
 for ar in ("eng", "py", "num", "c"):
     blk = areas.holdout[ar]
-    sp = tok_api.tokenize(tok, vocab, blk, view=pview)
-    ss = tok_api.tokenize(tok, vocab, blk, view=sview)
-    ids, bp = list(ss.ids), list(ss.byte_pos) + [len(blk)]
-    moved = sum(bp[k + 1] - bp[k] for k, t in enumerate(ids) if t in sess_ids)
-    print(f"  {ar:3s}: held-out tokens at the parent's view {len(sp.ids)}, at the session's last-cut view {len(ids)}; "
-          f"bytes in session-minted tokens {100 * moved / len(blk):.1f}%")
+
+    def cut(v):
+        """Tokens of the block at view v, and the % of its bytes in the parent's late ids and in session mints."""
+        s_ = tok_api.tokenize(tok, vocab, blk, view=v)
+        ids, bp = list(s_.ids), list(s_.byte_pos) + [len(blk)]
+        b_late = sum(bp[k + 1] - bp[k] for k, t in enumerate(ids) if t in late)
+        b_sess = sum(bp[k + 1] - bp[k] for k, t in enumerate(ids) if t in sess_ids)
+        return len(ids), 100 * b_late / len(blk), 100 * b_sess / len(blk)
+    p, f, s = cut(pview), cut(fview), cut(sview)
+    print(f"  {ar:3s}: held-out tokens at the parent's last cut {p[0]}, at the session's first cut {f[0]} (bytes in "
+          f"the parent's late ids {f[1]:.1f}%), at R's view {s[0]} (late ids {s[1]:.1f}%, session-minted {s[2]:.1f}%)")
