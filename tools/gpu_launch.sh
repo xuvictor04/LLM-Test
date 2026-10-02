@@ -68,7 +68,8 @@ done
 # and not empty, once, quoted for the shell.
 KNOBS="EXP OUT WINDOWS SEEDS BYTES RETOK_BYTES EPOCH_BYTES SMOKE_WINDOWS EXTRA ARCH_ALSO LONG PAR MPS FILL
        MAX_SEEDS DEVICE CAL_WINDOWS LADDER RETOK_ARMS COOLDOWN_ARM KEEP_CKPT KEEP_POLL KEEP_EVERY PIN_RETOK
-       PROBE_EVERY GO_WORLD_EPOCH EPS RETOK_INCUMBENT HB_EVERY ALLOW_CONCURRENT STOP_WAIT LOG WAIT_S FETCH CKPT_MB"
+       PROBE_EVERY GO_WORLD_EPOCH EPS RETOK_INCUMBENT HB_EVERY ALLOW_CONCURRENT STOP_WAIT LOG WAIT_S FETCH CKPT_MB
+       POOL_WITH"
 PFX=$(sed -n 's/^ *PREFIX = "\([A-Z][A-Z0-9]*\)".*/\1/p' src/*/levers.py 2>/dev/null | sort -u | paste -sd'|' -)
 shq() {  # one word for the shell: as it is when it is safe bare, else single-quoted
   if [[ "$1" =~ ^[A-Za-z0-9_./:,@%+=-]+$ ]]; then printf '%s' "$1"; else printf "'%s'" "${1//\'/\'\\\'\'}"; fi
@@ -114,6 +115,20 @@ case "$EXP_SET" in
            "EXP=retok bash $(printf %q "$ROOT/tools/gpu_launch.sh")$([[ $GO == 1 ]] && echo ' --go')" ;;
   *) fail "EXP='$EXP_SET' is not an experiment gpu_world.sh runs (world, retok, world_epoch, heldout)" "EXP=heldout" ;;
 esac
+
+# A TOP-UP'S FIRST FLEET (EXP=heldout, §8 6.3a): the fleet POOL_WITH names, which gpu_world.sh checks again.
+if [[ -n "${POOL_WITH:-}" ]]; then
+  _pw=$(cd "$POOL_WITH" 2>/dev/null && pwd -P)
+  if [[ "$EXP_SET" != heldout ]]; then
+    fail "POOL_WITH names a top-up's first fleet, which only EXP=heldout reads" "unset POOL_WITH"
+  elif [[ -z "$_pw" ]] || ! grep -q '^=== plan: EXP=heldout;' "$_pw/SUMMARY.txt" 2>/dev/null; then
+    fail "POOL_WITH='$POOL_WITH' holds no EXP=heldout fleet" "the first fleet's OUT, as its block printed it"
+  elif [[ "$_pw" == "$OUT_ABS" ]]; then
+    fail "POOL_WITH is this OUT, and the launch would move that fleet aside" "OUT=<its own directory>, as the first fleet's block printed it"
+  else
+    pass "POOL_WITH: this fleet is the top-up of $_pw"
+  fi
+fi
 
 # ------------------------------------------------------------------------------------------ python and torch
 if ! command -v python3 > /dev/null 2>&1; then

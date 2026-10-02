@@ -263,8 +263,19 @@
 # TOK_MINT_NOVEL=0 after EXTRA, with its arm's settings after them, and writes its probe series and
 # flush bytes beside its curve. KEEP_CKPT is on: each run's final save, and the probe's best saves beside
 # it, are the next test's parents (no periodic save; those are EXP=retok's k0 family's alone). FILL is
-# 0, since the seeds are capped.
+# 0, since the seeds are capped. THE READING: each area's R reading through the memory-off closure, report
+# half -- the last 'boundary' row of curves/<run>.probe.json -- arm - k0 paired by seed, by the eps rule
+# with the areas as its cells (Bonferroni over them) and Holm across k<c> and k<c>_mn. The DECISION:
+# k<c> PASS ends its B-provisional label on this source; k<c> FAIL with k<c>_mn PASS ships TOK_MINT_NOVEL
+# 1.0; both FAIL: neither ships, c stays on and the next remedy arms run; UNRESOLVED below the cap of 11
+# seeds prints the top-up's command, whose analysis reads both fleets' seeds where commit, card, torch
+# and shape match (POOL_WITH, below). Beside the rule, deciding nothing: O14's per-phase prequential
+# reading, memory-on minus memory-off, the time-integrated report gap from 20% of the stream, the
+# end-state SD per area, n_live, the probe's seconds, data.trust.wall_s, readings per phase, the rates,
+# and the act arms' finals with their sha256 (FINALS.sha256) and a line that packs them.
 #     EXP=heldout SEEDS='0 1 2 3 4 5 6' FILL=0 bash tools/gpu_launch.sh --go
+#     EXP=heldout SEEDS='7 8 9 10' FILL=0 OUT=gpu_heldout_topup_out POOL_WITH=gpu_heldout_out \
+#         bash tools/gpu_launch.sh --go                   # a top-up, as the block prints it (with PAR)
 #
 # EVERY FLEET ENDS IN A BLOCK TO PASTE BACK AND AN ARCHIVE TO KEEP. The GPU box has a checkout and no
 # push token (results/gpu_world_2026-09-24/ANALYSIS.txt was transcribed from its terminal by hand), so
@@ -272,7 +283,9 @@
 # "==== PASTE THIS BACK ====" to "==== END ====", at most 80 lines, and writes it to
 # $OUT/PASTE_BACK.txt: the commit, the card, the shape, the failed runs, and the result (at EXP=retok
 # the per-seed bits/byte, each cadence's per-phase bounds and verdict, eps, the choice and why, M
-# reported, rates, secondaries with the blackout split, and kept checkpoints). Paste it
+# reported, rates, secondaries with the blackout split, and kept checkpoints; at EXP=heldout the per-seed
+# held-out readings, each act arm's per-area bounds and verdict, the DECISION and, where it is UNRESOLVED,
+# the top-up's command, what is reported beside it, and the finals' pack line). Paste it
 # into the chat. $OUT is then packed beside itself as <name>_<launch date>.tgz -- logs, curves, smoke,
 # calibration, SUMMARY, ANALYSIS, the block, KEPT.txt; never a checkpoint -- which the owner keeps
 # (the 2026-09-24 precedent, gpu_world_2026-09-24.tgz, and the layout tools/read_fleet_archive.sh reads).
@@ -339,6 +352,7 @@ COOLDOWN_ARM=${COOLDOWN_ARM:-}             # EXP=retok: FAB_COOLDOWN of an extra
 KEEP_CKPT=${KEEP_CKPT:-$([[ "$EXP" == retok || "$EXP" == heldout ]] && echo 1 || echo 0)}
 KEEP_POLL=${KEEP_POLL:-1}                  # seconds between the kept-checkpoint watcher's looks
 PIN_RETOK=${PIN_RETOK:-1000}               # the shipped TOK_RETOK_EVERY: every EXP=world_epoch run's pin, EXP=heldout's act arms'
+POOL_WITH=${POOL_WITH:-}                   # EXP=heldout: a top-up's first fleet (its OUT), whose seeds it reads with its own
 PROBE_EVERY=${PROBE_EVERY:-700}            # EXP=world_epoch and heldout: the EVAL_RETENTION_EVERY every run pins (04-6.2's cap)
 GO_WORLD_EPOCH=${GO_WORLD_EPOCH:-0}
 [[ "$PROBE_EVERY" =~ ^[1-9][0-9]*$ ]] \
@@ -559,6 +573,8 @@ plan_banner() {  # the fleet's shape, as SUMMARY records it and the EXP=world_ep
   local p="" w
   for w in $EXP_ENV; do p="$p${p:+, }$w pinned"; done
   echo "=== pins: ${p:-none}"
+  [[ -n "${POOL_ABS:-}" ]] && echo "=== pool: with $POOL_ABS (seeds $POOL_SEEDS): this fleet is its top-up, and its" \
+       "analysis reads the two fleets' seeds together where commit, card, torch and shape match"
   echo "=== DOM Levels: $LEVELS"
   echo "=== §8 1.3 in this tree: counters ${TREE13:-none}; run.py --flush-bytes $FB_FLAG"
 }
@@ -568,6 +584,7 @@ plan_banner() {  # the fleet's shape, as SUMMARY records it and the EXP=world_ep
 # THE ANALYSIS, AS A FUNCTION so --analyze can re-run it on a finished (or interrupted) fleet.
 analyze() {  # out device mps_on par ncpu
   if [[ "$EXP" == retok ]]; then analyze_retok "$@"; return; fi
+  if [[ "$EXP" == heldout ]]; then analyze_heldout "$@"; return; fi
   # EVERY EXP BUT world READS ONE WHOLE EPOCH: its runs are meant to end at the stream's end, so the
   # flags turn over (the 6th argument, the EXP). At EXP=world the output is what it always was.
   python3 - "$@" "$EXP" <<'PY'
@@ -734,13 +751,20 @@ analyze_retok() {  # out device mps_on par ncpu
   GW_TREE_PINS="$TREE_PINS" gw_py retok "$1" "$CTX" "$(archive_path)" "$EPS" "$RETOK_INCUMBENT"
 }
 
+# E2's RETOK PART ON THE HELD-OUT PROBE (EXP=heldout; §8 6.3a): the reader, the rule and the block, in one
+# program as EXP=retok's are. POOL_WITH given here reads a top-up with that first fleet (an archive unpacked
+# elsewhere, say); else the one SUMMARY.txt records.
+analyze_heldout() {  # out device mps_on par ncpu
+  gw_py heldout "$1" "$CTX" "$(archive_path)" "$EPS" "$POOL_WITH" "$GW_HOME"
+}
+
 # THE BLOCK AND ITS PARTS (Proposal 05 §8 1.5). Modes: retok (the analysis above, which also writes
 # PASTE_BACK.txt and KEPT.txt), wrap (EXP=world and world_epoch: the header plus ANALYSIS.txt from
 # '=== RUNS ===' on), fail (a stop before the analysis). Every header is read off SUMMARY.txt alone,
 # so --analyze reproduces the block the fleet wrote.
 gw_py() {  # mode out ...
   python3 - "$@" <<'PY'
-import glob, json, math, os, re, sys
+import glob, hashlib, json, math, os, re, shlex, sys
 MODE, OUT = sys.argv[1], sys.argv[2]
 CAP = 80                              # lines in the block, both delimiters included
 L2 = math.log(2)
@@ -1063,7 +1087,7 @@ def better_than(diffs, alpha=0.05):
 O14_CADENCES = ("k3000", "k1000")
 
 
-def choose(cadences, verdicts, better, inc):
+def choose(cadences, verdicts, better, inc, remedy=None, room=False):
     """O14's choice. cadences: every cadence arm of the fleet (k<c>); verdicts: eps_rule's reading of the
     ones that acted; better: better_than's reading of the acted challengers against the incumbent arm
     `inc` (k1000 since the 2026-09-27 fleet's DECISION, k3000 before it). Returns (kind, arm, why), kind
@@ -1078,7 +1102,29 @@ def choose(cadences, verdicts, better, inc):
     cadence or O14's remedy arms run next (register O14, note retok fleet (3)). At 88d3fae the cooldown
     fleet's re-read of the shipped 1000 alone (RETOK_ARMS=1000) would have taken its FAIL for ESCALATE, the
     act ON at 1000 until the owner answered, though 3000 never FAILed. A lone challenger that FAILs does
-    not ship either, and the incumbent, which that fleet does not read, stays."""
+    not ship either, and the incumbent, which that fleet does not read, stays.
+    THE REMEDY BRANCH (2026-10-02, §8 6.3a, EXP=heldout). `remedy` is the arm that runs `inc` with O14's first
+    remedy arm on (k<c>_mn), read beside it per area on held-out text; `room` says seeds remain under the test's
+    cap. The answer is 'pass' (inc PASSes: its B-provisional label ends on that source), 'remedy' (inc FAILs
+    and the remedy PASSes: the remedy ships at inc), 'withdraw' (inc FAILs and the remedy FAILs, or is not
+    read, or stays UNRESOLVED at the cap: neither ships, inc stays on meanwhile and the next remedy arms run),
+    'topup' (inc UNRESOLVED, or inc FAILs and the remedy is UNRESOLVED, with room), 'unresolved' (inc
+    UNRESOLVED at the cap: reported so, never escalated) or 'undecided' (inc did not act)."""
+    if remedy is not None:
+        iv, rv = verdicts.get(inc, {}).get("verdict"), verdicts.get(remedy, {}).get("verdict")
+        if iv is None:
+            return "undecided", None, f"{inc} did not act in these runs"
+        if iv == "PASS":
+            return "pass", inc, f"{inc} PASSes against k0"
+        if iv == "FAIL" and rv == "PASS":
+            return "remedy", remedy, f"{inc} FAILs against k0 and {remedy} PASSes"
+        if iv == "FAIL" and not (rv == "UNRESOLVED" and room):
+            return "withdraw", inc, (f"{inc} FAILs against k0 and {remedy} "
+                                     + {"FAIL": "FAILs too", None: "did not act"}.get(rv, f"is {rv} at the seed cap"))
+        if room:
+            return "topup", None, (f"{inc} FAILs against k0 and {remedy} is UNRESOLVED" if iv == "FAIL" else
+                                   f"{inc} is UNRESOLVED against k0")
+        return "unresolved", inc, f"{inc} is UNRESOLVED against k0 at the seed cap"
     if not verdicts:
         return "undecided", None, "no cadence acted in these runs"
     if cadences and all(verdicts.get(a, {}).get("verdict") == "FAIL" for a in cadences):
@@ -1917,6 +1963,498 @@ def retok(ctx_arg, archive, eps, inc_cadence):
     ])
 
 
+# ------------------------------------------------------------------------------------------ heldout
+# E2's RETOK PART, READ ON SR0's HELD-OUT PROBE (EXP=heldout; Proposal 05 §8 6.3a, O14, O2; 2026-10-02). The
+# endpoint is each area's R reading through the memory-off closure, report half: the LAST row of the run's
+# curves/<run>.probe.json whose kind is 'boundary' and closure 'memory-off', its areas[a].report. arm - k0,
+# paired by seed, is read by the eps rule with the areas as its cells (Bonferroni over them) and Holm across
+# the two act arms; choose()'s remedy branch gives the DECISION. A top-up (POOL_WITH, recorded in SUMMARY)
+# reads its seeds with its first fleet's only where commit, card, torch and shape match; at most CAP_SEEDS
+# seeds are read. Everything after the rule is reported and decides nothing.
+HO_AREAS = ("eng", "py", "num", "c")      # the synthetic source's order; any other area follows, sorted
+CAP_SEEDS = 11                            # §8 6.3a's cap: 7 seeds, then a top-up of 4
+HO_REMEDIES = ("LM_ANCHOR_USES raised, OPT_HORIZON_REVISE=0, and OPT_BORN_CLOCK once §8 4.2 builds it, with k3000 "
+               "read for O14's escalation (it needs both cadences and every named remedy to FAIL)")
+
+
+def ho_runs(out):
+    """{(name, seed): run} off one fleet directory: each log, its curve, flush bytes and probe series."""
+    runs = {}
+    for log in sorted(glob.glob(os.path.join(out, "logs", "*.log"))):
+        tag = os.path.basename(log)[:-4]
+        name, _, seed = tag.rpartition(".s")
+        if not name or not seed.isdigit():
+            continue
+        t = rd(log)
+        r = rep(t)
+
+        def js(sfx):
+            try:
+                with open(os.path.join(out, "curves", tag + sfx)) as fh:
+                    return json.load(fh)
+            except (OSError, ValueError):
+                return None
+        series = js(".probe.json")
+        bnd = {}
+        for row in series if isinstance(series, list) else []:
+            if isinstance(row, dict) and row.get("kind") == "boundary":
+                bnd[row.get("closure")] = row               # the LAST boundary row of each closure
+        w = re.search(r"=== (\d+) windows[^\n]*? in ([\d.]+)s", t)
+        fl = re.search(r"^=== \d+ windows, (\d+) flushes", t, re.M)
+        prog = re.findall(r"^\[(\d+) windows\][^\n]*? n_live=(\d+)", t, re.M)
+        pe = re.search(r"^\s+gate:data\.phase_entered\s[^\n]*?'(\d+) vs (\d+)'", t, re.M)
+        nl = fnum(r.get("fab.n_live"))
+        runs[(name, int(seed))] = dict(
+            tag=tag, curve=js(".json"), fbytes=js(".bytes.json"), series=series, bnd=bnd, r=r,
+            win=int(w.group(1)) if w else None, secs=float(w.group(2)) if w else None,
+            flushes=int(fl.group(1)) if fl else None, acts=fnum(r.get("loop.acts")),
+            stopped="stopped at max_windows" in t,
+            nlive=nl if nl is not None else (float(prog[-1][1]) if prog else None),
+            nph=int(pe.group(2)) if pe else None)
+    return runs
+
+
+def ho_end(v, closure="memory-off"):
+    """{area: report} of the run's last boundary reading through `closure`; {} where it has none."""
+    row = v.get("bnd", {}).get(closure) or {}
+    return {a: float(x["report"]) for a, x in (row.get("areas") or {}).items()
+            if isinstance(x, dict) and fnum(x.get("report")) is not None}
+
+
+def ho_facts(s):
+    """What a pooled reading must share, off a SUMMARY.txt: the commit with its dirty flag and the code copy's
+    sha256, the card, torch, and the shape (windows, stream, EXTRA, arms, LM_CTX, pins)."""
+    first = s.splitlines()[0] if s else ""
+    m = re.match(r"=== gpu_world\.sh\s+\S+\s+commit\s*(\S*)(.*)$", first)
+    code = re.search(r"^=== code: .*?sha256 (\S+)\)", s, re.M)
+    sz = re.search(r"^=== (\d+) windows per run, DATA_STREAM_BYTES=(\d+), seeds: .*?, EXTRA='(.*)'$", s, re.M)
+    plan = re.search(r"^=== plan: EXP=(\w+); arms (.*?), plus .*?LM_CTX (\d+)", s, re.M)
+    pins = re.search(r"^=== pins: (.*)$", s, re.M)
+    return {"commit": (m.group(1) + (" (dirty)" if "(dirty)" in m.group(2) else "")) if m else None,
+            "code": code.group(1) if code else None,
+            "card": ", ".join(sorted({f"{n.strip()} {mib} MiB" for n, mib in
+                                      re.findall(r"^\s+\d+, ([^,\n]+), (\d+) MiB, \d+ MiB\s*$", s, re.M)})) or "no GPU",
+            "torch": (re.search(r"^=== (torch \S+, CUDA \S+)", s, re.M) or [None, None])[1],
+            "shape": (sz.groups() if sz else None, plan.groups() if plan else None, pins.group(1) if pins else None)}
+
+
+def heldout(ctx_arg, archive, eps, pool_arg, home):
+    ctx = int(sget(r"^=== plan: .*?LM_CTX (\d+)") or ctx_arg)
+    total = int(sget(r"DATA_STREAM_BYTES=(\d+)") or 0)
+    done = done_book()
+    here = ho_runs(OUT)
+    runs = {k: v for k, v in here.items() if k[0] != "k0_rerun"}
+    reruns = [("this fleet's", here.get(("k0_rerun", 0)), here.get(("k0", 0)))]
+    mine = {s for (n, s) in runs}
+
+    # ---------------------------------------------------------------- a top-up's first fleet
+    pool = (pool_arg or sget(r"^=== pool: with (\S+)") or "").strip()
+    pooled, refused, pool_lines = None, None, []
+    if pool:
+        P = rd(os.path.join(pool, "SUMMARY.txt"))
+        if not P:
+            refused = f"{pool} holds no SUMMARY.txt"
+        else:
+            a_, b_ = ho_facts(S), ho_facts(P)
+            diff = [k for k in ("commit", "code", "card", "torch", "shape") if a_[k] != b_[k]]
+            there = ho_runs(pool)
+            both = sorted(mine & {s for (n, s) in there if n != "k0_rerun"})
+            # THE TOP-UP'S RERUN IS THE FIRST FLEET'S k0.s0 AGAIN, ON THIS FLEET'S CARD AND TORCH: pooled or not,
+            # the pair says whether the two fleets compute alike.
+            reruns = [("this top-up's, against the first fleet's k0.s0", here.get(("k0_rerun", 0)),
+                       there.get(("k0", 0)))]
+            if diff:
+                refused = "they differ in " + "; ".join(f"{k} ({a_[k]} here, {b_[k]} there)" for k in diff)
+            elif both:
+                refused = f"seed(s) {' '.join(map(str, both))} are in both"
+            else:
+                pooled = pool
+                runs.update({k: v for k, v in there.items() if k[0] != "k0_rerun"})
+                reruns = [("the first fleet's", there.get(("k0_rerun", 0)), there.get(("k0", 0)))] + reruns
+        pool_lines = ([f"POOLED with the first fleet {pooled}: its seeds and this top-up's (marked *) are read "
+                       f"together; commit, card, torch and shape match"] if pooled else
+                      [f"POOLING REFUSED with {pool}: {refused}; nothing is decided here"])
+
+    # ---------------------------------------------------------------- the endpoint and the rule
+    end = {k: ho_end(v) for k, v in runs.items()}
+    names = {n for (n, s) in runs}
+    incs = sorted((n for n in names if re.fullmatch(r"k[1-9]\d*", n)), key=lambda a: int(a[1:]))
+    inc = incs[0] if incs else None
+    mn = f"{inc}_mn" if inc and f"{inc}_mn" in names else None
+    arms = [a for a in (inc, mn) if a]
+    k0s = sorted(s for (n, s) in runs if n == "k0" and end[(n, s)])
+    seeds, past = k0s[:CAP_SEEDS], k0s[CAP_SEEDS:]
+    seen = [a for e in end.values() for a in e]
+    areas = [a for a in HO_AREAS if a in seen] + sorted(set(seen) - set(HO_AREAS))
+    acted = [a for a in arms if any((runs.get((a, s)) or {}).get("acts") for s in seeds)]
+    diffs = {}
+    for a in acted:
+        per = [[] for _ in areas]
+        for s in seeds:
+            ea, e0 = end.get((a, s)), end.get(("k0", s))
+            if ea and e0:
+                for i, ar in enumerate(areas):
+                    if ar in ea and ar in e0:
+                        per[i].append(ea[ar] - e0[ar])
+        diffs[a] = per
+    R = eps_rule(diffs, eps) if diffs else {}
+    n_read = max([len(xs) for per in diffs.values() for xs in per] or [0])
+    room = n_read < CAP_SEEDS and not pool
+    kind, pick, why = choose([inc] if inc else [], R, {}, inc, remedy=mn, room=room)
+    if refused:
+        kind = "refused"
+    c = inc[1:] if inc else "?"
+    nxt = 1 + max([s for (n, s) in runs] + [int(t.rpartition(".s")[2]) for t in done if t.rpartition(".s")[2].isdigit()]
+                  or [-1])
+    cmd = None
+    if kind == "topup":
+        sz = re.search(r"^=== (\d+) windows per run, DATA_STREAM_BYTES=(\d+), seeds: .*?, EXTRA='(.*)'$", S, re.M)
+        pe = re.search(r"EVAL_RETENTION_EVERY=(\d+) pinned", S)
+        dv = re.search(r"^=== \d+ CPU core\(s\), \d+ GPU\(s\), device=(\w+)", S, re.M)
+        pr = (re.findall(r"^=== \d+ run\(s\), (\d+) at a time", S, re.M) or [None])[-1]
+        oa = os.path.realpath(OUT)
+        kv = [("EXP", "heldout"), ("SEEDS", " ".join(str(s) for s in range(nxt, nxt + CAP_SEEDS - n_read))),
+              ("FILL", "0")]
+        if sz and sz.group(1) != "20000":
+            kv.append(("WINDOWS", sz.group(1)))
+        if sz and int(sz.group(2)) != int(sz.group(1)) * 189:
+            kv.append(("EPOCH_BYTES", sz.group(2)))
+        if sz and sz.group(3):
+            kv.append(("EXTRA", sz.group(3)))
+        if c != "1000":
+            kv.append(("PIN_RETOK", c))
+        if pe and pe.group(1) != "700":
+            kv.append(("PROBE_EVERY", pe.group(1)))
+        if dv and dv.group(1) != "cuda":
+            kv.append(("DEVICE", dv.group(1)))
+        if pr:
+            kv.append(("PAR", pr))
+        kv += [("OUT", (oa[:-4] if oa.endswith("_out") else oa) + "_topup_out"), ("POOL_WITH", oa)]
+        cmd = " ".join(f"{k}={shlex.quote(v)}" for k, v in kv) + f" bash {shlex.quote(os.path.join(home, 'tools', 'gpu_launch.sh'))} --go"
+    tail_ = f" (ε {eps:g} bits/byte, {n_read} seed(s))"
+    if kind == "pass":
+        decision = (f"TOK_RETOK_EVERY {c} PASSes against k0 on every area's held-out reading: its B-provisional label "
+                    f"ends on this synthetic source (real text, E2's shape (b), is §8 6.3's)" + tail_)
+    elif kind == "remedy":
+        decision = (f"TOK_MINT_NOVEL 1.0 ships at TOK_RETOK_EVERY {c}, in its own default-change commit: {why}" + tail_)
+    elif kind == "withdraw":
+        decision = (f"neither ships: {why}; {c} stays on meanwhile (0 is never shipped by the rule) and the next "
+                    f"remedy arms run: {HO_REMEDIES}" + tail_)
+    elif kind == "topup":
+        decision = (f"UNRESOLVED at {n_read} seed(s): {why}; top up to the cap of {CAP_SEEDS} on this card and torch "
+                    f"with the command below, then paste back the top-up's block, which reads both fleets" + tail_)
+    elif kind == "unresolved":
+        decision = (f"UNRESOLVED at the cap: {why}; reported so, never escalated, and TOK_RETOK_EVERY {c} stays, "
+                    f"B-provisional" + tail_)
+    elif kind == "refused":
+        decision = (f"NOTHING IS DECIDED: this top-up's seeds pool with its first fleet's only where commit, card, torch "
+                    f"and shape match, and {refused}; the first fleet's reading stands, and the top-up runs again on "
+                    f"its card and torch, at its commit")
+    else:
+        decision = f"UNDECIDED: {why}" + ("" if acted else "; no act arm acted in these runs (raise WINDOWS)")
+
+    # ---------------------------------------------------------------- the runs, as read
+    print()
+    print("=== RUNS (held-out bits/byte at R: the last 'boundary' row, closure memory-off, report half) ===")
+    missing = []
+    for (n, s), v in sorted(runs.items(), key=lambda kv: (kv[0][0], kv[0][1])):
+        e = end[(n, s)]
+        why_ = ("NO PROBE SERIES" if v["series"] is None else "NO BOUNDARY ROW (memory-off)" if not e else "")
+        if why_:
+            missing.append(f"{v['tag']}{'*' if pooled and (n, s) in here else ''}")
+        print(f"  {n:<10} s{s:<3} {v['win'] or '?':>6} win  acts {fmt(v['acts'], 'n'):>4}  "
+              + ("  ".join(f"{a} {e[a]:.5f}" for a in areas if a in e) or why_)
+              + ("  STOPPED AT THE WINDOW CAP" if v["stopped"] else ""))
+    rr_lines = []
+    for who, a_, b_ in reruns:
+        if a_ is None:
+            continue
+        ea, eb = ho_end(a_), ho_end(b_ or {})
+        d_ = [abs(ea[x] - eb[x]) for x in ea if x in eb]
+        pq = (abs(sum(a_["curve"]) - sum(b_["curve"])) if a_.get("curve") and b_ and b_.get("curve") else None)
+        rr_lines.append(f"k0_rerun ({who}): " + ("no k0.s0 reading to pair it with" if not d_ else
+                        f"k0 seed 0 twice, R per area max |diff| {max(d_):.3g}"
+                        + (f", summed loss |diff| {pq:.3g}" if pq is not None else "")
+                        + (" (BIT-EXACT)" if max(d_) == 0 and pq == 0 else "")))
+    print()
+    for l in rr_lines:
+        print(f"=== RUN-TO-RUN: {l} ===")
+
+    def cell(i, row, n_arm):
+        n, m, lo, up = row
+        if m is None:
+            return f"{areas[i]} -"
+        return (f"{areas[i]} {m:+.4f} " + (f"[{lo:+.4f},{up:+.4f}]" if lo is not None else "[-]")
+                + (f" (n={n})" if n != n_arm else ""))
+
+    rule_rows = []
+    for a in arms:
+        if a not in R:
+            rule_rows.append(f"  {a}: NO ACT FIRED at any seed -- no evidence either way, not a pass")
+            continue
+        r_ = R[a]
+        n_arm = max([n for n, _, _, _ in r_["phases"]] or [0])
+        rule_rows.append(f"  {a} n={n_arm} a={r_['level']:.3g}: "
+                         + " ".join(cell(i, row, n_arm) for i, row in enumerate(r_["phases"]))
+                         + f" -> {r_['verdict']}"
+                         + (f" ({r_['note'].replace('some phase', 'some area')})" if r_["note"] else ""))
+    rule_head = (f"RULE (§8 6.3a; O2, O14): ε {eps:g} bits/byte; per area ({len(areas)}), arm - k0 paired over seeds: "
+                 f"mean [lower at t(1 - a/{len(areas)}), Holm a across the act arms; one-sided 95% upper]"
+                 + (" -- this fleet alone, deciding nothing" if refused else ""))
+    print()
+    print("=== " + rule_head + " ===")
+    for l in rule_rows:
+        print(l)
+    print()
+    print(f"=== DECISION: {decision} ===")
+    if cmd:
+        print(f"    top-up: {cmd}")
+    extra_rows = []
+    if missing:
+        extra_rows.append(f"  left out of the pairs (no endpoint): {' '.join(missing)}")
+    if past:
+        extra_rows.append(f"  seeds past the cap of {CAP_SEEDS}, not read: {' '.join(map(str, past))}")
+    for l in extra_rows:
+        print(l)
+
+    # ---------------------------------------------------------------- reported, deciding nothing
+    def per_arm(a):
+        return [(s, runs[(a, s)]) for s in seeds if (a, s) in runs]
+
+    def sd(xs):
+        n_, m_, se_ = mean_se(xs)
+        return None if se_ is None else se_ * math.sqrt(n_)
+
+    rep_lines = []
+    # (1) O14's per-phase prequential reading (§8 2.1's endpoint), each act arm against k0.
+    gate_n = [v["nph"] for v in runs.values() if v["nph"]]
+    nph = max(sorted(set(gate_n)), key=gate_n.count) if gate_n else 4
+
+    def phases(v):
+        cu, fb = v["curve"], v["fbytes"]
+        if not (cu and fb and len(cu) == len(fb) and total):
+            return None
+        lo_n, lo_b, off = [0.0] * nph, [0] * nph, 0
+        for x, nb in zip(cu, fb):
+            k = min(nph - 1, next((j for j in range(nph) if off < round((j + 1) * total / nph)), nph - 1))
+            lo_n[k] += x
+            lo_b[k] += nb
+            off += nb
+        return [lo_n[k] * ctx / L2 / lo_b[k] if lo_b[k] else None for k in range(nph)]
+    ph = {k: phases(v) for k, v in runs.items()}
+    pin = {}
+    for a in acted:
+        per = [[] for _ in range(nph)]
+        for s in seeds:
+            pa, p0 = ph.get((a, s)), ph.get(("k0", s))
+            if pa and p0:
+                for k in range(nph):
+                    if pa[k] is not None and p0[k] is not None:
+                        per[k].append(pa[k] - p0[k])
+        pin[a] = per
+    PR = eps_rule(pin, eps) if pin else {}
+    for a in acted:
+        n_arm = max([len(xs) for xs in pin[a]] or [0])
+        body = " ".join(f"p{k + 1} " + ("-" if m is None else f"{m:+.4f}" + (f" [{lo:+.4f},{up:+.4f}]" if lo is not None else ""))
+                        for k, (n, m, lo, up) in enumerate(PR[a]["phases"]))
+        rep_lines.append(f"  prequential per phase (O14's 2.1 endpoint), {a} - k0 n={n_arm}: {body} -> {PR[a]['verdict']}")
+    # (2) memory-on minus memory-off per area at R (NEW-03).
+    mem = []
+    for a in ["k0"] + arms:
+        pairs = [(ho_end(v, "memory-on"), ho_end(v)) for _, v in per_arm(a)]
+        dd = {ar: mean([on[ar] - off[ar] for on, off in pairs if ar in on and ar in off]) for ar in areas}
+        if any(x is not None for x in dd.values()):
+            mem.append(f"{a} " + " ".join(f"{ar} {fmt(x, '+.4f')}" for ar, x in dd.items()))
+    if mem:
+        rep_lines.append("  memory-on - memory-off at R, mean over seeds (NEW-03): " + " | ".join(mem))
+
+    # (3) the time-integrated report gap from 20% of the stream: each run's all-area report mean over its in-run
+    # readings (memory-off), a step function of its stream position, integrated over the bytes from 20% of its
+    # stream to the end; arm - k0 paired by seed.
+    def integ(v):
+        ser, fb = v["series"], v["fbytes"]
+        if not ser or not fb or not v["win"] or not v["flushes"]:
+            return None
+        wpf = max(1, round(v["win"] / v["flushes"]))
+        cum = [0]
+        for b in fb:
+            cum.append(cum[-1] + b)
+        T = cum[-1]
+        pts = sorted((cum[min(len(fb), int(r_["step"]) // wpf)], float(r_["report"])) for r_ in ser
+                     if isinstance(r_, dict) and r_.get("kind") in ("phase", "cadence")
+                     and r_.get("closure") == "memory-off" and fnum(r_.get("report")) is not None)
+        if not pts or T <= 0:
+            return None
+        lo, acc = 0.2 * T, 0.0
+        for i, (x, val) in enumerate(pts):
+            a_ = lo if i == 0 else max(x, lo)
+            b_ = pts[i + 1][0] if i + 1 < len(pts) else T
+            acc += val * max(0.0, min(b_, T) - a_)
+        return acc / (T - lo)
+    ti = {k: integ(v) for k, v in runs.items()}
+    tl = []
+    for a in acted:
+        xs = [ti[(a, s)] - ti[("k0", s)] for s in seeds
+              if ti.get((a, s)) is not None and ti.get(("k0", s)) is not None]
+        if xs:
+            tl.append(f"{a} - k0 mean {sum(xs) / len(xs):+.4f} sd {fmt(sd(xs), '.4f')} n={len(xs)}")
+    if tl:
+        rep_lines.append("  time-integrated report gap from 20% of the stream (all areas, in-run readings): "
+                         + " | ".join(tl))
+    # (4) the end-state SD per area of arm - k0, which sizes the next tests.
+    sdl = [f"{a} " + " ".join(f"{ar} {fmt(sd(xs), '.4f')}" for ar, xs in zip(areas, diffs[a])) for a in acted]
+    if sdl:
+        rep_lines.append("  end-state SD per area of arm - k0: " + " | ".join(sdl))
+    # (5) n_live at the end (NEW-20); (6) the probe's seconds, R's share split out by windows (E6's cost);
+    # (7) data.trust.wall_s; each per arm, mean [min-max] over the seeds read.
+    def mm(xs, spec):
+        xs = [x for x in xs if x is not None]
+        return (f"{fmt(mean(xs), spec)} [{fmt(min(xs), spec)}-{fmt(max(xs), spec)}]" if xs else "-")
+    rep_lines.append("  n_live at the end (NEW-20): " + " | ".join(
+        f"{a} {mm([v['nlive'] for _, v in per_arm(a)], '.0f')}" for a in ["k0"] + arms))
+    pr_ = []
+    for a in ["k0"] + arms:
+        tot, inrun, rsh = [], [], []
+        for _, v in per_arm(a):
+            sec_, win_ = fnum(v["r"].get("eval.holdout.seconds")), fnum(v["r"].get("eval.holdout.windows"))
+            rw = sum(int(x.get("windows") or 0) for x in (v["series"] or []) if isinstance(x, dict)
+                     and x.get("kind") == "boundary")
+            if sec_ is None or not win_:
+                continue
+            r_s = sec_ * rw / win_
+            tot.append(sec_)
+            rsh.append(r_s)
+            if v["secs"]:
+                inrun.append(100 * (sec_ - r_s) / v["secs"])
+        if tot:
+            pr_.append(f"{a} {mean(tot):.1f} s, R {mean(rsh):.1f} s, in-run {fmt(mean(inrun), '.2f')}% of loop time")
+    if pr_:
+        rep_lines.append("  the probe's seconds (eval.holdout.seconds; R's share by its windows; E6's cost at the "
+                         "pinned cadence): " + " | ".join(pr_))
+    tw_ = [f"{a} {mm([fnum(v['r'].get('data.trust.wall_s')) for _, v in per_arm(a)], '.2f')} s" for a in ["k0"] + arms]
+    rep_lines.append("  data.trust.wall_s (the book's seconds; no claim fires on synthetic text): " + " | ".join(tw_))
+    # (8) in-run readings per phase, and §8 0.4's check on the pinned cadence.
+    cnt, short = [], []
+    for k, v in runs.items():
+        steps, cs = [], []
+        for r_ in v["series"] or []:
+            if not isinstance(r_, dict) or r_.get("closure") != "memory-off":
+                continue
+            if r_.get("kind") == "phase":
+                steps.append(int(r_["step"]))
+                cs.append(1)
+            elif r_.get("kind") == "cadence" and cs:
+                cs[-1] += 1
+        cnt += [(x, v["tag"], i + 1) for i, x in enumerate(cs)]
+        if steps and v["win"]:
+            ln_ = [b - a for a, b in zip(steps, steps[1:])] + [v["win"] - steps[-1] + 1]
+            short.append((min(ln_), v["tag"]))
+    every = sget(r"EVAL_RETENTION_EVERY=(\d+) pinned")
+    if cnt:
+        lo_ = min(cnt)
+        sh = min(short) if short else None
+        rep_lines.append(f"  in-run readings per phase: fewest {lo_[0]} ({lo_[1]}, phase {lo_[2]}), most {max(cnt)[0]}"
+                         + (f"; shortest phase {sh[0]:,} windows ({sh[1]}), / 5 = {sh[0] / 5:.0f} against "
+                            f"EVAL_RETENTION_EVERY {every or '?'} (§8 0.4)" if sh else ""))
+
+    # ---------------------------------------------------------------- rates
+    rate_rows = []
+    for a in ["k0"] + arms:
+        wps = [v["win"] / v["secs"] for _, v in per_arm(a) if v["win"] and v["secs"]]
+        if wps:
+            rate_rows.append(f"{a} {mean(wps):.2f} [{min(wps):.2f}-{max(wps):.2f}]")
+    agg = []
+    fin = re.search(r"^---- fleet finished in \d+ min \((\d+) s\)", S, re.M)
+    eta = re.search(r"^=== ETA by waves: about \d+ min \((\d+) s\)", S, re.M)
+    if fin and int(fin.group(1)) > 0:
+        wall = int(fin.group(1))
+        tw = sum(v["win"] for k, v in here.items() if v["win"])
+        agg.append(f"  this fleet: {tw:,} windows in {wall} s of fleet wall = {tw / wall:.2f} windows/s aggregate"
+                   + (f"; ETA by waves {eta.group(1)} s, took {wall} s: {wall / max(1, int(eta.group(1))):.2f}x"
+                      if eta else ""))
+
+    # ---------------------------------------------------------------- the finals: test 2's parents
+    # THIS FLEET'S act arms' final checkpoints and their vocabularies, sha256 in FINALS.sha256 (sha256sum's
+    # format, paths relative to OUT), so the next test can check a copy. An archive holds no checkpoint, so with
+    # no ckpt/ here the FINALS.sha256 the fleet's own analysis wrote is kept and read.
+    fin_lines = []
+    ck = os.path.join(OUT, "ckpt")
+    man = os.path.join(OUT, "FINALS.sha256")
+    if os.path.isdir(ck):
+        rows, nb = [], 0
+        for (n, s), v in sorted(here.items()):
+            if n not in arms:
+                continue
+            for rel in (f"ckpt/{v['tag']}/ckpt.pt", f"ckpt/{v['tag']}.dyntok.json"):
+                p_ = os.path.join(OUT, rel)
+                if os.path.isfile(p_):
+                    h = hashlib.sha256()
+                    with open(p_, "rb") as fh:
+                        for blk in iter(lambda: fh.read(1 << 20), b""):
+                            h.update(blk)
+                    rows.append(f"{h.hexdigest()}  {rel}")
+                    nb += os.path.getsize(p_)
+        with open(man, "w") as fh:
+            fh.write("".join(r_ + "\n" for r_ in rows))
+        oa, tar_ = os.path.realpath(OUT), re.sub(r"\.tgz$", "", os.path.realpath(archive)) + "_finals.tar"
+        fin_lines.append(f"FINALS: {len(rows)} file(s), the {' and '.join(arms)} runs' final checkpoints and "
+                         f"vocabularies, {nb / 1e9:.2f} GB, sha256 in FINALS.sha256; the next test's parents. Pack "
+                         f"them to upload: tar -cf {tar_} -C {oa} FINALS.sha256 $(cut -c67- {oa}/FINALS.sha256)")
+    elif os.path.exists(man):
+        n_ = sum(1 for l in rd(man).splitlines() if l.strip())
+        fin_lines.append(f"FINALS: {n_} file(s) in FINALS.sha256, as the fleet's own analysis wrote it (no ckpt/ here: "
+                         f"an archive packs none)")
+    else:
+        fin_lines.append("FINALS: none" + (" (KEEP_CKPT was off)" if KEPT_ON == "OFF" else
+                                           ": this directory holds no ckpt/ and no FINALS.sha256"))
+
+    print()
+    print("=== REPORTED, DECIDES NOTHING (§8 6.3a) ===")
+    for l in rep_lines + ["  windows/s per run (mean [min-max] over the seeds read): " + " | ".join(rate_rows)] + agg:
+        print(l)
+    print()
+    for l in fin_lines:
+        print("=== " + l)
+
+    # ---------------------------------------------------------------- the block
+    hd = [f"held-out bits/byte at R (memory-off, report half), per seed: k0, then " + ", then ".join(f"{a} - k0" for a in arms),
+          "  seed  " + " ".join(f"{a:>7}" for a in areas) + "".join(" | " + " ".join(f"{a:>8}" for a in areas) for _ in arms)]
+    t_rows = []
+    for s in seeds:
+        e0 = end.get(("k0", s)) or {}
+        cells = " ".join(f"{fmt(e0.get(a), '.4f'):>7}" for a in areas)
+        for a in arms:
+            ea = end.get((a, s)) or {}
+            cells += " | " + " ".join(f"{fmt(ea[x] - e0[x] if x in ea and x in e0 else None, '+.4f'):>8}"
+                                      for x in areas)
+        t_rows.append(f"  {'s' + str(s) + ('*' if pooled and ('k0', s) in here else ''):<6}{cells}")
+
+    def table(n=None):
+        if n is None or len(t_rows) + 2 <= n:
+            return hd + t_rows
+        keep = max(0, n - 3)
+        return hd + t_rows[:keep] + [f"  ... {len(t_rows) - keep} more seed row(s): in ANALYSIS.txt's RUNS"]
+    labels = ["synthetic source"] + (["pooled"] if pooled else [])
+    emit([
+        ("head", head("heldout", labels) + failures(here, done), 0),
+        ("pool", pool_lines, 0),
+        ("per-seed rows", table, 0),
+        ("verdict", rr_lines + [rule_head] + rule_rows + [f"DECISION: {decision}"]
+         + ([f"  top-up: {cmd}"] if cmd else []) + extra_rows, 0),
+        ("reported", ["REPORTED, DECIDES NOTHING:"], 0),
+        ("time-integrated and SD", [l for l in rep_lines if "time-integrated" in l or "end-state SD" in l], 1),
+        ("prequential", [l for l in rep_lines if "prequential" in l], 2),
+        ("memory", [l for l in rep_lines if "memory-on" in l], 2),
+        ("readings", [l for l in rep_lines if "readings per phase" in l], 2),
+        ("pool and probe costs", [l for l in rep_lines if "n_live" in l or "probe's seconds" in l
+                                  or "data.trust" in l], 3),
+        ("rates", ["  windows/s per run: " + " | ".join(rate_rows)], 4),
+        ("aggregate", agg, 1),
+        ("finals", fin_lines, 0),
+        ("archive", [archive_line(archive)], 0),
+    ])
+
+
 # ------------------------------------------------------------------------------------------ wrap
 def wrap(exp, archive):
     """EXP=world and world_epoch: the header, then ANALYSIS.txt from '=== RUNS ===' on. The run rows
@@ -1956,6 +2494,8 @@ def fail(exp, archive, reason, logs):
 
 if MODE == "retok":
     retok(int(sys.argv[3]), sys.argv[4], float(sys.argv[5]), int(sys.argv[6]))
+elif MODE == "heldout":
+    heldout(int(sys.argv[3]), sys.argv[4], float(sys.argv[5]), sys.argv[6], sys.argv[7])
 elif MODE == "wrap":
     wrap(sys.argv[3], sys.argv[4])
 elif MODE == "fail":
@@ -2115,8 +2655,8 @@ archive_path() {  # beside OUT, named for the fleet's LAUNCH date, so --analyze 
   b=$(basename "$OUT")
   echo "$(dirname "$OUT")/${b%_out}_${d:-$(date -u +%Y-%m-%d)}.tgz"
 }
-paste_back() {  # print the owner's block (EXP=retok's analysis wrote it; the others are wrapped here)
-  [[ "$EXP" == retok ]] || gw_py wrap "$OUT" "$EXP" "$(archive_path)"
+paste_back() {  # print the owner's block (EXP=retok's and heldout's analyses wrote it; the others are wrapped here)
+  [[ "$EXP" == retok || "$EXP" == heldout ]] || gw_py wrap "$OUT" "$EXP" "$(archive_path)"
   echo
   # A MISSING BLOCK IS SAID, NOT SWALLOWED (2026-09-27 review: `cat 2>/dev/null` printed nothing at all)
   if [[ -f "$OUT/PASTE_BACK.txt" ]]; then cat "$OUT/PASTE_BACK.txt" 2>/dev/null
@@ -2556,6 +3096,28 @@ fi
 if [[ "$KEEP_CKPT" == 1 && "$OUT" =~ [[:space:]] ]]; then
   echo "!! OUT='$OUT' holds whitespace, and with KEEP_CKPT=1 its path rides inside the job lines, which are"
   echo "   split on whitespace. Choose an OUT without spaces. Nothing was started."; exit 2
+fi
+
+# A TOP-UP NAMES ITS FIRST FLEET (§8 6.3a): POOL_WITH=<that fleet's OUT>, which the launch checks before
+# anything is written -- an EXP=heldout fleet there, not this OUT (a launch moves the fleet in OUT aside), and
+# none of its seeds run again -- and the banner records for the analysis.
+POOL_ABS=""; POOL_SEEDS=""
+if [[ -n "$POOL_WITH" ]]; then
+  [[ "$EXP" == heldout ]] || { echo "!! POOL_WITH names a top-up's first fleet, which only EXP=heldout reads. Nothing was started."; exit 2; }
+  POOL_ABS=$(cd "$POOL_WITH" 2>/dev/null && pwd -P)
+  if [[ -z "$POOL_ABS" ]] || ! grep -q '^=== plan: EXP=heldout;' "$POOL_ABS/SUMMARY.txt" 2>/dev/null; then
+    echo "!! POOL_WITH='$POOL_WITH' holds no EXP=heldout fleet (no SUMMARY.txt that records one). Nothing was started."; exit 2
+  fi
+  if [[ "$POOL_ABS" == "$(realpath -m -- "$OUT")" ]]; then
+    echo "!! POOL_WITH is this OUT, and a launch moves the fleet in OUT aside: give the top-up its own OUT, as the"
+    echo "   first fleet's block prints it. Nothing was started."; exit 2
+  fi
+  POOL_SEEDS=$(sed -n "s/^=== [0-9]* windows per run, DATA_STREAM_BYTES=[0-9]*, seeds: \(.*\), EXTRA='.*'\$/\1/p" \
+               "$POOL_ABS/SUMMARY.txt" | head -1)
+  for _s in $SEEDS; do
+    [[ " $POOL_SEEDS " == *" $_s "* ]] \
+      && { echo "!! SEEDS: seed $_s ran in the first fleet too ($POOL_SEEDS). Nothing was started."; exit 2; }
+  done
 fi
 
 # ---------------------------------------------------------------- the launch gate (from the checkout)

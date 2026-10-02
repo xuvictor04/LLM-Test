@@ -184,6 +184,19 @@ is pinned here, on a fleet whose every number is chosen.
       none of them, and its arm's settings after the pins (TOK_MINT_NOVEL 1.0 on k<c>_mn alone); --probe-series
       and --flush-bytes on every run; finals only, the k0 family's too; an arm named k0 budgeting 3 files,
       the launcher's disk check the same; the ETA priced by waves; FILL 0 by default; PIN_RETOK refused by name.
+  F30 EXP=heldout's READING, on fleets written by hand: each run's endpoint is the last memory-off boundary row
+      of its probe series, report half, per area; arm - k0 by the eps rule with the areas as its cells and Holm
+      across the act arms; the DECISION's five outcomes -- PASS ends the label, k<c> FAIL with k<c>_mn PASS
+      ships TOK_MINT_NOVEL 1.0, both FAIL withdraw (the next remedy arms named, no ESCALATE), UNRESOLVED
+      below the cap prints the top-up's command, at the cap it is reported -- and a FAIL with the remedy
+      UNRESOLVED topping up; runs with no boundary row or no series named and left out; seeds past the cap
+      not read; the reported lines' known answers (the time-integrated gap from 20% of the stream, the
+      per-phase prequential reading, memory-on - memory-off, the ETA by waves against the wall).
+  F31 THE TOP-UP: read with its first fleet where commit, card, torch and shape match -- the pooled 11 seeds
+      deciding what the first 7 could not, both reruns read -- and refused, deciding nothing, where card,
+      torch or commit differ or a seed is in both; POOL_WITH at --analyze over SUMMARY's record. End to end
+      with the stand-in: the first fleet's printed command launches the top-up that pools with it; the finals'
+      manifest and its pack line; the launch's refusals of POOL_WITH, and the launcher's check and ready line.
 """
 import glob
 import json
@@ -921,7 +934,7 @@ if "--flush-bytes" in a:
 # first window and a 'cadence' one mid-quarter, memory-off, over the areas arrived so far (eng and py, then
 # num, then c), and R's two 'boundary' readings, memory-off then memory-on (0.01 lower). Each area's report
 # is planted, 2.0 + 0.1 x its index + 0.001 x the seed, with STUB_HARM added to num on the act arm without
-# TOK_MINT_NOVEL and STUB_HARM_MN on the one with it, each +- STUB_SPREAD by the seed's parity.
+# TOK_MINT_NOVEL and STUB_HARM_MN on the one with it, +- STUB_SPREAD (STUB_SPREAD_MN) by the seed's parity.
 ps_rows = []
 if "--probe-series" in a:
     AR, seed = ("eng", "py", "num", "c"), int(os.environ.get("RUN_SEED", "0"))
@@ -930,7 +943,7 @@ if "--probe-series" in a:
         h = 0.0
         if act and AR[k] == "num":
             h = float(os.environ.get("STUB_HARM_MN" if mn else "STUB_HARM", "0"))
-            h += (1 if seed % 2 == 0 else -1) * float(os.environ.get("STUB_SPREAD", "0"))
+            h += (1 if seed % 2 == 0 else -1) * float(os.environ.get("STUB_SPREAD_MN" if mn else "STUB_SPREAD", "0"))
         return 2.0 + 0.1 * k + 0.001 * seed + h
     def row(step, kind, closure, nar, off=0.0):
         ars = {AR[k]: {"control": val(k) + off, "report": val(k) + off, "seen_by_parent": False} for k in range(nar)}
@@ -2860,11 +2873,295 @@ for _ in range(100):
                           env=clean_env(PATH=env10["PATH"], **dict(k29, SEEDS="0", PAR=10, KEEP_CKPT=0, OUT=o29f)))
     s29f = txt(os.path.join(o29f, "SUMMARY.txt"))
     check("F29 FILL is 0 at EXP=heldout: one seed at PAR 10 runs its 4 runs and no seed is added",
-          p29f.returncode == 0 and "=== 4 run(s), 10 at a time" in s29f and "FILL" not in s29f,
-          [l for l in s29f.splitlines() if "run(s)" in l or "FILL" in l])
+          p29f.returncode == 0 and "=== 4 run(s), 10 at a time" in s29f and "=== FILL" not in s29f,
+          [l for l in s29f.splitlines() if "run(s)" in l or "=== FILL" in l])
     p29e = gw(EXP="heldout", PIN_RETOK="10x", OUT=os.path.join(TMP, "f29e"))
     check("F29 a PIN_RETOK that is not a positive cadence is refused by name, before anything is written",
           p29e.returncode == 2 and "PIN_RETOK='10x'" in p29e.stdout and not os.path.exists(os.path.join(TMP, "f29e")))
+
+    # ---- F30: EXP=heldout's reading, rule and block (2026-10-02, register §8 6.3a) ---------------------------
+    # Fleets written by hand, each number chosen. Each area's R reading (the last 'boundary' row, memory-off,
+    # report half) is 2.0 + 0.1 x its index + 0.001 x the seed, with `harm` added to num on k1000 (harm_mn on
+    # k1000_mn), +- `spread` by the seed's parity; memory-on reads 0.01 lower; the in-run readings' all-area
+    # report is 2.5, and 2.5 + tgap from the stream's middle on; the prequential curve reads 2.0 bits/byte in
+    # every phase, + preq4 in phase 4 on k1000.
+    HO_AR = ("eng", "py", "num", "c")
+
+    def ho_summary(out, *, seeds, commit="abc1234", card="NVIDIA H100 PCIe, 81559", torch_="torch 2.7.0, CUDA 12.8",
+                   pool=None, windows=400, par=24):
+        n_, mib = card.split(", ")
+        L = [f"=== gpu_world.sh  2026-10-03T12:00:00Z  commit {commit}",
+             f"=== code: this fleet runs its own copy, {out}/code (gpu_world.sh, run.py, src/, tools/fleet_dash.sh; "
+             f"sha256 0123456789abcdef), taken from commit {commit} at launch: a git pull during the fleet reaches none of it",
+             "    index, name, memory.total [MiB], memory.used [MiB]", f"    0, {n_}, {mib} MiB, 1 MiB",
+             "=== 26 CPU core(s), 1 GPU(s), device=cuda", f"=== {torch_}",
+             f"=== {windows} windows per run, DATA_STREAM_BYTES={windows * 189}, seeds: {seeds}, EXTRA=''",
+             f"=== plan: EXP=heldout; arms k0 k1000 k1000_mn, plus k0_rerun at seed 0; window cap {3 * windows}; "
+             f"CAL_WINDOWS 600; LM_CTX {CTX}",
+             f"=== kept checkpoints: ON, one final checkpoint per run under {out}/ckpt, and beside it the retention "
+             f"probe's best saves (ckpt.pt.best and .best.prev): up to 3 checkpoint files per run, all counted in the "
+             f"disk check",
+             "=== pins: DATA_DRAW=planned pinned, DATA_SYNTH_HOLDOUT=1 pinned, EVAL_RETENTION_EVERY=700 pinned, "
+             "EVAL_HOLDOUT_WINDOWS=256 pinned, EVAL_RETENTION_N=24 pinned, EVAL_GENERATE=0 pinned, TOK_MINT_NOVEL=0 pinned"]
+        if pool:
+            L.append(f"=== pool: with {pool} (seeds 0 1 2 3 4 5 6): this fleet is its top-up, and its analysis reads "
+                     f"the two fleets' seeds together where commit, card, torch and shape match")
+        L += [f"=== {len(seeds.split()) * 3 + 1} run(s), {par} at a time",
+              "=== ETA by waves: about 20 min (1200 s): 22 run(s) over 24 slot(s), 1 wave(s), each run its windows "
+              "at 19.20 windows/s plus 15 s of startup",
+              "---- 2. fleet started 12:10:00Z", "---- fleet finished in 21 min (1260 s)"]
+        write(os.path.join(out, "SUMMARY.txt"), "\n".join(L) + "\n")
+
+    def ho_run(out, name, seed, *, harm=0.0, spread=0.0, tgap=0.0, preq4=0.0, windows=400, nobnd=False,
+               noseries=False):
+        tag = f"{name}.s{seed}"
+
+        def val(k):
+            return (2.0 + 0.1 * k + 0.001 * seed
+                    + ((harm + (1 if seed % 2 == 0 else -1) * spread) if HO_AR[k] == "num" else 0.0))
+
+        def row(step, kind, closure, nar, rep_=None, off=0.0):
+            ars = {HO_AR[k]: {"control": val(k) + off, "report": val(k) + off, "seen_by_parent": False}
+                   for k in range(nar)}
+            m_ = sum(x["report"] for x in ars.values()) / nar if rep_ is None else rep_
+            return {"step": step, "kind": kind, "closure": closure, "control": m_, "report": m_,
+                    "windows": 24 * nar, "nonfinite": 0, "paired_sd": None, "areas": ars}
+        rows = []
+        for q in range(4):
+            for st, kind in ((q * windows // 4 + 1, "phase"), (q * windows // 4 + windows // 8 + 1, "cadence")):
+                rows.append(row(st, kind, "memory-off", min(4, q + 2), rep_=2.5 + (tgap if st > windows // 2 else 0.0)))
+        if not nobnd:
+            rows += [row(windows, "boundary", "memory-off", 4), row(windows, "boundary", "memory-on", 4, off=-0.01)]
+        cc = {"loop.bytes_scored": 189 * windows, "loop.acts": 0 if name.startswith("k0") else 3,
+              "eval.holdout.seconds": "3.000000", "eval.holdout.windows": sum(r_["windows"] for r_ in rows),
+              "data.trust.wall_s": "0.500000", "fab.n_live": 2000 + seed}
+        write(os.path.join(out, "logs", tag + ".log"), "\n".join(
+            ["=== device=cuda amp=off tf32=(True, True) torch_seed=1",
+             f"=== {windows} windows, {windows} flushes, {windows} optimizer steps, 1 epoch(s) in 20.0s (20.0 w/s)",
+             "=== R STAGE -- the did-it-fire surfaces:"] + [f"       {k:<44} {v}" for k, v in cc.items()]
+            + ["       gate:data.phase_entered                      ('fired', '4 vs 4')"]) + "\n")
+        write(os.path.join(out, "curves", tag + ".json"), json.dumps(
+            [(2.0 + (preq4 if i * 4 // windows == 3 else 0.0)) * LN2 * 189 / CTX for i in range(windows)]))
+        write(os.path.join(out, "curves", tag + ".bytes.json"), json.dumps([189] * windows))
+        if not noseries:
+            write(os.path.join(out, "curves", tag + ".probe.json"), json.dumps(rows))
+        with open(os.path.join(out, "logs", "_done.txt"), "a") as fh:
+            fh.write(f"{tag} rc=0 secs=25\n")
+
+    def ho_fleet(out, seeds, *, harm=0.0, spread=0.0, harm_mn=0.0, spread_mn=0.0, tgap=0.0, preq4=0.0, nobnd=(),
+                 noseries=(), **kw):
+        ho_summary(out, seeds=" ".join(map(str, seeds)), **kw)
+        for s_ in seeds:
+            for nm, h_, sp_, tg_, p4_ in (("k0", 0.0, 0.0, 0.0, 0.0), ("k1000", harm, spread, tgap, preq4),
+                                         ("k1000_mn", harm_mn, spread_mn, 0.0, 0.0)):
+                ho_run(out, nm, s_, harm=h_, spread=sp_, tgap=tg_, preq4=p4_, nobnd=f"{nm}.s{s_}" in nobnd,
+                       noseries=f"{nm}.s{s_}" in noseries)
+        ho_run(out, "k0_rerun", 0)
+
+    def ho_read(tag, seeds, pool_env=None, **kw):
+        o_ = os.path.join(TMP, "f30", tag, "gpu_heldout_out")
+        ho_fleet(o_, seeds, **kw)
+        p_ = gw("--analyze", EXP="heldout", OUT=o_, **({"POOL_WITH": pool_env} if pool_env else {}))
+        return o_, p_, txt(os.path.join(o_, "ANALYSIS.txt")), "\n".join(block_of(p_.stdout) or [])
+
+    def dec(text):
+        return (re.search(r"^DECISION: (.*)$", text, re.M) or [None, ""])[1]
+
+    zero = " ".join(f"{a} +0.0000 [+0.0000,+0.0000]" for a in HO_AR)
+    o30, p30, a30, b30 = ho_read("pass", range(7), tgap=0.0625, preq4=0.1)
+    check("F30 a harmless fleet: both act arms PASS on every area by the eps rule (the areas its cells, Holm's a/2 on "
+          "the first arm), and the DECISION ends 1000's B-provisional label on this synthetic source; the block, within "
+          "80 lines and equal to PASTE_BACK.txt, carries every seed's per-area readings and both rows",
+          p30.returncode == 0 and f"  k1000 n=7 a=0.025: {zero} -> PASS" in b30
+          and f"  k1000_mn n=7 a=0.05: {zero} -> PASS" in b30
+          and dec(b30).startswith("TOK_RETOK_EVERY 1000 PASSes against k0 on every area's held-out reading: its "
+                                  "B-provisional label ends on this synthetic source")
+          and 0 < len(block_of(p30.stdout)) <= 80
+          and block_of(p30.stdout) == txt(os.path.join(o30, "PASTE_BACK.txt")).splitlines()
+          and re.search(r"^  s6 +2\.0060 +2\.1060 +2\.2060 +2\.3060 \| +\+0\.0000", b30, re.M) is not None,
+          b30[-1500:])
+    # THE REPORTED LINES' KNOWN ANSWERS. The time-integrated gap: k1000's in-run report steps from 2.5 to 2.5625 at
+    # window 201 of 400, read from 20% of the stream (window 80) on: 0.0625 x (400 - 201) / (0.8 x 400).
+    tg30 = 0.0625 * (400 - 201) / (0.8 * 400)
+    check("F30 ... and beside it, deciding nothing: the time-integrated report gap from 20% of the stream (+0.0389 = "
+          "0.0625 x 199 / 320 for k1000, 0 for k1000_mn), the end-state SD per area, O14's per-phase prequential "
+          "reading (phase 4 +0.1000, FAIL, reported), memory-on - memory-off (-0.0100), n_live, the probe's seconds "
+          "with R's share, data.trust.wall_s, readings per phase, and the ETA by waves against the wall",
+          f"k1000 - k0 mean {tg30:+.4f} sd 0.0000 n=7 | k1000_mn - k0 mean +0.0000 sd 0.0000 n=7" in b30
+          and "end-state SD per area of arm - k0: k1000 eng 0.0000 py 0.0000 num 0.0000 c 0.0000" in b30
+          and re.search(r"prequential per phase \(O14's 2\.1 endpoint\), k1000 - k0 n=7: .*p4 \+0\.1000 "
+                        r"\[\+0\.1000,\+0\.1000\] -> FAIL", b30) is not None
+          and "k0 eng -0.0100 py -0.0100 num -0.0100 c -0.0100" in b30 and "n_live at the end (NEW-20): k0 2003" in b30
+          and "k0 3.0 s, R 0.7 s, in-run 11.47% of loop time" in b30 and "k0 0.50 [0.50-0.50] s" in b30
+          and "in-run readings per phase: fewest 2" in b30 and "ETA by waves 1200 s, took 1260 s: 1.05x" in b30,
+          [l for l in b30.splitlines() if "REPORTED" in l or l.startswith("  ")][-12:])
+    _, _, _, b30r = ho_read("remedy", range(7), harm=0.2)
+    check("F30 k1000 FAILs on num (+0.2000, its lower bound past eps) and k1000_mn PASSes: TOK_MINT_NOVEL 1.0 ships "
+          "at 1000, in its own default-change commit",
+          "num +0.2000 [+0.2000,+0.2000] c +0.0000 [+0.0000,+0.0000] -> FAIL" in b30r
+          and dec(b30r).startswith("TOK_MINT_NOVEL 1.0 ships at TOK_RETOK_EVERY 1000, in its own default-change commit: "
+                                   "k1000 FAILs against k0 and k1000_mn PASSes"), dec(b30r))
+    _, _, _, b30w = ho_read("withdraw", range(7), harm=0.2, harm_mn=0.2)
+    check("F30 both FAIL: neither ships, 1000 stays on meanwhile (never 0) and the next remedy arms run, named, with "
+          "k3000 read for O14's escalation -- no ESCALATE",
+          dec(b30w).startswith("neither ships: k1000 FAILs against k0 and k1000_mn FAILs too; 1000 stays on meanwhile "
+                               "(0 is never shipped by the rule) and the next remedy arms run: LM_ANCHOR_USES raised, "
+                               "OPT_HORIZON_REVISE=0, and OPT_BORN_CLOCK once §8 4.2 builds it, with k3000 read for "
+                               "O14's escalation") and "ESCALATE" not in b30w, dec(b30w))
+    o30u, _, _, b30u = ho_read("unres", range(7), harm=0.05, spread=0.1)
+    oa30 = os.path.realpath(o30u)
+    check("F30 UNRESOLVED below the cap (num +0.0643, bounds -0.0780 and +0.1428 at 7 seeds) prints the top-up's "
+          "command: the next 4 seeds to the cap of 11, FILL=0, the fleet's shape (WINDOWS here) and PAR, its own OUT and "
+          "POOL_WITH this one",
+          "num +0.0643 [-0.0780,+0.1428]" in b30u and dec(b30u).startswith("UNRESOLVED at 7 seed(s): k1000 is UNRESOLVED")
+          and f"  top-up: EXP=heldout SEEDS='7 8 9 10' FILL=0 WINDOWS=400 PAR=24 OUT={oa30[:-4]}_topup_out "
+              f"POOL_WITH={oa30} bash {ROOT}/tools/gpu_launch.sh --go" in b30u, b30u[-900:])
+    _, _, _, b30c = ho_read("cap", range(11), harm=0.05, spread=0.1)
+    check("F30 the same at the cap of 11 seeds is reported unresolved, never escalated, and 1000 stays B-provisional",
+          dec(b30c).startswith("UNRESOLVED at the cap: k1000 is UNRESOLVED against k0 at the seed cap; reported so, "
+                               "never escalated, and TOK_RETOK_EVERY 1000 stays, B-provisional")
+          and "top-up:" not in b30c, dec(b30c))
+    _, _, _, b30f = ho_read("failunres", range(7), harm=0.2, harm_mn=0.05, spread_mn=0.1)
+    check("F30 k1000 FAILs and k1000_mn is UNRESOLVED: the top-up runs for the remedy's reading",
+          dec(b30f).startswith("UNRESOLVED at 7 seed(s): k1000 FAILs against k0 and k1000_mn is UNRESOLVED")
+          and "  top-up: EXP=heldout SEEDS='7 8 9 10'" in b30f, dec(b30f))
+    _, _, a30m, b30m = ho_read("missing", range(7), nobnd=("k1000.s3",), noseries=("k1000_mn.s5",))
+    check("F30 a run whose series holds no memory-off boundary row, and one with no series, are named and left out of "
+          "their arm's pairs (n=6), and the rule reads the rest",
+          "left out of the pairs (no endpoint): k1000.s3 k1000_mn.s5" in b30m
+          and re.search(r"^  k1000 +s3 .*NO BOUNDARY ROW \(memory-off\)$", a30m, re.M) is not None
+          and re.search(r"^  k1000_mn +s5 .*NO PROBE SERIES$", a30m, re.M) is not None
+          and f"  k1000 n=6 a=0.025: {zero} -> PASS" in b30m, b30m[-700:])
+    _, _, _, b30x = ho_read("past", range(12))
+    check("F30 seeds past the cap of 11 are not read, and the block says which",
+          "seeds past the cap of 11, not read: 11" in b30x and f"  k1000 n=11 a=0.025: {zero} -> PASS" in b30x)
+
+    # ---- F31: a top-up pooled with its first fleet (2026-10-02, register §8 6.3a) ----------------------------------
+    # The first fleet reads UNRESOLVED at 7 seeds (num +0.4 at even seeds, 0 at odd); its top-up at seeds 7-10
+    # reads +0.3 at each, so the pooled 11 FAIL k1000 (mean +0.2545, lower +0.0993) and the remedy ships.
+    o31 = os.path.join(TMP, "f31", "gpu_heldout_out")
+    ho_fleet(o31, range(7), harm=0.2, spread=0.2)
+    p31a = gw("--analyze", EXP="heldout", OUT=o31)
+
+    def topup(tag, seeds=range(7, 11), pool=o31, **kw):
+        o_ = os.path.join(TMP, "f31", tag)
+        ho_fleet(o_, seeds, harm=0.3, pool=pool, **kw)
+        p_ = gw("--analyze", EXP="heldout", OUT=o_)
+        return o_, "\n".join(block_of(p_.stdout) or [])
+    o31t, b31t = topup("gpu_heldout_topup_out")
+    check("F31 the first fleet alone is UNRESOLVED and asks for the top-up; the top-up, recorded as its pool, reads the "
+          "11 seeds together -- its own marked * -- and k1000 FAILs (+0.2545, lower +0.0993) while k1000_mn PASSes: "
+          "TOK_MINT_NOVEL 1.0 ships",
+          dec("\n".join(block_of(p31a.stdout) or [])).startswith("UNRESOLVED at 7 seed(s)")
+          and f"POOLED with the first fleet {o31}: its seeds and this top-up's (marked *) are read together" in b31t
+          and "num +0.2545 [+0.0993,+0.3472] c +0.0000 [+0.0000,+0.0000] -> FAIL" in b31t
+          and re.search(r"^  s10\* ", b31t, re.M) is not None and re.search(r"^  s6 ", b31t, re.M) is not None
+          and dec(b31t).startswith("TOK_MINT_NOVEL 1.0 ships at TOK_RETOK_EVERY 1000")
+          and "(ε 0.05 bits/byte, 11 seed(s))" in b31t, b31t[-1500:])
+    check("F31 ... and both reruns are read: the first fleet's own, and the top-up's against the first fleet's k0.s0, "
+          "the pair that says the two fleets compute alike",
+          "k0_rerun (the first fleet's): k0 seed 0 twice, R per area max |diff| 0, summed loss |diff| 0 (BIT-EXACT)" in b31t
+          and "k0_rerun (this top-up's, against the first fleet's k0.s0): k0 seed 0 twice, R per area max |diff| 0, "
+              "summed loss |diff| 0 (BIT-EXACT)" in b31t)
+    for tag31, kw31, why31 in (("card_out", {"card": "NVIDIA H200, 143771"},
+                                "they differ in card (NVIDIA H200 143771 MiB here, NVIDIA H100 PCIe 81559 MiB there)"),
+                               ("torch_out", {"torch_": "torch 2.8.0, CUDA 12.8"},
+                                "they differ in torch (torch 2.8.0, CUDA 12.8 here, torch 2.7.0, CUDA 12.8 there)"),
+                               ("commit_out", {"commit": "def5678"}, "they differ in commit (def5678 here, abc1234 there)"),
+                               ("overlap_out", {"seeds": range(6, 10)}, "seed(s) 6 are in both")):
+        _, b31r = topup(tag31, **kw31)
+        check(f"F31 a top-up whose {tag31.split('_')[0]} differs from the first fleet's is not pooled: POOLING REFUSED, "
+              f"saying why, and nothing is decided",
+              f"POOLING REFUSED with {o31}: {why31}; nothing is decided here" in b31r
+              and dec(b31r).startswith("NOTHING IS DECIDED: this top-up's seeds pool with its first fleet's only where "
+                                       f"commit, card, torch and shape match, and {why31}")
+              and "-- this fleet alone, deciding nothing" in b31r, b31r[-900:])
+    o31e, _ = topup("moved_out", pool="/nonexistent/gpu_heldout_out")
+    p31e = gw("--analyze", EXP="heldout", OUT=o31e, POOL_WITH=o31)
+    check("F31 POOL_WITH given to --analyze reads the top-up with that fleet (an archive unpacked elsewhere), over the "
+          "path SUMMARY.txt recorded",
+          f"POOLED with the first fleet {o31}:" in p31e.stdout and "TOK_MINT_NOVEL 1.0 ships" in p31e.stdout)
+    # A LAUNCH AND ITS TOP-UP, END TO END, with the stand-in: the first fleet's block prints the top-up's command,
+    # which is run as printed (env in the launcher's place, as F24 reads a ready line) with the stand-in's planted
+    # harm moved, and the top-up's block reads the two fleets together. The stand-in plants num at +0.2 +- 0.2 on
+    # k10 in the first fleet (UNRESOLVED at 7 seeds) and +0.3 in the top-up; k10_mn at 0.
+    o31l = os.path.join(TMP, "f31l", "gpu_heldout_out")
+    e31 = dict(PATH=env10["PATH"], EXP="heldout", DEVICE="cpu", WINDOWS=20, SEEDS="0 1 2 3 4 5 6", PAR=8,
+               SMOKE_WINDOWS=5, PIN_RETOK=10, PROBE_EVERY=5, STUB_FINAL_BYTES="1000", OUT=o31l)
+    p31l = subprocess.run(["bash", SCRIPT], cwd=ROOT, capture_output=True, text=True, timeout=600,
+                          env=clean_env(STUB_HARM="0.2", STUB_SPREAD="0.2", **e31))
+    b31l = "\n".join(block_of(p31l.stdout) or [])
+    cmd31 = (re.search(r"^  top-up: (.*) bash \S+/tools/gpu_launch\.sh --go$", b31l, re.M) or [None, ""])[1]
+    kv31 = dict(re.findall(r"(\w+)=('[^']*'|\S+)", cmd31))
+    kv31 = {k: v.strip("'") for k, v in kv31.items()}
+    oa31 = os.path.realpath(o31l)
+    man31 = txt(os.path.join(o31l, "FINALS.sha256"))
+    day31 = (re.match(r"=== gpu_world\.sh  (\d{4}-\d\d-\d\d)T", txt(os.path.join(o31l, "SUMMARY.txt"))) or [None, "?"])[1]
+    z1000 = __import__("hashlib").sha256(b"\0" * 1000).hexdigest()
+    check("F31 a stand-in launch reads UNRESOLVED at 7 seeds and prints the top-up's command with the fleet's knobs -- "
+          "seeds 7-10, FILL=0, WINDOWS, PIN_RETOK, PROBE_EVERY, DEVICE and PAR, its own OUT and POOL_WITH this one -- and "
+          "writes FINALS.sha256 over the act arms' finals, with a pack line",
+          p31l.returncode == 0 and dec(b31l).startswith("UNRESOLVED at 7 seed(s): k10 is UNRESOLVED")
+          and kv31 == {"EXP": "heldout", "SEEDS": "7 8 9 10", "FILL": "0", "WINDOWS": "20", "PIN_RETOK": "10",
+                       "PROBE_EVERY": "5", "DEVICE": "cpu", "PAR": "8", "OUT": oa31[:-4] + "_topup_out",
+                       "POOL_WITH": oa31}
+          and man31.count(f"{z1000}  ckpt/") == 14 and "  ckpt/k10.s6/ckpt.pt\n" in man31
+          and "  ckpt/k0.s0/" not in man31
+          and f"Pack them to upload: tar -cf {os.path.dirname(oa31)}/gpu_heldout_{day31}_finals.tar -C {oa31} "
+              f"FINALS.sha256 $(cut -c67- {oa31}/FINALS.sha256)" in b31l,
+          f"rc {p31l.returncode}; {cmd31!r}; {man31[:200]!r}; {b31l[-1200:]}")
+    # THE PACK LINE PACKS WHAT THE MANIFEST LISTS, and sha256sum -c accepts it.
+    pk31 = (re.search(r"Pack them to upload: (.*)$", b31l, re.M) or [None, "false"])[1]
+    subprocess.run(["bash", "-c", pk31], capture_output=True, text=True, timeout=120)
+    chk31 = subprocess.run(["bash", "-c", f"cd {oa31} && sha256sum -c --quiet FINALS.sha256"], capture_output=True,
+                           text=True, timeout=120)
+    try:
+        with tarfile.open(f"{os.path.dirname(oa31)}/gpu_heldout_{day31}_finals.tar") as tf_:
+            mem31 = sorted(tf_.getnames())
+    except (OSError, tarfile.TarError):
+        mem31 = []
+    check("F31 ... the pack line, run as printed, packs FINALS.sha256 and the 14 finals it lists, and sha256sum -c "
+          "accepts the manifest",
+          chk31.returncode == 0 and len(mem31) == 15 and "FINALS.sha256" in mem31 and "ckpt/k10_mn.s3/ckpt.pt" in mem31,
+          f"{chk31.stdout[-200:]} {mem31[:4]}")
+    o31u = kv31.get("OUT", os.path.join(TMP, "f31l", "none"))
+    p31u = subprocess.run(["bash", SCRIPT], cwd=ROOT, capture_output=True, text=True, timeout=600,
+                          env=clean_env(PATH=env10["PATH"], STUB_HARM="0.3", SMOKE_WINDOWS=5,
+                                        **{k: v for k, v in kv31.items()}))
+    b31u = "\n".join(block_of(p31u.stdout) or [])
+    check("F31 ... the top-up, launched with that command, records its first fleet and reads the 11 seeds together: "
+          "k10 FAILs and k10_mn PASSes, and TOK_MINT_NOVEL 1.0 ships",
+          p31u.returncode == 0 and f"=== pool: with {oa31} (seeds 0 1 2 3 4 5 6)" in txt(os.path.join(o31u, "SUMMARY.txt"))
+          and f"POOLED with the first fleet {oa31}" in b31u and "k10 n=11 a=0.025:" in b31u
+          and dec(b31u).startswith("TOK_MINT_NOVEL 1.0 ships at TOK_RETOK_EVERY 10"), b31u[-1500:])
+    # THE LAUNCH'S OWN CHECKS, before anything is written: POOL_WITH at another EXP, naming no EXP=heldout fleet,
+    # naming this OUT, or a seed of the first fleet's again.
+    r31 = []
+    for env31, want31 in (({"EXP": "retok", "POOL_WITH": o31l}, "only EXP=heldout reads"),
+                          ({"POOL_WITH": os.path.join(TMP, "f31l", "nothing")}, "holds no EXP=heldout fleet"),
+                          ({"POOL_WITH": o31l, "OUT": o31l}, "POOL_WITH is this OUT"),
+                          ({"POOL_WITH": o31l, "SEEDS": "6 7"}, "seed 6 ran in the first fleet too")):
+        o_ = env31.get("OUT", os.path.join(TMP, "f31r", str(len(r31)), "gpu_heldout_out"))
+        p_ = gw(**dict({"EXP": "heldout", "DEVICE": "cpu", "OUT": o_}, **env31))
+        r31.append(p_.returncode == 2 and want31 in p_.stdout and "Nothing was started" in p_.stdout
+                   and (o_ == o31l or not os.path.exists(o_)))
+    check("F31 a launch refuses POOL_WITH, writing nothing, at another EXP, where no EXP=heldout fleet is, when it is "
+          "this OUT (a launch moves that fleet aside), and when a seed of the first fleet would run again",
+          r31 == [True] * 4 and os.path.exists(os.path.join(o31l, "SUMMARY.txt")), str(r31))
+    # AND THE LAUNCHER: its check names the first fleet, its ready line carries POOL_WITH back, and it FAILs one
+    # naming no fleet.
+    l31 = subprocess.run(["bash", LAUNCHER], cwd=TMP, capture_output=True, text=True, timeout=300,
+                         env=clean_env(PATH=env10["PATH"], FETCH=0, **dict(kv31, OUT=os.path.join(TMP, "f31m", "o_out"))))
+    rl31 = next((ln[len("    ready: "):] for ln in l31.stdout.splitlines() if ln.startswith("    ready: ")), "")
+    l31b = subprocess.run(["bash", LAUNCHER], cwd=TMP, capture_output=True, text=True, timeout=300,
+                          env=clean_env(PATH=env10["PATH"], FETCH=0, EXP="heldout", DEVICE="cpu",
+                                        POOL_WITH=os.path.join(TMP, "f31l", "nothing")))
+    check("F31 the launcher names the top-up's first fleet, carries POOL_WITH and the top-up's knobs on its ready line, "
+          "and FAILs a POOL_WITH that names no EXP=heldout fleet",
+          f"PASS POOL_WITH: this fleet is the top-up of {oa31}" in l31.stdout
+          and f"POOL_WITH={oa31}" in rl31 and "SEEDS='7 8 9 10'" in rl31 and "PIN_RETOK=10" in rl31
+          and "FAIL POOL_WITH=" in l31b.stdout and "holds no EXP=heldout fleet" in l31b.stdout,
+          l31.stdout[-600:] + l31b.stdout[-300:])
 finally:
     # NOTHING THESE CHECKS STARTED OUTLIVES THEM: a process carrying a GW_FLEET_OUT under TMP (a fleet, its
     # runs, its heartbeat) or naming TMP on its command line (a stand-in run, a dashboard) is killed.
