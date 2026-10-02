@@ -5122,6 +5122,14 @@ not occur. (3) `FILL=1` (`MAX_SEEDS` 16) adds a sixth seed at PAR 25 or more, pa
 area, which neither fleet pre-registered, num in phase 4 is +0.091 at 1000 (Bonferroni-8 lower bound
 +0.065, above ε), E2's risk (register O14).
 
+**2026-10-02 (Proposal 05 §8 6.3a, O14): E2's RETOK PART IS PRE-REGISTERED AS ITS OWN FLEET.** The risk
+above is read where it lives, on held-out text: `EXP=heldout SEEDS='0 1 2 3 4 5 6' FILL=0 bash
+tools/gpu_launch.sh --go` reads k1000 and k1000_mn (k1000 at `TOK_MINT_NOVEL=1.0`, O14's first remedy
+arm) against k0 on each area's R reading through SR0's memory-off closure, report half, paired by seed,
+by the ε rule with the four areas as its cells and Holm across the two arms. The register's row holds
+the pins, the seeds and their cap, what each outcome ships and the remedy arms in their order. No `src/`
+file changes.
+
 **THE QUESTION AS IT STOOD.**
 
 `TOK.on_window` raises `Due.retok` on its own `retok_every` cadence, and the act it asks for is to

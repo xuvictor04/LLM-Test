@@ -1,0 +1,44 @@
+$ OMP_NUM_THREADS=1 python3 tokreplay.py 0 1000 0
+seed 0 TOK_RETOK_EVERY=1000 TOK_MINT_NOVEL=0: windows 16212, build vocab 512, final vocab 998, mints 486, acts 16 (29s)
+  mints born in p1: {'eng': 60, 'py': 72, 'num': 0, 'c': 0, 'cross': 0}
+  mints born in p2: {'eng': 13, 'py': 55, 'num': 58, 'c': 0, 'cross': 0}
+  mints born in p3: {'eng': 0, 'py': 35, 'num': 73, 'c': 0, 'cross': 0}
+  mints born in p4: {'eng': 0, 'py': 14, 'num': 68, 'c': 38, 'cross': 0}
+  eng held-out block 94500 B at the last-cut view: 1.94 B/token; bytes in online-minted tokens 39.9%; in tokens minted after p1 5.0%
+  py  held-out block 94500 B at the last-cut view: 2.26 B/token; bytes in online-minted tokens 67.5%; in tokens minted after p3 3.3%
+  num held-out block 94500 B at the last-cut view: 2.36 B/token; bytes in online-minted tokens 70.8%; in tokens minted after p3 17.8%
+  c   held-out block 94500 B at the last-cut view: 1.80 B/token; bytes in online-minted tokens 22.5%; in tokens minted after - 0.0%
+
+$ OMP_NUM_THREADS=1 python3 tokreplay.py 0 1000 1.0
+seed 0 TOK_RETOK_EVERY=1000 TOK_MINT_NOVEL=1.0: windows 17080, build vocab 512, final vocab 1022, mints 510, acts 17 (32s)
+  mints born in p1: {'eng': 70, 'py': 68, 'num': 0, 'c': 0, 'cross': 0}
+  mints born in p2: {'eng': 6, 'py': 16, 'num': 110, 'c': 0, 'cross': 0}
+  mints born in p3: {'eng': 0, 'py': 15, 'num': 111, 'c': 0, 'cross': 0}
+  mints born in p4: {'eng': 0, 'py': 0, 'num': 38, 'c': 76, 'cross': 0}
+  eng held-out block 94500 B at the last-cut view: 1.69 B/token; bytes in online-minted tokens 19.2%; in tokens minted after p1 1.1%
+  py  held-out block 94500 B at the last-cut view: 1.64 B/token; bytes in online-minted tokens 20.6%; in tokens minted after p3 0.0%
+  num held-out block 94500 B at the last-cut view: 2.30 B/token; bytes in online-minted tokens 64.6%; in tokens minted after p3 7.2%
+  c   held-out block 94500 B at the last-cut view: 1.96 B/token; bytes in online-minted tokens 38.2%; in tokens minted after - 0.0%
+
+$ OMP_NUM_THREADS=1 python3 tokreplay.py 1 1000 0
+seed 1 TOK_RETOK_EVERY=1000 TOK_MINT_NOVEL=0: windows 15940, build vocab 512, final vocab 986, mints 474, acts 15 (28s)
+  mints born in p1: {'eng': 66, 'py': 66, 'num': 0, 'c': 0, 'cross': 0}
+  mints born in p2: {'eng': 0, 'py': 87, 'num': 33, 'c': 0, 'cross': 0}
+  mints born in p3: {'eng': 0, 'py': 41, 'num': 61, 'c': 0, 'cross': 0}
+  mints born in p4: {'eng': 0, 'py': 3, 'num': 75, 'c': 42, 'cross': 0}
+  eng held-out block 94500 B at the last-cut view: 1.88 B/token; bytes in online-minted tokens 39.2%; in tokens minted after p1 0.0%
+  py  held-out block 94500 B at the last-cut view: 2.41 B/token; bytes in online-minted tokens 73.6%; in tokens minted after p3 0.7%
+  num held-out block 94500 B at the last-cut view: 2.35 B/token; bytes in online-minted tokens 63.7%; in tokens minted after p3 20.8%
+  c   held-out block 94500 B at the last-cut view: 1.70 B/token; bytes in online-minted tokens 17.6%; in tokens minted after - 0.0%
+
+$ OMP_NUM_THREADS=1 python3 tokreplay.py 1 1000 1.0
+seed 1 TOK_RETOK_EVERY=1000 TOK_MINT_NOVEL=1.0: windows 16609, build vocab 512, final vocab 1010, mints 498, acts 16 (31s)
+  mints born in p1: {'eng': 75, 'py': 63, 'num': 0, 'c': 0, 'cross': 0}
+  mints born in p2: {'eng': 0, 'py': 26, 'num': 100, 'c': 0, 'cross': 0}
+  mints born in p3: {'eng': 0, 'py': 25, 'num': 95, 'c': 0, 'cross': 0}
+  mints born in p4: {'eng': 0, 'py': 0, 'num': 26, 'c': 88, 'cross': 0}
+  eng held-out block 94500 B at the last-cut view: 1.59 B/token; bytes in online-minted tokens 17.5%; in tokens minted after p1 0.0%
+  py  held-out block 94500 B at the last-cut view: 1.72 B/token; bytes in online-minted tokens 23.8%; in tokens minted after p3 0.0%
+  num held-out block 94500 B at the last-cut view: 2.35 B/token; bytes in online-minted tokens 59.5%; in tokens minted after p3 3.7%
+  c   held-out block 94500 B at the last-cut view: 1.94 B/token; bytes in online-minted tokens 40.7%; in tokens minted after - 0.0%
+

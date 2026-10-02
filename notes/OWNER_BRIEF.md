@@ -55,8 +55,9 @@ Updated 2026-09-29 (edb90de, the Stage 3 merge; then the paths that moved, under
 | 1 | Read the 2026-09-24 fleet archive | **done** (you uploaded it; `results/gpu_world_2026-09-24/ARCHIVE_READS.md`) | data source; expert pool; culls; gradients |
 | 2 | Retokenization fleet (`EXP=retok bash tools/gpu_launch.sh --go`) | **done** 2026-09-27, 13 of 13 runs. Rebuilding every 1000 windows now ships: better than every 3000, and within budget against no rebuilding phase by phase (area by area, see Major issues 2). Provisional until SR0's held-out check, which must watch older text rebuilt late in a run (`results/gpu_retok_2026-09-27/RESULTS.md`) | which re-segmentation cadence ships; post-fix GPU speed; checkpoints for the first post-training test |
 | 3 | Cooldown fleet | **done** 2026-09-28, 21 of 21 runs on an H100. Rebuilding every 1000 windows stays. The 400-window pause of the pool's growth requests stays; it stays by rule, whatever this test read. Cutting it to 100 showed no measurable cost to learning: growth requests rose, the pause covered 10% of the run instead of 38%, and bits/byte did not move. One baseline run started learning late; it decides nothing (`results/gpu_retok_2026-09-28/RESULTS.md`) | whether the 400-window pause of the pool's growth requests costs learning at the shipped cadence (a measured cost; the pause stays); 1000 against no rebuilding, re-read at 5 seeds |
+| 4 | Held-out re-read of rebuilding | **pre-registered** 2026-10-02 (register §8 6.3a); its script is being built | whether rebuilding every 1000 windows keeps each older area's held-out text within budget (Major issue 2), and if not, whether the first fix aimed at it ships |
 
-No GPU test is ready now: SR0 is built, and the tests that read it still need their scripts.
+No GPU test is ready now: test 4's script is being built.
 
 Moved on 2026-09-28/29, if you run them from memory: the run.py sweeps are now `bash tools/sweep_gpu.sh`
 and `bash tools/sweep_world.sh`, and the old tree's commands start with `cd archive/old-tree`; the fleet
