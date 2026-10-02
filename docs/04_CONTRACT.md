@@ -2395,6 +2395,22 @@ the ε rule over the parents, at `OPT_LR_CONTINUE='as_logged'` (the floor, for a
 labelled so. The register's row holds the arms, the seeds and their cap, the choice and the outcomes.
 A synthetic parent takes only a synthetic area, so `data/continual` waits for real-text parents.
 
+**2026-10-02: BUILT (ff80b49, 412e828, 80135f1), AND ITS CPU OPERATION CHECK (operation only;
+`results/session_prereg_2026-10-02/cpu/`, each script beside its output).** `gpu_world.sh EXP=session`
+launches and reads the fleet, and `tests/test_gpu_world.py` F32-F34 pin its launch, the rule's outcomes on
+series written by hand, and the top-up's pooling and refusals. The anchor and 5.1's per-window SD are read
+off a boundary row's pairing, written since Q-EVAL-12's amendment of the same day. At `DEVICE=cpu`, at a
+toy shape whose parents fill `FAB_SLOTS` 2200 and whose acts re-measure their epochs, a parents stage and
+7 sessions ran to rc=0, finite, and wrote the block:
+- every session's resume-start readings are its parent's R readings, through both closures, item for item;
+- P_parent alone rehearses the parent, from window 0, at 0.27 of each phase;
+- every session prices as a logged parent at the floor;
+- P_twin equals P at its first flush and parts at the second;
+- W resumes at 4,248 slots and ends with 2,472 experts live, past its parent's 2,200.
+From those parents named as PARENTS, the same sessions reproduce byte for byte. Sessions from a CPU
+EXP=heldout fleet's finals at cce2d39 read their anchor exactly too; that parent's one act did not change
+its epoch's length, so they price as 'no-log parent: re-priced'.
+
 ### Q-DATA-6 — the held-out split becomes a seeded random block — **RESOLVED 2026-09-02: (b) CONFIRMED, PLUS ONE REPAIR THE QUESTION DID NOT CONTAIN — ONE HOLD-OUT RNG STREAM PER AREA, KEYED BY NAME. ⚠ EVERY HISTORICAL HELD-OUT NUMBER BECOMES NON-COMPARABLE**
 `holdout_frac` currently takes the **last** fraction of each area, which is a sample only if the
 corpus was written in no particular order. Measured: py held out at **5.061 ± 0.560** against 2.922

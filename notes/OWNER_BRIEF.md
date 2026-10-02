@@ -4,7 +4,8 @@ The one page for the owner. Everything else — how decisions were made, the evi
 rules — is in the repo for reference (`docs/proposals/05_DECISIONS.md`, `docs/04_CONTRACT.md`,
 `results/`, `notes/AGENT_STATE.md`) and is not brought up here.
 
-Updated 2026-10-02 (test 4, the held-out re-read of rebuilding, is ready: its block is under GPU tests).
+Updated 2026-10-02 (test 4, the held-out re-read of rebuilding, is ready, and test 5, the first learning
+sessions after training, follows it: both blocks are under GPU tests).
 
 ## How we work
 - **Owner:** leads and monitors, keeps the goals from drifting, adds ideas, expands the project, and
@@ -57,7 +58,7 @@ Updated 2026-10-02 (test 4, the held-out re-read of rebuilding, is ready: its bl
 | 2 | Retokenization fleet (`EXP=retok bash tools/gpu_launch.sh --go`) | **done** 2026-09-27, 13 of 13 runs. Rebuilding every 1000 windows now ships: better than every 3000, and within budget against no rebuilding phase by phase (area by area, see Major issues 2). Provisional until SR0's held-out check, which must watch older text rebuilt late in a run (`results/gpu_retok_2026-09-27/RESULTS.md`) | which re-segmentation cadence ships; post-fix GPU speed; checkpoints for the first post-training test |
 | 3 | Cooldown fleet | **done** 2026-09-28, 21 of 21 runs on an H100. Rebuilding every 1000 windows stays. The 400-window pause of the pool's growth requests stays; it stays by rule, whatever this test read. Cutting it to 100 showed no measurable cost to learning: growth requests rose, the pause covered 10% of the run instead of 38%, and bits/byte did not move. One baseline run started learning late; it decides nothing (`results/gpu_retok_2026-09-28/RESULTS.md`) | whether the 400-window pause of the pool's growth requests costs learning at the shipped cadence (a measured cost; the pause stays); 1000 against no rebuilding, re-read at 5 seeds |
 | 4 | Held-out re-read of rebuilding (below) | **ready** 2026-10-02 (register §8 6.3a) | whether rebuilding every 1000 windows keeps each older area's held-out text within budget (Major issue 2), and if not, whether the first fix aimed at it ships |
-| 5 | The first learning sessions after training | **pre-registered** 2026-10-02 (register §8 5.3a); its script is being built; it starts from test 4's kept checkpoints | whether a model learning a new area after training keeps each older area within budget, learning the new area alone and with its old text rehearsed; how noisy one session's reading is, which sizes the future gate; more expert room after training (described) |
+| 5 | The first learning sessions after training (below) | **ready** 2026-10-02 (register §8 5.3a); run it after test 4: it starts from test 4's kept checkpoints | whether a model learning a new area after training keeps each older area within budget, learning the new area alone and with its old text rehearsed; how noisy one session's reading is, which sizes the future gate; more expert room after training (described) |
 
 ### Test 4: the held-out re-read of rebuilding (about 25-30 minutes)
 Rebuilding every 1000 windows ships, but read area by area it may leave older numeric text worse than
@@ -91,6 +92,32 @@ EXP=heldout SEEDS='0 1 2 3 4 5 6' FILL=0 bash "$R/tools/gpu_launch.sh" --go
 - **Keep `gpu_heldout_out/ckpt/` on the box:** the next test starts from its finals. If the box will be
   given up, run the command after `pack:` in `gpu_heldout_out`'s block (a top-up's block has none) and
   download the `_finals.tar` it writes (about 2.1 GB).
+
+### Test 5: the first learning sessions after training (about 10-35 minutes)
+Each model test 4 kept learns a new, fifth area for 5,000 windows: once alone and once with its old text
+rehearsed. A third copy differs only by one part in ten thousand in its learning rate, to measure the
+noise, and the model with the most experts runs once more with room to grow. It reads whether each older
+area stays within budget, and which of the two ways to learn to keep. Run it after test 4's blocks (its
+top-up's too) are pasted back, from any provider:
+```bash
+R=/workspace/LLM-Test
+cd "$R" && git fetch origin rm-predict-DC && git checkout rm-predict-DC && git pull --ff-only
+EXP=session SEEDS='0 1 2 3 4 5 6' FILL=0 PARENTS="$R/gpu_heldout_out" bash "$R/tools/gpu_launch.sh" --go
+```
+- If test 4's DECISION shipped `TOK_MINT_NOVEL` 1.0, put `PARENT_ARM=k1000_mn` before `bash`.
+- The launcher checks test 4's kept models against their `FINALS.sha256` before anything starts. On a new
+  box, unpack test 4's `_finals.tar` into a directory and set `PARENTS` to it, or leave `PARENTS` out: the
+  fleet then trains the seven models again first. It also checks the disk: the sessions' kept checkpoints
+  need about 20 GB beside test 4's (`KEEP_CKPT=0` keeps none).
+- **Time:** 22 sessions. On the H100 PCIe box they run as one wave, about 15-20 minutes from launch to
+  block; about 30-35 without `PARENTS`. On the H200 box, two waves, about 10-15 minutes; about 20-25
+  without `PARENTS`.
+- Watch, stop and paste back as for test 4, with `session` for `heldout`: `bash "$R/tools/fleet_dash.sh"`,
+  `EXP=session bash "$R/gpu_world.sh" --stop`, and when it says FINISHED or STOPPED,
+  `cat "$R/gpu_session_out/PASTE_BACK.txt"`. Upload the `.tgz` its `archive:` line names.
+- **If its DECISION says UNRESOLVED,** run the command after `top-up:` on the same box, before any `git pull`
+  (it is read with this fleet only at the same commit). It trains four more models, then their sessions
+  (about 25-35 minutes). Paste back `cat "$R/gpu_session_topup_out/PASTE_BACK.txt"` and upload its `.tgz`.
 
 Moved on 2026-09-28/29, if you run them from memory: the run.py sweeps are now `bash tools/sweep_gpu.sh`
 and `bash tools/sweep_world.sh`, and the old tree's commands start with `cd archive/old-tree`; the fleet

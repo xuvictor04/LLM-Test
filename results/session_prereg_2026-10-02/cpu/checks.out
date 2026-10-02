@@ -1,0 +1,19 @@
+$ python3 checks.py "$C/gpu_session_out" "$C/gpu_session_p_out" "$C/gpu_session_h_out" "$H"
+PASS A: every run ended rc=0 (14: parents 2, smoke 1, smoke/sessions 4, logs 7), every loss and probe value finite -- {'parents': {}, 'smoke': {}, 'smoke/sessions': {}, 'logs': {}} []
+PASS B: every run ended rc=0 (11: smoke 4, logs 7), every loss and probe value finite -- {'smoke': {}, 'logs': {}} []
+PASS C: every run ended rc=0 (8: smoke 4, logs 4), every loss and probe value finite -- {'smoke': {}, 'logs': {}} []
+PASS A: each session's resume-start readings, through both closures, are its parent's R readings area for area at the parent's step, and their pairing against them reads differences of exactly 0 on every item -- []
+PASS B: each session's resume-start readings, through both closures, are its parent's R readings area for area at the parent's step, and their pairing against them reads differences of exactly 0 on every item -- []
+PASS C: each session's resume-start readings, through both closures, are its parent's R readings area for area at the parent's step, and their pairing against them reads differences of exactly 0 on every item -- []
+PASS A: data.rehearse_parent FIRED on every P_parent session, the old areas faded from window 0 and laid at 0.27 of each phase's bytes (data.replay), and on no other session -- {'P.s0': ('unreachable', []), 'P.s1': ('unreachable', []), 'P_parent.s0': ('fired', [0.27, 0.27, 0.27, 0.27]), 'P_parent.s1': ('fired', [0.27, 0.27, 0.27, 0.27]), 'P_twin.s0': ('unreachable', []), 'P_twin.s1': ('unreachable', []), 'W.s0': ('unreachable', [])}
+PASS C: data.rehearse_parent FIRED on every P_parent session, the old areas faded from window 0 and laid at 0.27 of each phase's bytes (data.replay), and on no other session -- {'P.s0': ('unreachable', []), 'P_parent.s0': ('fired', [0.27, 0.27, 0.27, 0.27]), 'P_twin.s0': ('unreachable', []), 'W.s0': ('unreachable', [])}
+PASS every session's opt.continue.pricing is its parent's case: 'logged parent: floor' under A's and B's parents, whose acts re-measured their epochs, and 'no-log parent: re-priced' under C's, whose one act did not; opt.continue.regime as_logged on all -- [('A', 'logged parent: floor'), ('B', 'logged parent: floor'), ('C', 'no-log parent: re-priced')] {'as_logged'}
+PASS A: P_twin's first flush equals P's and the two part at the second -- the twin's first step is its first at OPT_LR x 1.0001 (register §8 5.3a: not FAB_BIRTH_JITTER, read only at a growth birth) -- [(0, 1, True), (1, 1, True)]
+PASS A: W at the parent with the most experts (k40.s0, n_live 2200 of its 2200 slots, full) resumes at FAB_SLOTS 4248 = 2200 + 2048: the widening is accepted (fab.resume_widened 3, fab.cap 4248) and ends with n_live 2472, past the parent's 2200 slots, so births landed past them; P there stays at fab.cap 2200, n_live 2200
+PASS B: launched with PARENTS=A's parents (their 4 files sha256-checked against its FINALS.sha256), every session's loss curve, flush bytes and probe series equal A's byte for byte -- [('P.s0', True), ('P.s1', True), ('P_parent.s0', True), ('P_parent.s1', True), ('P_twin.s0', True), ('P_twin.s1', True), ('W.s0', True)]
+PASS C: the sessions resume the EXP=heldout fleet's k40.s0 final at cce2d39 (2 files sha256-checked against its FINALS.sha256), and that fleet's finals still match their manifest afterwards
+PASS A: the block is written, within 80 lines, its anchor equal in 7 of 7 sessions and a DECISION -- 31
+PASS B: the block is written, within 80 lines, its anchor equal in 7 of 7 sessions and a DECISION -- 31
+PASS C: the block is written, within 80 lines, its anchor equal in 4 of 4 sessions and a DECISION -- 30
+    ok
+(exit 0)

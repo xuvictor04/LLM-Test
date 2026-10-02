@@ -290,6 +290,21 @@ Updated 2026-10-02 (test 4, E2's retok part as its own fleet, register §8 6.3a:
   EXP's fix and --status's hint name the brief's current test, EXP=heldout (the launcher's CUR_EXP: change
   both with the brief). results/heldout_prereg_2026-10-02/cpu/ stays 8672c89's record (its rule rows at 0.05
   a look, the pack command inline).
+- 2026-10-02, TEST 5 READY: THE FIRST POST-TRAINING SESSIONS (register §8 5.3a). b4174c2 pre-registers it,
+  ff80b49 builds the launch, 412e828 writes a boundary row's pairing (Q-EVAL-12), 80135f1 the reader, and
+  the commit after them checks it on CPU. `EXP=session ... PARENTS=gpu_heldout_out bash tools/gpu_launch.sh
+  --go` resumes test 4's finals onto x5 (P, P_parent, P_twin per parent, W at the fullest), or trains the
+  parents first in a parents stage. Its block reads F per old area by the ε rule over the parents, O9's
+  choice and a top-up of parents 7-10, and reports the anchor, 5.1's SDs and W. Where it departs from the
+  judge's plan, the register's row or the code says why: the twin is OPT_LR x 1.0001 (the jitter is read
+  only at growth births); each look is at 0.025; W's slots are max(the parent's, n_live + 2048), since a
+  resume may widen FAB's slots but never shrink them (src/ckpt/api.py); and the pairing is written on a
+  resume or boundary row alone, so a fresh run's series is unchanged. F32-F34 pin it; the CPU check is
+  results/session_prereg_2026-10-02/cpu/ (the contract's Q-DATA-7 note). Handed to the owner as brief
+  test 5, to run after test 4's blocks. A tiny CPU EXP=heldout fleet at 80135f1 writes cce2d39's curves,
+  series and finals byte for byte, its blocks differing only in the commit, the launch and measured seconds
+  (cpu/heldout_identity.out). NEXT: read test 4's block, then test 5's; E2's shape (b) on real text (§8
+  6.3), whose finals are 6.1's parents.
 0. Proposal 05 §8 orders everything: Stage 0 (owner rulings O1-O20; the fleet-archive reads; the
    k0_nuis pair; phase-traversal resizing), then Stage 1's small builds (vocab `.prev` rotation, DOM
    Levels, counters, OPT_LR_CONTINUE 'as_logged', gpu_world.sh kept checkpoints) before the owner's

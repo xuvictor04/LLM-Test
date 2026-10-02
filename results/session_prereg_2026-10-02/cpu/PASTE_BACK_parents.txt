@@ -1,0 +1,31 @@
+==== PASTE THIS BACK ====
+gpu_world.sh EXP=session  commit 80135f1  launched 2026-10-02T19:25:05Z  synthetic source  as_logged
+card: no GPU listed; torch 2.14.0+cu130, CUDA 13.0; NCPU 4; PAR 4; MPS off; device=cpu
+shape: 300 windows/run, DATA_STREAM_BYTES=56700, seeds 0 1, EXTRA='TOK_GROW_EVERY=20 FAB_SLOTS=2200'; cap 300; CAL 600; LM_CTX 128; kept ckpts OFF; pins DATA_DRAW=planned pinned, DATA_SYNTH_HOLDOUT=1 pinned, EVAL_RETENTION_EVERY=50 pinned, EVAL_HOLDOUT_WINDOWS=256 pinned, EVAL_RETENTION_N=24 pinned, EVAL_GENERATE=0 pinned, TOK_MINT_NOVEL=0 pinned
+runs: 7 of 7 ended rc=0, every one
+parents: k40 at seeds 0 1, from /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/t23/c5/gpu_session_out/parents (4 file(s) sha256-checked against its FINALS.sha256)
+F per old area at R - resume start (memory-off, report half), per parent: P | P_parent; then x5 at R
+  seed      eng      py     num       c |     eng      py     num       c |        P P_parent
+  s0    +0.1917 +0.6676 +2.3264 -2.1963 | -0.9323 +0.0137 +1.7677 -3.0362 |   4.0409   4.2168
+  s1    +1.9888 +3.0011 +0.2342 +1.6852 | -1.8271 -1.1667 +0.0196 +0.4328 |   3.9013   4.0389
+ANCHOR (O2): the resume start against the parent's R, item for item: equal in 7 of 7 session(s)
+RULE (§8 5.3a; O2, O9): ε 0.05 bits/byte; per old area (4), F = R - resume start over the parents, each look (7 parents; a top-up's pooled 11) at 0.025: mean [lower at t(1 - a/4), Holm's a across P and P_parent; one-sided upper at t(0.975)]
+  P n=2 a=0.0125: eng +1.0903 [-90.4323,+12.5075] py +1.8343 [-117.0054,+16.6592] num +1.2803 [-105.2727,+14.5725] c -0.2556 [-197.9303,+24.4038] -> UNRESOLVED
+  P_parent n=2 a=0.025: eng -1.3797 [-24.1615,+4.3048] py -0.5765 [-30.6307,+6.9226] num +0.8937 [-43.6157,+11.9996] c -1.3017 [-89.6276,+20.7372] -> UNRESOLVED
+O9 (the new area): x5 at R, P_parent - P paired by parent: +0.1567 [-0.0862,+0.3997] n=2, one-sided at t(0.975); below 0 favours P_parent
+DECISION: UNRESOLVED at 2 parent(s): P and P_parent are UNRESOLVED; top up to the cap of 11 on this card and torch with the command below (its parents stage trains the new parents first), then paste back the top-up's block, which reads both fleets (ε 0.05 bits/byte per old area, 2 parent(s))
+  top-up: EXP=session SEEDS='2 3 4 5 6 7 8 9 10' FILL=0 WINDOWS=300 EXTRA='TOK_GROW_EVERY=20 FAB_SLOTS=2200' PARENT_ARM=k40 PROBE_EVERY=50 SESSION_WINDOWS=300 DEVICE=cpu PAR=4 OUT=/tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/t23/c5/gpu_session_p_topup_out POOL_WITH=/tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/t23/c5/gpu_session_p_out bash /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/t23/c5/tools/gpu_launch.sh --go
+REPORTED, DECIDES NOTHING:
+  x5's learning (its first in-run reading -> R, mean over parents): P 15.9060 -> 3.9711 | P_parent 15.9545 -> 4.1278 | P_twin 15.9060 -> 3.9308
+  5.1's SDs per old area (NEW-02): between-run from the twins, RMS(P_twin - P)/√2; per-window from R - resume start item by item (report half); one session's SD, √(between² + per-window²/n), against the single-run gate's ε/(z(1 - 0.05/4) + 0.84) = 0.0162, K 4:
+    eng: between 0.2797 (n=2) | per-window 0.0675 | one session 0.2798: the between-run SD alone exceeds it: O10's second-seed replay
+    py: between 0.6580 (n=2) | per-window 0.2457 | one session 0.6584: the between-run SD alone exceeds it: O10's second-seed replay
+    num: between 0.3481 (n=2) | per-window 0.1770 | one session 0.3485: the between-run SD alone exceeds it: O10's second-seed replay
+    c: between 0.0724 (n=2) | per-window 0.0933 | one session 0.0728: the between-run SD alone exceeds it: O10's second-seed replay
+  W (NEW-20) at the parent s0, FAB_SLOTS 4248 (its n_live 2200 + 2048; its slots 2200): W - P F eng -0.2212 py +0.0314 num -0.0536 c -0.0571, x5 +0.0221; n_live at the end W 2472 (272 past the parent's 2200 slots), P 2200; births W 425, P 153; fab.resume_widened 3
+  opt.continue.pricing (each session's rate, CONTRACT-Q-DATA-7): 'logged parent: floor' 7 of 7
+  data.rehearse_parent FIRED (O9's rehearsal): P 0 of 2 | P_parent 2 of 2 | P_twin 0 of 2 | W 0 of 1
+  windows/s per session: P 1.96 [1.95-1.97] | P_parent 1.99 [1.95-2.03] | P_twin 2.00 [1.97-2.02] | W 1.78 [1.78-1.78]
+  this fleet: 2,100 session windows in 496 s of the sessions' wall = 4.23 windows/s aggregate; ETA by waves 920 s, took 496 s: 0.54x
+archive: gpu_session_p_2026-10-02.tgz beside gpu_session_p_out (logs, curves, SUMMARY, ANALYSIS, this block; no checkpoints) -- keep it
+==== END ====
