@@ -1,7 +1,7 @@
 #!/bin/bash
 # ==================================================================================================
 # THE OWNER'S GPU FLEETS, EACH RUN AS A FLEET THAT FILLS THE CARD: Q-WORLD-10's WORLD EXPERIMENT,
-# 03b S0b's RETOK SHIP RULE, AND THE WHOLE-EPOCH WORLD RE-RUN'S SIZING
+# 03b S0b's RETOK SHIP RULE, THE WHOLE-EPOCH WORLD RE-RUN'S SIZING AND THE RETOK CADENCE'S HELD-OUT RE-READ
 # ==================================================================================================
 # EXP CHOOSES THE EXPERIMENT, AND ANY OTHER VALUE IS REFUSED BY NAME (Proposal 05 §8 1.5): a
 # misspelled EXP used to fall through to the WORLD fleet, which then ran under the label meant for
@@ -10,6 +10,8 @@
 #   EXP=retok        03b S0b's ship rule for TOK_RETOK_EVERY, with kept checkpoints (§8 2.1)
 #   EXP=world_epoch  the whole-epoch, phase-traversing WORLD re-run: sized, and refused until O13's two
 #                    WORLD levers are built
+#   EXP=heldout      E2's retok part (§8 6.3a): the shipped cadence against k0 on SR0's held-out probe,
+#                    per area, with O14's first remedy arm (below)
 #
 # WHAT EXP=world DECIDED (2026-09-24: within noise, WORLD_FEEDBACK now ships False). Whether WORLD_FEEDBACK stays True (the forecast wired into LM.encode, world_proj
 # born zero) and, if it helps, whether the help is WORLD MODELLING or just added capacity. The
@@ -252,6 +254,18 @@
 #     EXP=world_epoch bash gpu_world.sh                   # the sizing and the pre-registration; exit 2
 #     EXP=world_epoch GO_WORLD_EPOCH=1 bash gpu_world.sh  # an operation check, until O13's build
 #
+# EXP=heldout IS E2's RETOK PART AS ITS OWN FLEET (Proposal 05 §8 6.3a, O14; 2026-10-02): whether the
+# shipped cadence keeps each older area's held-out text within eps, on SR0's probe. Arms k0
+# (TOK_RETOK_EVERY=0), k<c> and k<c>_mn -- c is PIN_RETOK, the shipped 1000, and _mn adds O14's first
+# remedy arm, TOK_MINT_NOVEL=1.0 -- at seeds 0-6, and k0_rerun: 22 runs, each one whole WINDOWS x
+# 189-byte epoch, sized as EXP=world_epoch is. Every run pins DATA_DRAW=planned DATA_SYNTH_HOLDOUT=1
+# EVAL_RETENTION_EVERY=PROBE_EVERY EVAL_HOLDOUT_WINDOWS=256 EVAL_RETENTION_N=24 EVAL_GENERATE=0
+# TOK_MINT_NOVEL=0 after EXTRA, with its arm's settings after them, and writes its probe series and
+# flush bytes beside its curve. KEEP_CKPT is on: each run's final save, and the probe's best saves beside
+# it, are the next test's parents (no periodic save; those are EXP=retok's k0 family's alone). FILL is
+# 0, since the seeds are capped.
+#     EXP=heldout SEEDS='0 1 2 3 4 5 6' FILL=0 bash tools/gpu_launch.sh --go
+#
 # EVERY FLEET ENDS IN A BLOCK TO PASTE BACK AND AN ARCHIVE TO KEEP. The GPU box has a checkout and no
 # push token (results/gpu_world_2026-09-24/ANALYSIS.txt was transcribed from its terminal by hand), so
 # the end of every fleet, every --analyze and every early stop prints ONE block, from
@@ -267,15 +281,18 @@ set -u
 _EXP_GIVEN=${EXP+x}
 EXP=${EXP:-world}
 case "$EXP" in
-  world|retok|world_epoch) ;;
-  *) echo "!! EXP='$EXP' is not an experiment this script runs: world (the default), retok or world_epoch." \
-          "Nothing was started."; exit 2 ;;
+  world|retok|world_epoch|heldout) ;;
+  *) echo "!! EXP='$EXP' is not an experiment this script runs: world (the default), retok, world_epoch or" \
+          "heldout. Nothing was started."; exit 2 ;;
 esac
-case "$EXP" in retok) _o=gpu_retok_out ;; world_epoch) _o=gpu_world_epoch_out ;; *) _o=gpu_world_out ;; esac
+case "$EXP" in
+  retok) _o=gpu_retok_out; _s="0 1 2" ;; world_epoch) _o=gpu_world_epoch_out; _s="0 1 2 3 4" ;;
+  heldout) _o=gpu_heldout_out; _s="0 1 2 3 4 5 6" ;; *) _o=gpu_world_out; _s="0 1 2 3 4" ;;
+esac
 _OUT_GIVEN=${OUT:+x}
 OUT=${OUT:-$_o}
 WINDOWS=${WINDOWS:-20000}
-SEEDS=${SEEDS:-$([[ "$EXP" == retok ]] && echo "0 1 2" || echo "0 1 2 3 4")}
+SEEDS=${SEEDS:-$_s}
 # DATA_STREAM_BYTES >= 1000 x windows, so every run stops at --max-windows and never at the end of
 # the stream. A run that ran out of stream is flagged in the summary; it is a different length of
 # experiment wearing the same label.
@@ -286,11 +303,12 @@ BYTES=${BYTES:-$(( WINDOWS * 1000 > 2000000 ? WINDOWS * 1000 : 2000000 ))}
 # ONE WHOLE EPOCH of the same stream -- sized so the control takes about WINDOWS windows at the 189
 # bytes/window measured on CPU (2026-09-26) -- and the window cap (RUN_WIN) is set out of reach.
 # EXP=world_epoch takes the same whole-epoch sizing, for its own reason: the WORLD re-run must cross
-# every phase of the stream, and a window cap below the epoch would stop it inside one.
+# every phase of the stream, and a window cap below the epoch would stop it inside one. So does
+# EXP=heldout: its endpoint is each area's reading at the end of the epoch.
 if [[ "$EXP" == retok ]]; then
   BYTES=${RETOK_BYTES:-$(( WINDOWS * 189 ))}
   RUN_WIN=$(( WINDOWS * 3 ))
-elif [[ "$EXP" == world_epoch ]]; then
+elif [[ "$EXP" == world_epoch || "$EXP" == heldout ]]; then
   BYTES=${EPOCH_BYTES:-$(( WINDOWS * 189 ))}
   RUN_WIN=$(( WINDOWS * 3 ))
 else
@@ -302,7 +320,9 @@ ARCH_ALSO=${ARCH_ALSO:-}
 LONG=${LONG:-0}
 PAR=${PAR:-auto}
 MPS=${MPS:-auto}
-FILL=${FILL:-1}
+# FILL IS 0 AT EXP=heldout, WHOSE SEEDS ARE CAPPED (§8 6.3a): FILL adds seeds to fill spare slots, up to
+# MAX_SEEDS, past a pre-registered cap.
+FILL=${FILL:-$([[ "$EXP" == heldout ]] && echo 0 || echo 1)}
 MAX_SEEDS=${MAX_SEEDS:-16}
 DEVICE=${DEVICE:-cuda}
 # 600 AT THE WHOLE-EPOCH SHAPES, 150 AT EXP=world (LOW-GPU-WORLD-ETA). 600 is past FAB's first manage
@@ -316,13 +336,15 @@ LADDER=${LADDER:-"1 2 4 8 12 16 24 32 48 64 96 128"}
 # accident, silently -- spine/lever.py ignores undeclared names under a declared prefix.
 RETOK_ARMS=${RETOK_ARMS:-"3000 1000"}      # EXP=retok: the act cadences, one arm k<c> each
 COOLDOWN_ARM=${COOLDOWN_ARM:-}             # EXP=retok: FAB_COOLDOWN of an extra arm at the fastest cadence
-KEEP_CKPT=${KEEP_CKPT:-$([[ "$EXP" == retok ]] && echo 1 || echo 0)}
+KEEP_CKPT=${KEEP_CKPT:-$([[ "$EXP" == retok || "$EXP" == heldout ]] && echo 1 || echo 0)}
 KEEP_POLL=${KEEP_POLL:-1}                  # seconds between the kept-checkpoint watcher's looks
-PIN_RETOK=${PIN_RETOK:-1000}               # EXP=world_epoch: the TOK_RETOK_EVERY every run pins (the shipped one)
-PROBE_EVERY=${PROBE_EVERY:-700}            # EXP=world_epoch: the EVAL_RETENTION_EVERY every run pins (04-6.2's cap)
+PIN_RETOK=${PIN_RETOK:-1000}               # the shipped TOK_RETOK_EVERY: every EXP=world_epoch run's pin, EXP=heldout's act arms'
+PROBE_EVERY=${PROBE_EVERY:-700}            # EXP=world_epoch and heldout: the EVAL_RETENTION_EVERY every run pins (04-6.2's cap)
 GO_WORLD_EPOCH=${GO_WORLD_EPOCH:-0}
 [[ "$PROBE_EVERY" =~ ^[1-9][0-9]*$ ]] \
-  || { echo "!! PROBE_EVERY='$PROBE_EVERY' is not a positive window count (EXP=world_epoch's retention cadence). Nothing was started."; exit 2; }
+  || { echo "!! PROBE_EVERY='$PROBE_EVERY' is not a positive window count (the retention cadence EXP=world_epoch and heldout pin). Nothing was started."; exit 2; }
+[[ "$PIN_RETOK" =~ ^[1-9][0-9]*$ ]] \
+  || { echo "!! PIN_RETOK='$PIN_RETOK' is not a positive cadence (EXP=world_epoch's pin, EXP=heldout's act arms). Nothing was started."; exit 2; }
 # THE eps RULE'S TWO READING-TIME SETTINGS (EXP=retok's analysis; O2, O14). They are read when the
 # analysis runs, not recorded at launch, so --analyze can read the same runs against another eps; the
 # analysis prints both.
@@ -374,6 +396,9 @@ arm_env() {  # the lever settings that define each arm; an arm this does not kno
     k1000)     echo "TOK_RETOK_EVERY=1000" ;;
     k0_nuis)   echo "TOK_RETOK_EVERY=0 SIG_WARMUP=801" ;;
     k[1-9]*_cd[0-9]*) local c=${1%%_cd*}; echo "TOK_RETOK_EVERY=${c#k} FAB_COOLDOWN=${1##*_cd}" ;;
+    # O14's FIRST REMEDY ARM (§8 6.3a, EXP=heldout): the cadence with TOK_MINT_NOVEL at 1.0. Ahead of
+    # k[1-9]*, which would read k1000_mn as TOK_RETOK_EVERY=1000_mn.
+    k[1-9]*_mn) local c=${1%_mn}; echo "TOK_RETOK_EVERY=${c#k} TOK_MINT_NOVEL=1.0" ;;
     k[1-9]*)   echo "TOK_RETOK_EVERY=${1#k}" ;;
     # NEVER AN EMPTY ANSWER: an unknown name used to return '' and run the defaults under it.
     *)         echo "!! arm_env: no arm named '$1'" >&2; return 1 ;;
@@ -399,6 +424,9 @@ if [[ "$EXP" == retok ]]; then
   for c in $RETOK_ARMS; do
     (( c % KEEP_EVERY == 0 )) || echo "WARNING: KEEP_EVERY=$KEEP_EVERY does not divide the k$c cadence: k0 keeps no copy at some k$c act windows."
   done
+elif [[ "$EXP" == heldout ]]; then
+  BASE_ARMS="k0 k$PIN_RETOK k${PIN_RETOK}_mn"; CTRL=k0
+  KEEP_EVERY=${KEEP_EVERY:-0}
 else
   BASE_ARMS="fb_off fb_on skip world_off"; CTRL=fb_off
   KEEP_EVERY=${KEEP_EVERY:-0}
@@ -416,6 +444,10 @@ fi
 # every dependent experiment pins and labels TOK_RETOK_EVERY). EXP=retok's arms set it themselves.
 EXP_ENV=""
 [[ "$EXP" == world_epoch ]] && EXP_ENV="TOK_RETOK_EVERY=$PIN_RETOK DATA_DRAW=planned DATA_SYNTH_HOLDOUT=1 EVAL_RETENTION_EVERY=$PROBE_EVERY"
+# EXP=heldout's PINS (§8 6.3a): the probe on at its cap and its boundary reading at 128 report windows
+# per area, the in-run reading at 12, no generation, and plain minting -- the arms set the cadence, and
+# k<c>_mn TOK_MINT_NOVEL, after them. 04-Q5's pin rule does not apply: the arms pair with each other.
+[[ "$EXP" == heldout ]] && EXP_ENV="DATA_DRAW=planned DATA_SYNTH_HOLDOUT=1 EVAL_RETENTION_EVERY=$PROBE_EVERY EVAL_HOLDOUT_WINDOWS=256 EVAL_RETENTION_N=24 EVAL_GENERATE=0 TOK_MINT_NOVEL=0"
 # 04-Q5's PIN RULE AT EXP=retok (2026-09-29): the three levers whose defaults flipped, at the values
 # that restore the tree before them -- each only where this tree declares its lever, read off the
 # fleet's code at launch as LEVELS is below. A checkout from before a flip then gets no name its lever
@@ -447,11 +479,15 @@ grep -q -- '--flush-bytes' "$CODE_DIR/run.py" 2>/dev/null && FB_FLAG=yes
 
 # THE CHECKPOINT SETTINGS OF ONE RUN, '' AT KEEP_CKPT=0 -- so every default command line is the one
 # this script ran before the option existed. Appended AFTER the arm's settings, so they win over EXTRA.
+# THE k0 FAMILY'S PERIODIC SAVES ARE EXP=retok's ALONE (2026-10-02, §8 6.3a): the act windows they land
+# on are its spike test's control. An arm named k0 at any other EXP saves once, at the end, as every
+# other arm does (EXP=heldout's k0 did a periodic save in the smoke, and its budget divided by 0, below).
 ckpt_env() {  # name seed base-dir [smoke]
   [[ "$KEEP_CKPT" == 1 ]] || return 0
   local every=0
-  case "$1" in
-    k0|k0_nuis|k0_rerun) every=$KEEP_EVERY; [[ -n "${4:-}" ]] && every=$(( SMOKE_WINDOWS / 2 > 0 ? SMOKE_WINDOWS / 2 : 1 )) ;;
+  case "$EXP:$1" in
+    retok:k0|retok:k0_nuis|retok:k0_rerun)
+      every=$KEEP_EVERY; [[ -n "${4:-}" ]] && every=$(( SMOKE_WINDOWS / 2 > 0 ? SMOKE_WINDOWS / 2 : 1 )) ;;
   esac
   echo "CKPT_DIR=$3/$1.s$2 CKPT_EVERY=$every"
 }
@@ -489,13 +525,15 @@ if grep -qE "^ +retention_every = Lever\(" "$CODE_DIR/src/eval/levers.py" 2>/dev
     BEST_FILES=$(( 2 + 2 * BEST_KEEP ))
   fi
 fi
-# HOW MANY CHECKPOINT FILES A RUN LEAVES AT MOST: k0 its kept saves plus the ring's two, the rest of
-# the k0 family the ring's two, every other run its one final save -- each with the probe's best saves
-# beside them, BEST_FILES, 0 where no probe is armed (at EXP=retok, whose pins turn it off, always).
+# HOW MANY CHECKPOINT FILES A RUN LEAVES AT MOST: at EXP=retok k0 its kept saves plus the ring's two and
+# the rest of the k0 family the ring's two; every other run its one final save -- each with the probe's
+# best saves beside them, BEST_FILES, 0 where no probe is armed (at EXP=retok, whose pins turn it off,
+# always). ONLY AT EXP=retok (2026-10-02, §8 6.3a): an arm named k0 elsewhere divided by KEEP_EVERY 0,
+# which ended jobs_need's sum with an error, and the disk check went on with 0 GB needed.
 ckpt_files() {  # name
-  case "$1" in
-    k0) echo $(( (11 * WINDOWS + 10 * KEEP_EVERY - 1) / (10 * KEEP_EVERY) + 2 + BEST_FILES )) ;;
-    k0_nuis|k0_rerun) echo $(( 2 + BEST_FILES )) ;;
+  case "$EXP:$1" in
+    retok:k0) echo $(( (11 * WINDOWS + 10 * KEEP_EVERY - 1) / (10 * KEEP_EVERY) + 2 + BEST_FILES )) ;;
+    retok:k0_nuis|retok:k0_rerun) echo $(( 2 + BEST_FILES )) ;;
     *) echo $(( 1 + BEST_FILES )) ;;
   esac
 }
@@ -530,12 +568,13 @@ plan_banner() {  # the fleet's shape, as SUMMARY records it and the EXP=world_ep
 # THE ANALYSIS, AS A FUNCTION so --analyze can re-run it on a finished (or interrupted) fleet.
 analyze() {  # out device mps_on par ncpu
   if [[ "$EXP" == retok ]]; then analyze_retok "$@"; return; fi
-  # EXP=world_epoch READS ONE WHOLE EPOCH: its runs are meant to end at the stream's end, so the
-  # flags turn over (the 6th argument). At EXP=world the output is what it always was.
-  python3 - "$@" "$([[ "$EXP" == world_epoch ]] && echo 1 || echo 0)" <<'PY'
+  # EVERY EXP BUT world READS ONE WHOLE EPOCH: its runs are meant to end at the stream's end, so the
+  # flags turn over (the 6th argument, the EXP). At EXP=world the output is what it always was.
+  python3 - "$@" "$EXP" <<'PY'
 import glob, json, math, os, re, statistics, sys
 out, dev, mps_on, par, ncpu = sys.argv[1], sys.argv[2], sys.argv[3] == "1", int(sys.argv[4]), int(sys.argv[5])
-whole = len(sys.argv) > 6 and sys.argv[6] == "1"
+exp = sys.argv[6] if len(sys.argv) > 6 else "world"
+whole = exp != "world"
 
 def rep(t):
     r = {}
@@ -631,7 +670,7 @@ for key, names in sorted(groups.items()):
 # the decision, the judge's rule from Q-WORLD-10
 print()
 print("=== DECISION (Q-WORLD-10's rule) ===")
-if whole:
+if exp == "world_epoch":
     print("  Q-WORLD-10's rule, shown for continuity; the pre-registered re-run rule (note WORLD 4) reads "
           "each run's retention-probe series (curves/<run>.probe.json), which this analysis does not read "
           "yet; the rule is owed with the fifth arm")
@@ -2752,9 +2791,9 @@ run_job() {  # name seed windows gpu arm-env...
   local vis=() fb=() ps=() ck="" kd="" w="" a
   [[ "$DEVICE" == cuda ]] && vis=(CUDA_VISIBLE_DEVICES="$gpu")
   [[ "$FLUSH_BYTES" == 1 ]] && fb=(--flush-bytes "${CURVE_DIR:-$OUT/curves}/$tag.bytes.json")
-  # EXP=world_epoch's RULE READS THE RETENTION PROBE (note WORLD 4): each run writes its reading series
-  # beside its curve, and the archive packs it with the curves.
-  [[ "$EXP" == world_epoch ]] && ps=(--probe-series "${CURVE_DIR:-$OUT/curves}/$tag.probe.json")
+  # EXP=world_epoch's AND EXP=heldout's RULES READ THE RETENTION PROBE (note WORLD 4, §8 6.3a): each run
+  # writes its reading series beside its curve, and the archive packs it with the curves.
+  [[ "$EXP" == world_epoch || "$EXP" == heldout ]] && ps=(--probe-series "${CURVE_DIR:-$OUT/curves}/$tag.probe.json")
   if [[ "$KEEP_CKPT" == 1 && "$EXP" == retok && "$name" == k0 ]]; then
     for a in "$@"; do [[ "$a" == CKPT_DIR=* ]] && ck="${a#CKPT_DIR=}"; done
   fi
@@ -3078,8 +3117,13 @@ say "=== ${#JOBS[@]} run(s), $PAR at a time"
 # THE ETA IS PRICED AT THE MEASURED AGGREGATE RATE at PAR, over every window the job list holds. It
 # assumes every slot stays busy, so the last partial wave makes it slightly optimistic, and the rate
 # was measured on short runs whose fabric had not grown yet.
+# AND BY WAVES (2026-10-02; register LOW-GPU-WORLD-ETA's owed fix): the 2026-09-27 fleet took 1.95x its
+# aggregate ETA because 13 runs at PAR 12 left one running alone, where 2 x (20,000 / 42.88 + 12.6 s)
+# came within 3% of the wall. Each run takes its windows at the calibrated rate per run (the aggregate
+# over PAR) plus the smoke's startup, and starts in the job list's order when a slot frees, as run_fleet
+# starts them; the ETA is the last one's end. Its R stage and saves come on top.
 python3 - "${CAL_RATE:-0}" "$SMOKE_WPS" "$PAR" <<PY | tee -a "$S"
-import math
+import heapq, math
 jobs = """$(printf '%s\n' "${JOBS[@]}")""".split("\n")
 # A retok job's window count is its cap, set out of reach; it reads about WINDOWS windows.
 total = sum(min(int(j.split()[2]), int("$WINDOWS")) for j in jobs if j.strip())
@@ -3087,6 +3131,14 @@ rate, smoke, par = float("${CAL_RATE:-0}"), float("$SMOKE_WPS" or 0), int("$PAR"
 if rate <= 0: rate = smoke * par
 if rate > 0:
     print(f"=== ETA: about {total / rate / 3600:.1f} h for {total:,} windows at {rate:.1f} windows/s aggregate")
+    per, st = rate / par, float("${STARTUP_S:-0}" or 0)
+    ws = [int(j.split()[2]) if "$EXP" == "world" else min(int(j.split()[2]), int("$WINDOWS")) for j in jobs if j.strip()]
+    ends = [0.0] * max(1, min(par, len(ws)))
+    for w in ws:
+        heapq.heappush(ends, heapq.heappop(ends) + w / per + st)
+    eta = max(ends)
+    print(f"=== ETA by waves: about {eta / 60:.0f} min ({eta:.0f} s): {len(ws)} run(s) over {par} slot(s), "
+          f"{math.ceil(len(ws) / par)} wave(s), each run its windows at {per:.2f} windows/s plus {st:.0f} s of startup")
 PY
 
 # ---------------------------------------------------------------- 4. the fleet, with a sampler

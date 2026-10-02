@@ -177,7 +177,13 @@ is pinned here, on a fleet whose every number is chosen.
       never at EXP=retok (its pins) or at EVAL_RETENTION_EVERY=0, nor on a tree whose default is 0 or that
       declares no probe; the settings read in run_job's order, off the fleet's code. An EXP=world launch
       at KEEP_CKPT=1 budgets 3 files a run and its banner names them, and tools/gpu_launch.sh's disk
-      check, which runs the same block, counts them too.
+      check, which runs the same block, counts them too. k0's kept saves count at EXP=retok alone
+      (2026-10-02): an arm named k0 elsewhere divided by KEEP_EVERY 0.
+  F29 EXP=heldout's LAUNCH (2026-10-02, register §8 6.3a), with a stand-in that writes a probe series: k0,
+      k<c> and k<c>_mn (c = PIN_RETOK) at every seed and k0_rerun; every run's pins after EXTRA, which moves
+      none of them, and its arm's settings after the pins (TOK_MINT_NOVEL 1.0 on k<c>_mn alone); --probe-series
+      and --flush-bytes on every run; finals only, the k0 family's too; an arm named k0 budgeting 3 files,
+      the launcher's disk check the same; the ETA priced by waves; FILL 0 by default; PIN_RETOK refused by name.
 """
 import glob
 import json
@@ -893,7 +899,10 @@ if os.environ.get("STUB_BOOK"):
                              "runpy": os.environ.get("STUB_RUNPY", ""),
                              "unbuffered": os.environ.get("PYTHONUNBUFFERED", ""),
                              "pins": {k: os.environ.get(k) for k in ("DATA_SYNTH_HOLDOUT", "EVAL_RETENTION_EVERY",
-                                                                      "DATA_TRUST")}}) + "\n")
+                                                                      "DATA_TRUST")},
+                             "env": {k: os.environ.get(k) for k in ("TOK_MINT_NOVEL", "EVAL_HOLDOUT_WINDOWS",
+                                                                     "EVAL_RETENTION_N", "EVAL_GENERATE", "DATA_DRAW",
+                                                                     "TOK_GROW_EVERY", "DATA_STREAM_BYTES")}}) + "\n")
 time.sleep(float(os.environ.get("STUB_STARTUP", "0")))
 print(f"=== device={os.environ.get('RUN_DEVICE', 'cpu')} amp=off")
 print(f"=== composed: stage=assembled, 0 refusal(s), 0 warning(s); startup took {time.time() - t0:.1f} s (imports and "
@@ -908,10 +917,42 @@ for i in range(1, n + 1):
 json.dump([2.0] * n, open(curve, "w"))
 if "--flush-bytes" in a:
     json.dump([189] * n, open(a[a.index("--flush-bytes") + 1], "w"))
+# --probe-series: A SERIES AS run.py WRITES ONE (RunResult.probe_series) -- a 'phase' reading at each quarter's
+# first window and a 'cadence' one mid-quarter, memory-off, over the areas arrived so far (eng and py, then
+# num, then c), and R's two 'boundary' readings, memory-off then memory-on (0.01 lower). Each area's report
+# is planted, 2.0 + 0.1 x its index + 0.001 x the seed, with STUB_HARM added to num on the act arm without
+# TOK_MINT_NOVEL and STUB_HARM_MN on the one with it, each +- STUB_SPREAD by the seed's parity.
+ps_rows = []
+if "--probe-series" in a:
+    AR, seed = ("eng", "py", "num", "c"), int(os.environ.get("RUN_SEED", "0"))
+    act, mn = int(os.environ.get("TOK_RETOK_EVERY") or 0) > 0, float(os.environ.get("TOK_MINT_NOVEL") or 0) > 0
+    def val(k):
+        h = 0.0
+        if act and AR[k] == "num":
+            h = float(os.environ.get("STUB_HARM_MN" if mn else "STUB_HARM", "0"))
+            h += (1 if seed % 2 == 0 else -1) * float(os.environ.get("STUB_SPREAD", "0"))
+        return 2.0 + 0.1 * k + 0.001 * seed + h
+    def row(step, kind, closure, nar, off=0.0):
+        ars = {AR[k]: {"control": val(k) + off, "report": val(k) + off, "seen_by_parent": False} for k in range(nar)}
+        m = sum(v["report"] for v in ars.values()) / nar
+        return {"step": step, "kind": kind, "closure": closure, "control": m, "report": m, "windows": 2 * nar,
+                "nonfinite": 0, "paired_sd": None, "areas": ars}
+    for q in range(4):
+        ps_rows += [row(q * n // 4 + 1, "phase", "memory-off", min(4, q + 2)),
+                    row(q * n // 4 + n // 8 + 1, "cadence", "memory-off", min(4, q + 2))]
+    ps_rows += [row(n, "boundary", "memory-off", 4), row(n, "boundary", "memory-on", 4, -0.01)]
+    json.dump(ps_rows, open(a[a.index("--probe-series") + 1], "w"))
 print(f"=== {n} windows, {n} flushes, {n} optimizer steps, 1 epoch(s) in 1.0s ({n} w/s)")
 if n == w:
     print(f"WARNING: loop: stopped at max_windows={w} window(s) trained by THIS process")
 print(f"       loop.bytes_scored                            {189 * n}")
+if ps_rows:
+    _r = int(os.environ.get("TOK_RETOK_EVERY") or 0)
+    print(f"       loop.acts                                    {(n - 1) // _r if _r else 0}")
+    print(f"       eval.holdout.seconds                         1.500000")
+    print(f"       eval.holdout.windows                         {sum(r['windows'] for r in ps_rows)}")
+    print(f"       data.trust.wall_s                            0.250000")
+    print(f"       fab.n_live                                   2049")
 if os.environ.get("WORLD_ENABLED") == "0":
     print("       world.built                                  null")
 elif os.environ.get("WORLD_FEEDBACK") == "1":
@@ -2684,7 +2725,9 @@ for _ in range(100):
     _blk28 = re.search(r"^# >>> THE BEST SAVES' BUDGET.*?^# <<< THE BEST SAVES' BUDGET$", open(SCRIPT).read(),
                        re.M | re.S)
     _pins28 = {"world": "", "retok": PINS27,
-               "world_epoch": "TOK_RETOK_EVERY=1000 DATA_DRAW=planned DATA_SYNTH_HOLDOUT=1 EVAL_RETENTION_EVERY=700"}
+               "world_epoch": "TOK_RETOK_EVERY=1000 DATA_DRAW=planned DATA_SYNTH_HOLDOUT=1 EVAL_RETENTION_EVERY=700",
+               "heldout": "DATA_DRAW=planned DATA_SYNTH_HOLDOUT=1 EVAL_RETENTION_EVERY=700 EVAL_HOLDOUT_WINDOWS=256 "
+                          "EVAL_RETENTION_N=24 EVAL_GENERATE=0 TOK_MINT_NOVEL=0"}
     t28 = os.path.join(TMP, "f28")
     for _d28, _ev28 in (("preflip", "    retention_every = Lever(\n        0, 'x', U.Windows)\n"),
                         ("presr0", "    curve_every = Lever(\n        2000, 'x', U.Windows)\n")):
@@ -2703,7 +2746,7 @@ for _ in range(100):
 
     _pf, _ps = os.path.join(t28, "preflip"), os.path.join(t28, "presr0")
     got28 = {"world": budget28(ROOT, "world"), "world_epoch": budget28(ROOT, "world_epoch"),
-             "retok": budget28(ROOT, "retok"),
+             "retok": budget28(ROOT, "retok"), "heldout": budget28(ROOT, "heldout"),
              "EXTRA 0": budget28(ROOT, "world", "EVAL_RETENTION_EVERY=0"),
              "env 0": budget28(ROOT, "world", EVAL_RETENTION_EVERY="0"),
              "env keep 2": budget28(ROOT, "world", CKPT_BEST_KEEP="2"),
@@ -2711,15 +2754,19 @@ for _ in range(100):
              "world_epoch pin over EXTRA 0": budget28(ROOT, "world_epoch", "EVAL_RETENTION_EVERY=0"),
              "preflip world": budget28(_pf, "world"), "preflip world_epoch": budget28(_pf, "world_epoch"),
              "presr0 world_epoch": budget28(_ps, "world_epoch")}
-    want28 = {"world": [2, 3, 26, 4], "world_epoch": [2, 3, 26, 4], "retok": [0, 1, 24, 2],
-              "EXTRA 0": [0, 1, 24, 2], "env 0": [0, 1, 24, 2], "env keep 2": [6, 7, 30, 8],
-              "EXTRA keep 3 over env 1": [8, 9, 32, 10], "world_epoch pin over EXTRA 0": [2, 3, 26, 4],
-              "preflip world": [0, 1, 24, 2], "preflip world_epoch": [2, 3, 26, 4],
-              "presr0 world_epoch": [0, 1, 24, 2]}
+    # THE k0 FAMILY'S KEPT SAVES ARE EXP=retok's ALONE (2026-10-02, §8 6.3a): elsewhere an arm named k0 leaves its
+    # final save as every arm does. The k0 column held retok's count at every EXP (26 at EXP=world, here at
+    # KEEP_EVERY 1000), and at EXP=heldout, whose KEEP_EVERY is 0, it divided by 0 and the fleet budgeted 0 GB.
+    want28 = {"world": [2, 3, 3, 3], "world_epoch": [2, 3, 3, 3], "retok": [0, 1, 24, 2], "heldout": [2, 3, 3, 3],
+              "EXTRA 0": [0, 1, 1, 1], "env 0": [0, 1, 1, 1], "env keep 2": [6, 7, 7, 7],
+              "EXTRA keep 3 over env 1": [8, 9, 9, 9], "world_epoch pin over EXTRA 0": [2, 3, 3, 3],
+              "preflip world": [0, 1, 1, 1], "preflip world_epoch": [2, 3, 3, 3],
+              "presr0 world_epoch": [0, 1, 1, 1]}
     check("F28 ckpt_files counts the probe's best saves where a run's probe is armed: 2 more at EXP=world (the "
-          "shipped 1000) and EXP=world_epoch (its pinned 700), 2 + 2N at CKPT_BEST_KEEP=N (EXTRA over the "
-          "environment), none at EXP=retok, at EVAL_RETENTION_EVERY=0 from EXTRA or the environment, on a tree "
-          "whose default is 0 or that declares no probe -- and a pin beats EXTRA, as run_job's order does",
+          "shipped 1000), EXP=world_epoch and EXP=heldout (their pinned 700), 2 + 2N at CKPT_BEST_KEEP=N (EXTRA "
+          "over the environment), none at EXP=retok, at EVAL_RETENTION_EVERY=0 from EXTRA or the environment, on "
+          "a tree whose default is 0 or that declares no probe -- and a pin beats EXTRA, as run_job's order does; "
+          "k0's kept saves and the ring's .prev count at EXP=retok alone",
           got28 == want28, str({k: v for k, v in got28.items() if v != want28.get(k)}))
     # AND THE LAUNCH SAYS SO: EXP=world at KEEP_CKPT=1, the stand-in leaving a 10 MB final checkpoint --
     # 5 runs x 3 files x 2 x 10 MB is 0.3 GB, where the final save alone was 0.1 -- and the banner names
@@ -2753,6 +2800,71 @@ for _ in range(100):
     check("F28 the launcher's disk check counts the probe's best saves as the script does: 0.3 GB for EXP=world's 5 "
           "runs at 10 MB, 0.1 GB at EVAL_RETENTION_EVERY=0, and 0.3 GB at EXP=world_epoch, whose pin arms the probe",
           got28l == ["0.3", "0.1", "0.3"], str(got28l))
+
+    # ---- F29: EXP=heldout's launch (2026-10-02, register §8 6.3a) -------------------------------------------
+    # E2's retok part as its own fleet. The stand-in records what each run saw. PIN_RETOK=10 names the act arms
+    # k10 and k10_mn; EXTRA tries to move four of the pinned levers and sets one that is not pinned.
+    o29 = os.path.join(TMP, "f29", "gpu_heldout_out")
+    b29 = os.path.join(TMP, "f29_book.jsonl")
+    k29 = dict(EXP="heldout", DEVICE="cpu", WINDOWS=20, SEEDS="0 1", PAR=3, SMOKE_WINDOWS=5, PIN_RETOK=10,
+               PROBE_EVERY=5, EXTRA="TOK_MINT_NOVEL=0.5 EVAL_HOLDOUT_WINDOWS=32 DATA_DRAW=uniform EVAL_GENERATE=1 "
+                                   "TOK_GROW_EVERY=20", OUT=o29)
+    p29 = subprocess.run(["bash", SCRIPT], cwd=ROOT, capture_output=True, text=True, timeout=300,
+                         env=clean_env(PATH=env10["PATH"], STUB_BOOK=b29, STUB_FINAL_BYTES="50000000", **k29))
+    r29 = [json.loads(l) for l in open(b29)] if os.path.exists(b29) else []
+    s29 = txt(os.path.join(o29, "SUMMARY.txt"))
+    smoke29 = [r for r in r29 if "/smoke/" in r["argv"][r["argv"].index("--loss-curve") + 1]]
+    fleet29 = [r for r in r29 if r not in smoke29]
+    arm29 = {"k0": ("0", "0"), "k0_rerun": ("0", "0"), "k10": ("10", "0"), "k10_mn": ("10", "1.0")}
+    check("F29 EXP=heldout launches k0, k<c> and k<c>_mn (c = PIN_RETOK) at every seed and k0_rerun -- the smoke's 3 "
+          "and the fleet's 7 runs, rc 0 -- every run pinned after EXTRA (which moves no pinned lever and keeps an "
+          "unpinned one), its arm's settings after the pins: TOK_MINT_NOVEL 0 on k0 and k<c>, 1.0 on k<c>_mn",
+          p29.returncode == 0 and len(smoke29) == 3 and sorted(r["tag"] for r in fleet29)
+          == ["k0.s0", "k0.s1", "k0_rerun.s0", "k10.s0", "k10.s1", "k10_mn.s0", "k10_mn.s1"]
+          and all(r["pins"]["DATA_SYNTH_HOLDOUT"] == "1" and r["pins"]["EVAL_RETENTION_EVERY"] == "5"
+                  and r["env"]["EVAL_HOLDOUT_WINDOWS"] == "256" and r["env"]["EVAL_RETENTION_N"] == "24"
+                  and r["env"]["EVAL_GENERATE"] == "0" and r["env"]["DATA_DRAW"] == "planned"
+                  and r["env"]["TOK_GROW_EVERY"] == "20" and r["env"]["DATA_STREAM_BYTES"] == "3780" for r in r29)
+          and all((r["retok"], r["env"]["TOK_MINT_NOVEL"]) == arm29[r["tag"].rsplit(".s", 1)[0]] for r in r29),
+          f"rc {p29.returncode}; {[(r['tag'], r['retok'], r['env']) for r in r29][:4]}; {p29.stderr[-300:]!r}")
+    check("F29 ... each writes its probe series and flush bytes beside its curve, and saves its final alone: CKPT_EVERY "
+          "0 on every run, the k0 family's included, the smoke's too",
+          all("--probe-series" in r["argv"] and "--flush-bytes" in r["argv"] for r in r29)
+          and all(os.path.exists(os.path.join(o29, "curves", r["tag"] + ".probe.json")) for r in fleet29)
+          and all(r["ckpt"] == {"CKPT_DIR": os.path.join(o29, "ckpt", r["tag"]), "CKPT_EVERY": "0"} for r in fleet29)
+          and all(r["ckpt"] == {"CKPT_DIR": os.path.join(o29, "smoke", "ckpt", r["tag"]), "CKPT_EVERY": "0"}
+                  for r in smoke29), str([(r["tag"], r["ckpt"]) for r in r29][:3]))
+    # THE k0 BUDGET (the judge's catch, reproduced: ckpt_files divided by KEEP_EVERY 0 at an arm named k0, ended
+    # jobs_need's sum, and the disk check budgeted 0 GB): every run its final and the probe's two best saves.
+    check("F29 an arm named k0 budgets 3 files as every run does: 7 runs x 3 files x 2 x 50 MB is 2.1 GB, and the "
+          "banner names the best saves",
+          "=== disk: checkpoints may take about 2.1 GB (50 MB x 2 per file)" in s29
+          and "the retention probe's best saves (ckpt.pt.best and .best.prev): up to 3 checkpoint files per run" in s29,
+          [l for l in s29.splitlines() if "disk" in l or "kept checkpoints" in l])
+    l29 = subprocess.run(["bash", LAUNCHER], cwd=TMP, capture_output=True, text=True, timeout=300,
+                         env=clean_env(PATH=env10["PATH"], CKPT_MB=50, FETCH=0,
+                                       **dict(k29, OUT=os.path.join(TMP, "f29l", "gpu_heldout_out"))))
+    check("F29 the launcher's disk check budgets the same files: three arms a seed and the rerun, 2.1 GB at 50 MB",
+          "the kept checkpoints may need 2.1 GB at 2 seed(s)" in l29.stdout and "PASS EXP=heldout" in l29.stdout,
+          l29.stdout[-500:])
+    # THE ETA BY WAVES (register LOW-GPU-WORLD-ETA's owed fix): with PAR set by hand the rate per run is the smoke's,
+    # 5 windows a second, so each run's 20 windows take 4 s and 7 runs over 3 slots end at 12 s.
+    check("F29 the ETA is priced by waves: 7 runs over 3 slots are 3 waves of 4 s, 12 s, beside the aggregate ETA",
+          re.search(r"^=== ETA by waves: about 0 min \(12 s\): 7 run\(s\) over 3 slot\(s\), 3 wave\(s\), each run "
+                    r"its windows at 5\.00 windows/s plus 0 s of startup$", s29, re.M) is not None
+          and "=== ETA: about 0.0 h for 140 windows at 15.0 windows/s aggregate" in s29,
+          [l for l in s29.splitlines() if "ETA" in l])
+    # FILL IS 0 AT EXP=heldout (its seeds are capped): 4 runs at PAR 10 stay 4, where FILL=1 adds two seeds.
+    o29f = os.path.join(TMP, "f29f", "gpu_heldout_out")
+    p29f = subprocess.run(["bash", SCRIPT], cwd=ROOT, capture_output=True, text=True, timeout=300,
+                          env=clean_env(PATH=env10["PATH"], **dict(k29, SEEDS="0", PAR=10, KEEP_CKPT=0, OUT=o29f)))
+    s29f = txt(os.path.join(o29f, "SUMMARY.txt"))
+    check("F29 FILL is 0 at EXP=heldout: one seed at PAR 10 runs its 4 runs and no seed is added",
+          p29f.returncode == 0 and "=== 4 run(s), 10 at a time" in s29f and "FILL" not in s29f,
+          [l for l in s29f.splitlines() if "run(s)" in l or "FILL" in l])
+    p29e = gw(EXP="heldout", PIN_RETOK="10x", OUT=os.path.join(TMP, "f29e"))
+    check("F29 a PIN_RETOK that is not a positive cadence is refused by name, before anything is written",
+          p29e.returncode == 2 and "PIN_RETOK='10x'" in p29e.stdout and not os.path.exists(os.path.join(TMP, "f29e")))
 finally:
     # NOTHING THESE CHECKS STARTED OUTLIVES THEM: a process carrying a GW_FLEET_OUT under TMP (a fleet, its
     # runs, its heartbeat) or naming TMP on its command line (a stand-in run, a dashboard) is killed.

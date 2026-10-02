@@ -29,12 +29,13 @@
 # quota where it is lower; OMP_NUM_THREADS, which GNU nproc reports instead of the cores, is ignored by
 # the fleet's sizing since the 2026-09-27 review: it was a WARN here that --go launched past, into a
 # fleet sized at one core); the free disk against the kept checkpoints' estimate (EXP=retok keeps k0's
-# saves, and since 2026-09-29 an armed retention probe its best saves: about 2 x CKPT_MB, 125 MB
-# measured, per file); the branch and whether it is at origin's head,
-# and a dirty tree; a fleet already RUNNING in OUT -- a FAIL, with the commands to watch or stop it --
-# or processes of an ended one still running there (runs orphaned when it was killed: a FAIL, since
-# gpu_world.sh would refuse the launch; --stop clears them); and, at DEVICE=cuda, a fleet under another
-# OUT on this machine. DEVICE=cpu skips the GPU checks (a CPU fleet: an operation check only). Every
+# saves, EXP=heldout every run's final, and since 2026-09-29 an armed retention probe its best saves:
+# about 2 x CKPT_MB per file, 151 MB -- 134 MB measured on 2026-09-27's finals, and the trust book's
+# 16.8 MB sketch, saved wherever the book is on since 04-6.3's flip); the branch and whether it is at
+# origin's head, and a dirty tree; a fleet already RUNNING in OUT -- a FAIL, with the commands to watch or
+# stop it -- or processes of an ended one still running there (runs orphaned when it was killed: a FAIL,
+# since gpu_world.sh would refuse the launch; --stop clears them); and, at DEVICE=cuda, a fleet under
+# another OUT on this machine. DEVICE=cpu skips the GPU checks (a CPU fleet: an operation check only). Every
 # command it prints names the checkout by its absolute path, so it works from any terminal.
 #
 # --go LAUNCHES DETACHED: `setsid nohup bash gpu_world.sh >> LOG 2>&1 < /dev/null &` -- its own session,
@@ -86,7 +87,8 @@ fail() { NF=$(( NF + 1 )); printf '  %sFAIL%s %s\n' "$C_F" "$C_0" "$1"; [[ -n "$
 
 EXP_SET=${EXP:-}
 DEVICE=${DEVICE:-cuda}
-case "$EXP_SET" in retok) _o=gpu_retok_out ;; world_epoch) _o=gpu_world_epoch_out ;; *) _o=gpu_world_out ;; esac
+case "$EXP_SET" in retok) _o=gpu_retok_out ;; world_epoch) _o=gpu_world_epoch_out ;; heldout) _o=gpu_heldout_out ;;
+                   *) _o=gpu_world_out ;; esac
 OUT=${OUT:-$_o}
 LOG=${LOG:-${EXP_SET:-fleet}_fleet.log}
 CMDENV="EXP=${EXP_SET:-<exp>} "; [[ "$OUT" != "$_o" ]] && CMDENV="${CMDENV}OUT=$OUT "
@@ -105,12 +107,12 @@ echo "    knobs set here (a ready line carries them all): ${READYENV:-(none)}"
 
 # ------------------------------------------------------------------------------------------ the experiment
 case "$EXP_SET" in
-  retok|world) pass "EXP=$EXP_SET" ;;
+  retok|world|heldout) pass "EXP=$EXP_SET" ;;
   world_epoch) if [[ "${GO_WORLD_EPOCH:-0}" == 1 ]]; then pass "EXP=world_epoch (GO_WORLD_EPOCH=1)"
                else fail "EXP=world_epoch is sized, not run, until O13's two WORLD levers are built (gpu_world.sh refuses it)" "EXP=retok"; fi ;;
   "") fail "EXP is not set: say which fleet (gpu_world.sh's default, world, is the decided 2026-09-24 experiment)" \
            "EXP=retok bash $(printf %q "$ROOT/tools/gpu_launch.sh")$([[ $GO == 1 ]] && echo ' --go')" ;;
-  *) fail "EXP='$EXP_SET' is not an experiment gpu_world.sh runs (world, retok, world_epoch)" "EXP=retok" ;;
+  *) fail "EXP='$EXP_SET' is not an experiment gpu_world.sh runs (world, retok, world_epoch, heldout)" "EXP=heldout" ;;
 esac
 
 # ------------------------------------------------------------------------------------------ python and torch
@@ -221,11 +223,12 @@ pass "cores the fleet sizes its parallelism by: $SIZE$([[ -n "${OMP_NUM_THREADS:
 # ------------------------------------------------------------------------------------------ the disk
 _p=$OUT; while [[ ! -d "$_p" ]]; do _p=$(dirname "$_p"); done
 FREE_B=$(( $(df -Pk "$_p" | awk 'NR == 2 {print $4}') * 1024 ))
-KC=${KEEP_CKPT:-$([[ "$EXP_SET" == retok ]] && echo 1 || echo 0)}
+KC=${KEEP_CKPT:-$([[ "$EXP_SET" == retok || "$EXP_SET" == heldout ]] && echo 1 || echo 0)}
 W=${WINDOWS:-20000}
-SD=${SEEDS:-$([[ "$EXP_SET" == retok ]] && echo "0 1 2" || echo "0 1 2 3 4")}
+case "$EXP_SET" in retok) _s="0 1 2" ;; heldout) _s="0 1 2 3 4 5 6" ;; *) _s="0 1 2 3 4" ;; esac
+SD=${SEEDS:-$_s}
 NS=$(wc -w <<< "$SD")
-CKPT_MB=${CKPT_MB:-125}
+CKPT_MB=${CKPT_MB:-151}
 if [[ "$KC" == 1 && "$W" =~ ^[0-9]+$ ]]; then
   if [[ "$EXP_SET" == retok ]]; then
     ARMS=${RETOK_ARMS:-"3000 1000"}
@@ -237,12 +240,15 @@ if [[ "$KC" == 1 && "$W" =~ ^[0-9]+$ ]]; then
     # SINCE 04-6.2's FLIP (2026-09-29) A RUN WHOSE RETENTION PROBE IS ARMED LEAVES ITS BEST SAVES BESIDE ITS
     # FINAL ONE (ckpt.pt.best and .best.prev, and CKPT_BEST_KEEP's slots with theirs). gpu_world.sh's own
     # budget block counts them, run here between its markers with this launch's settings -- EXTRA, this
-    # environment and, at EXP=world_epoch, its probe pin -- so the two disk checks count the same files.
-    _pp=""; [[ "$EXP_SET" == world_epoch ]] && _pp="EVAL_RETENTION_EVERY=${PROBE_EVERY:-700}"
+    # environment and, at EXP=world_epoch and heldout, the probe's pin -- so the two disk checks count the
+    # same files. EXP=world and world_epoch run four arms a seed, EXP=heldout three (2026-10-02), and each
+    # fleet one rerun.
+    _pp=""; [[ "$EXP_SET" == world_epoch || "$EXP_SET" == heldout ]] && _pp="EVAL_RETENTION_EVERY=${PROBE_EVERY:-700}"
     BF=$(EXTRA="${EXTRA:-}" EXP_ENV="$_pp" CODE_DIR="$ROOT" WINDOWS="$W" KEEP_EVERY=1000 bash -c \
          "$(sed -n "/^# >>> THE BEST SAVES' BUDGET/,/^# <<< THE BEST SAVES' BUDGET\$/p" gpu_world.sh)"$'\n''echo "$BEST_FILES"' 2>/dev/null)
     [[ "$BF" =~ ^[0-9]+$ ]] || BF=0
-    FILES=$(( (NS * 4 + 1) * (1 + BF) ))
+    NA=4; [[ "$EXP_SET" == heldout ]] && NA=3
+    FILES=$(( (NS * NA + 1) * (1 + BF) ))
   fi
   NEED_B=$(( FILES * CKPT_MB * 2 * 1000000 ))
   G() { awk -v b="$1" 'BEGIN { printf "%.1f", b / 1e9 }'; }

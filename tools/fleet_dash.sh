@@ -93,7 +93,8 @@ TOOLS = sys.argv[1]
 ROOT = os.path.dirname(TOOLS)
 ARGS = sys.argv[2:]
 VERDICT_RC = {"RUNNING": 0, "FINISHED": 1, "NO FLEET": 2, "STOPPED": 3, "DEAD": 4, "STALLED": 5}
-DEFAULT_OUT = {"world": "gpu_world_out", "retok": "gpu_retok_out", "world_epoch": "gpu_world_epoch_out"}
+DEFAULT_OUT = {"world": "gpu_world_out", "retok": "gpu_retok_out", "world_epoch": "gpu_world_epoch_out",
+               "heldout": "gpu_heldout_out"}
 READER_FLAGS = {"--status", "--analyze", "--stop", "--help", "-h"}
 HIST_MAX = 24            # heartbeat samples kept (12 minutes at gpu_world.sh's default HB_EVERY of 30 s)
 RATE_SPAN = 300.0        # a rate is measured over at most the last 5 minutes
