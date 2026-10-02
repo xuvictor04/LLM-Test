@@ -139,8 +139,9 @@ pass are not recorded; a plant is made where its anchor occurs once and refused 
 the two --mutants plants still find theirs; a loss finding is read back with its leg.
 
 A FIXTURE IS A PER-MACHINE RECORD. It carries the machine key (platform, torch version, cpu count,
-threads). On another machine the comparison is UNVERIFIABLE and this file says so and exits 0 -- it does
-not pass a comparison it could not make, and it does not fail a box it was never recorded on. Record one
+threads; the platform is compared without its kernel release, same_machine). On another machine the
+comparison is UNVERIFIABLE and this file says so and exits 0 -- it does not pass a comparison it
+could not make, and it does not fail a box it was never recorded on. Record one
 there with --record. (A resume pair's derived check is not machine-keyed and still runs there against
 its live reference.)
 
@@ -286,6 +287,29 @@ def machine_key():
     import torch
     return {"platform": platform.platform(), "python": platform.python_version(),
             "torch": torch.__version__, "cpu_count": os.cpu_count(), "threads": COMMON["OMP_NUM_THREADS"]}
+
+
+def _platform_family(plat):
+    """platform.platform() without the kernel release: 'Linux-6.18.44-fc-v37-x86_64-with-glibc2.39'
+    reads 'Linux-x86_64-with-glibc2.39'. The release is the second dash-field when the string has the
+    usual system-release-machine-... shape, and anything else is kept whole."""
+    parts = str(plat).split("-")
+    return "-".join([parts[0]] + parts[parts.index("x86_64" if "x86_64" in parts else "aarch64"):]) \
+        if len(parts) > 2 and ("x86_64" in parts or "aarch64" in parts) else str(plat)
+
+
+def same_machine(recorded, live):
+    """Whether a fixture's machine key names this machine, for the comparison's purpose.
+
+    THE KERNEL RELEASE IS NOT PART OF IT (2026-10-02). The host's kernel build moved from fc-v37 to fc-v51
+    under the same CPU, python, torch, core count and threads, and every fixture then read UNVERIFIABLE,
+    so the file compared nothing while exiting 0. With the release mapped back, all 13 workloads
+    reproduce their fixtures bit for bit on the fc-v51 box (the §8 6.3a build's check), which is what a
+    CPU-numerics key has to predict: the kernel does not enter a float. Everything else in the key still
+    has to match exactly."""
+    a, b = dict(recorded), dict(live)
+    a["platform"], b["platform"] = _platform_family(a.get("platform")), _platform_family(b.get("platform"))
+    return a == b
 
 
 def commit():
@@ -519,7 +543,7 @@ def compare_workload(name, legs, key, exempt=(), quiet=False):
         return "FAIL", ["no fixture"]
     with open(path, encoding="utf-8") as fh:
         fx = json.load(fh)
-    if fx["machine"] != key:
+    if not same_machine(fx["machine"], key):
         if not quiet:
             print(f"UNVERIFIABLE  {name}  the fixture was recorded on {fx['machine']}, this machine is "
                   f"{key}. Nothing was compared. Record a fixture for this machine with --record {name}.")
@@ -557,7 +581,7 @@ def resume_check(name, live, key):
         if os.path.exists(path):
             with open(path, encoding="utf-8") as fh:
                 fx = json.load(fh)
-        if fx is None or fx["machine"] != key:
+        if fx is None or not same_machine(fx["machine"], key):
             return "UNVERIFIABLE", f"no {of} to hold it to: run {of} too, or record its fixture here"
         ref, src = fixture_legs(fx)[0]["loss_curve"], f"{of}'s fixture recorded at {fx['commit']}"
     legs = {leg["name"]: leg for leg in live[name]}
