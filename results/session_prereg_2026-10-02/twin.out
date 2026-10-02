@@ -1,0 +1,12 @@
+$ python3 twin.py
+2026-09-27: k0_rerun: k0 seed 0 twice, |diff| 0 bits/byte (BIT-EXACT)
+  k1000.s0          16186 windows: spawned  2716, growth births  13 (regression 3, stall 10): 0.48% of births, 0.80 per 1,000 windows
+  k1000.s1          15957 windows: spawned  2068, growth births  10 (regression 3, stall 7): 0.48% of births, 0.63 per 1,000 windows
+  k1000.s2          16136 windows: spawned  1840, growth births  11 (regression 2, stall 9): 0.59% of births, 0.68 per 1,000 windows
+2026-09-28: k0_rerun: k0 seed 0 twice, |diff| 0 bits/byte (BIT-EXACT)
+  k1000.s0          16186 windows: spawned  1720, growth births  11 (regression 3, stall 8): 0.64% of births, 0.68 per 1,000 windows
+  k1000.s1          15957 windows: spawned  1756, growth births   8 (regression 1, stall 7): 0.45% of births, 0.50 per 1,000 windows
+  k1000.s2          16136 windows: spawned  2500, growth births   8 (regression 2, stall 6): 0.32% of births, 0.50 per 1,000 windows
+  k1000.s3          16071 windows: spawned  2106, growth births  11 (regression 3, stall 8): 0.52% of births, 0.68 per 1,000 windows
+  k1000.s4          16206 windows: spawned  1894, growth births  10 (regression 3, stall 7): 0.53% of births, 0.62 per 1,000 windows
+growth births per 1,000 windows: 0.50-0.80; at that rate (Poisson) a 5,000-window session's first one comes after 1,245-2,017 windows on average, and a session has none with chance 1.8%-8.4%

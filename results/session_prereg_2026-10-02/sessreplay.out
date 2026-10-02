@@ -1,0 +1,24 @@
+$ OMP_NUM_THREADS=1 python3 sessreplay.py 0 0 5000
+seed 0 TOK_MINT_NOVEL=0: parent 16212 windows; session 5000 windows; the four old held-out blocks byte for byte the parent's with x5 appended: True (eng 94500 B, py 94500 B, num 94500 B, c 94500 B); x5's block in alphabet 4 alone: True; the session's mints by area {'num': 5, 'c': 2, 'py': 2, 'x5': 141} (42s)
+  eng: held-out tokens at the parent's view 48724, at the session's last-cut view 48724; bytes in session-minted tokens 0.0%
+  py : held-out tokens at the parent's view 41864, at the session's last-cut view 41748; bytes in session-minted tokens 0.5%
+  num: held-out tokens at the parent's view 40117, at the session's last-cut view 39755; bytes in session-minted tokens 1.5%
+  c  : held-out tokens at the parent's view 52414, at the session's last-cut view 51717; bytes in session-minted tokens 1.3%
+$ OMP_NUM_THREADS=1 python3 sessreplay.py 0 1.0 5000
+seed 0 TOK_MINT_NOVEL=1.0: parent 17080 windows; session 5000 windows; the four old held-out blocks byte for byte the parent's with x5 appended: True (eng 94500 B, py 94500 B, num 94500 B, c 94500 B); x5's block in alphabet 4 alone: True; the session's mints by area {'num': 6, 'x5': 144} (45s)
+  eng: held-out tokens at the parent's view 56026, at the session's last-cut view 56026; bytes in session-minted tokens 0.0%
+  py : held-out tokens at the parent's view 57735, at the session's last-cut view 57735; bytes in session-minted tokens 0.0%
+  num: held-out tokens at the parent's view 40998, at the session's last-cut view 40816; bytes in session-minted tokens 1.0%
+  c  : held-out tokens at the parent's view 48271, at the session's last-cut view 48271; bytes in session-minted tokens 0.0%
+$ OMP_NUM_THREADS=1 python3 sessreplay.py 1 0 5000
+seed 1 TOK_MINT_NOVEL=0: parent 15940 windows; session 5000 windows; the four old held-out blocks byte for byte the parent's with x5 appended: True (eng 94500 B, py 94500 B, num 94500 B, c 94500 B); x5's block in alphabet 4 alone: True; the session's mints by area {'num': 11, 'c': 4, 'x5': 135} (42s)
+  eng: held-out tokens at the parent's view 50358, at the session's last-cut view 50358; bytes in session-minted tokens 0.0%
+  py : held-out tokens at the parent's view 39158, at the session's last-cut view 39158; bytes in session-minted tokens 0.0%
+  num: held-out tokens at the parent's view 40129, at the session's last-cut view 39155; bytes in session-minted tokens 3.1%
+  c  : held-out tokens at the parent's view 55648, at the session's last-cut view 51697; bytes in session-minted tokens 2.1%
+$ OMP_NUM_THREADS=1 python3 sessreplay.py 1 1.0 5000
+seed 1 TOK_MINT_NOVEL=1.0: parent 16609 windows; session 5000 windows; the four old held-out blocks byte for byte the parent's with x5 appended: True (eng 94500 B, py 94500 B, num 94500 B, c 94500 B); x5's block in alphabet 4 alone: True; the session's mints by area {'x5': 145, 'c': 2, 'num': 3} (46s)
+  eng: held-out tokens at the parent's view 59271, at the session's last-cut view 59271; bytes in session-minted tokens 0.0%
+  py : held-out tokens at the parent's view 54824, at the session's last-cut view 54824; bytes in session-minted tokens 0.0%
+  num: held-out tokens at the parent's view 40270, at the session's last-cut view 40049; bytes in session-minted tokens 0.6%
+  c  : held-out tokens at the parent's view 48614, at the session's last-cut view 46797; bytes in session-minted tokens 0.8%

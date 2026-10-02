@@ -2386,6 +2386,15 @@ the end of each. Rehearsal keeps `eng` trained, so only arm P measures what the 
 if R's `eng` retention is not materially better than P's, rehearsal buys nothing and pure-add is the
 honest default everywhere.
 
+**2026-10-02 (Proposal 05 §8 5.3a, O9): THE AFTER-TRAINING HALF IS PRE-REGISTERED.** `EXP=session
+SEEDS='0 1 2 3 4 5 6' FILL=0 PARENTS=<the held-out fleet's OUT> bash tools/gpu_launch.sh --go` resumes
+§8 6.3a's finals onto a fifth synthetic area, pure-add (`DATA_PHASE_SCHED=x5|x5|x5|x5`), and reads each
+old area's F, the session's R reading minus its resume-start reading through SR0's memory-off closure,
+report half, for P (this protocol's arm) and P+parent (the continue protocol's provisional rehearsal) by
+the ε rule over the parents, at `OPT_LR_CONTINUE='as_logged'` (the floor, for an act parent) and
+labelled so. The register's row holds the arms, the seeds and their cap, the choice and the outcomes.
+A synthetic parent takes only a synthetic area, so `data/continual` waits for real-text parents.
+
 ### Q-DATA-6 — the held-out split becomes a seeded random block — **RESOLVED 2026-09-02: (b) CONFIRMED, PLUS ONE REPAIR THE QUESTION DID NOT CONTAIN — ONE HOLD-OUT RNG STREAM PER AREA, KEYED BY NAME. ⚠ EVERY HISTORICAL HELD-OUT NUMBER BECOMES NON-COMPARABLE**
 `holdout_frac` currently takes the **last** fraction of each area, which is a sample only if the
 corpus was written in no particular order. Measured: py held out at **5.061 ± 0.560** against 2.922
