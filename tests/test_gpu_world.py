@@ -85,7 +85,8 @@ is pinned here, on a fleet whose every number is chosen.
   F15 THE eps RULE (Proposal 05 O2, O14), on its own and on synthetic per-phase fleets: a harmless
       cadence PASSes, a harmful one FAILs, a noisy one and one at n < 2 are UNRESOLVED; the Bonferroni
       split over phases and Holm across the cadences (the stronger evidence at alpha/2, the other at
-      alpha, none after the first that does not FAIL); the block carries each arm's per-phase means and
+      alpha, none after the first that does not FAIL), the upper bound at t(1 - alpha) (2026-10-02: it
+      was t(0.95) at any alpha); the block carries each arm's per-phase means and
       bounds, its verdict, eps and n. Each flush is placed by its run's cumulative bytes: an act arm
       whose flushes grow after its act reads each phase at its known value, where index quarters
       would mix neighbouring phases (the split's review: every fleet had equal flushes, so a
@@ -184,19 +185,23 @@ is pinned here, on a fleet whose every number is chosen.
       none of them, and its arm's settings after the pins (TOK_MINT_NOVEL 1.0 on k<c>_mn alone); --probe-series
       and --flush-bytes on every run; finals only, the k0 family's too; an arm named k0 budgeting 3 files,
       the launcher's disk check the same; the ETA priced by waves; FILL 0 by default; PIN_RETOK refused by name.
+      The launcher's disk check at 134 MB a file at EXP=retok, 151 elsewhere, and its FAIL's fix, and the
+      fleet's own, fitting the experiment (at EXP=heldout the 7 seeds and the finals kept; at a top-up
+      KEEP_CKPT=0); EXP=heldout, the current test, named where EXP is not given (2026-10-02).
   F30 EXP=heldout's READING, on fleets written by hand: each run's endpoint is the last memory-off boundary row
       of its probe series, report half, per area; arm - k0 by the eps rule with the areas as its cells and Holm
-      across the act arms; the DECISION's five outcomes -- PASS ends the label, k<c> FAIL with k<c>_mn PASS
-      ships TOK_MINT_NOVEL 1.0, both FAIL withdraw (the next remedy arms named, no ESCALATE), UNRESOLVED
-      below the cap prints the top-up's command, at the cap it is reported -- and a FAIL with the remedy
-      UNRESOLVED topping up; runs with no boundary row or no series named and left out; seeds past the cap
-      not read; the reported lines' known answers (the time-integrated gap from 20% of the stream, the
-      per-phase prequential reading, memory-on - memory-off, the ETA by waves against the wall).
+      across the act arms, at 0.025 a look; the DECISION's five outcomes -- PASS ends the label, k<c> FAIL
+      with k<c>_mn PASS ships TOK_MINT_NOVEL 1.0, both FAIL withdraw (the next remedy arms named, no
+      ESCALATE), UNRESOLVED below the cap prints the top-up's command, at the cap it is reported -- and a
+      FAIL with the remedy UNRESOLVED topping up; runs with no boundary row or no series named and left out;
+      seeds past the cap not read; the reported lines' known answers (the time-integrated gap from 20% of the
+      stream, the per-phase prequential reading, memory-on - memory-off, the ETA by waves against the wall).
   F31 THE TOP-UP: read with its first fleet where commit, card, torch and shape match -- the pooled 11 seeds
       deciding what the first 7 could not, both reruns read -- and refused, deciding nothing, where card,
       torch or commit differ or a seed is in both; POOL_WITH at --analyze over SUMMARY's record. End to end
       with the stand-in: the first fleet's printed command launches the top-up that pools with it; the finals'
-      manifest and its pack line; the launch's refusals of POOL_WITH, and the launcher's check and ready line.
+      manifest and its pack: line, run as printed (a top-up's block packs none); the launch's refusals of
+      POOL_WITH, and the launcher's check and ready line.
 """
 import glob
 import json
@@ -1310,6 +1315,13 @@ esac
           "beside kA (p 0.03, not FAILing at 0.025) it is UNRESOLVED, and says why",
           r15c["kB"]["verdict"] == "FAIL" and r15b["kA"]["verdict"] == "UNRESOLVED"
           and r15b["kB"]["verdict"] == "UNRESOLVED" and "Holm stopped" in r15b["kB"]["note"], str(r15b))
+    # THE LEVEL REACHES BOTH BOUNDS (2026-10-02, review of 0dfb8e5): EXP=heldout reads each of its two looks at
+    # 0.025, and the upper bound was t(0.95) at any level.
+    r15f = rule({"kN": [NOISY] * 4, "kX": [HARMFUL] * 4}, 0.05, 0.025)
+    check("F15 ... at alpha 0.025 the upper bound is at t(0.975) and Holm's levels are 0.0125 and 0.025",
+          (r15f["kX"]["level"], r15f["kN"]["level"]) == (0.0125, 0.025)
+          and all(abs(up - (_m + tq(0.975, 2) * _se)) < 1e-12 and abs(lo - (_m - tq(1 - 0.025 / 4, 2) * _se)) < 1e-12
+                  for _, _, lo, up in r15f["kN"]["phases"]), str(r15f["kN"]))
     r15e = rule({"kA": [HARMLESS, HARMLESS, HARMLESS, HARMFUL]}, 0.05)
     check("F15 one harmful phase is enough to FAIL, and every phase must be within eps to PASS",
           r15e["kA"]["verdict"] == "FAIL" and rule({"kA": [HARMLESS] * 3 + [NOISY]}, 0.05)["kA"]["verdict"]
@@ -2892,6 +2904,65 @@ for _ in range(100):
     p29e = gw(EXP="heldout", PIN_RETOK="10x", OUT=os.path.join(TMP, "f29e"))
     check("F29 a PIN_RETOK that is not a positive cadence is refused by name, before anything is written",
           p29e.returncode == 2 and "PIN_RETOK='10x'" in p29e.stdout and not os.path.exists(os.path.join(TMP, "f29e")))
+    # THE LAUNCHER'S DISK CHECK PER EXPERIMENT (2026-10-02, review of 49a657d). A file is 134 MB at EXP=retok, whose
+    # pins keep the trust book's 16.8 MB sketch out of its checkpoints, and 151 MB elsewhere (it was 151 everywhere);
+    # and the FAIL's fix fits the experiment: at EXP=heldout it gave EXP=retok's, fewer SEEDS (below the 7
+    # pre-registered) or KEEP_CKPT=0 "(which leaves the spike test without its control)", where a top-up's finals,
+    # unlike the first fleet's, are not the next test's parents. Each launch is sized past any disk: retok by its
+    # windows, heldout by 2,000 seeds.
+    def fail29(**env):
+        p = subprocess.run(["bash", LAUNCHER], cwd=TMP, capture_output=True, text=True, timeout=300,
+                           env=clean_env(PATH=env10["PATH"], DEVICE="cpu", FETCH=0, **env))
+        m = re.search(r"FAIL disk: .*? \((\d+) files x 2 x (\d+) MB at \d+ seed\(s\)\)\n +fix: (.*)$", p.stdout, re.M)
+        return m.groups() if m else p.stdout[-400:]
+    many29 = " ".join(map(str, range(2000)))
+    d29 = {"retok": fail29(EXP="retok", SEEDS="0", WINDOWS="100000000", OUT=os.path.join(TMP, "f29d", "r")),
+           "heldout": fail29(EXP="heldout", SEEDS=many29, OUT=os.path.join(TMP, "f29d", "h")),
+           "top-up": fail29(EXP="heldout", SEEDS=" ".join(map(str, range(2, 2002))), POOL_WITH=o29,
+                            OUT=os.path.join(TMP, "f29d", "t")),
+           "world": fail29(EXP="world", SEEDS=many29, KEEP_CKPT=1, OUT=os.path.join(TMP, "f29d", "w"))}
+    check("F29 the launcher's disk check sizes a file at 134 MB at EXP=retok and 151 MB elsewhere, and its FAIL's fix "
+          "fits the experiment: the spike test's at EXP=retok; at EXP=heldout the 7 pre-registered seeds and the finals, "
+          "the next test's parents, kept; at a top-up KEEP_CKPT=0; elsewhere fewer SEEDS or KEEP_CKPT=0",
+          [v[1:] if isinstance(v, tuple) else v for v in d29.values()]
+          == [("134", "free space there, fewer SEEDS, or KEEP_CKPT=0 (which leaves the spike test without its control)"),
+              ("151", "free space there, keeping the 7 pre-registered seeds and KEEP_CKPT on: the finals are the next "
+                      "test's parents"),
+              ("151", "free space there, or KEEP_CKPT=0: the next test starts from the first fleet's finals, not a "
+                      "top-up's"),
+              ("151", "free space there, fewer SEEDS, or KEEP_CKPT=0")], str(d29))
+    # AND THE FLEET'S OWN DISK CHECK, sized at the smoke's largest checkpoint (100 GB, sparse): the same fixes.
+    def fleet29(tag, **env):
+        o_ = os.path.join(TMP, "f29k", tag, "gpu_heldout_out")
+        p = subprocess.run(["bash", SCRIPT], cwd=ROOT, capture_output=True, text=True, timeout=300,
+                           env=clean_env(PATH=env10["PATH"], STUB_FINAL_BYTES="100000000000",
+                                         **dict(k29, SEEDS="2", PAR=4, OUT=o_, **env)))
+        return p.returncode, (re.search(r"^!! (Free space.*)$", p.stdout, re.M) or [None, p.stdout[-300:]])[1], \
+            "\n".join(block_of(p.stdout) or [])
+    k29d, t29d = fleet29("first"), fleet29("topup", POOL_WITH=o29)
+    check("F29 ... and gpu_world.sh's own disk check gives the same fixes, at the fleet and at a top-up, in its log and "
+          "its block",
+          k29d[0] == 1 and k29d[1] == "Free space, keeping the 7 pre-registered seeds and KEEP_CKPT on: the finals are "
+                                      "the next test's parents."
+          and "GB free (free space, keeping the 7 pre-registered seeds and KEEP_CKPT on" in k29d[2]
+          and t29d[0] == 1 and t29d[1] == "Free space, or KEEP_CKPT=0: the next test starts from the first fleet's "
+                                          "finals, not a top-up's."
+          and "GB free (free space, or KEEP_CKPT=0: the next test starts from the first fleet's finals" in t29d[2],
+          f"{k29d[:2]} {t29d[:2]}")
+    # EXP=heldout IS THE CURRENT TEST, AND WHERE EXP IS NOT GIVEN THAT IS WHAT IS NAMED (2026-10-02, review of 49a657d):
+    # the launcher's fix for an unset EXP, and --status's hint with neither EXP nor OUT, named EXP=retok, the decided
+    # 2026-09-27 fleet, whose launch runs 13 runs with k0's periodic saves.
+    u29 = subprocess.run(["bash", LAUNCHER, "--go"], cwd=TMP, capture_output=True, text=True, timeout=300,
+                         env=clean_env(PATH=env10["PATH"], DEVICE="cpu", FETCH=0, OUT=os.path.join(TMP, "f29u")))
+    st29 = gw("--status")
+    check("F29 an unset EXP's fix names EXP=heldout, test 4, and --go launches nothing; --status with neither EXP nor OUT "
+          "points to it too",
+          u29.returncode == 1 and f"fix: EXP=heldout bash {LAUNCHER} --go" in u29.stdout and "EXP=retok" not in u29.stdout
+          and "!! NOT LAUNCHED" in u29.stdout and not os.path.exists(os.path.join(TMP, "f29u"))
+          and (os.path.exists(os.path.join(ROOT, "gpu_world_out"))
+               or (st29.returncode == 2 and f"the owner brief's current test, test 4, is EXP=heldout bash {SCRIPT} "
+                                            f"--status)" in st29.stdout and "EXP=retok" not in st29.stdout)),
+          u29.stdout[-500:] + st29.stdout[-300:])
 
     # ---- F30: EXP=heldout's reading, rule and block (2026-10-02, register §8 6.3a) ---------------------------
     # Fleets written by hand, each number chosen. Each area's R reading (the last 'boundary' row, memory-off,
@@ -2983,11 +3054,14 @@ for _ in range(100):
 
     zero = " ".join(f"{a} +0.0000 [+0.0000,+0.0000]" for a in HO_AR)
     o30, p30, a30, b30 = ho_read("pass", range(7), tgap=0.0625, preq4=0.1)
-    check("F30 a harmless fleet: both act arms PASS on every area by the eps rule (the areas its cells, Holm's a/2 on "
-          "the first arm), and the DECISION ends 1000's B-provisional label on this synthetic source; the block, within "
-          "80 lines and equal to PASTE_BACK.txt, carries every seed's per-area readings and both rows",
-          p30.returncode == 0 and f"  k1000 n=7 a=0.025: {zero} -> PASS" in b30
-          and f"  k1000_mn n=7 a=0.05: {zero} -> PASS" in b30
+    check("F30 a harmless fleet: both act arms PASS on every area by the eps rule (the areas its cells, at 0.025 a "
+          "look: Holm's 0.0125 on the first arm, the upper bound at t(0.975)), and the DECISION ends 1000's B-provisional "
+          "label on this synthetic source; the block, within 80 lines and equal to PASTE_BACK.txt, carries every seed's "
+          "per-area readings and both rows",
+          p30.returncode == 0 and f"  k1000 n=7 a=0.0125: {zero} -> PASS" in b30
+          and f"  k1000_mn n=7 a=0.025: {zero} -> PASS" in b30
+          and "each look (7 seeds; a top-up's pooled 11) at 0.025: mean [lower at t(1 - a/4), Holm's a across the act "
+              "arms; one-sided upper at t(0.975)]" in b30
           and dec(b30).startswith("TOK_RETOK_EVERY 1000 PASSes against k0 on every area's held-out reading: its "
                                   "B-provisional label ends on this synthetic source")
           and 0 < len(block_of(p30.stdout)) <= 80
@@ -3024,10 +3098,10 @@ for _ in range(100):
                                "O14's escalation") and "ESCALATE" not in b30w, dec(b30w))
     o30u, _, _, b30u = ho_read("unres", range(7), harm=0.05, spread=0.1)
     oa30 = os.path.realpath(o30u)
-    check("F30 UNRESOLVED below the cap (num +0.0643, bounds -0.0780 and +0.1428 at 7 seeds) prints the top-up's "
-          "command: the next 4 seeds to the cap of 11, FILL=0, the fleet's shape (WINDOWS here) and PAR, its own OUT and "
-          "POOL_WITH this one",
-          "num +0.0643 [-0.0780,+0.1428]" in b30u and dec(b30u).startswith("UNRESOLVED at 7 seed(s): k1000 is UNRESOLVED")
+    check("F30 UNRESOLVED below the cap (num +0.0643, bounds -0.1020 and +0.1632 at 7 seeds, a = 0.0125) prints the "
+          "top-up's command: the next 4 seeds to the cap of 11, FILL=0, the fleet's shape (WINDOWS here) and PAR, its own "
+          "OUT and POOL_WITH this one",
+          "num +0.0643 [-0.1020,+0.1632]" in b30u and dec(b30u).startswith("UNRESOLVED at 7 seed(s): k1000 is UNRESOLVED")
           and f"  top-up: EXP=heldout SEEDS='7 8 9 10' FILL=0 WINDOWS=400 PAR=24 OUT={oa30[:-4]}_topup_out "
               f"POOL_WITH={oa30} bash {ROOT}/tools/gpu_launch.sh --go" in b30u, b30u[-900:])
     _, _, _, b30c = ho_read("cap", range(11), harm=0.05, spread=0.1)
@@ -3045,14 +3119,15 @@ for _ in range(100):
           "left out of the pairs (no endpoint): k1000.s3 k1000_mn.s5" in b30m
           and re.search(r"^  k1000 +s3 .*NO BOUNDARY ROW \(memory-off\)$", a30m, re.M) is not None
           and re.search(r"^  k1000_mn +s5 .*NO PROBE SERIES$", a30m, re.M) is not None
-          and f"  k1000 n=6 a=0.025: {zero} -> PASS" in b30m, b30m[-700:])
+          and f"  k1000 n=6 a=0.0125: {zero} -> PASS" in b30m, b30m[-700:])
     _, _, _, b30x = ho_read("past", range(12))
     check("F30 seeds past the cap of 11 are not read, and the block says which",
-          "seeds past the cap of 11, not read: 11" in b30x and f"  k1000 n=11 a=0.025: {zero} -> PASS" in b30x)
+          "seeds past the cap of 11, not read: 11" in b30x and f"  k1000 n=11 a=0.0125: {zero} -> PASS" in b30x)
 
     # ---- F31: a top-up pooled with its first fleet (2026-10-02, register §8 6.3a) ----------------------------------
     # The first fleet reads UNRESOLVED at 7 seeds (num +0.4 at even seeds, 0 at odd); its top-up at seeds 7-10
-    # reads +0.3 at each, so the pooled 11 FAIL k1000 (mean +0.2545, lower +0.0993) and the remedy ships.
+    # reads +0.3 at each, so the pooled 11, the second look at 0.025, FAIL k1000 (mean +0.2545, lower +0.0784 at
+    # t(1 - 0.0125/4)) and the remedy ships.
     o31 = os.path.join(TMP, "f31", "gpu_heldout_out")
     ho_fleet(o31, range(7), harm=0.2, spread=0.2)
     p31a = gw("--analyze", EXP="heldout", OUT=o31)
@@ -3064,11 +3139,11 @@ for _ in range(100):
         return o_, "\n".join(block_of(p_.stdout) or [])
     o31t, b31t = topup("gpu_heldout_topup_out")
     check("F31 the first fleet alone is UNRESOLVED and asks for the top-up; the top-up, recorded as its pool, reads the "
-          "11 seeds together -- its own marked * -- and k1000 FAILs (+0.2545, lower +0.0993) while k1000_mn PASSes: "
+          "11 seeds together -- its own marked * -- and k1000 FAILs (+0.2545, lower +0.0784) while k1000_mn PASSes: "
           "TOK_MINT_NOVEL 1.0 ships",
           dec("\n".join(block_of(p31a.stdout) or [])).startswith("UNRESOLVED at 7 seed(s)")
           and f"POOLED with the first fleet {o31}: its seeds and this top-up's (marked *) are read together" in b31t
-          and "num +0.2545 [+0.0993,+0.3472] c +0.0000 [+0.0000,+0.0000] -> FAIL" in b31t
+          and "num +0.2545 [+0.0784,+0.3684] c +0.0000 [+0.0000,+0.0000] -> FAIL" in b31t
           and re.search(r"^  s10\* ", b31t, re.M) is not None and re.search(r"^  s6 ", b31t, re.M) is not None
           and dec(b31t).startswith("TOK_MINT_NOVEL 1.0 ships at TOK_RETOK_EVERY 1000")
           and "(ε 0.05 bits/byte, 11 seed(s))" in b31t, b31t[-1500:])
@@ -3114,18 +3189,21 @@ for _ in range(100):
     z1000 = __import__("hashlib").sha256(b"\0" * 1000).hexdigest()
     check("F31 a stand-in launch reads UNRESOLVED at 7 seeds and prints the top-up's command with the fleet's knobs -- "
           "seeds 7-10, FILL=0, WINDOWS, PIN_RETOK, PROBE_EVERY, DEVICE and PAR, its own OUT and POOL_WITH this one -- and "
-          "writes FINALS.sha256 over the act arms' finals, with a pack line",
+          "writes FINALS.sha256 over the act arms' finals, the pack command on a line of its own (it was the FINALS "
+          "line's tail, which run as printed is a syntax error)",
           p31l.returncode == 0 and dec(b31l).startswith("UNRESOLVED at 7 seed(s): k10 is UNRESOLVED")
           and kv31 == {"EXP": "heldout", "SEEDS": "7 8 9 10", "FILL": "0", "WINDOWS": "20", "PIN_RETOK": "10",
                        "PROBE_EVERY": "5", "DEVICE": "cpu", "PAR": "8", "OUT": oa31[:-4] + "_topup_out",
                        "POOL_WITH": oa31}
           and man31.count(f"{z1000}  ckpt/") == 14 and "  ckpt/k10.s6/ckpt.pt\n" in man31
           and "  ckpt/k0.s0/" not in man31
-          and f"Pack them to upload: tar -cf {os.path.dirname(oa31)}/gpu_heldout_{day31}_finals.tar -C {oa31} "
-              f"FINALS.sha256 $(cut -c67- {oa31}/FINALS.sha256)" in b31l,
+          and f"\n  pack: tar -cf {os.path.dirname(oa31)}/gpu_heldout_{day31}_finals.tar -C {oa31} "
+              f"FINALS.sha256 $(cut -c67- {oa31}/FINALS.sha256)\n" in b31l
+          and "the next test's parents, which the pack: line below packs to upload" in b31l
+          and "tar " not in (re.search(r"^FINALS: .*$", b31l, re.M) or [""])[0],
           f"rc {p31l.returncode}; {cmd31!r}; {man31[:200]!r}; {b31l[-1200:]}")
     # THE PACK LINE PACKS WHAT THE MANIFEST LISTS, and sha256sum -c accepts it.
-    pk31 = (re.search(r"Pack them to upload: (.*)$", b31l, re.M) or [None, "false"])[1]
+    pk31 = (re.search(r"^  pack: (.*)$", b31l, re.M) or [None, "false"])[1]
     subprocess.run(["bash", "-c", pk31], capture_output=True, text=True, timeout=120)
     chk31 = subprocess.run(["bash", "-c", f"cd {oa31} && sha256sum -c --quiet FINALS.sha256"], capture_output=True,
                            text=True, timeout=120)
@@ -3140,14 +3218,17 @@ for _ in range(100):
           f"{chk31.stdout[-200:]} {mem31[:4]}")
     o31u = kv31.get("OUT", os.path.join(TMP, "f31l", "none"))
     p31u = subprocess.run(["bash", SCRIPT], cwd=ROOT, capture_output=True, text=True, timeout=600,
-                          env=clean_env(PATH=env10["PATH"], STUB_HARM="0.3", SMOKE_WINDOWS=5,
+                          env=clean_env(PATH=env10["PATH"], STUB_HARM="0.3", SMOKE_WINDOWS=5, STUB_FINAL_BYTES="1000",
                                         **{k: v for k, v in kv31.items()}))
     b31u = "\n".join(block_of(p31u.stdout) or [])
     check("F31 ... the top-up, launched with that command, records its first fleet and reads the 11 seeds together: "
           "k10 FAILs and k10_mn PASSes, and TOK_MINT_NOVEL 1.0 ships",
           p31u.returncode == 0 and f"=== pool: with {oa31} (seeds 0 1 2 3 4 5 6)" in txt(os.path.join(o31u, "SUMMARY.txt"))
-          and f"POOLED with the first fleet {oa31}" in b31u and "k10 n=11 a=0.025:" in b31u
+          and f"POOLED with the first fleet {oa31}" in b31u and "k10 n=11 a=0.0125:" in b31u
           and dec(b31u).startswith("TOK_MINT_NOVEL 1.0 ships at TOK_RETOK_EVERY 10"), b31u[-1500:])
+    check("F31 ... and the top-up's block packs no finals: the next test starts from the first fleet's",
+          "a top-up's: the next test starts from the first fleet's, which its block's pack: line packs" in b31u
+          and "  pack: " not in b31u, [l for l in b31u.splitlines() if "FINALS" in l or "pack" in l])
     # THE LAUNCH'S OWN CHECKS, before anything is written: POOL_WITH at another EXP, naming no EXP=heldout fleet,
     # naming this OUT, or a seed of the first fleet's again.
     r31 = []

@@ -265,7 +265,8 @@
 # it, are the next test's parents (no periodic save; those are EXP=retok's k0 family's alone). FILL is
 # 0, since the seeds are capped. THE READING: each area's R reading through the memory-off closure, report
 # half -- the last 'boundary' row of curves/<run>.probe.json -- arm - k0 paired by seed, by the eps rule
-# with the areas as its cells (Bonferroni over them) and Holm across k<c> and k<c>_mn. The DECISION:
+# with the areas as its cells (Bonferroni over them) and Holm across k<c> and k<c>_mn, each of its two looks
+# (the 7 seeds; a top-up's pooled 11) at 0.025, half the rule's 0.05 (LOOK_ALPHA). The DECISION:
 # k<c> PASS ends its B-provisional label on this source; k<c> FAIL with k<c>_mn PASS ships TOK_MINT_NOVEL
 # 1.0; both FAIL: neither ships, c stays on and the next remedy arms run; UNRESOLVED below the cap of 11
 # seeds prints the top-up's command, whose analysis reads both fleets' seeds where commit, card, torch
@@ -1016,8 +1017,9 @@ def mean_se(xs):
 
 def eps_rule(arms, eps, alpha=0.05):
     """O14's harm reading, by the eps rule (O2). arms: {arm: one list per phase of the paired differences
-    arm - k0 over the seeds with both readings}. Per phase the one-sided 95% UPPER bound is
-    mean + t(0.95, n-1) x sd / sqrt(n), and the LOWER bound mean - t(1 - a/N, n-1) x sd / sqrt(n): a
+    arm - k0 over the seeds with both readings}. Per phase the one-sided UPPER bound is
+    mean + t(1 - alpha, n-1) x sd / sqrt(n) -- 95% at the default alpha; EXP=heldout reads each of its two
+    looks at 0.025 -- and the LOWER bound mean - t(1 - a/N, n-1) x sd / sqrt(n): a
     Bonferroni split over the N phases, and Holm across the arms -- the arm with the strongest evidence
     of harm (the smallest N x p of 'difference > eps' over its phases, uncapped so arms that cannot
     FAIL are still ordered) is tested at alpha / K, the next at alpha / (K - 1), and so on, and once one
@@ -1043,7 +1045,7 @@ def eps_rule(arms, eps, alpha=0.05):
         for xs in arms[a]:
             n, m, se = mean_se(xs)
             rows.append((n, m, None, None) if se is None else
-                        (n, m, m - t_quantile(1.0 - level / nph, n - 1) * se, m + t_quantile(0.95, n - 1) * se))
+                        (n, m, m - t_quantile(1.0 - level / nph, n - 1) * se, m + t_quantile(1.0 - alpha, n - 1) * se))
         harm = any(lo is not None and lo > eps for _, _, lo, _ in rows)
         fail = harm and holm_open
         ok = bool(rows) and all(up is not None and up <= eps for _, _, _, up in rows)
@@ -1968,11 +1970,16 @@ def retok(ctx_arg, archive, eps, inc_cadence):
 # endpoint is each area's R reading through the memory-off closure, report half: the LAST row of the run's
 # curves/<run>.probe.json whose kind is 'boundary' and closure 'memory-off', its areas[a].report. arm - k0,
 # paired by seed, is read by the eps rule with the areas as its cells (Bonferroni over them) and Holm across
-# the two act arms; choose()'s remedy branch gives the DECISION. A top-up (POOL_WITH, recorded in SUMMARY)
-# reads its seeds with its first fleet's only where commit, card, torch and shape match; at most CAP_SEEDS
-# seeds are read. Everything after the rule is reported and decides nothing.
+# the two act arms, at LOOK_ALPHA a look; choose()'s remedy branch gives the DECISION. A top-up (POOL_WITH,
+# recorded in SUMMARY) reads its seeds with its first fleet's only where commit, card, torch and shape match;
+# at most CAP_SEEDS seeds are read. Everything after the rule is reported and decides nothing.
 HO_AREAS = ("eng", "py", "num", "c")      # the synthetic source's order; any other area follows, sorted
 CAP_SEEDS = 11                            # §8 6.3a's cap: 7 seeds, then a top-up of 4
+# EACH LOOK AT HALF THE RULE'S 0.05 (2026-10-02, review of 0dfb8e5). The 7 seeds, and the pooled 11 a top-up reads
+# where they are UNRESOLVED, are two looks at one question. Read each at 0.05, an arm whose num sits at eps exactly
+# PASSed 7.1% of the time over the two; at 0.025 a look, Bonferroni over the two, 3.4% -- PASS's upper bound at
+# t(0.975), Holm's FAIL levels from 0.0125 (results/heldout_prereg_2026-10-02/power.out).
+LOOK_ALPHA = 0.025
 HO_REMEDIES = ("LM_ANCHOR_USES raised, OPT_HORIZON_REVISE=0, and OPT_BORN_CLOCK once §8 4.2 builds it, with k3000 "
                "read for O14's escalation (it needs both cadences and every named remedy to FAIL)")
 
@@ -2097,7 +2104,7 @@ def heldout(ctx_arg, archive, eps, pool_arg, home):
                     if ar in ea and ar in e0:
                         per[i].append(ea[ar] - e0[ar])
         diffs[a] = per
-    R = eps_rule(diffs, eps) if diffs else {}
+    R = eps_rule(diffs, eps, LOOK_ALPHA) if diffs else {}
     n_read = max([len(xs) for per in diffs.values() for xs in per] or [0])
     room = n_read < CAP_SEEDS and not pool
     kind, pick, why = choose([inc] if inc else [], R, {}, inc, remedy=mn, room=room)
@@ -2198,8 +2205,9 @@ def heldout(ctx_arg, archive, eps, pool_arg, home):
                          + " ".join(cell(i, row, n_arm) for i, row in enumerate(r_["phases"]))
                          + f" -> {r_['verdict']}"
                          + (f" ({r_['note'].replace('some phase', 'some area')})" if r_["note"] else ""))
-    rule_head = (f"RULE (§8 6.3a; O2, O14): ε {eps:g} bits/byte; per area ({len(areas)}), arm - k0 paired over seeds: "
-                 f"mean [lower at t(1 - a/{len(areas)}), Holm a across the act arms; one-sided 95% upper]"
+    rule_head = (f"RULE (§8 6.3a; O2, O14): ε {eps:g} bits/byte; per area ({len(areas)}), arm - k0 paired over seeds, "
+                 f"each look (7 seeds; a top-up's pooled 11) at {LOOK_ALPHA:g}: mean [lower at t(1 - a/{len(areas)}), "
+                 f"Holm's a across the act arms; one-sided upper at t({1 - LOOK_ALPHA:g})]"
                  + (" -- this fleet alone, deciding nothing" if refused else ""))
     print()
     print("=== " + rule_head + " ===")
@@ -2396,10 +2404,16 @@ def heldout(ctx_arg, archive, eps, pool_arg, home):
                     nb += os.path.getsize(p_)
         with open(man, "w") as fh:
             fh.write("".join(r_ + "\n" for r_ in rows))
+        # THE PACK COMMAND ON A LINE OF ITS OWN, as the top-up's is (2026-10-02, review of 0dfb8e5): it was the FINALS
+        # line's tail, and that line run as printed is a syntax error. A top-up's finals are not the next test's
+        # parents, so its block packs none.
         oa, tar_ = os.path.realpath(OUT), re.sub(r"\.tgz$", "", os.path.realpath(archive)) + "_finals.tar"
         fin_lines.append(f"FINALS: {len(rows)} file(s), the {' and '.join(arms)} runs' final checkpoints and "
-                         f"vocabularies, {nb / 1e9:.2f} GB, sha256 in FINALS.sha256; the next test's parents. Pack "
-                         f"them to upload: tar -cf {tar_} -C {oa} FINALS.sha256 $(cut -c67- {oa}/FINALS.sha256)")
+                         f"vocabularies, {nb / 1e9:.2f} GB, sha256 in FINALS.sha256; "
+                         + ("a top-up's: the next test starts from the first fleet's, which its block's pack: line packs"
+                            if pool else "the next test's parents, which the pack: line below packs to upload"))
+        if not pool:
+            fin_lines.append(f"  pack: tar -cf {tar_} -C {oa} FINALS.sha256 $(cut -c67- {oa}/FINALS.sha256)")
     elif os.path.exists(man):
         n_ = sum(1 for l in rd(man).splitlines() if l.strip())
         fin_lines.append(f"FINALS: {n_} file(s) in FINALS.sha256, as the fleet's own analysis wrote it (no ckpt/ here: "
@@ -2414,7 +2428,7 @@ def heldout(ctx_arg, archive, eps, pool_arg, home):
         print(l)
     print()
     for l in fin_lines:
-        print("=== " + l)
+        print(l if l.startswith("  ") else "=== " + l)
 
     # ---------------------------------------------------------------- the block
     hd = [f"held-out bits/byte at R (memory-off, report half), per seed: k0, then " + ", then ".join(f"{a} - k0" for a in arms),
@@ -3025,8 +3039,9 @@ fi
 if [[ "${1:-}" == --status ]]; then
   bash "$DASH" --status "$OUT" 9>&-
   _v=$?
+  # THE HINT NAMES THE CURRENT TEST (2026-10-02, review of 49a657d): it named the decided retok fleet.
   [[ "$_v" == 2 && -z "$_EXP_GIVEN" && -z "$_OUT_GIVEN" ]] \
-    && echo "   (EXP was not given, so this read $OUT, EXP=world's; the retok fleet is EXP=retok bash $(printf %q "$GW_HOME/gpu_world.sh") --status)"
+    && echo "   (EXP was not given, so this read $OUT, EXP=world's; the owner brief's current test, test 4, is EXP=heldout bash $(printf %q "$GW_HOME/gpu_world.sh") --status)"
   exit "$_v"
 fi
 
@@ -3647,10 +3662,19 @@ if [[ "$KEEP_CKPT" == 1 ]]; then
   FREE_B=$(( $(df -Pk "$OUT" | awk 'NR == 2 {print $4}') * 1024 ))
   NEED_B=$(jobs_need)
   if [[ "$NEED_B" -gt "$FREE_B" ]]; then
+    # THE FIX FITS THE EXPERIMENT (2026-10-02, review of 49a657d; tools/gpu_launch.sh says the same): EXP=retok's
+    # spike test needs k0's saves; EXP=heldout's seeds are pre-registered and its first fleet's finals are the next
+    # test's parents, which a top-up's (POOL_WITH) are not.
+    case "$EXP" in
+      retok) _fx="free space, run fewer SEEDS, or KEEP_CKPT=0 (which leaves the spike test without its control)" ;;
+      heldout) if [[ -n "$POOL_WITH" ]]; then _fx="free space, or KEEP_CKPT=0: the next test starts from the first fleet's finals, not a top-up's"
+               else _fx="free space, keeping the 7 pre-registered seeds and KEEP_CKPT on: the finals are the next test's parents"; fi ;;
+      *) _fx="free space, run fewer SEEDS, or KEEP_CKPT=0" ;;
+    esac
     say "!! disk: the kept checkpoints may need $(gb $NEED_B) GB and $OUT has $(gb $FREE_B) GB free."
-    say "!! Free space, run fewer SEEDS, or KEEP_CKPT=0 (which leaves the spike test without its control)."
+    say "!! ${_fx^}."
     [[ -n "$MOVED_ASIDE" ]] && say "!! The previous fleet, moved aside to $MOVED_ASIDE, still holds its checkpoints."
-    fail_back "disk: checkpoints may need $(gb $NEED_B) GB, $(gb $FREE_B) GB free (free space, fewer SEEDS, or KEEP_CKPT=0)"
+    fail_back "disk: checkpoints may need $(gb $NEED_B) GB, $(gb $FREE_B) GB free ($_fx)"
     exit 1
   fi
 fi

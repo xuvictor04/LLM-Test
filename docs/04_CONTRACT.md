@@ -5126,9 +5126,9 @@ area, which neither fleet pre-registered, num in phase 4 is +0.091 at 1000 (Bonf
 above is read where it lives, on held-out text: `EXP=heldout SEEDS='0 1 2 3 4 5 6' FILL=0 bash
 tools/gpu_launch.sh --go` reads k1000 and k1000_mn (k1000 at `TOK_MINT_NOVEL=1.0`, O14's first remedy
 arm) against k0 on each area's R reading through SR0's memory-off closure, report half, paired by seed,
-by the ε rule with the four areas as its cells and Holm across the two arms. The register's row holds
-the pins, the seeds and their cap, what each outcome ships and the remedy arms in their order. No `src/`
-file changes.
+by the ε rule with the four areas as its cells and Holm across the two arms, each of its two looks (the 7
+seeds, a top-up's pooled 11) at a = 0.025. The register's row holds the pins, the seeds and their cap, what
+each outcome ships and the remedy arms in their order. No `src/` file changes.
 
 **2026-10-02: BUILT (49a657d, 8672c89), AND ITS CPU OPERATION CHECK (operation only;
 `results/heldout_prereg_2026-10-02/cpu/`, each script beside its output).** `gpu_world.sh EXP=heldout`

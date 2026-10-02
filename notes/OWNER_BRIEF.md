@@ -71,7 +71,8 @@ cd "$R" && git fetch origin rm-predict-DC && git checkout rm-predict-DC && git p
 EXP=heldout SEEDS='0 1 2 3 4 5 6' FILL=0 bash "$R/tools/gpu_launch.sh" --go
 ```
 - The launcher checks the box and prints each FAIL with its fix (a CUDA build of torch, the card, about
-  20 GB of free disk for the kept checkpoints). It launches the fleet detached and prints
+  20 GB of free disk for the kept checkpoints, about 22 GB if a top-up follows: it budgets 12 GB more
+  while `gpu_heldout_out/ckpt/` stays). It launches the fleet detached and prints
   `RUNNING: pid N`. Watch it with `bash "$R/tools/fleet_dash.sh"`; stop it with
   `EXP=heldout bash "$R/gpu_world.sh" --stop`, which writes its block. For its first minutes the card
   reads idle while the runs build on the CPU. Do not launch it again, and do not `git pull` until this
@@ -79,15 +80,16 @@ EXP=heldout SEEDS='0 1 2 3 4 5 6' FILL=0 bash "$R/tools/gpu_launch.sh" --go
 - **Time:** 22 runs. On the H100 PCIe box (26 cores) they run as one wave, about 30 minutes from launch
   to block. On the H200 box (13 cores), two waves, about 25 minutes.
 - **When the dashboard says FINISHED or STOPPED, paste back** `cat "$R/gpu_heldout_out/PASTE_BACK.txt"`,
-  from `==== PASTE THIS BACK ====` to `==== END ====`, and upload the `.tgz` its last line names, beside
-  `gpu_heldout_out/`. If the dashboard says DEAD, paste `bash "$R/tools/fleet_dash.sh" --once` instead.
+  from `==== PASTE THIS BACK ====` to `==== END ====`, and upload the `.tgz` its `archive:` line names,
+  beside `gpu_heldout_out/`. If the dashboard says DEAD, paste `bash "$R/tools/fleet_dash.sh" --once`
+  instead.
 - **If the block's DECISION says UNRESOLVED,** the line under it is a `top-up:` command that adds seeds
-  up to 11. Run it on the same box (it is read with this fleet only on the same card and torch); it
-  takes about 20 minutes. Then paste back `cat "$R/gpu_heldout_topup_out/PASTE_BACK.txt"` and upload
-  its `.tgz`.
+  up to 11. Run the command after `top-up:` on the same box (it is read with this fleet only on the same
+  card and torch); it takes about 20 minutes. Then paste back
+  `cat "$R/gpu_heldout_topup_out/PASTE_BACK.txt"` and upload its `.tgz`.
 - **Keep `gpu_heldout_out/ckpt/` on the box:** the next test starts from its finals. If the box will be
-  given up, run the block's `Pack them to upload:` line and download the `_finals.tar` it writes (about
-  2.1 GB).
+  given up, run the command after `pack:` in `gpu_heldout_out`'s block (a top-up's block has none) and
+  download the `_finals.tar` it writes (about 2.1 GB).
 
 Moved on 2026-09-28/29, if you run them from memory: the run.py sweeps are now `bash tools/sweep_gpu.sh`
 and `bash tools/sweep_world.sh`, and the old tree's commands start with `cd archive/old-tree`; the fleet

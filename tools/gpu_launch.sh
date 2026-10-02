@@ -7,9 +7,10 @@
 # container down, because nothing said it was alive. This is the launch that replaces the pasted
 # `nohup ... &` line:
 #
-#     EXP=retok bash tools/gpu_launch.sh          # the checks: PASS / WARN / FAIL, each FAIL with its fix
-#     EXP=retok bash tools/gpu_launch.sh --go     # the checks, then the launch, confirmed alive
-# (from the checkout; from anywhere else, by its path: EXP=retok bash /workspace/LLM-Test/tools/gpu_launch.sh)
+#     EXP=heldout bash tools/gpu_launch.sh        # the checks: PASS / WARN / FAIL, each FAIL with its fix
+#     EXP=heldout bash tools/gpu_launch.sh --go   # the checks, then the launch, confirmed alive
+# (from the checkout; from anywhere else, by its path: EXP=heldout bash /workspace/LLM-Test/tools/gpu_launch.sh).
+# EXP=heldout is test 4, the current one; notes/OWNER_BRIEF.md gives each test's command with its EXP.
 #
 # EXP IS REQUIRED here (gpu_world.sh's default, world, is the 2026-09-24 experiment, already decided).
 # Every other knob -- WINDOWS, SEEDS, EXTRA, PAR, MPS, OUT, KEEP_CKPT, RETOK_ARMS, DEVICE, ... -- is
@@ -30,13 +31,14 @@
 # the fleet's sizing since the 2026-09-27 review: it was a WARN here that --go launched past, into a
 # fleet sized at one core); the free disk against the kept checkpoints' estimate (EXP=retok keeps k0's
 # saves, EXP=heldout every run's final, and since 2026-09-29 an armed retention probe its best saves:
-# about 2 x CKPT_MB per file, 151 MB -- 134 MB measured on 2026-09-27's finals, and the trust book's
-# 16.8 MB sketch, saved wherever the book is on since 04-6.3's flip); the branch and whether it is at
-# origin's head, and a dirty tree; a fleet already RUNNING in OUT -- a FAIL, with the commands to watch or
-# stop it -- or processes of an ended one still running there (runs orphaned when it was killed: a FAIL,
-# since gpu_world.sh would refuse the launch; --stop clears them); and, at DEVICE=cuda, a fleet under
-# another OUT on this machine. DEVICE=cpu skips the GPU checks (a CPU fleet: an operation check only). Every
-# command it prints names the checkout by its absolute path, so it works from any terminal.
+# about 2 x CKPT_MB per file -- 134 MB at EXP=retok, measured on 2026-09-27's finals, whose pins keep the
+# trust book off; 151 MB elsewhere, adding the book's 16.8 MB sketch, saved wherever the book is on since
+# 04-6.3's flip); the branch and whether it is at origin's head, and a dirty tree; a fleet already RUNNING
+# in OUT -- a FAIL, with the commands to watch or stop it -- or processes of an ended one still running
+# there (runs orphaned when it was killed: a FAIL, since gpu_world.sh would refuse the launch; --stop
+# clears them); and, at DEVICE=cuda, a fleet under another OUT on this machine. DEVICE=cpu skips the GPU
+# checks (a CPU fleet: an operation check only). Every command it prints names the checkout by its
+# absolute path, so it works from any terminal.
 #
 # --go LAUNCHES DETACHED: `setsid nohup bash gpu_world.sh >> LOG 2>&1 < /dev/null &` -- its own session,
 # so no terminal close or logout reaches it, HUP ignored, no stdin, and the log APPENDED to, never
@@ -87,6 +89,9 @@ warn() { NW=$(( NW + 1 )); printf '  %sWARN%s %s\n' "$C_W" "$C_0" "$1"; [[ -n "$
 fail() { NF=$(( NF + 1 )); printf '  %sFAIL%s %s\n' "$C_F" "$C_0" "$1"; [[ -n "${2:-}" ]] && printf '       fix: %s\n' "$2"; return 0; }
 
 EXP_SET=${EXP:-}
+# THE CURRENT TEST, WHICH EVERY EXP FIX NAMES (2026-10-02, review of 49a657d): an unset EXP's named EXP=retok,
+# the decided 2026-09-27 fleet, whose launch runs 13 runs with k0's periodic saves. The owner brief's test 4.
+CUR_EXP=heldout
 DEVICE=${DEVICE:-cuda}
 case "$EXP_SET" in retok) _o=gpu_retok_out ;; world_epoch) _o=gpu_world_epoch_out ;; heldout) _o=gpu_heldout_out ;;
                    *) _o=gpu_world_out ;; esac
@@ -110,10 +115,10 @@ echo "    knobs set here (a ready line carries them all): ${READYENV:-(none)}"
 case "$EXP_SET" in
   retok|world|heldout) pass "EXP=$EXP_SET" ;;
   world_epoch) if [[ "${GO_WORLD_EPOCH:-0}" == 1 ]]; then pass "EXP=world_epoch (GO_WORLD_EPOCH=1)"
-               else fail "EXP=world_epoch is sized, not run, until O13's two WORLD levers are built (gpu_world.sh refuses it)" "EXP=retok"; fi ;;
-  "") fail "EXP is not set: say which fleet (gpu_world.sh's default, world, is the decided 2026-09-24 experiment)" \
-           "EXP=retok bash $(printf %q "$ROOT/tools/gpu_launch.sh")$([[ $GO == 1 ]] && echo ' --go')" ;;
-  *) fail "EXP='$EXP_SET' is not an experiment gpu_world.sh runs (world, retok, world_epoch, heldout)" "EXP=heldout" ;;
+               else fail "EXP=world_epoch is sized, not run, until O13's two WORLD levers are built (gpu_world.sh refuses it)" "EXP=$CUR_EXP"; fi ;;
+  "") fail "EXP is not set: say which fleet; the owner brief's current test, test 4, is EXP=$CUR_EXP (gpu_world.sh's default, world, is the decided 2026-09-24 experiment)" \
+           "EXP=$CUR_EXP bash $(printf %q "$ROOT/tools/gpu_launch.sh")$([[ $GO == 1 ]] && echo ' --go')" ;;
+  *) fail "EXP='$EXP_SET' is not an experiment gpu_world.sh runs (world, retok, world_epoch, heldout)" "EXP=$CUR_EXP" ;;
 esac
 
 # A TOP-UP'S FIRST FLEET (EXP=heldout, §8 6.3a): the fleet POOL_WITH names, which gpu_world.sh checks again.
@@ -243,7 +248,9 @@ W=${WINDOWS:-20000}
 case "$EXP_SET" in retok) _s="0 1 2" ;; heldout) _s="0 1 2 3 4 5 6" ;; *) _s="0 1 2 3 4" ;; esac
 SD=${SEEDS:-$_s}
 NS=$(wc -w <<< "$SD")
-CKPT_MB=${CKPT_MB:-151}
+# 134 MB A FILE AT EXP=retok, 151 ELSEWHERE (2026-10-02, review of 49a657d): EXP=retok's pins turn the trust
+# book off, and DATA.stream_state writes no sketch into a checkpoint at 'off'.
+CKPT_MB=${CKPT_MB:-$([[ "$EXP_SET" == retok ]] && echo 134 || echo 151)}
 if [[ "$KC" == 1 && "$W" =~ ^[0-9]+$ ]]; then
   if [[ "$EXP_SET" == retok ]]; then
     ARMS=${RETOK_ARMS:-"3000 1000"}
@@ -267,9 +274,18 @@ if [[ "$KC" == 1 && "$W" =~ ^[0-9]+$ ]]; then
   fi
   NEED_B=$(( FILES * CKPT_MB * 2 * 1000000 ))
   G() { awk -v b="$1" 'BEGIN { printf "%.1f", b / 1e9 }'; }
+  # THE FIX FITS THE EXPERIMENT (2026-10-02, review of 49a657d; gpu_world.sh's own disk check says the same):
+  # EXP=retok's spike test needs k0's saves; EXP=heldout's seeds are pre-registered and its first fleet's finals
+  # are the next test's parents, which a top-up's (POOL_WITH) are not.
+  case "$EXP_SET" in
+    retok) _fx="free space there, fewer SEEDS, or KEEP_CKPT=0 (which leaves the spike test without its control)" ;;
+    heldout) if [[ -n "${POOL_WITH:-}" ]]; then _fx="free space there, or KEEP_CKPT=0: the next test starts from the first fleet's finals, not a top-up's"
+             else _fx="free space there, keeping the 7 pre-registered seeds and KEEP_CKPT on: the finals are the next test's parents"; fi ;;
+    *) _fx="free space there, fewer SEEDS, or KEEP_CKPT=0" ;;
+  esac
   if (( FREE_B < NEED_B )); then
     fail "disk: $(G $FREE_B) GB free at $_p, and the kept checkpoints may need $(G $NEED_B) GB ($FILES files x 2 x $CKPT_MB MB at $NS seed(s))" \
-         "free space there, fewer SEEDS, or KEEP_CKPT=0 (which leaves the spike test without its control)"
+         "$_fx"
   elif (( FREE_B < 2 * NEED_B )) && [[ "${FILL:-$([[ "$EXP_SET" == heldout ]] && echo 0 || echo 1)}" != 0 ]]; then
     warn "disk: $(G $FREE_B) GB free, $(G $NEED_B) GB needed at $NS seed(s): FILL will add few extra seeds (it stops at 0.9 of the free disk)" \
          "free space for more seeds, or accept fewer"

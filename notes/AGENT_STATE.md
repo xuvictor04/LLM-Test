@@ -1,6 +1,6 @@
 # Agent state — read this first after a session reset
 
-Updated 2026-10-02 (test 4, E2's retok part as its own fleet, register §8 6.3a: pre-registered, built, checked on CPU and handed to the owner; before it, the Stage 3 merge and the reorganisation's Phase B, both reviewed) on `rm-predict-DC` (the only branch pushed to; no PRs unless asked).
+Updated 2026-10-02 (test 4, E2's retok part as its own fleet, register §8 6.3a: pre-registered, built, checked on CPU, reviewed and handed to the owner; before it, the Stage 3 merge and the reorganisation's Phase B, both reviewed) on `rm-predict-DC` (the only branch pushed to; no PRs unless asked).
 
 ## Where things stand
 - **WORLD_FEEDBACK ships False** (d97779d) on the 20k-window GPU fleet: the forecast was within
@@ -280,6 +280,16 @@ Updated 2026-10-02 (test 4, E2's retok part as its own fleet, register §8 6.3a:
   Q-RUN-8 note). Handed to the owner (brief test 4). NEXT: read its block when it comes back; then the
   first post-training sessions from its finals (§8 4.3 with 5.3's after-training half), and E2's shape
   (b) on real text (§8 6.3).
+- 2026-10-02, REVIEW OF 981306c..0dfb8e5 (6 findings, each checked against the code, fixed in the commit
+  after 0dfb8e5). The rule reads each of its two looks (the 7 seeds; a top-up's pooled 11) at 0.025,
+  Bonferroni over them: at 0.05 a look an arm whose num sits at ε PASSed 7.1% of the time over the two.
+  power.py says its cells are about 50% power for one area, and simulates an arm at the cited SDs (a null
+  arm PASSes 0.67 at 7 seeds, 0.91 by 11). The block prints the finals' pack command on a `pack:` line of
+  its own (a top-up's packs none). The launcher sizes a file at 134 MB at EXP=retok, whose pins keep the
+  trust book's sketch out, and 151 elsewhere; both disk checks give a fix that fits the experiment; an unset
+  EXP's fix and --status's hint name the brief's current test, EXP=heldout (the launcher's CUR_EXP: change
+  both with the brief). results/heldout_prereg_2026-10-02/cpu/ stays 8672c89's record (its rule rows at 0.05
+  a look, the pack command inline).
 0. Proposal 05 §8 orders everything: Stage 0 (owner rulings O1-O20; the fleet-archive reads; the
    k0_nuis pair; phase-traversal resizing), then Stage 1's small builds (vocab `.prev` rotation, DOM
    Levels, counters, OPT_LR_CONTINUE 'as_logged', gpu_world.sh kept checkpoints) before the owner's
