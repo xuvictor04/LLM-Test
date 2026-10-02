@@ -4,7 +4,7 @@ The one page for the owner. Everything else — how decisions were made, the evi
 rules — is in the repo for reference (`docs/proposals/05_DECISIONS.md`, `docs/04_CONTRACT.md`,
 `results/`, `notes/AGENT_STATE.md`) and is not brought up here.
 
-Updated 2026-09-29 (edb90de, the Stage 3 merge; then the paths that moved, under GPU tests).
+Updated 2026-10-02 (test 4, the held-out re-read of rebuilding, is ready: its block is under GPU tests).
 
 ## How we work
 - **Owner:** leads and monitors, keeps the goals from drifting, adds ideas, expands the project, and
@@ -42,7 +42,8 @@ Updated 2026-09-29 (edb90de, the Stage 3 merge; then the paths that moved, under
    area (not the fleets' deciding reading): rebuilding every 1000 windows helps newly arriving text,
    but it leaves the older numeric text about 0.1 bits/byte worse than no rebuilding by the end of the
    run. That is about twice the budget, at every seed on both cards, and rebuilding every 3000 windows
-   was worse there. SR0's held-out check decides it, with fixes aimed at that text tested beside it.
+   was worse there. SR0's held-out check decides it (test 4, ready), with the first fix aimed at that
+   text tested beside it.
    No decision is needed: rebuilding stays on, and turning it off in training runs comes to you only if
    every cadence and fix fails (O14, unchanged).
 
@@ -55,9 +56,38 @@ Updated 2026-09-29 (edb90de, the Stage 3 merge; then the paths that moved, under
 | 1 | Read the 2026-09-24 fleet archive | **done** (you uploaded it; `results/gpu_world_2026-09-24/ARCHIVE_READS.md`) | data source; expert pool; culls; gradients |
 | 2 | Retokenization fleet (`EXP=retok bash tools/gpu_launch.sh --go`) | **done** 2026-09-27, 13 of 13 runs. Rebuilding every 1000 windows now ships: better than every 3000, and within budget against no rebuilding phase by phase (area by area, see Major issues 2). Provisional until SR0's held-out check, which must watch older text rebuilt late in a run (`results/gpu_retok_2026-09-27/RESULTS.md`) | which re-segmentation cadence ships; post-fix GPU speed; checkpoints for the first post-training test |
 | 3 | Cooldown fleet | **done** 2026-09-28, 21 of 21 runs on an H100. Rebuilding every 1000 windows stays. The 400-window pause of the pool's growth requests stays; it stays by rule, whatever this test read. Cutting it to 100 showed no measurable cost to learning: growth requests rose, the pause covered 10% of the run instead of 38%, and bits/byte did not move. One baseline run started learning late; it decides nothing (`results/gpu_retok_2026-09-28/RESULTS.md`) | whether the 400-window pause of the pool's growth requests costs learning at the shipped cadence (a measured cost; the pause stays); 1000 against no rebuilding, re-read at 5 seeds |
-| 4 | Held-out re-read of rebuilding | **pre-registered** 2026-10-02 (register §8 6.3a); its script is being built | whether rebuilding every 1000 windows keeps each older area's held-out text within budget (Major issue 2), and if not, whether the first fix aimed at it ships |
+| 4 | Held-out re-read of rebuilding (below) | **ready** 2026-10-02 (register §8 6.3a) | whether rebuilding every 1000 windows keeps each older area's held-out text within budget (Major issue 2), and if not, whether the first fix aimed at it ships |
 
-No GPU test is ready now: test 4's script is being built.
+### Test 4: the held-out re-read of rebuilding (about 25-30 minutes)
+Rebuilding every 1000 windows ships, but read area by area it may leave older numeric text worse than
+no rebuilding (Major issue 2). This fleet reads every area on held-out text at the end of a run,
+against no rebuilding, and beside it the first fix aimed at that text: new tokens minted for the text
+that is new rather than for text already learned (`TOK_MINT_NOVEL` 1.0).
+On the GPU box, from any provider (`R` is the checkout's path; set it to yours):
+```bash
+R=/workspace/LLM-Test
+# on a new box, first: git clone https://github.com/xuvictor04/LLM-Test "$R"
+cd "$R" && git fetch origin rm-predict-DC && git checkout rm-predict-DC && git pull --ff-only
+EXP=heldout SEEDS='0 1 2 3 4 5 6' FILL=0 bash "$R/tools/gpu_launch.sh" --go
+```
+- The launcher checks the box and prints each FAIL with its fix (a CUDA build of torch, the card, about
+  20 GB of free disk for the kept checkpoints). It launches the fleet detached and prints
+  `RUNNING: pid N`. Watch it with `bash "$R/tools/fleet_dash.sh"`; stop it with
+  `EXP=heldout bash "$R/gpu_world.sh" --stop`, which writes its block. For its first minutes the card
+  reads idle while the runs build on the CPU. Do not launch it again, and do not `git pull` until this
+  test's blocks are pasted back: a top-up is read with this fleet only at the same commit.
+- **Time:** 22 runs. On the H100 PCIe box (26 cores) they run as one wave, about 30 minutes from launch
+  to block. On the H200 box (13 cores), two waves, about 25 minutes.
+- **When the dashboard says FINISHED or STOPPED, paste back** `cat "$R/gpu_heldout_out/PASTE_BACK.txt"`,
+  from `==== PASTE THIS BACK ====` to `==== END ====`, and upload the `.tgz` its last line names, beside
+  `gpu_heldout_out/`. If the dashboard says DEAD, paste `bash "$R/tools/fleet_dash.sh" --once` instead.
+- **If the block's DECISION says UNRESOLVED,** the line under it is a `top-up:` command that adds seeds
+  up to 11. Run it on the same box (it is read with this fleet only on the same card and torch); it
+  takes about 20 minutes. Then paste back `cat "$R/gpu_heldout_topup_out/PASTE_BACK.txt"` and upload
+  its `.tgz`.
+- **Keep `gpu_heldout_out/ckpt/` on the box:** the next test starts from its finals. If the box will be
+  given up, run the block's `Pack them to upload:` line and download the `_finals.tar` it writes (about
+  2.1 GB).
 
 Moved on 2026-09-28/29, if you run them from memory: the run.py sweeps are now `bash tools/sweep_gpu.sh`
 and `bash tools/sweep_world.sh`, and the old tree's commands start with `cd archive/old-tree`; the fleet

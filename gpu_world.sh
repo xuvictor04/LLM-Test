@@ -3700,7 +3700,8 @@ if rate > 0:
         heapq.heappush(ends, heapq.heappop(ends) + w / per + st)
     eta = max(ends)
     print(f"=== ETA by waves: about {eta / 60:.0f} min ({eta:.0f} s): {len(ws)} run(s) over {par} slot(s), "
-          f"{math.ceil(len(ws) / par)} wave(s), each run its windows at {per:.2f} windows/s plus {st:.0f} s of startup")
+          f"{math.ceil(len(ws) / par)} wave(s), each run its windows at {per:.2f} windows/s plus {st:.0f} s of startup; "
+          f"each run's R stage and saves come on top")
 PY
 
 # ---------------------------------------------------------------- 4. the fleet, with a sampler

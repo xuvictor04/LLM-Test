@@ -1,6 +1,6 @@
 # Agent state — read this first after a session reset
 
-Updated 2026-09-29 (the Stage 3 merge and its review: SR0 built on `sr0-build`, reviewed and merged, its three defaults on and 04-Q5's pins carried into the new gpu_world.sh; the reorganisation's Phase B done and reviewed) on `rm-predict-DC` (the only branch pushed to; no PRs unless asked).
+Updated 2026-10-02 (test 4, E2's retok part as its own fleet, register §8 6.3a: pre-registered, built, checked on CPU and handed to the owner; before it, the Stage 3 merge and the reorganisation's Phase B, both reviewed) on `rm-predict-DC` (the only branch pushed to; no PRs unless asked).
 
 ## Where things stand
 - **WORLD_FEEDBACK ships False** (d97779d) on the 20k-window GPU fleet: the forecast was within
@@ -268,6 +268,18 @@ Updated 2026-09-29 (the Stage 3 merge and its review: SR0 built on `sr0-build`, 
   ONLY=shipped,feedback_off has formed no paired line since d97779d made shipped the feedback_off run
   (a dated note in the contract says so). REORGANISATION's record of 86a11a5 and of fleet_dash.sh
   --once's exit code (0; --status exits 2) are corrected.
+- 2026-10-02, TEST 4 READY: E2'S RETOK PART AS ITS OWN FLEET (register §8 6.3a; 981306c pre-registers it,
+  49a657d and 8672c89 build it, the commit after them checks it on CPU). `EXP=heldout bash
+  tools/gpu_launch.sh --go` runs k0, k1000 and k1000_mn (`TOK_MINT_NOVEL` 1.0, O14's first remedy arm) at
+  seeds 0-6 and k0_rerun, one whole synthetic epoch each, every run pinned after EXTRA with its arm
+  after the pins, finals kept. Its block reads each area's R reading (memory-off, report half) by the ε
+  rule over the four areas, Holm across the two arms; choose()'s remedy branch gives the DECISION, and
+  UNRESOLVED below 11 seeds prints a top-up's command (`POOL_WITH`, a new knob) whose block pools both
+  fleets only where commit, code, card, torch and shape match. The ETA priced by waves is built for
+  every EXP. F28-F31 pin it; the CPU check is results/heldout_prereg_2026-10-02/cpu/ (the contract's
+  Q-RUN-8 note). Handed to the owner (brief test 4). NEXT: read its block when it comes back; then the
+  first post-training sessions from its finals (§8 4.3 with 5.3's after-training half), and E2's shape
+  (b) on real text (§8 6.3).
 0. Proposal 05 §8 orders everything: Stage 0 (owner rulings O1-O20; the fleet-archive reads; the
    k0_nuis pair; phase-traversal resizing), then Stage 1's small builds (vocab `.prev` rotation, DOM
    Levels, counters, OPT_LR_CONTINUE 'as_logged', gpu_world.sh kept checkpoints) before the owner's
@@ -299,7 +311,7 @@ Updated 2026-09-29 (the Stage 3 merge and its review: SR0 built on `sr0-build`, 
   against wall: past 1.5x, raise EXP=world's default to >= 520 (LOW-GPU-WORLD-ETA). That fleet missed
   by 1.95x at CAL_WINDOWS 600, so the advice does not fit it: 13 runs at PAR 12 left k0_rerun running
   alone from +590 s to +986 s. The register's row records that the raise is not taken (2026-09-28).
-  Owed: an ETA priced by waves, and a FILL that fills a partial last wave.
+  The ETA priced by waves is built (49a657d, 2026-10-02); owed: a FILL that fills a partial last wave.
 - OWED, UNBLOCKED BY THE STAGE 3 MERGE (2026-09-29; the lines are the merged tree's). Text: the two
   places in src/fabric/api.py that Q-RUN-17's correction contradicts, grow_check's docstring on the
   stall counter (:5278-5282) and the "WINDOWS, NOT PASSES" comment above its windows count
@@ -309,8 +321,11 @@ Updated 2026-09-29 (the Stage 3 merge and its review: SR0 built on `sr0-build`, 
   paired seeds" and the gap over the whole run) to note WORLD 4's endpoint, before O13's build lifts
   its guard; the C13 alarm's COOLDOWN_ARM=100 advice, read null on 2026-09-28 (with
   tests/test_gpu_world.py:506, which pins it); the block's "at PAR" when fewer runs ran, its ETA on
-  nominal windows, and "ESTIMATED" on a split the act windows give exactly. Code: a FILL guard for a
-  capped seed count (until then a capped command passes FILL=0); per-area cells in analyze_retok.
+  nominal windows, and "ESTIMATED" on a split the act windows give exactly; src/tok/levers.py:516-522,
+  which still calls mint_novel's fail-open bug (ISSUES P1-M77) open, where src/tok/api.py:2275-2290 and
+  :2382 hold its fix (and at TOK_MINT_PMIN 0 the fail-open never runs). Code: a FILL guard for a capped
+  seed count at EXP=retok (EXP=heldout's FILL is 0; elsewhere a capped command passes FILL=0); per-area
+  cells in analyze_retok (EXP=heldout reads per area).
 - Next hunt classes: lever isolation, efficacy vs labels, long-horizon mechanisms, SIGUSR1 saves.
 
 ## Working rules this repo has taught

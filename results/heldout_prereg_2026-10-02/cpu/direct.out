@@ -1,0 +1,4 @@
+$ bash direct.sh "$C" D
+raised: === 298 windows, 298 flushes, 298 optimizer steps, 1 epoch(s) in 96.7s (3.1 w/s)
+default: === 298 windows, 298 flushes, 298 optimizer steps, 1 epoch(s) in 82.5s (3.6 w/s)
+child: === 352 windows run total (60 trained by this process, resumed at 292), 60 flushes this process, 352 optimizer steps run total, 1 epoch(s) in 91.6s (0.7 w/s this process)

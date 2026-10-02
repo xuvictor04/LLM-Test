@@ -1,0 +1,30 @@
+==== PASTE THIS BACK ====
+gpu_world.sh EXP=heldout  commit 8672c89  launched 2026-10-02T14:50:00Z  synthetic source
+card: no GPU listed; torch 2.14.0+cu130, CUDA 13.0; NCPU 4; PAR 4; MPS off; device=cpu
+shape: 300 windows/run, DATA_STREAM_BYTES=56700, seeds 0 1, EXTRA='TOK_GROW_EVERY=20'; cap 900; CAL 600; LM_CTX 128; kept ckpts ON; pins DATA_DRAW=planned pinned, DATA_SYNTH_HOLDOUT=1 pinned, EVAL_RETENTION_EVERY=50 pinned, EVAL_HOLDOUT_WINDOWS=256 pinned, EVAL_RETENTION_N=24 pinned, EVAL_GENERATE=0 pinned, TOK_MINT_NOVEL=0 pinned
+runs: 7 of 7 ended rc=0, every one
+held-out bits/byte at R (memory-off, report half), per seed: k0, then k40 - k0, then k40_mn - k0
+  seed      eng      py     num       c |      eng       py      num        c |      eng       py      num        c
+  s0     7.8489  5.0053  5.0168  9.2209 |  -0.2700  -0.5724  -0.7437  -0.4517 |  -0.4845  -0.7790  -0.6527  +1.6652
+  s1     7.7853  4.4671  4.2826  7.6424 |  -0.1439  -0.3638  -0.2272  +2.5037 |  -0.1282  -0.3146  -0.2074  +2.3192
+k0_rerun (this fleet's): k0 seed 0 twice, R per area max |diff| 0, summed loss |diff| 0 (BIT-EXACT)
+RULE (§8 6.3a; O2, O14): ε 0.05 bits/byte; per area (4), arm - k0 paired over seeds: mean [lower at t(1 - a/4), Holm a across the act arms; one-sided 95% upper]
+  k40 n=2 a=0.05: eng -0.2070 [-1.8117,+0.1911] py -0.4681 [-3.1233,+0.1905] num -0.4855 [-7.0591,+1.1453] c +1.0260 [-36.5838,+10.3558] -> UNRESOLVED
+  k40_mn n=2 a=0.025: eng -0.3064 [-9.3769,+0.8183] py -0.5468 [-12.3713,+0.9193] num -0.4300 [-11.7670,+0.9756] c +1.9922 [-14.6586,+4.0567] -> UNRESOLVED
+DECISION: UNRESOLVED at 2 seed(s): k40 is UNRESOLVED against k0; top up to the cap of 11 on this card and torch with the command below, then paste back the top-up's block, which reads both fleets (ε 0.05 bits/byte, 2 seed(s))
+  top-up: EXP=heldout SEEDS='2 3 4 5 6 7 8 9 10' FILL=0 WINDOWS=300 EXTRA=TOK_GROW_EVERY=20 PIN_RETOK=40 PROBE_EVERY=50 DEVICE=cpu PAR=4 OUT=/tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/t1/cpu/gpu_heldout_topup_out POOL_WITH=/tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/t1/cpu/gpu_heldout_out bash /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/t1/cpu/tools/gpu_launch.sh --go
+REPORTED, DECIDES NOTHING:
+  time-integrated report gap from 20% of the stream (all areas, in-run readings): k40 - k0 mean -0.0468 sd 0.1065 n=2 | k40_mn - k0 mean -0.0286 sd 0.0789 n=2
+  end-state SD per area of arm - k0: k40 eng 0.0892 py 0.1475 num 0.3653 c 2.0898 | k40_mn eng 0.2519 py 0.3284 num 0.3148 c 0.4624
+  prequential per phase (O14's 2.1 endpoint), k40 - k0 n=2: p1 +0.0000 [+0.0000,+0.0000] p2 +0.0230 [-0.6386,+0.1871] p3 -0.0828 [-0.7548,+0.0840] p4 +0.1429 [-13.8472,+3.6134] -> UNRESOLVED
+  prequential per phase (O14's 2.1 endpoint), k40_mn - k0 n=2: p1 +0.0000 [+0.0000,+0.0000] p2 +0.0230 [-1.2991,+0.1869] p3 -0.0697 [-0.4799,-0.0188] p4 +0.3019 [-20.9329,+2.9347] -> UNRESOLVED
+  memory-on - memory-off at R, mean over seeds (NEW-03): k0 eng -0.2468 py +0.0502 num +0.2064 c -0.1971 | k40 eng +0.4426 py +0.1734 num +0.2699 c -0.5771 | k40_mn eng +0.5383 py +0.1501 num +0.1214 c -1.6284
+  in-run readings per phase: fewest 2 (k0.s0, phase 1), most 3; shortest phase 68 windows (k40_mn.s1), / 5 = 14 against EVAL_RETENTION_EVERY 50 (§8 0.4)
+  n_live at the end (NEW-20): k0 2306 [2301-2312] | k40 2278 [2273-2282] | k40_mn 2278 [2272-2284]
+  the probe's seconds (eval.holdout.seconds; R's share by its windows; E6's cost at the pinned cadence): k0 88.1 s, R 67.8 s, in-run 19.38% of loop time | k40 85.3 s, R 65.7 s, in-run 18.68% of loop time | k40_mn 84.2 s, R 64.9 s, in-run 18.76% of loop time
+  data.trust.wall_s (the book's seconds; no claim fires on synthetic text): k0 0.02 [0.02-0.02] s | k40 0.02 [0.02-0.02] s | k40_mn 0.02 [0.02-0.02] s
+  windows/s per run: k0 2.83 [2.76-2.89] | k40 2.76 [2.67-2.85] | k40_mn 2.81 [2.74-2.87]
+  this fleet: 2,047 windows in 370 s of fleet wall = 5.53 windows/s aggregate; ETA by waves 229 s, took 370 s: 1.62x
+FINALS: 8 file(s), the k40 and k40_mn runs' final checkpoints and vocabularies, 0.57 GB, sha256 in FINALS.sha256; the next test's parents. Pack them to upload: tar -cf /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/t1/cpu/gpu_heldout_2026-10-02_finals.tar -C /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/t1/cpu/gpu_heldout_out FINALS.sha256 $(cut -c67- /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/t1/cpu/gpu_heldout_out/FINALS.sha256)
+archive: gpu_heldout_2026-10-02.tgz beside gpu_heldout_out (logs, curves, SUMMARY, ANALYSIS, this block; no checkpoints) -- keep it
+==== END ====

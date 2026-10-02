@@ -2,11 +2,17 @@
 mint bursts every TOK_GROW_EVERY windows and the act's splice every TOK_RETOK_EVERY windows, as
 spine/loop.py orders them (on_window per window; mint at the flush; the act after it). Reports where
 mints go (by alphabet = area, by phase) and how much of each area's held-out block the last-cut view
-segments with tokens minted after a given phase began."""
-import os, sys, time, bisect, collections
-SRC = "/home/user/LLM-Test/src"
-sys.path[:] = [p for p in sys.path if os.path.abspath(p or ".") != "/home/user/LLM-Test"]
-sys.path.insert(0, SRC)
+segments with tokens minted after a given phase began.
+
+    python3 tokreplay.py <seed> <TOK_RETOK_EVERY> <TOK_MINT_NOVEL>       # the fleet's shape (tokreplay.out)
+    python3 tokreplay.py <seed> 40 <TOK_MINT_NOVEL> 56700 20 <out.json>  # cpu/'s toy shape: DATA_STREAM_BYTES,
+                                                                         # TOK_GROW_EVERY; the bursts, acts and
+                                                                         # windows to a file for cpu/checks.py
+Run it in place, by its path, from any directory but the checkout's root (it finds src/ two folders up)."""
+import os, sys, time, bisect, collections, json
+ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+sys.path[:] = [p for p in sys.path if os.path.abspath(p or ".") != ROOT]
+sys.path.insert(0, os.path.join(ROOT, "src"))
 from spine.assemble import build as _build
 from spine.compose import RNG_SUBSYSTEMS
 from spine import units as U
@@ -14,9 +20,12 @@ from data import api as data_api
 from tok import api as tok_api
 from train import api as run_api
 seed, retok, novel = int(sys.argv[1]), sys.argv[2], sys.argv[3]
+nbytes, grow, jout = (sys.argv[4:7] + [None, None, None])[:3]
 env = {k: v for k, v in os.environ.items()}
-env.update(RUN_SEED=str(seed), DATA_STREAM_BYTES="3780000", RUN_DEVICE="cpu", OMP_NUM_THREADS="1",
-           DATA_DIR="/home/user/LLM-Test/data", TOK_RETOK_EVERY=retok, TOK_MINT_NOVEL=novel)
+env.update(RUN_SEED=str(seed), DATA_STREAM_BYTES=nbytes or "3780000", RUN_DEVICE="cpu", OMP_NUM_THREADS="1",
+           DATA_DIR=os.path.join(ROOT, "data"), TOK_RETOK_EVERY=retok, TOK_MINT_NOVEL=novel)
+if grow:
+    env["TOK_GROW_EVERY"] = grow
 t0 = time.time()
 configs, wires, warnings = _build(environ=env)
 run, lm, data, tok = configs["RUN"], configs["LM"], configs["DATA"], configs["TOK"]
@@ -39,7 +48,9 @@ def area_of(bs):
     hit = [a for a, s in ALPHA.items() if all(x in s for x in bs)]
     return hit[0] if len(hit) == 1 else "cross"
 mints = []          # (window, phase, area, id)
+wph = collections.Counter()   # windows per phase, by each window's first byte (the probe's phase starts)
 acts = []           # (window, view_size)
+bursts = []         # (window, [each mint's bytes, hex]): where TOK_MINT_NOVEL first reorders a burst
 last_view = tok_api.view_of(vocab)
 i = 0
 while True:
@@ -50,9 +61,12 @@ while True:
     step = U.Windows(i + 1)
     due = tok_api.on_window(tok, vocab, ids[a:b], step=step)
     ph = phase_of(seg.byte_pos[a])
+    wph[ph] += 1
     if due.mint:
+        bursts.append((i + 1, []))
         for m in tok_api.mint_burst(tok, vocab, step=step):
             mints.append((i + 1, ph, area_of(m.token_bytes), int(m.new_id)))
+            bursts[-1][1].append(bytes(m.token_bytes).hex())
     if due.retok:
         v = tok_api.view_of(vocab)
         if v != last_view:
@@ -62,6 +76,11 @@ while True:
     i += 1
 print(f"seed {seed} TOK_RETOK_EVERY={retok} TOK_MINT_NOVEL={novel}: windows {i}, build vocab {build_size}, "
       f"final vocab {vocab.size()}, mints {len(mints)}, acts {len(acts)} ({time.time()-t0:.0f}s)")
+print(f"  windows per phase: {' '.join(f'p{k + 1} {wph[k]}' for k in range(4))}; the shortest / 5 = "
+      f"{min(wph[k] for k in range(4)) / 5:.0f} (§8 0.4" + (")" if nbytes else ", against EVAL_RETENTION_EVERY 700)"))
+if jout:
+    with open(jout, "w") as fh:
+        json.dump({"bursts": bursts, "acts": acts, "windows": i, "wph": [wph[k] for k in range(4)]}, fh)
 tab = collections.Counter((ph, ar) for _, ph, ar, _ in mints)
 for ph in range(4):
     row = {ar: tab.get((ph, ar), 0) for ar in ("eng", "py", "num", "c", "cross")}

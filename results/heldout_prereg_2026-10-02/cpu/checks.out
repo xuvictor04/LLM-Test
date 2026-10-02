@@ -1,0 +1,20 @@
+$ python3 checks.py "$C/gpu_heldout_out" D
+  replay: seed 0 TOK_RETOK_EVERY=40 TOK_MINT_NOVEL=0: windows 292, build vocab 512, final vocab 566, mints 54, acts 5 (0s)
+  replay: seed 0 TOK_RETOK_EVERY=40 TOK_MINT_NOVEL=1.0: windows 292, build vocab 512, final vocab 566, mints 54, acts 5 (0s)
+  replay: seed 1 TOK_RETOK_EVERY=40 TOK_MINT_NOVEL=0: windows 288, build vocab 512, final vocab 558, mints 46, acts 5 (0s)
+  replay: seed 1 TOK_RETOK_EVERY=40 TOK_MINT_NOVEL=1.0: windows 287, build vocab 512, final vocab 558, mints 46, acts 5 (0s)
+PASS every fleet and smoke run ended rc=0 -- {'k40_mn.s0': '0', 'k40.s0': '0', 'k0.s0': '0', 'k0.s1': '0', 'k40_mn.s1': '0', 'k40.s1': '0', 'k0_rerun.s0': '0'} {'k0.s0': '0', 'k40.s0': '0', 'k40_mn.s0': '0'}
+PASS finite: no run stopped, every loss and every probe value finite
+PASS every series holds phase readings at the four phases' starts and cadence readings, memory-off, over the areas arrived so far, and R's boundary readings through both closures over all four areas -- []
+    readings per run (phase, cadence): {'k0.s0': (4, 4), 'k0.s1': (4, 5), 'k0_rerun.s0': (4, 4), 'k40.s0': (4, 4), 'k40.s1': (4, 5), 'k40_mn.s0': (4, 4), 'k40_mn.s1': (4, 5)}
+PASS seed 0: k40 equals k0 bit for bit through its first act (window 121): the first differing flush is 122 -- acts [121, 161, 201, 241, 281]
+PASS seed 0: the acts and the window counts are the replay's: k40 acts [121, 161, 201, 241, 281], k40_mn [121, 161, 201, 241, 281]; windows k40 292 k40_mn 292 against the replay's 292 and 292
+PASS seed 0: k40_mn equals k40 through the first burst the re-rank reorders -- the replay's burst 6 at window 121, after 5 it left alone -- the first differing flush being 123; tok.mint_novel_reranked 14
+PASS seed 1: k40 equals k0 bit for bit through its first act (window 121): the first differing flush is 123 -- acts [121, 161, 201, 241, 281]
+PASS seed 1: the acts and the window counts are the replay's: k40 acts [121, 161, 201, 241, 281], k40_mn [121, 161, 201, 241, 281]; windows k40 288 k40_mn 287 against the replay's 288 and 287
+PASS seed 1: k40_mn equals k40 through the first burst the re-rank reorders -- the replay's burst 6 at window 121, after 5 it left alone -- the first differing flush being 123; tok.mint_novel_reranked 14
+PASS k0_rerun is exact: its losses and its R readings are k0.s0's
+PASS k0.s0 at the fleet's probe sizes and at the defaults: the same losses and flush bytes as each other and as the fleet's k0.s0, which saved its final and best checkpoints -- 298 flushes
+PASS k40.s0's final continues into a second epoch with the probe on (RUN_EPOCHS=2 DATA_RESAMPLE=1): it trains its 60 windows, its resume readings are the parent's R readings through both closures, area for area (each area now seen_by_parent), and it reads on: resume memory-off at 292, resume memory-on at 292, phase memory-off at 293, cadence memory-off at 301, cadence memory-off at 351, boundary memory-off at 352, boundary memory-on at 352 -- [True, True]
+    ok
+(exit 0)

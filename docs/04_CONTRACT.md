@@ -5130,6 +5130,22 @@ by the ε rule with the four areas as its cells and Holm across the two arms. Th
 the pins, the seeds and their cap, what each outcome ships and the remedy arms in their order. No `src/`
 file changes.
 
+**2026-10-02: BUILT (49a657d, 8672c89), AND ITS CPU OPERATION CHECK (operation only;
+`results/heldout_prereg_2026-10-02/cpu/`, each script beside its output).** `gpu_world.sh EXP=heldout`
+launches and reads the fleet; `tests/test_gpu_world.py` F28-F31 pin its launch, the rule's outcomes on
+series written by hand, and the top-up's pooling and refusals. The same command at `DEVICE=cpu`, at a toy
+shape where bursts and acts fire (`WINDOWS=300 SEEDS='0 1' PIN_RETOK=40 PROBE_EVERY=50
+EXTRA='TOK_GROW_EVERY=20'`), ran 7 runs and 3 smoke runs to rc=0, finite, and wrote its block. Every
+probe series holds a reading at each phase's start and at the cadence between, memory-off, over the areas
+arrived so far, and R's two boundary readings over all four areas. k40 equals k0 bit for bit through its
+first act (window 121); k40_mn equals k40 through the first burst the re-rank reorders (the sixth, at
+window 121; `tok.mint_novel_reranked` 14); the acts (121, 161, 201, 241, 281) and each run's windows are
+the model-free replay's; k0_rerun is bit-exact; and both arms read UNRESOLVED at 2 seeds, the block
+printing the top-up's command. Run directly, the probe at its default sizes and at the pinned ones gives
+k0.s0's losses and flush bytes exactly, and k40.s0's final continues into a second epoch with the probe
+on (`RUN_EPOCHS=2 DATA_RESAMPLE=1`), its resume readings equal to the parent's R readings through both
+closures, area for area.
+
 **THE QUESTION AS IT STOOD.**
 
 `TOK.on_window` raises `Due.retok` on its own `retok_every` cadence, and the act it asks for is to

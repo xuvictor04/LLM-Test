@@ -270,7 +270,7 @@ if [[ "$KC" == 1 && "$W" =~ ^[0-9]+$ ]]; then
   if (( FREE_B < NEED_B )); then
     fail "disk: $(G $FREE_B) GB free at $_p, and the kept checkpoints may need $(G $NEED_B) GB ($FILES files x 2 x $CKPT_MB MB at $NS seed(s))" \
          "free space there, fewer SEEDS, or KEEP_CKPT=0 (which leaves the spike test without its control)"
-  elif (( FREE_B < 2 * NEED_B )); then
+  elif (( FREE_B < 2 * NEED_B )) && [[ "${FILL:-$([[ "$EXP_SET" == heldout ]] && echo 0 || echo 1)}" != 0 ]]; then
     warn "disk: $(G $FREE_B) GB free, $(G $NEED_B) GB needed at $NS seed(s): FILL will add few extra seeds (it stops at 0.9 of the free disk)" \
          "free space for more seeds, or accept fewer"
   else

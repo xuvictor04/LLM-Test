@@ -2860,11 +2860,25 @@ for _ in range(100):
     check("F29 the launcher's disk check budgets the same files: three arms a seed and the rerun, 2.1 GB at 50 MB",
           "the kept checkpoints may need 2.1 GB at 2 seed(s)" in l29.stdout and "PASS EXP=heldout" in l29.stdout,
           l29.stdout[-500:])
+    # THE LAUNCHER WARNS THAT FILL ADDS FEW SEEDS ONLY WHERE FILL RUNS: at a need between half the free disk and all of
+    # it, EXP=heldout (FILL 0) PASSes the check, and with FILL=1 it WARNs as before.
+    st29 = os.statvfs(TMP)
+    mb29 = max(1, int(st29.f_bavail * st29.f_frsize / 1e6 * 0.7 / 24))      # 1 seed: 4 runs x 3 files x 2 per MB
+    w29 = [subprocess.run(["bash", LAUNCHER], cwd=TMP, capture_output=True, text=True, timeout=300,
+                          env=clean_env(PATH=env10["PATH"], EXP="heldout", DEVICE="cpu", SEEDS="0", CKPT_MB=mb29, FETCH=0,
+                                        OUT=os.path.join(TMP, "f29w", "gpu_heldout_out"), **fl)).stdout
+           for fl in ({}, {"FILL": "1"})]
+    check("F29 the launcher's warning that FILL adds few seeds comes only where FILL runs: EXP=heldout's FILL 0 PASSes "
+          "a disk need between half the free space and all of it, and FILL=1 WARNs",
+          "PASS disk: " in w29[0] and "FILL will add few extra seeds" not in w29[0]
+          and "WARN disk: " in w29[1] and "FILL will add few extra seeds" in w29[1],
+          [l for w_ in w29 for l in w_.splitlines() if "disk" in l])
     # THE ETA BY WAVES (register LOW-GPU-WORLD-ETA's owed fix): with PAR set by hand the rate per run is the smoke's,
     # 5 windows a second, so each run's 20 windows take 4 s and 7 runs over 3 slots end at 12 s.
     check("F29 the ETA is priced by waves: 7 runs over 3 slots are 3 waves of 4 s, 12 s, beside the aggregate ETA",
           re.search(r"^=== ETA by waves: about 0 min \(12 s\): 7 run\(s\) over 3 slot\(s\), 3 wave\(s\), each run "
-                    r"its windows at 5\.00 windows/s plus 0 s of startup$", s29, re.M) is not None
+                    r"its windows at 5\.00 windows/s plus 0 s of startup; each run's R stage and saves come on top$",
+                    s29, re.M) is not None
           and "=== ETA: about 0.0 h for 140 windows at 15.0 windows/s aggregate" in s29,
           [l for l in s29.splitlines() if "ETA" in l])
     # FILL IS 0 AT EXP=heldout (its seeds are capped): 4 runs at PAR 10 stay 4, where FILL=1 adds two seeds.
