@@ -1,0 +1,31 @@
+$ OMP_NUM_THREADS=1 python3 realplan.py 0
+seed 0, DATA_SOURCE=real, DATA_STREAM_BYTES 3780000 (13s)
+  build vocabulary: 512 ids, 1.656 bytes/token; the epoch: 2,236,953 ids, 17,476 windows (216 B/window)
+  phases: schedule ((0, 1), (1, 2), (1, 2), (2, 3)); windows at the build vocabulary [4569, 4278, 4278, 4349]; the shortest / 5 = 856 (§8 0.4: the cap EVAL_RETENTION_EVERY may not pass)
+  bodies: eng 1,900,000, py 837,229, num 1,349,069, c 1,143,036; held-out blocks: eng 100,000, py 44,064, num 71,003, c 60,159 B
+  the probe at EVAL_HOLDOUT_WINDOWS 256 (windows of 129 B behind a 211-B prefix): c 128/128, eng 128/128, num 128/128, py 128/128 windows pinned (control/report); shortfall c 0, eng 0, num 0, py 0
+  exposure: c 0.41, eng 0.25, num 1.05, py 1.69
+    Gate data.exposure_max: armed, did not fire (1.6931 vs 2.0)
+    Gate data.exposure_skew: FIRED (6.8082 vs 3.0)
+    Gate data.splice_window: FIRED (5.897 vs 8.0)
+    Gate data.replay: unreachable (None vs 4)
+    Gate data.rehearse_parent: unreachable (None vs 0)
+  DATA_DRAW=planned: epoch windows 17,476; phase 1 = bytes [0, 945,000), sha256 12b0fe5c992ac253; warmup 1000 steps over 17,476; each phase's bytes by area eng 472,500 py 472,500 | py 472,500 num 472,500 | py 472,500 num 472,500 | num 472,500 c 472,500
+  DATA_DRAW=replay: epoch windows 17,626; phase 1 = bytes [0, 945,000), sha256 12b0fe5c992ac253; warmup 1000 steps over 17,626; each phase's bytes by area eng 472,500 py 472,500 | eng 255,150 py 344,925 num 344,925 | eng 255,150 py 344,925 num 344,925 | eng 127,575 py 127,575 num 344,925 c 344,925
+  the two streams first part at byte 945,000 of 3,780,000 (phase 1 ends at 945,000); OPT's rate first differs at optimizer step 1001 (planned 0.0019999999827301014, replay 0.001999999983040314), the warmup's last step 1000 at 0.002 on both; at step 5000 0.0017368196229372186 and 0.0017413196886087866
+
+$ OMP_NUM_THREADS=1 python3 realplan.py 1
+seed 1, DATA_SOURCE=real, DATA_STREAM_BYTES 3780000 (12s)
+  build vocabulary: 512 ids, 1.656 bytes/token; the epoch: 2,239,243 ids, 17,494 windows (216 B/window)
+  phases: schedule ((0, 1), (1, 2), (1, 2), (2, 3)); windows at the build vocabulary [4559, 4284, 4275, 4374]; the shortest / 5 = 855 (§8 0.4: the cap EVAL_RETENTION_EVERY may not pass)
+  bodies: eng 1,900,000, py 837,229, num 1,349,069, c 1,143,036; held-out blocks: eng 100,000, py 44,064, num 71,003, c 60,159 B
+  the probe at EVAL_HOLDOUT_WINDOWS 256 (windows of 129 B behind a 211-B prefix): c 128/128, eng 128/128, num 128/128, py 128/128 windows pinned (control/report); shortfall c 0, eng 0, num 0, py 0
+  exposure: c 0.41, eng 0.25, num 1.05, py 1.69
+    Gate data.exposure_max: armed, did not fire (1.6931 vs 2.0)
+    Gate data.exposure_skew: FIRED (6.8082 vs 3.0)
+    Gate data.splice_window: FIRED (5.898 vs 8.0)
+    Gate data.replay: unreachable (None vs 4)
+    Gate data.rehearse_parent: unreachable (None vs 0)
+  DATA_DRAW=planned: epoch windows 17,494; phase 1 = bytes [0, 945,000), sha256 f349a9952843b220; warmup 1000 steps over 17,494; each phase's bytes by area eng 472,500 py 472,500 | py 472,500 num 472,500 | py 472,500 num 472,500 | num 472,500 c 472,500
+  DATA_DRAW=replay: epoch windows 17,627; phase 1 = bytes [0, 945,000), sha256 f349a9952843b220; warmup 1000 steps over 17,627; each phase's bytes by area eng 472,500 py 472,500 | eng 255,150 py 344,925 num 344,925 | eng 255,150 py 344,925 num 344,925 | eng 127,575 py 127,575 num 344,925 c 344,925
+  the two streams first part at byte 945,000 of 3,780,000 (phase 1 ends at 945,000); OPT's rate first differs at optimizer step 1001 (planned 0.0019999999827677744, replay 0.0019999999830423543), the warmup's last step 1000 at 0.002 on both; at step 5000 0.0017373656856622378 and 0.0017413493079909395

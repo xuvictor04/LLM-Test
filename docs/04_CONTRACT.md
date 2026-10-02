@@ -5177,6 +5177,15 @@ k0.s0's losses and flush bytes exactly, and k40.s0's final continues into a seco
 on (`RUN_EPOCHS=2 DATA_RESAMPLE=1`), its resume readings equal to the parent's R readings through both
 closures, area for area.
 
+**2026-10-02 (Proposal 05 §8 6.3b; O14, O16, 04-6.3): E2's SHAPE (b) ON REAL TEXT IS PRE-REGISTERED.** `EXP=heldout
+HELDOUT_SOURCE=real SEEDS='0 1 2 3 4 5 6' FILL=0 bash tools/gpu_launch.sh --go` reads S, 6.3a's shipped configuration,
+against k0 on real text by 6.3a's rule at one arm; S at 'replay' 0.27 against S for O16, which CONFIRMs where
+every area's one-sided upper bound is within ε and the time-integrated all-area gap's is below 0, each look at
+a = 0.025; and the trust book's seconds against E3's 2%. Real areas share an alphabet, so an arriving area's
+merges re-segment older areas' held-out text here, which 6.3a's synthetic text cannot show. The register's row
+holds the sizing, the pins (the probe at 650, from the act arms' phases), the seeds and what each outcome does.
+No `src/` file changes.
+
 **THE QUESTION AS IT STOOD.**
 
 `TOK.on_window` raises `Due.retok` on its own `retok_every` cadence, and the act it asks for is to
@@ -8430,6 +8439,9 @@ where it stood:
 **What the default changes:** nothing a run trains on and no integer it prints. The gauges, the
 counts and the Gates move only under 'replay', the refusal only at `DATA_REHEARSE_PARENT=1` under
 'replay', and the new record key is a list; B1, B3, B3r, B5, B6 and B6r reproduce their fixtures.
+
+**2026-10-02:** O16's training-run draw pair is pre-registered as Proposal 05 §8 6.3b, on real text (Q-RUN-8's note
+of that date).
 
 ### Q-DATA-11 — the source-reliability book in observe mode, and the sources it reads — **RESOLVED 2026-09-28 (Proposal 05 §8 3.4; register 04-6.3; Proposal 04 §1 item 8, §5, §6 and SR3): `DATA_TRUST` BUILT `'off'`, `'observe'` BUILT AND `'loss'`/`'loss+draw'` REFUSED WITH `NotBuilt`; THIRTEEN LEVERS OF ITS BOOK; `Areas.sources` AND `Stream.sources`; THE `Focus` RECORD THROUGH `DATA.new_focus(restored=)`, `DATA.claims_observe` AND `DATA.trust_period`; SR3's BIT-IDENTITY. ⚠ FOURTEEN NEW LEVERS, FOURTEEN CENSUS AMENDMENTS, THREE NEW ENTRY POINTS AND ONE MOVED (`DATA.stream_state(..., focus=None)`). NO WIRE, AND NO NUMBER A DEFAULT RUN TRAINS ON MOVES. `DATA_SRC_CAP` IS NOT BUILT: DEFERRED TO §8 4.7, WITH THE REGISTER'S NOTE. ⚠ FLIPPED TO `'observe'` ON 2026-09-29, LAST AND ALONE: DEFAULT BEHAVIOUR CHANGE 3; ACTUATION STAYS OFF**
 

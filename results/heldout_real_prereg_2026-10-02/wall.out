@@ -1,0 +1,5 @@
+$ python3 wall.py
+H100 PCIe, PAR 24, S = k1000: the fleet 16.8-17.8 min (1 wave(s) of runs)
+H100 PCIe, PAR 24, S = k1000_mn: the fleet 16.8-17.8 min (1 wave(s) of runs)
+H200, PAR 12, S = k1000: the fleet 17.0-18.1 min (2 wave(s) of runs)
+H200, PAR 12, S = k1000_mn: the fleet 17.0-18.1 min (2 wave(s) of runs)

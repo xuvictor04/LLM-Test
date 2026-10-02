@@ -1,0 +1,71 @@
+$ OMP_NUM_THREADS=1 python3 realreplay.py 0 0 0
+seed 0 TOK_RETOK_EVERY=0 TOK_MINT_NOVEL=0 DATA_DRAW=planned: windows 17,476, acts 0, build vocab 512, final vocab 1034, mints 522 (8s)
+  windows per phase: p1 4,570 p2 4,278 p3 4,279 p4 4,349; the shortest / 5 = 856 (§8 0.4: the cap EVAL_RETENTION_EVERY may not pass)
+  mints born per phase: p1 132 p2 132 p3 126 p4 132
+  eng held-out 100,000 B (live p1-p1): 1.66 B/token at the build vocabulary, 1.66 at the last-cut view; bytes in tokens minted while it was live 0.0%, before it arrived 0.0%, after it faded 0.0%
+  py  held-out 44,064 B (live p1-p3): 1.56 B/token at the build vocabulary, 1.56 at the last-cut view; bytes in tokens minted while it was live 0.0%, before it arrived 0.0%, after it faded 0.0%
+  num held-out 71,003 B (live p2-p4): 1.90 B/token at the build vocabulary, 1.90 at the last-cut view; bytes in tokens minted while it was live 0.0%, before it arrived 0.0%, after it faded 0.0%
+  c   held-out 60,159 B (live p4-p4): 1.55 B/token at the build vocabulary, 1.55 at the last-cut view; bytes in tokens minted while it was live 0.0%, before it arrived 0.0%, after it faded 0.0%
+
+$ OMP_NUM_THREADS=1 python3 realreplay.py 0 1000 0
+seed 0 TOK_RETOK_EVERY=1000 TOK_MINT_NOVEL=0 DATA_DRAW=planned: windows 14,424, acts 14, build vocab 512, final vocab 944, mints 432 (17s)
+  windows per phase: p1 4,075 p2 3,593 p3 3,352 p4 3,404; the shortest / 5 = 670 (§8 0.4: the cap EVAL_RETENTION_EVERY may not pass)
+  mints born per phase: p1 120 p2 108 p3 102 p4 102
+  eng held-out 100,000 B (live p1-p1): 1.66 B/token at the build vocabulary, 2.03 at the last-cut view; bytes in tokens minted while it was live 27.4%, before it arrived 0.0%, after it faded 9.2%
+  py  held-out 44,064 B (live p1-p3): 1.56 B/token at the build vocabulary, 2.26 at the last-cut view; bytes in tokens minted while it was live 43.0%, before it arrived 0.0%, after it faded 9.0%
+  num held-out 71,003 B (live p2-p4): 1.90 B/token at the build vocabulary, 2.33 at the last-cut view; bytes in tokens minted while it was live 34.4%, before it arrived 0.0%, after it faded 0.0%
+  c   held-out 60,159 B (live p4-p4): 1.55 B/token at the build vocabulary, 2.25 at the last-cut view; bytes in tokens minted while it was live 26.5%, before it arrived 28.2%, after it faded 0.0%
+
+$ OMP_NUM_THREADS=1 python3 realreplay.py 0 1000 1.0
+seed 0 TOK_RETOK_EVERY=1000 TOK_MINT_NOVEL=1.0 DATA_DRAW=planned: windows 15,249, acts 15, build vocab 512, final vocab 968, mints 456 (18s)
+  windows per phase: p1 4,248 p2 3,739 p3 3,614 p4 3,648; the shortest / 5 = 723 (§8 0.4: the cap EVAL_RETENTION_EVERY may not pass)
+  mints born per phase: p1 126 p2 108 p3 114 p4 108
+  eng held-out 100,000 B (live p1-p1): 1.66 B/token at the build vocabulary, 1.73 at the last-cut view; bytes in tokens minted while it was live 6.6%, before it arrived 0.0%, after it faded 2.7%
+  py  held-out 44,064 B (live p1-p3): 1.56 B/token at the build vocabulary, 1.99 at the last-cut view; bytes in tokens minted while it was live 30.6%, before it arrived 0.0%, after it faded 4.4%
+  num held-out 71,003 B (live p2-p4): 1.90 B/token at the build vocabulary, 2.06 at the last-cut view; bytes in tokens minted while it was live 13.0%, before it arrived 0.0%, after it faded 0.0%
+  c   held-out 60,159 B (live p4-p4): 1.55 B/token at the build vocabulary, 2.27 at the last-cut view; bytes in tokens minted while it was live 30.4%, before it arrived 22.4%, after it faded 0.0%
+
+$ OMP_NUM_THREADS=1 python3 realreplay.py 0 1000 0 replay
+seed 0 TOK_RETOK_EVERY=1000 TOK_MINT_NOVEL=0 DATA_DRAW=replay: windows 14,625, acts 14, build vocab 512, final vocab 950, mints 438 (18s)
+  windows per phase: p1 4,075 p2 3,648 p3 3,436 p4 3,466; the shortest / 5 = 687 (§8 0.4: the cap EVAL_RETENTION_EVERY may not pass)
+  mints born per phase: p1 120 p2 108 p3 102 p4 108
+  eng held-out 100,000 B (live p1-p1): 1.66 B/token at the build vocabulary, 2.17 at the last-cut view; bytes in tokens minted while it was live 23.3%, before it arrived 0.0%, after it faded 23.1%
+  py  held-out 44,064 B (live p1-p3): 1.56 B/token at the build vocabulary, 2.22 at the last-cut view; bytes in tokens minted while it was live 48.1%, before it arrived 0.0%, after it faded 2.5%
+  num held-out 71,003 B (live p2-p4): 1.90 B/token at the build vocabulary, 2.28 at the last-cut view; bytes in tokens minted while it was live 31.1%, before it arrived 0.0%, after it faded 0.0%
+  c   held-out 60,159 B (live p4-p4): 1.55 B/token at the build vocabulary, 2.12 at the last-cut view; bytes in tokens minted while it was live 15.0%, before it arrived 31.9%, after it faded 0.0%
+
+$ OMP_NUM_THREADS=1 python3 realreplay.py 0 1000 1.0 replay
+seed 0 TOK_RETOK_EVERY=1000 TOK_MINT_NOVEL=1.0 DATA_DRAW=replay: windows 15,528, acts 15, build vocab 512, final vocab 974, mints 462 (19s)
+  windows per phase: p1 4,248 p2 3,893 p3 3,726 p4 3,661; the shortest / 5 = 732 (§8 0.4: the cap EVAL_RETENTION_EVERY may not pass)
+  mints born per phase: p1 126 p2 114 p3 114 p4 108
+  eng held-out 100,000 B (live p1-p1): 1.66 B/token at the build vocabulary, 1.78 at the last-cut view; bytes in tokens minted while it was live 6.2%, before it arrived 0.0%, after it faded 8.4%
+  py  held-out 44,064 B (live p1-p3): 1.56 B/token at the build vocabulary, 1.97 at the last-cut view; bytes in tokens minted while it was live 29.8%, before it arrived 0.0%, after it faded 5.3%
+  num held-out 71,003 B (live p2-p4): 1.90 B/token at the build vocabulary, 2.15 at the last-cut view; bytes in tokens minted while it was live 20.2%, before it arrived 0.0%, after it faded 0.0%
+  c   held-out 60,159 B (live p4-p4): 1.55 B/token at the build vocabulary, 2.20 at the last-cut view; bytes in tokens minted while it was live 30.0%, before it arrived 22.2%, after it faded 0.0%
+
+$ OMP_NUM_THREADS=1 python3 realreplay.py 1 1000 0
+seed 1 TOK_RETOK_EVERY=1000 TOK_MINT_NOVEL=0 DATA_DRAW=planned: windows 14,465, acts 14, build vocab 512, final vocab 944, mints 432 (17s)
+  windows per phase: p1 4,074 p2 3,619 p3 3,355 p4 3,417; the shortest / 5 = 671 (§8 0.4: the cap EVAL_RETENTION_EVERY may not pass)
+  mints born per phase: p1 120 p2 108 p3 102 p4 102
+  eng held-out 100,000 B (live p1-p1): 1.63 B/token at the build vocabulary, 1.99 at the last-cut view; bytes in tokens minted while it was live 27.9%, before it arrived 0.0%, after it faded 8.1%
+  py  held-out 44,064 B (live p1-p3): 1.61 B/token at the build vocabulary, 2.72 at the last-cut view; bytes in tokens minted while it was live 59.2%, before it arrived 0.0%, after it faded 8.2%
+  num held-out 71,003 B (live p2-p4): 1.91 B/token at the build vocabulary, 2.33 at the last-cut view; bytes in tokens minted while it was live 35.0%, before it arrived 0.0%, after it faded 0.0%
+  c   held-out 60,159 B (live p4-p4): 1.55 B/token at the build vocabulary, 2.20 at the last-cut view; bytes in tokens minted while it was live 24.0%, before it arrived 28.0%, after it faded 0.0%
+
+$ OMP_NUM_THREADS=1 python3 realreplay.py 1 1000 1.0
+seed 1 TOK_RETOK_EVERY=1000 TOK_MINT_NOVEL=1.0 DATA_DRAW=planned: windows 15,299, acts 15, build vocab 512, final vocab 968, mints 456 (19s)
+  windows per phase: p1 4,230 p2 3,768 p3 3,638 p4 3,663; the shortest / 5 = 728 (§8 0.4: the cap EVAL_RETENTION_EVERY may not pass)
+  mints born per phase: p1 126 p2 108 p3 114 p4 108
+  eng held-out 100,000 B (live p1-p1): 1.63 B/token at the build vocabulary, 1.78 at the last-cut view; bytes in tokens minted while it was live 12.5%, before it arrived 0.0%, after it faded 3.9%
+  py  held-out 44,064 B (live p1-p3): 1.61 B/token at the build vocabulary, 2.34 at the last-cut view; bytes in tokens minted while it was live 44.9%, before it arrived 0.0%, after it faded 3.2%
+  num held-out 71,003 B (live p2-p4): 1.91 B/token at the build vocabulary, 2.05 at the last-cut view; bytes in tokens minted while it was live 12.1%, before it arrived 0.0%, after it faded 0.0%
+  c   held-out 60,159 B (live p4-p4): 1.55 B/token at the build vocabulary, 2.18 at the last-cut view; bytes in tokens minted while it was live 31.6%, before it arrived 17.6%, after it faded 0.0%
+
+$ OMP_NUM_THREADS=1 python3 realreplay.py 1 1000 0 replay
+seed 1 TOK_RETOK_EVERY=1000 TOK_MINT_NOVEL=0 DATA_DRAW=replay: windows 14,659, acts 14, build vocab 512, final vocab 950, mints 438 (18s)
+  windows per phase: p1 4,074 p2 3,641 p3 3,483 p4 3,461; the shortest / 5 = 692 (§8 0.4: the cap EVAL_RETENTION_EVERY may not pass)
+  mints born per phase: p1 120 p2 108 p3 102 p4 108
+  eng held-out 100,000 B (live p1-p1): 1.63 B/token at the build vocabulary, 2.10 at the last-cut view; bytes in tokens minted while it was live 25.3%, before it arrived 0.0%, after it faded 18.8%
+  py  held-out 44,064 B (live p1-p3): 1.61 B/token at the build vocabulary, 2.68 at the last-cut view; bytes in tokens minted while it was live 63.4%, before it arrived 0.0%, after it faded 3.6%
+  num held-out 71,003 B (live p2-p4): 1.91 B/token at the build vocabulary, 2.28 at the last-cut view; bytes in tokens minted while it was live 31.3%, before it arrived 0.0%, after it faded 0.0%
+  c   held-out 60,159 B (live p4-p4): 1.55 B/token at the build vocabulary, 2.06 at the last-cut view; bytes in tokens minted while it was live 12.6%, before it arrived 32.1%, after it faded 0.0%
