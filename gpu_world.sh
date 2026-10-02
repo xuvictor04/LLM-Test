@@ -295,7 +295,12 @@
 # appended (DATA_AREAS=eng,py,num,c,x5 DATA_N_PROCESSES=5 and 5/4 of the parent's DATA_STREAM_BYTES, so every
 # old held-out block stays the parent's; DATA_PHASE_SCHED=x5|x5|x5|x5) at OPT_LR_CONTINUE=as_logged, EXP=heldout's
 # probe pins and the parent arm's settings, for SESSION_WINDOWS (5000) windows. The script's knobs are named
-# clear of every package prefix; EXTRA may not move the session's data levers (refused by name).
+# clear of every package prefix; EXTRA may not move the session's data levers (refused by name). THE READING: per
+# old area F = the session's R reading - its resume-start reading (memory-off, report half; the start reads the
+# parent's final weights on the same pinned items, O2's anchor); P and P_parent over the parents by the eps rule,
+# Holm across the two, at 0.025 a look; O9 takes, of those admitted, the lower x5 R reading paired by parent (a tie
+# to the smaller worst-area mean F); UNRESOLVED below the cap of 11 prints a top-up's command (parents 7-10,
+# trained by its parents stage); 5.1's SDs, W against P and the rest are reported beside it.
 #     EXP=session SEEDS='0 1 2 3 4 5 6' FILL=0 PARENTS=gpu_heldout_out bash tools/gpu_launch.sh --go
 #     EXP=session SEEDS='0 1 2 3 4 5 6' FILL=0 PARENT_ARM=k1000_mn PARENTS=gpu_heldout_out \
 #         bash tools/gpu_launch.sh --go                   # if EXP=heldout's DECISION shipped TOK_MINT_NOVEL
@@ -308,7 +313,9 @@
 # the per-seed bits/byte, each cadence's per-phase bounds and verdict, eps, the choice and why, M
 # reported, rates, secondaries with the blackout split, and kept checkpoints; at EXP=heldout the per-seed
 # held-out readings, each act arm's per-area bounds and verdict, the DECISION and, where it is UNRESOLVED,
-# the top-up's command, what is reported beside it, and the finals' pack line). Paste it
+# the top-up's command, what is reported beside it, and the finals' pack line; at EXP=session the per-parent F
+# per old area, the anchor, each candidate's bounds and verdict, O9's reading of x5, the DECISION, a top-up's
+# command, and what is reported beside it). Paste it
 # into the chat. $OUT is then packed beside itself as <name>_<launch date>.tgz -- logs, curves, smoke,
 # calibration, SUMMARY, ANALYSIS, the block, KEPT.txt; never a checkpoint -- which the owner keeps
 # (the 2026-09-24 precedent, gpu_world_2026-09-24.tgz, and the layout tools/read_fleet_archive.sh reads).
@@ -679,6 +686,7 @@ plan_banner() {  # the fleet's shape, as SUMMARY records it and the EXP=world_ep
 analyze() {  # out device mps_on par ncpu
   if [[ "$EXP" == retok ]]; then analyze_retok "$@"; return; fi
   if [[ "$EXP" == heldout ]]; then analyze_heldout "$@"; return; fi
+  if [[ "$EXP" == session ]]; then analyze_session "$@"; return; fi
   # EVERY EXP BUT world READS ONE WHOLE EPOCH: its runs are meant to end at the stream's end, so the
   # flags turn over (the 6th argument, the EXP). At EXP=world the output is what it always was.
   python3 - "$@" "$EXP" <<'PY'
@@ -852,9 +860,16 @@ analyze_heldout() {  # out device mps_on par ncpu
   gw_py heldout "$1" "$CTX" "$(archive_path)" "$EPS" "$POOL_WITH" "$GW_HOME"
 }
 
+# THE FIRST POST-TRAINING SESSIONS (EXP=session; §8 5.3a): the reader, the rule and the block, one program as
+# EXP=heldout's; POOL_WITH given here reads a top-up with that first fleet, else the one SUMMARY.txt records.
+analyze_session() {  # out device mps_on par ncpu
+  gw_py session "$1" "$CTX" "$(archive_path)" "$EPS" "$POOL_WITH" "$GW_HOME"
+}
+
 # THE BLOCK AND ITS PARTS (Proposal 05 §8 1.5). Modes: retok (the analysis above, which also writes
-# PASTE_BACK.txt and KEPT.txt), wrap (EXP=world and world_epoch: the header plus ANALYSIS.txt from
-# '=== RUNS ===' on), fail (a stop before the analysis). Every header is read off SUMMARY.txt alone,
+# PASTE_BACK.txt and KEPT.txt), heldout and session (their readers, which write PASTE_BACK.txt too), wrap
+# (EXP=world and world_epoch: the header plus ANALYSIS.txt from '=== RUNS ===' on), fail (a stop before the
+# analysis). Every header is read off SUMMARY.txt alone,
 # so --analyze reproduces the block the fleet wrote.
 gw_py() {  # mode out ...
   python3 - "$@" <<'PY'
@@ -2562,6 +2577,493 @@ def heldout(ctx_arg, archive, eps, pool_arg, home):
     ])
 
 
+# ------------------------------------------------------------------------------------------ session
+# THE FIRST POST-TRAINING SESSIONS (EXP=session; Proposal 05 §8 5.3a, O2, O9; 2026-10-02). A session's endpoint per
+# old area is F = its R reading - its resume-start reading, both through the memory-off closure, report half: the
+# last 'boundary' row of curves/<run>.probe.json against its 'resume' row, which reads the parent's final weights on
+# the same pinned items (O2's anchor). Over the parents each candidate, P and P_parent, is read by the eps rule with
+# the old areas as its cells and Holm across the two, at LOOK_ALPHA a look (7 parents; a top-up's pooled 11). Among
+# the admitted, O9 takes the larger new-area gain: d = x5's R reading on P_parent - on P, paired by parent, read by
+# its one-sided bounds at t(1 - LOOK_ALPHA); a tie goes to the smaller worst-area mean F (C25). A top-up reads its
+# parents with its first fleet's only where commit, card, torch and shape match. Everything after the rule is
+# reported and decides nothing: the anchor, x5's learning, 5.1's SDs with the gate's arithmetic, W against P, the
+# pricing and the rehearsal, rates.
+SE_CANDS = ("P", "P_parent")              # the rule's candidates; P_twin and W are read beside them
+SE_NEW = "x5"                             # the session's new area
+SE_NEXT = "P+parent at 'replay' 0.40; P+parent with W's headroom; 5.2's continuation rates"
+
+
+def se_runs(out):
+    """{(arm, seed): session} off one EXP=session fleet: each session's resume-start and R rows, its first in-run
+    reading holding x5, its windows and seconds in this process, and the lines the reader reports."""
+    runs = {}
+    for log in sorted(glob.glob(os.path.join(out, "logs", "*.log"))):
+        tag = os.path.basename(log)[:-4]
+        name, _, seed = tag.rpartition(".s")
+        if name not in SE_CANDS + ("P_twin", "W") or not seed.isdigit():
+            continue
+        t = rd(log)
+        r = rep(t)
+
+        def js(sfx):
+            try:
+                with open(os.path.join(out, "curves", tag + sfx)) as fh:
+                    return json.load(fh)
+            except (OSError, ValueError):
+                return None
+        series = js(".probe.json")
+        rows = [x for x in series if isinstance(x, dict)] if isinstance(series, list) else []
+
+        def last(kind, closure="memory-off"):
+            m_ = [x for x in rows if x.get("kind") == kind and x.get("closure") == closure]
+            return m_[-1] if m_ else None
+        w = re.search(r"^=== \d+ windows run total \((\d+) trained by this process, resumed at (\d+)\)[^\n]*? in "
+                      r"([\d.]+)s", t, re.M)
+        pr = re.search(r"^\s+opt\.continue\.pricing\s+(\S.*?)\s*$", t, re.M)
+        rh = re.search(r"^\s+gate:data\.rehearse_parent\s+\('([\w-]+)'", t, re.M)
+        runs[(name, int(seed))] = dict(
+            tag=tag, curve=js(".json"), series=series, r=r, res=last("resume"), R=last("boundary"),
+            first5=next((x for x in rows if x.get("closure") == "memory-off" and x.get("kind") in ("phase", "cadence")
+                         and SE_NEW in (x.get("areas") or {})), None),
+            win=int(w.group(1)) if w else None, base=int(w.group(2)) if w else None,
+            secs=float(w.group(3)) if w else None, capped="stopped at max_windows" in t,
+            pricing=pr.group(1) if pr else None, rehearse=rh.group(1) if rh else None,
+            nlive=fnum(r.get("fab.n_live")), births=fnum(r.get("fab.births")),
+            widened=fnum(r.get("fab.resume_widened")))
+    return runs
+
+
+def se_val(row, area, half="report"):
+    """One area's mean in one series row, or None."""
+    return fnum((((row or {}).get("areas") or {}).get(area) or {}).get(half))
+
+
+def se_F(v, areas):
+    """{area: F}: the session's R reading - its resume-start reading, per old area (memory-off, report half)."""
+    out_ = {}
+    for a in areas:
+        x, y = se_val(v.get("R"), a), se_val(v.get("res"), a)
+        if x is not None and y is not None:
+            out_[a] = x - y
+    return out_
+
+
+def se_facts(s):
+    """ho_facts, and the session's own shape: the session line (its windows, levers, the twin's rate and W's
+    headroom) and the parents' arm. Where the parents came from may differ: a top-up's parents stage trains its own."""
+    f = ho_facts(s)
+    ses = re.search(r"^=== session: (.*)$", s, re.M)
+    arm = re.search(r"^=== parents: (\S+) at seeds", s, re.M)
+    f["shape"] = f["shape"] + (ses.group(1) if ses else None, arm.group(1) if arm else None)
+    return f
+
+
+def se_choose(V, d, worst, room):
+    """O9's choice between the candidates (§8 5.3a). V: eps_rule's reading of P and P_parent; d: (n, mean, lower,
+    upper) of x5's R reading on P_parent - on P, paired by parent, each bound one-sided at t(1 - LOOK_ALPHA); worst:
+    {candidate: its worst old area's mean F}; room: parents remain under the cap. Returns (kind, arm, why), kind one
+    of 'undecided' (a candidate has no reading at all: nothing is decided on the other alone), 'topup' (a candidate
+    UNRESOLVED with room -- beside an admitted one too, since it may yet be admitted), 'take' (arm is O9's choice: the
+    only one admitted, or of two the larger new-area gain, a tie going to the smaller worst-area mean F), 'unresolved'
+    (none admitted and one UNRESOLVED at the cap) or 'none' (both FAIL)."""
+    vs = {a: V.get(a, {}).get("verdict") for a in SE_CANDS}
+    if any(v is None for v in vs.values()):
+        return "undecided", None, ("no session was read" if all(v is None for v in vs.values()) else
+                                   " and ".join(a for a in SE_CANDS if vs[a] is None) + " has no reading")
+    adm = [a for a in SE_CANDS if vs[a] == "PASS"]
+    unr = [a for a in SE_CANDS if vs[a] == "UNRESOLVED"]
+    if unr and room:
+        return "topup", None, (" and ".join(unr) + (" is" if len(unr) == 1 else " are") + " UNRESOLVED"
+                               + "".join(f", {a} FAILs" for a in SE_CANDS if vs[a] == "FAIL")
+                               + "".join(f", {a} is admitted" for a in adm))
+    if len(adm) == 2:
+        n, m, lo, up = d
+        if up is not None and up < 0:
+            return "take", "P_parent", (f"both are admitted, and x5's R reading on P_parent - on P has its one-sided "
+                                        f"upper bound {up:+.4f} below 0: P_parent learns the new area better")
+        if lo is not None and lo > 0:
+            return "take", "P", (f"both are admitted, and x5's R reading on P_parent - on P has its one-sided lower "
+                                 f"bound {lo:+.4f} above 0: P learns the new area better")
+        pick = min(SE_CANDS, key=lambda c: (math.inf if worst.get(c) is None else worst[c], SE_CANDS.index(c)))
+        return "take", pick, ("both are admitted and the new area ties (x5 P_parent - P "
+                              + (f"[{lo:+.4f},{up:+.4f}]" if lo is not None else "unbounded at n < 2")
+                              + "), so the smaller worst-area mean F takes it (C25): "
+                              + ", ".join(f"{c} {fmt(worst.get(c), '+.4f')}" for c in SE_CANDS))
+    if adm:
+        o = [c for c in SE_CANDS if c != adm[0]][0]
+        return "take", adm[0], (f"{adm[0]} is the one admitted; {o} "
+                                + ("FAILs" if vs[o] == "FAIL" else "is UNRESOLVED at the parent cap"))
+    if unr:
+        return "unresolved", None, (" and ".join(f"{c} " + ("FAILs" if vs[c] == "FAIL" else "is UNRESOLVED")
+                                                 for c in SE_CANDS) + " at the parent cap")
+    return "none", None, "P and P_parent both FAIL"
+
+
+def session(ctx_arg, archive, eps, pool_arg, home):
+    done = done_book()
+    here = se_runs(OUT)
+    runs = dict(here)
+    mine = {s for (n, s) in runs}
+
+    # ---------------------------------------------------------------- a top-up's first fleet
+    pool = (pool_arg or sget(r"^=== pool: with (\S+)") or "").strip()
+    pooled, refused, pool_lines = None, None, []
+    if pool:
+        Pq = rd(os.path.join(pool, "SUMMARY.txt"))
+        if not Pq:
+            refused = f"{pool} holds no SUMMARY.txt"
+        else:
+            a_, b_ = se_facts(S), se_facts(Pq)
+            diff = [k for k in ("commit", "code", "card", "torch", "shape") if a_[k] != b_[k]]
+            there = se_runs(pool)
+            both = sorted(mine & {s for (n, s) in there})
+            if diff:
+                refused = "they differ in " + "; ".join(f"{k} ({a_[k]} here, {b_[k]} there)" for k in diff)
+            elif both:
+                refused = f"parent seed(s) {' '.join(map(str, both))} are in both"
+            else:
+                pooled = pool
+                runs.update(there)
+        pool_lines = ([f"POOLED with the first fleet {pooled}: its parents and this top-up's (marked *) are read "
+                       f"together; commit, card, torch and shape match"] if pooled else
+                      [f"POOLING REFUSED with {pool}: {refused}; nothing is decided here"])
+
+    # ---------------------------------------------------------------- the endpoint and the rule
+    seen = [a for v in runs.values() for a in ((v.get("res") or {}).get("areas") or {})]
+    areas = [a for a in HO_AREAS if a in seen] + sorted(set(seen) - set(HO_AREAS))
+    F = {k: se_F(v, areas) for k, v in runs.items()}
+    X5 = {k: se_val(v.get("R"), SE_NEW) for k, v in runs.items()}
+    pseeds = sorted({s for (n, s) in runs if n in SE_CANDS and F[(n, s)]})
+    seeds, past = pseeds[:CAP_SEEDS], pseeds[CAP_SEEDS:]
+    diffs = {}
+    for a in SE_CANDS:
+        per = [[F[(a, s)][ar] for s in seeds if ar in F.get((a, s), {})] for ar in areas]
+        if any(per):
+            diffs[a] = per
+    V = eps_rule(diffs, eps, LOOK_ALPHA) if diffs else {}
+    n_read = max([len(xs) for per in diffs.values() for xs in per] or [0])
+    room = n_read < CAP_SEEDS and not pool
+    dd = [X5[("P_parent", s)] - X5[("P", s)] for s in seeds
+          if X5.get(("P_parent", s)) is not None and X5.get(("P", s)) is not None]
+    n_d, m_d, se_d = mean_se(dd)
+    tq = t_quantile(1.0 - LOOK_ALPHA, n_d - 1) if se_d is not None else None
+    d_row = (n_d, m_d, None if tq is None else m_d - tq * se_d, None if tq is None else m_d + tq * se_d)
+    worst = {a: max([m for m in (mean(xs) for xs in diffs[a]) if m is not None] or [None]) for a in diffs}
+    kind, pick, why = se_choose(V, d_row, worst, room)
+    if refused:
+        kind = "refused"
+    # THE NEXT PARENTS: past every seed this fleet named, ran or booked (a seed whose parent failed has no session).
+    named = [int(x) for x in (sget(r"^=== \d+ windows per run, DATA_STREAM_BYTES=\d+, seeds: (.*?), EXTRA=") or "").split()
+             if x.isdigit()]
+    nxt = 1 + max([s for (n, s) in runs] + named
+                  + [int(t.rpartition(".s")[2]) for t in done if t.rpartition(".s")[2].isdigit()] or [-1])
+    cmd = None
+    if kind == "topup":
+        sz = re.search(r"^=== (\d+) windows per run, DATA_STREAM_BYTES=(\d+), seeds: .*?, EXTRA='(.*)'$", S, re.M)
+        pe = re.search(r"EVAL_RETENTION_EVERY=(\d+) pinned", S)
+        dv = re.search(r"^=== \d+ CPU core\(s\), \d+ GPU\(s\), device=(\w+)", S, re.M)
+        pr = (re.findall(r"^=== \d+ run\(s\), (\d+) at a time", S, re.M) or [None])[-1]
+        pa = sget(r"^=== parents: (\S+) at seeds")
+        sw = sget(r"^=== session: (\d+) windows")
+        wh = sget(r"^=== session: .*?its n_live \+ (\d+)\)")
+        oa = os.path.realpath(OUT)
+        kv = [("EXP", "session"), ("SEEDS", " ".join(str(s) for s in range(nxt, nxt + CAP_SEEDS - n_read))),
+              ("FILL", "0")]
+        if sz and sz.group(1) != "20000":
+            kv.append(("WINDOWS", sz.group(1)))
+        if sz and int(sz.group(2)) != int(sz.group(1)) * 189:
+            kv.append(("EPOCH_BYTES", sz.group(2)))
+        if sz and sz.group(3):
+            kv.append(("EXTRA", sz.group(3)))
+        if pa:
+            kv.append(("PARENT_ARM", pa))
+        if pe and pe.group(1) != "700":
+            kv.append(("PROBE_EVERY", pe.group(1)))
+        if sw and sw != "5000":
+            kv.append(("SESSION_WINDOWS", sw))
+        if wh and wh != "2048":
+            kv.append(("W_HEADROOM", wh))
+        if dv and dv.group(1) != "cuda":
+            kv.append(("DEVICE", dv.group(1)))
+        if pr:
+            kv.append(("PAR", pr))
+        kv += [("OUT", (oa[:-4] if oa.endswith("_out") else oa) + "_topup_out"), ("POOL_WITH", oa)]
+        cmd = " ".join(f"{k}={shlex.quote(v)}" for k, v in kv) + f" bash {shlex.quote(os.path.join(home, 'tools', 'gpu_launch.sh'))} --go"
+    tail_ = f" (ε {eps:g} bits/byte per old area, {n_read} parent(s))"
+    rate = ("at the measurement protocol's rate (OPT_LR_CONTINUE=as_logged, CONTRACT-Q-DATA-7), which 5.2 re-reads "
+            "at the preset's")
+    if kind == "take" and pick == "P_parent":
+        decision = (f"P_parent is taken (O9): {why}. The continue preset's provisional rehearsal (DATA_REHEARSE_PARENT=1, "
+                    f"'replay' 0.27) holds {rate}; no training default moves" + tail_)
+    elif kind == "take":
+        decision = (f"P is taken (O9): {why}. The preset's rehearsal is not needed {rate}, recorded so for 5.2; no "
+                    f"training default moves" + tail_)
+    elif kind == "none":
+        decision = (f"neither is admitted: {why}; nothing ships, and the next arms run ({SE_NEXT}), O9 escalating only "
+                    f"when every candidate, these included, FAILs" + tail_)
+    elif kind == "unresolved":
+        decision = (f"UNRESOLVED at the cap: {why}; reported so, nothing ships, and the next arms run ({SE_NEXT})"
+                    + tail_)
+    elif kind == "topup":
+        decision = (f"UNRESOLVED at {n_read} parent(s): {why}; top up to the cap of {CAP_SEEDS} on this card and torch "
+                    f"with the command below (its parents stage trains the new parents first), then paste back the "
+                    f"top-up's block, which reads both fleets" + tail_)
+    elif kind == "refused":
+        decision = (f"NOTHING IS DECIDED: this top-up's parents pool with its first fleet's only where commit, card, "
+                    f"torch and shape match, and {refused}; the first fleet's reading stands, and the top-up runs again "
+                    f"on its card and torch, at its commit")
+    else:
+        decision = f"UNDECIDED: {why}"
+
+    # ---------------------------------------------------------------- the runs, as read
+    star = lambda k: "*" if pooled and k in here else ""
+    print()
+    print("=== RUNS (F per old area = R - resume start, memory-off, report half; x5 at R) ===")
+    missing = []
+    for (n, s), v in sorted(runs.items(), key=lambda kv: (kv[0][0], kv[0][1])):
+        f_ = F[(n, s)]
+        why_ = ("NO PROBE SERIES" if v["series"] is None else "NO RESUME-START ROW" if not v["res"] else
+                "NO R ROW" if not v["R"] else "")
+        if why_:
+            missing.append(v["tag"] + star((n, s)))
+        print(f"  {n:<9} s{s:<3} {fmt(v['win'], 'n'):>6} win  " + ("  ".join(f"{a} {f_[a]:+.5f}" for a in areas if a in f_)
+                                                                   or why_)
+              + (f"  {SE_NEW} {X5[(n, s)]:.5f}" if X5.get((n, s)) is not None else "")
+              + ("" if v["capped"] or why_ else "  ENDED BEFORE ITS WINDOW CAP"))
+
+    def cell(i, row, n_arm):
+        n, m, lo, up = row
+        if m is None:
+            return f"{areas[i]} -"
+        return (f"{areas[i]} {m:+.4f} " + (f"[{lo:+.4f},{up:+.4f}]" if lo is not None else "[-]")
+                + (f" (n={n})" if n != n_arm else ""))
+
+    rule_rows = []
+    for a in SE_CANDS:
+        if a not in V:
+            rule_rows.append(f"  {a}: NO READING at any parent -- no evidence either way, not a pass")
+            continue
+        r_ = V[a]
+        n_arm = max([n for n, _, _, _ in r_["phases"]] or [0])
+        rule_rows.append(f"  {a} n={n_arm} a={r_['level']:.3g}: "
+                         + " ".join(cell(i, row, n_arm) for i, row in enumerate(r_["phases"]))
+                         + f" -> {r_['verdict']}"
+                         + (f" ({r_['note'].replace('some phase', 'some area')})" if r_["note"] else ""))
+    rule_head = (f"RULE (§8 5.3a; O2, O9): ε {eps:g} bits/byte; per old area ({len(areas)}), F = R - resume start over "
+                 f"the parents, each look (7 parents; a top-up's pooled 11) at {LOOK_ALPHA:g}: mean [lower at t(1 - "
+                 f"a/{len(areas)}), Holm's a across P and P_parent; one-sided upper at t({1 - LOOK_ALPHA:g})]"
+                 + (" -- this fleet alone, deciding nothing" if refused else ""))
+    o9_line = (f"O9 (the new area): {SE_NEW} at R, P_parent - P paired by parent: "
+               + ("-" if m_d is None else f"{m_d:+.4f} " + (f"[{d_row[2]:+.4f},{d_row[3]:+.4f}]" if d_row[2] is not None
+                                                             else "[-]") + f" n={n_d}")
+               + f", one-sided at t({1 - LOOK_ALPHA:g}); below 0 favours P_parent")
+    # THE ANCHOR, ITEM FOR ITEM (O2): the resume-start row's pairing against the parent's R (the series' `paired`,
+    # written since 2026-10-02): every difference 0 on every area and half says the session read its parent's
+    # final reading again.
+    anc, anc_bad, anc_none = 0, [], 0
+    for k, v in sorted(runs.items()):
+        p_ = (v.get("res") or {}).get("paired")
+        if not v.get("res"):
+            continue
+        if not p_:
+            anc_none += 1
+            continue
+        cells = [x for hs in p_.values() for x in hs.values()]
+        if cells and all(int(x[0]) > 0 and x[1] == 0 and (x[2] in (0, None)) for x in cells):
+            anc += 1
+        else:
+            anc_bad.append((max((abs(x[1]) for x in cells if x[1] is not None), default=0.0), v["tag"] + star(k)))
+    n_res = anc + len(anc_bad) + anc_none
+    anchor = (f"ANCHOR (O2): the resume start against the parent's R, item for item: equal in {anc} of {n_res} session(s)"
+              + (f"; DIFFERS in {len(anc_bad)} (largest |mean| {max(anc_bad)[0]:.3g}, {max(anc_bad)[1]}: F still "
+                 f"subtracts the session's own start)" if anc_bad else "")
+              + (f"; {anc_none} with no pairing written (a tree before 2026-10-02)" if anc_none else ""))
+    print()
+    print("=== " + anchor + " ===")
+    print()
+    print("=== " + rule_head + " ===")
+    for l in rule_rows:
+        print(l)
+    print("  " + o9_line)
+    print()
+    print(f"=== DECISION: {decision} ===")
+    if cmd:
+        print(f"    top-up: {cmd}")
+    extra_rows = []
+    if missing:
+        extra_rows.append(f"  left out (no endpoint): {' '.join(missing)}")
+    if past:
+        extra_rows.append(f"  parents past the cap of {CAP_SEEDS}, not read: {' '.join(map(str, past))}")
+    for l in extra_rows:
+        print(l)
+
+    # ---------------------------------------------------------------- reported, deciding nothing
+    def per_arm(a):
+        return [(s, runs[(a, s)]) for s in seeds if (a, s) in runs]
+
+    def rms(xs):
+        xs = [x for x in xs if x is not None]
+        return math.sqrt(sum(x * x for x in xs) / len(xs)) if xs else None
+
+    rep_lines = []
+    # (1) x5's learning: its first in-run reading (where it arrived) and its R reading, mean over the parents read.
+    xl = []
+    for a in SE_CANDS + ("P_twin",):
+        f5 = mean([se_val(v["first5"], SE_NEW) for _, v in per_arm(a)])
+        r5 = mean([X5.get((a, s)) for s, _ in per_arm(a)])
+        if r5 is not None:
+            xl.append(f"{a} {fmt(f5, '.4f')} -> {r5:.4f}")
+    if xl:
+        rep_lines.append(f"  {SE_NEW}'s learning (its first in-run reading -> R, mean over parents): " + " | ".join(xl))
+    # (2) 5.1's SDs per old area (NEW-02, C04, O11) and the single-run gate's arithmetic: between-run from the twins,
+    # per-window from R - resume start item by item (the R row's pairing), one session's SD at the probe's windows.
+    K = len(areas) or 1
+    try:
+        from statistics import NormalDist
+        zk, zp = NormalDist().inv_cdf(1.0 - 0.05 / K), NormalDist().inv_cdf(0.80)
+    except ImportError:                                  # python < 3.8: the two quantiles at K 4
+        zk, zp = 2.241403, 0.841621
+    T = eps / (zk + zp)
+    sd_rows = []
+    for ar in areas:
+        tw = [F[("P_twin", s)][ar] - F[("P", s)][ar] for s in seeds
+              if ar in F.get(("P_twin", s), {}) and ar in F.get(("P", s), {})]
+        sb = rms(tw) / math.sqrt(2) if tw else None
+        pw = [(((v.get("R") or {}).get("paired") or {}).get(ar) or {}).get("report") for a in SE_CANDS + ("P_twin",)
+              for _, v in per_arm(a)]
+        pw = [x for x in pw if isinstance(x, list) and len(x) == 3 and x[2] is not None]
+        sw = rms([x[2] for x in pw])
+        nw = int(round(mean([x[0] for x in pw]))) if pw else None
+        if sb is None and sw is None:
+            continue
+        one = math.sqrt(sb ** 2 + sw ** 2 / nw) if sb is not None and sw is not None and nw else None
+        if one is None:
+            verdict_ = "-"
+        elif one <= T:
+            verdict_ = f"meets it at {nw} windows a half"
+        elif sb is not None and sb >= T:
+            verdict_ = "the between-run SD alone exceeds it: O10's second-seed replay"
+        else:
+            verdict_ = f"needs {math.ceil(sw ** 2 / (T ** 2 - sb ** 2))} windows a half"
+        sd_rows.append(f"    {ar}: between {fmt(sb, '.4f')} (n={len(tw)}) | per-window {fmt(sw, '.4f')} | one session "
+                       f"{fmt(one, '.4f')}: {verdict_}")
+    if sd_rows:
+        rep_lines.append(f"  5.1's SDs per old area (NEW-02): between-run from the twins, RMS(P_twin - P)/√2; per-window "
+                         f"from R - resume start item by item (report half); one session's SD, √(between² + "
+                         f"per-window²/n), against the single-run gate's ε/(z(1 - 0.05/{K}) + 0.84) = {T:.4f}, K {K}:")
+        rep_lines += sd_rows
+    # (3) W at its parent (NEW-20, descriptive): W - P there, its slots, n_live past the parent's, births.
+    wl = {}                                   # W's line in this fleet's SUMMARY, and in a pooled first fleet's
+    for txt_ in (S, rd(os.path.join(pooled, "SUMMARY.txt")) if pooled else ""):
+        for m in re.finditer(r"^=== W: FAB_SLOTS=(\d+) at \S+\.s(\d+), the parent with the most experts \(n_live (\d+) "
+                             r"\+ W_HEADROOM (\d+), against its (\d+) slots\)", txt_, re.M):
+            wl[int(m.group(2))] = m.groups()
+    for (n, s), v in sorted(runs.items()):
+        if n != "W":
+            continue
+        p0 = runs.get(("P", s)) or {}
+        fw, fp = F.get(("W", s), {}), F.get(("P", s), {})
+        w_ = wl.get(s)
+        psl = int(w_[4]) if w_ else None
+        rep_lines.append(
+            f"  W (NEW-20) at the parent s{s}{star((n, s))}"
+            + (f", FAB_SLOTS {w_[0]} (its n_live {w_[2]} + {w_[3]}; its slots {psl})" if w_ else "")
+            + ": W - P F " + " ".join(f"{a} {fmt(fw[a] - fp[a] if a in fw and a in fp else None, '+.4f')}" for a in areas)
+            + f", {SE_NEW} {fmt(X5.get(('W', s)) - X5[('P', s)] if X5.get(('W', s)) is not None and X5.get(('P', s)) is not None else None, '+.4f')}"
+            + f"; n_live at the end W {fmt(v['nlive'], 'n')}"
+            + ("" if v["nlive"] is None or not psl else
+               f" ({int(v['nlive']) - psl} past the parent's {psl} slots)" if v["nlive"] > psl else
+               f" (within the parent's {psl} slots)")
+            + f", P {fmt(p0.get('nlive'), 'n')}; births W {fmt(v['births'], 'n')}, P {fmt(p0.get('births'), 'n')}; "
+            f"fab.resume_widened {fmt(v['widened'], 'n')}")
+    # (4) the pricing every session states (CONTRACT-Q-DATA-7) and the rehearsal P_parent fired.
+    pc = {}
+    for v in runs.values():
+        pc[v["pricing"] or "absent"] = pc.get(v["pricing"] or "absent", 0) + 1
+    rep_lines.append("  opt.continue.pricing (each session's rate, CONTRACT-Q-DATA-7): "
+                     + ", ".join(f"'{k}' {c}" for k, c in sorted(pc.items(), key=lambda kv: -kv[1]))
+                     + f" of {len(runs)}")
+    fired = {a: sum(1 for (n, s), v in runs.items() if n == a and v["rehearse"] == "fired") for a in SE_CANDS + ("P_twin", "W")}
+    tot = {a: sum(1 for (n, s) in runs if n == a) for a in fired}
+    rep_lines.append("  data.rehearse_parent FIRED (O9's rehearsal): " + " | ".join(f"{a} {fired[a]} of {tot[a]}"
+                                                                                  for a in fired if tot[a]))
+
+    # ---------------------------------------------------------------- rates
+    rate_rows = []
+    for a in SE_CANDS + ("P_twin", "W"):
+        wps = [v["win"] / v["secs"] for (n, s), v in runs.items() if n == a and v["win"] and v["secs"]]
+        if wps:
+            rate_rows.append(f"{a} {mean(wps):.2f} [{min(wps):.2f}-{max(wps):.2f}]")
+    agg = []
+    fin = re.search(r"^---- fleet finished in \d+ min \((\d+) s\)", S, re.M)
+    pst = re.search(r"^---- parents stage finished in \d+ min \((\d+) s\)", S, re.M)
+    eta = re.search(r"^=== ETA by waves: about \d+ min \((\d+) s\)", S, re.M)
+    if fin and int(fin.group(1)) > 0:
+        wall = int(fin.group(1)) + (int(pst.group(1)) if pst else 0)
+        tw = sum(v["win"] for k, v in here.items() if v["win"])
+        agg.append(f"  this fleet: {tw:,} session windows in {fin.group(1)} s of the sessions' wall = "
+                   f"{tw / int(fin.group(1)):.2f} windows/s aggregate"
+                   + (f"; the parents stage {pst.group(1)} s" if pst else "")
+                   + (f"; ETA by waves {eta.group(1)} s, took {wall} s: {wall / max(1, int(eta.group(1))):.2f}x"
+                      if eta else ""))
+    par_lines = []
+    pl = sget(r"^=== parents: (.*)$")
+    if pl:
+        par_lines.append("parents: " + re.sub(r",? sha256 in its FINALS.sha256$", "", pl)[:200])
+    pdone = {}
+    for l in rd(os.path.join(OUT, "parents", "_done.txt")).splitlines():
+        m = re.match(r"(\S+) rc=(-?\d+) secs=(\d+)", l)
+        if m:
+            pdone[m.group(1)] = int(m.group(2))
+    pbad = [f"{t} rc={c}" for t, c in sorted(pdone.items()) if c != 0]
+    if pbad:
+        par_lines.append(f"  PARENTS STAGE FAILED: {' '.join(pbad)} -- their seeds' sessions did not run "
+                         f"(logs in {os.path.join(OUT, 'parents')})")
+
+    print()
+    print("=== REPORTED, DECIDES NOTHING (§8 5.3a) ===")
+    for l in rep_lines + ["  windows/s per session (this process): " + " | ".join(rate_rows)] + agg + par_lines:
+        print(l)
+
+    # ---------------------------------------------------------------- the block
+    hd = [f"F per old area at R - resume start (memory-off, report half), per parent: "
+          + " | ".join(a for a in SE_CANDS) + f"; then {SE_NEW} at R",
+          "  seed  " + " | ".join(" ".join(f"{a:>7}" for a in areas) for _ in SE_CANDS)
+          + " | " + " ".join(f"{a:>8}" for a in SE_CANDS)]
+    t_rows = []
+    for s in seeds:
+        cells = " | ".join(" ".join(f"{fmt(F.get((a, s), {}).get(x), '+.4f'):>7}" for x in areas) for a in SE_CANDS)
+        cells += " | " + " ".join(f"{fmt(X5.get((a, s)), '.4f'):>8}" for a in SE_CANDS)
+        t_rows.append(f"  {'s' + str(s) + star(('P', s)):<6}{cells}")
+
+    def table(n=None):
+        if n is None or len(t_rows) + 2 <= n:
+            return hd + t_rows
+        keep = max(0, n - 3)
+        return hd + t_rows[:keep] + [f"  ... {len(t_rows) - keep} more parent row(s): in ANALYSIS.txt's RUNS"]
+    labels = ["synthetic source", "as_logged"] + (["pooled"] if pooled else [])
+    fl = failures({k: dict(curve=v["curve"]) for k, v in here.items()}, done)
+    short = [v["tag"] for k, v in sorted(here.items()) if not v["capped"] and v["series"] is not None
+             and done.get(v["tag"], (1,))[0] == 0]
+    if short:
+        fl.append(f"  ENDED BEFORE ITS WINDOW CAP: {' '.join(short[:12])}" + (" ..." if len(short) > 12 else ""))
+    emit([
+        ("head", head("session", labels) + fl + par_lines, 0),
+        ("pool", pool_lines, 0),
+        ("per-parent rows", table, 0),
+        ("verdict", [anchor, rule_head] + rule_rows + [o9_line, f"DECISION: {decision}"]
+         + ([f"  top-up: {cmd}"] if cmd else []) + extra_rows, 0),
+        ("reported", ["REPORTED, DECIDES NOTHING:"], 0),
+        ("x5", [l for l in rep_lines if "learning" in l], 1),
+        ("SDs", [l for l in rep_lines if "5.1's SDs" in l or l.startswith("    ")], 1),
+        ("W", [l for l in rep_lines if l.startswith("  W (NEW-20)")], 1),
+        ("pricing and rehearsal", [l for l in rep_lines if "opt.continue.pricing" in l or "rehearse_parent" in l], 2),
+        ("rates", ["  windows/s per session: " + " | ".join(rate_rows)], 4),
+        ("aggregate", agg, 3),
+        ("archive", [archive_line(archive)], 0),
+    ])
+
+
 # ------------------------------------------------------------------------------------------ wrap
 def wrap(exp, archive):
     """EXP=world and world_epoch: the header, then ANALYSIS.txt from '=== RUNS ===' on. The run rows
@@ -2603,6 +3105,8 @@ if MODE == "retok":
     retok(int(sys.argv[3]), sys.argv[4], float(sys.argv[5]), int(sys.argv[6]))
 elif MODE == "heldout":
     heldout(int(sys.argv[3]), sys.argv[4], float(sys.argv[5]), sys.argv[6], sys.argv[7])
+elif MODE == "session":
+    session(int(sys.argv[3]), sys.argv[4], float(sys.argv[5]), sys.argv[6], sys.argv[7])
 elif MODE == "wrap":
     wrap(sys.argv[3], sys.argv[4])
 elif MODE == "fail":
@@ -2762,8 +3266,8 @@ archive_path() {  # beside OUT, named for the fleet's LAUNCH date, so --analyze 
   b=$(basename "$OUT")
   echo "$(dirname "$OUT")/${b%_out}_${d:-$(date -u +%Y-%m-%d)}.tgz"
 }
-paste_back() {  # print the owner's block (EXP=retok's and heldout's analyses wrote it; the others are wrapped here)
-  [[ "$EXP" == retok || "$EXP" == heldout ]] || gw_py wrap "$OUT" "$EXP" "$(archive_path)"
+paste_back() {  # print the owner's block (EXP=retok's, heldout's and session's analyses wrote it; the others are wrapped here)
+  [[ "$EXP" == retok || "$EXP" == heldout || "$EXP" == session ]] || gw_py wrap "$OUT" "$EXP" "$(archive_path)"
   echo
   # A MISSING BLOCK IS SAID, NOT SWALLOWED (2026-09-27 review: `cat 2>/dev/null` printed nothing at all)
   if [[ -f "$OUT/PASTE_BACK.txt" ]]; then cat "$OUT/PASTE_BACK.txt" 2>/dev/null

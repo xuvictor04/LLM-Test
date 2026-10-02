@@ -214,6 +214,20 @@ is pinned here, on a fleet whose every number is chosen.
       nothing: a PARENT_ARM that is no act arm, PARENTS with no manifest or without a seed's final, a final whose
       sha256 moved, parents generated at another stream, EXTRA moving a session's data lever, FILL=1. The launcher's
       check of PARENTS, its disk budget and its ready line.
+  F33 EXP=session's READING, on fleets written by hand: each session's endpoint per old area is F = its last
+      memory-off 'boundary' row minus its 'resume' row, report half; P and P_parent are read over the parents by the
+      eps rule with the old areas as its cells and Holm across the two, at 0.025 a look; O9's choice -- the one
+      admitted, or of two the lower x5 R reading paired by parent, a tie to the smaller worst-area mean F (C25), both
+      ways -- and the other outcomes: a top-up's command below the cap (beside an admitted one too), the admitted one
+      taken at the cap, UNRESOLVED at the cap, neither admitted, and nothing decided with a candidate unread. Named
+      and left out: a session with no series or no resume-start row; flagged: an anchor that moved, a session ended
+      before its cap; parents past the cap not read. Reported to known answers: x5's learning, 5.1's SDs with the
+      single-run gate's arithmetic (meets it, needs n windows, or O10's replay), W against P, the pricing, the
+      rehearsal, rates and the ETA against the wall.
+  F34 THE SESSION TOP-UP: read with its first fleet where commit, card, torch and shape match -- the pooled 11
+      parents admitting what the first 7 could not -- and refused, deciding nothing, where card, commit or the
+      session's shape differ or a parent is in both. End to end with the stand-in: a fleet with a parents stage
+      prints the top-up's command, the launcher passes it, and run as printed it trains parents 7-10 and pools.
 """
 import glob
 import json
@@ -968,7 +982,8 @@ ps_rows = []
 # 2.0 + 0.1 x the area's index + 0.001 x the seed -- then a phase reading where x5 arrives (6.0) and R over all five:
 # each old area F above its start, STUB_F on P and P_twin (the twin +- STUB_TWIN by the seed's parity), STUB_F_PP on
 # P_parent, STUB_F_W on W, + STUB_F_NUM on num, + STUB_SPREAD by parity on P and P_parent; x5 at 3.0 - STUB_GAIN
-# (STUB_GAIN_PP on P_parent).
+# (STUB_GAIN_PP on P_parent). The start rows and R's carry their pairing as the tree writes it since 2026-10-02:
+# against the parent's R, 24 differences of 0 a half; against the start, each old area's F with SD STUB_PW_SD (0.1).
 arm = tag.rsplit(".s", 1)[0]
 if "--probe-series" in a and base:
     AR, seed = ("eng", "py", "num", "c"), int(os.environ.get("RUN_SEED", "0"))
@@ -977,16 +992,21 @@ if "--probe-series" in a and base:
     F = {"P": E("STUB_F") + par * E("STUB_SPREAD"), "P_parent": E("STUB_F_PP") + par * E("STUB_SPREAD"),
          "P_twin": E("STUB_F") + par * E("STUB_SPREAD") + par * E("STUB_TWIN"), "W": E("STUB_F_W")}.get(arm, 0.0)
     v0 = {AR[k]: 2.0 + 0.1 * k + 0.001 * seed for k in range(4)}
-    def srow(step, kind, closure, vals, off=0.0):
+    def srow(step, kind, closure, vals, off=0.0, pd=None):
         ars = {k: {"control": v + off, "report": v + off, "seen_by_parent": k != "x5"} for k, v in vals.items()}
         m_ = sum(x["report"] for x in ars.values()) / len(ars)
-        return {"step": step, "kind": kind, "closure": closure, "control": m_, "report": m_, "windows": 2 * len(ars),
-                "nonfinite": 0, "paired_sd": None, "areas": ars}
+        r_ = {"step": step, "kind": kind, "closure": closure, "control": m_, "report": m_, "windows": 2 * len(ars),
+              "nonfinite": 0, "paired_sd": None, "areas": ars}
+        if pd is not None:
+            r_["paired"] = {k: {h: [24, pd[k][0], pd[k][1]] for h in ("control", "report")} for k in pd}
+        return r_
     vr = {k: v + F + (E("STUB_F_NUM") if k == "num" else 0.0) for k, v in v0.items()}
     vr["x5"] = 3.0 - (E("STUB_GAIN_PP") if arm == "P_parent" else E("STUB_GAIN"))
-    ps_rows = [srow(base, "resume", "memory-off", v0), srow(base, "resume", "memory-on", v0, -0.01),
+    p0 = {k: (0.0, 0.0) for k in v0}
+    pr = {k: (vr[k] - v0[k], E("STUB_PW_SD", "0.1")) for k in v0}
+    ps_rows = [srow(base, "resume", "memory-off", v0, pd=p0), srow(base, "resume", "memory-on", v0, -0.01, pd=p0),
                srow(base + 1, "phase", "memory-off", dict(v0, x5=6.0)),
-               srow(base + n, "boundary", "memory-off", vr), srow(base + n, "boundary", "memory-on", vr, -0.01)]
+               srow(base + n, "boundary", "memory-off", vr, pd=pr), srow(base + n, "boundary", "memory-on", vr, -0.01, pd=pr)]
     json.dump(ps_rows, open(a[a.index("--probe-series") + 1], "w"))
 elif "--probe-series" in a:
     AR, seed = ("eng", "py", "num", "c"), int(os.environ.get("RUN_SEED", "0"))
@@ -3467,6 +3487,304 @@ for _ in range(100):
           and "FAIL PARENTS: ckpt/k10.s2/ckpt.pt is missing or not in its FINALS.sha256" in l32c.stdout
           and f"PARENTS={o32p}" in rl32 and "PARENT_ARM=k10" in rl32 and "SESSION_WINDOWS=8" in rl32
           and "W_HEADROOM=100" in rl32, l32.stdout[-700:] + l32b.stdout[-300:] + l32c.stdout[-300:])
+    # ---- F33: EXP=session's reading, rule and block (2026-10-02, register §8 5.3a) ---------------------------------
+    # Fleets written by hand, each number chosen. A session's resume-start reading of each old area is its parent's R,
+    # 2.0 + 0.1 x the area's index + 0.001 x the seed, and its R reading that plus F: `f` on P (num + f_num), `f_pp` on
+    # P_parent (num + f_pp_num), each + `spread` (spread_pp) by the seed's parity; P_twin at P's F + `twin` by the
+    # parity; W at P's F, at the parent W_SEED. x5 at R is 3.0 - gain (gain_pp on P_parent, 0.02 more on W) and 6.0 at
+    # its arrival. R's pairing against the start holds each area's F with SD `pw` over 128 windows a half, the start's
+    # 128 zeros against the parent's R. Every session trains 5,000 windows in 400 s past its parent's 20,000.
+    SE_AR = ("eng", "py", "num", "c")
+
+    def se_summary(out, *, seeds, commit="abc1234", card="NVIDIA H100 PCIe, 81559", torch_="torch 2.7.0, CUDA 12.8",
+                   pool=None, sw=5000, par=24, w_seed=3):
+        n_, mib = card.split(", ")
+        L = [f"=== gpu_world.sh  2026-10-03T12:00:00Z  commit {commit}",
+             f"=== code: this fleet runs its own copy, {out}/code (gpu_world.sh, run.py, src/, tools/fleet_dash.sh; "
+             f"sha256 0123456789abcdef), taken from commit {commit} at launch: a git pull during the fleet reaches none of it",
+             "    index, name, memory.total [MiB], memory.used [MiB]", f"    0, {n_}, {mib} MiB, 1 MiB",
+             "=== 26 CPU core(s), 1 GPU(s), device=cuda", f"=== {torch_}",
+             f"=== 20000 windows per run, DATA_STREAM_BYTES=3780000, seeds: {seeds}, EXTRA=''",
+             f"=== plan: EXP=session; arms P P_parent P_twin, plus W at the parent with the most experts; window cap {sw}; "
+             f"CAL_WINDOWS 600; LM_CTX {CTX}",
+             f"=== parents: k1000 at seeds {seeds}, from /data/gpu_heldout_out (14 file(s) sha256-checked against its "
+             f"FINALS.sha256)",
+             f"=== session: {sw} windows, resumed from its parent's final at its seed, the pins and the parent arm's "
+             f"settings, then RUN_EPOCHS=2 DATA_RESAMPLE=1 DATA_AREAS=eng,py,num,c,x5 DATA_N_PROCESSES=5 "
+             f"DATA_STREAM_BYTES=4725000 DATA_PHASE_SCHED=x5|x5|x5|x5 OPT_LR_CONTINUE=as_logged; P_twin OPT_LR=0.0020002; "
+             f"W FAB_SLOTS max(the parent's slots, its n_live + 2048)",
+             f"=== kept checkpoints: ON, one final checkpoint per run under {out}/ckpt, and beside it the retention "
+             f"probe's best saves (ckpt.pt.best and .best.prev): up to 3 checkpoint files per run, all counted in the "
+             f"disk check",
+             "=== pins: DATA_DRAW=planned pinned, DATA_SYNTH_HOLDOUT=1 pinned, EVAL_RETENTION_EVERY=700 pinned, "
+             "EVAL_HOLDOUT_WINDOWS=256 pinned, EVAL_RETENTION_N=24 pinned, EVAL_GENERATE=0 pinned, TOK_MINT_NOVEL=0 pinned"]
+        if pool:
+            L.append(f"=== pool: with {pool} (seeds 0 1 2 3 4 5 6): this fleet is its top-up, and its analysis reads "
+                     f"the two fleets' seeds together where commit, card, torch and shape match")
+        L += [f"=== {len(seeds.split()) * 3 + 1} run(s), {par} at a time",
+              "=== ETA by waves: about 7 min (420 s): 22 session(s) in 1 wave(s), over 24 slot(s), each run its windows "
+              "at 13.00 windows/s plus 15 s of startup; each run's reads (a session's resume start and R) and saves come "
+              "on top",
+              f"=== W: FAB_SLOTS=6144 at k1000.s{w_seed}, the parent with the most experts (n_live 4096 + W_HEADROOM "
+              f"2048, against its 4096 slots)",
+              "---- 2. fleet started 12:10:00Z", "---- fleet finished in 8 min (480 s)"]
+        write(os.path.join(out, "SUMMARY.txt"), "\n".join(L) + "\n")
+
+    def se_run(out, name, seed, *, f=0.0, f_num=0.0, x5=3.0, pw=0.1, capped=True, nores=False, noseries=False,
+               anchor=0.0, nlive=4096, births=900, widened=0):
+        tag, win, base = f"{name}.s{seed}", 5000, 20000
+        v0 = {SE_AR[k]: 2.0 + 0.1 * k + 0.001 * seed for k in range(4)}
+        vr = {a: v + f + (f_num if a == "num" else 0.0) for a, v in v0.items()}
+
+        def row(step, kind, closure, vals, pd=None, off=0.0):
+            ars = {a: {"control": v + off, "report": v + off, "seen_by_parent": a != "x5"} for a, v in vals.items()}
+            m_ = sum(x["report"] for x in ars.values()) / len(ars)
+            r_ = {"step": step, "kind": kind, "closure": closure, "control": m_, "report": m_, "windows": 256 * len(ars),
+                  "nonfinite": 0, "paired_sd": None, "areas": ars}
+            if pd is not None:
+                r_["paired"] = {a: {h: [128, m, s_] for h in ("control", "report")} for a, (m, s_) in pd.items()}
+            return r_
+        rows = [] if nores else [
+            row(base, "resume", "memory-off", v0, pd={a: (anchor, 0.01 if anchor else 0.0) for a in v0}),
+            row(base, "resume", "memory-on", v0, off=-0.01, pd={a: (0.0, 0.0) for a in v0})]
+        pr = {a: (vr[a] - v0[a], pw) for a in v0}
+        rows += [row(base + 1, "phase", "memory-off", dict(v0, x5=6.0)),
+                 row(base + win, "boundary", "memory-off", dict(vr, x5=x5), pd=pr),
+                 row(base + win, "boundary", "memory-on", dict(vr, x5=x5), off=-0.01, pd=pr)]
+        rh = "('fired', '4 vs 4')" if name == "P_parent" else "('unreachable', 'None vs 4 -- DATA_REHEARSE_PARENT=0')"
+        write(os.path.join(out, "logs", tag + ".log"), "\n".join(
+            ["=== device=cuda amp=off tf32=(True, True) torch_seed=1",
+             f"=== {base + win} windows run total ({win} trained by this process, resumed at {base}), {win} flushes this "
+             f"process, {base + win} optimizer steps run total, 2 epoch(s) in 400.0s (12.5 w/s this process)"]
+            + ([f"WARNING: loop: stopped at max_windows={win} window(s) trained by THIS process"] if capped else [])
+            + ["=== R STAGE -- the did-it-fire surfaces:",
+               "       opt.continue.pricing                         logged parent: floor",
+               f"       fab.n_live                                   {nlive}",
+               f"       fab.births                                   {births}",
+               f"       fab.resume_widened                           {widened}",
+               f"       gate:data.rehearse_parent                    {rh}"]) + "\n")
+        write(os.path.join(out, "curves", tag + ".json"), json.dumps([2.0] * 50))
+        if not noseries:
+            write(os.path.join(out, "curves", tag + ".probe.json"), json.dumps(rows))
+        with open(os.path.join(out, "logs", "_done.txt"), "a") as fh:
+            fh.write(f"{tag} rc=0 secs=420\n")
+
+    def se_fleet(out, seeds, *, f=0.0, f_pp=0.0, f_num=0.0, f_pp_num=0.0, spread=0.0, spread_pp=0.0, twin=0.0,
+                 gain=0.0, gain_pp=0.0, pw=0.1, w_seed=3, skip=(), nores=(), noseries=(), short=(), anchor=(), **kw):
+        se_summary(out, seeds=" ".join(map(str, seeds)), w_seed=w_seed, **kw)
+        for s_ in seeds:
+            par_ = 1 if s_ % 2 == 0 else -1
+            for nm, f_, fn_, x5_ in (("P", f + par_ * spread, f_num, 3.0 - gain),
+                                     ("P_parent", f_pp + par_ * spread_pp, f_pp_num, 3.0 - gain_pp),
+                                     ("P_twin", f + par_ * (spread + twin), f_num, 3.0 - gain)):
+                t_ = f"{nm}.s{s_}"
+                if t_ not in skip:
+                    se_run(out, nm, s_, f=f_, f_num=fn_, x5=x5_, pw=pw, nores=t_ in nores, noseries=t_ in noseries,
+                           capped=t_ not in short, anchor=0.001 if t_ in anchor else 0.0)
+        if w_seed in seeds:
+            se_run(out, "W", w_seed, f=f + (1 if w_seed % 2 == 0 else -1) * spread, f_num=f_num, x5=3.0 - gain - 0.02,
+                   pw=pw, nlive=4500, births=1300, widened=3)
+
+    def se_read(tag, seeds, pool_env=None, **kw):
+        o_ = os.path.join(TMP, "f33", tag, "gpu_session_out")
+        se_fleet(o_, seeds, **kw)
+        p_ = gw("--analyze", EXP="session", OUT=o_, **({"POOL_WITH": pool_env} if pool_env else {}))
+        return o_, p_, txt(os.path.join(o_, "ANALYSIS.txt")), "\n".join(block_of(p_.stdout) or [])
+
+    from statistics import NormalDist
+    T33 = 0.05 / (NormalDist().inv_cdf(1 - 0.05 / 4) + NormalDist().inv_cdf(0.8))
+    rate33 = "at the measurement protocol's rate (OPT_LR_CONTINUE=as_logged, CONTRACT-Q-DATA-7), which 5.2 re-reads at "
+    zero33 = " ".join(f"{a} +0.0000 [+0.0000,+0.0000]" for a in SE_AR)
+    o33, p33, a33, b33 = se_read("take_pp", range(7), twin=0.01, gain_pp=0.1)
+    check("F33 a harmless fleet: P and P_parent each PASS on every old area by the eps rule (F = R - resume start, the "
+          "areas its cells, at 0.025 a look: Holm's 0.0125 on the first, the upper bound at t(0.975)); both admitted, x5's "
+          "R reading on P_parent - on P (-0.1000, its upper bound below 0) takes P_parent (O9), labelled at the "
+          "measurement protocol's rate; the block, within 80 lines and equal to PASTE_BACK.txt, carries every parent's "
+          "row, the anchor and both rule rows",
+          p33.returncode == 0 and f"  P n=7 a=0.0125: {zero33} -> PASS" in b33
+          and f"  P_parent n=7 a=0.025: {zero33} -> PASS" in b33
+          and "per old area (4), F = R - resume start over the parents, each look (7 parents; a top-up's pooled 11) at "
+              "0.025: mean [lower at t(1 - a/4), Holm's a across P and P_parent; one-sided upper at t(0.975)]" in b33
+          and "O9 (the new area): x5 at R, P_parent - P paired by parent: -0.1000 [-0.1000,-0.1000] n=7" in b33
+          and dec(b33).startswith("P_parent is taken (O9): both are admitted, and x5's R reading on P_parent - on P has "
+                                  "its one-sided upper bound -0.1000 below 0: P_parent learns the new area better. The "
+                                  "continue preset's provisional rehearsal (DATA_REHEARSE_PARENT=1, 'replay' 0.27) holds "
+                                  + rate33 + "the preset's; no training default moves (ε 0.05 bits/byte per old area, "
+                                  "7 parent(s))")
+          and "ANCHOR (O2): the resume start against the parent's R, item for item: equal in 22 of 22 session(s)" in b33
+          and 0 < len(block_of(p33.stdout)) <= 80
+          and block_of(p33.stdout) == txt(os.path.join(o33, "PASTE_BACK.txt")).splitlines()
+          and re.search(r"^  s6 +(\+0\.0000 ){3}\+0\.0000 \| (\+0\.0000 ){3}\+0\.0000 \| +3\.0000 +2\.9000$", b33, re.M)
+          is not None and "  synthetic source  as_logged" in b33.splitlines()[1],
+          b33[-1800:])
+    one33 = math.sqrt(0.01 ** 2 / 2 + 0.1 ** 2 / 128)
+    check("F33 ... and beside it, deciding nothing: x5's learning (6.0 -> 3.0, 2.9 on P_parent), 5.1's SDs per old area "
+          f"-- between-run 0.0071 (twins at +-0.01: RMS / √2), per-window 0.1000, one session {one33:.4f} against the "
+          f"gate's {T33:.4f} (K 4), which it meets at 128 windows a half -- W at its parent (FAB_SLOTS 6144, x5 -0.0200, "
+          "n_live 404 past the parent's slots, births, resume_widened), the pricing every session states, the rehearsal "
+          "P_parent fired, rates, and the ETA by waves against the wall",
+          "x5's learning (its first in-run reading -> R, mean over parents): P 6.0000 -> 3.0000 | P_parent 6.0000 -> "
+          "2.9000 | P_twin 6.0000 -> 3.0000" in b33
+          and f"= {T33:.4f}, K 4:" in b33
+          and f"    num: between 0.0071 (n=7) | per-window 0.1000 | one session {one33:.4f}: meets it at 128 windows a "
+              f"half" in b33
+          and "  W (NEW-20) at the parent s3, FAB_SLOTS 6144 (its n_live 4096 + 2048; its slots 4096): W - P F eng +0.0000 "
+              "py +0.0000 num +0.0000 c +0.0000, x5 -0.0200; n_live at the end W 4500 (404 past the parent's 4096 slots), "
+              "P 4096; births W 1300, P 900; fab.resume_widened 3" in b33
+          and "opt.continue.pricing (each session's rate, CONTRACT-Q-DATA-7): 'logged parent: floor' 22 of 22" in b33
+          and "data.rehearse_parent FIRED (O9's rehearsal): P 0 of 7 | P_parent 7 of 7 | P_twin 0 of 7 | W 0 of 1" in b33
+          and "windows/s per session: P 12.50 [12.50-12.50]" in b33
+          and "this fleet: 110,000 session windows in 480 s of the sessions' wall = 229.17 windows/s aggregate; ETA by "
+              "waves 420 s, took 480 s: 1.14x" in b33,
+          [l for l in b33.splitlines() if l.startswith("  ") or "SDs" in l][-14:])
+    _, _, _, b33f = se_read("p_fails", range(7), f_num=0.2, pw=0.2)
+    n33 = math.ceil(0.2 ** 2 / (T33 ** 2 - 0))
+    check("F33 P FAILs on num (+0.2000, its lower bound past eps) and P_parent PASSes: P_parent is taken, the one "
+          f"admitted; at a per-window SD of 0.2 and twins equal to P a session needs {n33} windows a half",
+          "num +0.2000 [+0.2000,+0.2000] c +0.0000 [+0.0000,+0.0000] -> FAIL" in b33f
+          and dec(b33f).startswith("P_parent is taken (O9): P_parent is the one admitted; P FAILs. The continue preset's")
+          and f"    eng: between 0.0000 (n=7) | per-window 0.2000 | one session {0.2 / math.sqrt(128):.4f}: needs {n33} "
+              f"windows a half" in b33f, dec(b33f) + str([l for l in b33f.splitlines() if "eng: between" in l]))
+    _, _, _, b33t = se_read("tie_pp", range(7), f_num=0.02, f_pp_num=0.01, twin=0.03)
+    _, _, _, b33u = se_read("tie_p", range(7), f_num=0.01, f_pp_num=0.02)
+    check("F33 both admitted and the new area tied (x5 P_parent - P [0, 0]): the smaller worst-area mean F takes it (C25), "
+          "P_parent at +0.0100 against P's +0.0200, and P the other way round; twins 0.03 apart make the between-run SD "
+          "alone exceed the gate's: O10's second-seed replay",
+          dec(b33t).startswith("P_parent is taken (O9): both are admitted and the new area ties (x5 P_parent - P "
+                               "[+0.0000,+0.0000]), so the smaller worst-area mean F takes it (C25): P +0.0200, P_parent "
+                               "+0.0100.")
+          and dec(b33u).startswith("P is taken (O9): both are admitted and the new area ties (x5 P_parent - P "
+                                   "[+0.0000,+0.0000]), so the smaller worst-area mean F takes it (C25): P +0.0100, "
+                                   "P_parent +0.0200. The preset's rehearsal is not needed " + rate33 + "the preset's, "
+                                   "recorded so for 5.2; no training default moves")
+          and "    c: between 0.0212 (n=7) | per-window 0.1000 | one session " in b33t
+          and "the between-run SD alone exceeds it: O10's second-seed replay" in b33t, dec(b33t) + "\n" + dec(b33u))
+    o33u, _, _, b33up = se_read("topup", range(7), spread_pp=0.1, gain_pp=0.1)
+    oa33 = os.path.realpath(o33u)
+    check("F33 P admitted beside P_parent UNRESOLVED below the cap tops up first: the next 4 parents to the cap of 11, "
+          "FILL=0, the parents' arm, PAR, its own OUT and POOL_WITH this one (its parents stage trains the new parents)",
+          dec(b33up).startswith("UNRESOLVED at 7 parent(s): P_parent is UNRESOLVED, P is admitted; top up to the cap of "
+                                "11 on this card and torch with the command below (its parents stage trains the new "
+                                "parents first)")
+          and f"  top-up: EXP=session SEEDS='7 8 9 10' FILL=0 PARENT_ARM=k1000 PAR=24 OUT={oa33[:-4]}_topup_out "
+              f"POOL_WITH={oa33} bash {ROOT}/tools/gpu_launch.sh --go" in b33up, b33up[-900:])
+    _, _, _, b33c = se_read("cap", range(11), spread_pp=0.1)
+    _, _, _, b33cu = se_read("capu", range(11), f_num=0.2, spread_pp=0.1)
+    _, _, _, b33n = se_read("none", range(7), f_num=0.2, f_pp_num=0.2)
+    check("F33 at the cap of 11 the one admitted is taken beside the other UNRESOLVED; one FAILing beside one UNRESOLVED "
+          "at the cap is reported unresolved; both FAILing admits neither -- nothing ships, the next arms named, O9 "
+          "escalating only when every candidate FAILs",
+          dec(b33c).startswith("P is taken (O9): P is the one admitted; P_parent is UNRESOLVED at the parent cap.")
+          and "top-up:" not in b33c
+          and dec(b33cu).startswith("UNRESOLVED at the cap: P FAILs and P_parent is UNRESOLVED at the parent cap; reported "
+                                    "so, nothing ships, and the next arms run (P+parent at 'replay' 0.40; P+parent with "
+                                    "W's headroom; 5.2's continuation rates)")
+          and dec(b33n).startswith("neither is admitted: P and P_parent both FAIL; nothing ships, and the next arms run "
+                                   "(P+parent at 'replay' 0.40; P+parent with W's headroom; 5.2's continuation rates), O9 "
+                                   "escalating only when every candidate, these included, FAILs"),
+          dec(b33c) + "\n" + dec(b33cu) + "\n" + dec(b33n))
+    _, _, a33m, b33m = se_read("missing", range(7), noseries=("P.s5",), nores=("P_parent.s2",), anchor=("P_twin.s3",),
+                               short=("P_twin.s4",))
+    check("F33 a session with no series and one with no resume-start row are named and left out (n=6); an anchor that "
+          "moved is named and F still subtracts the session's own start; a session that ended before its window cap is "
+          "flagged",
+          "left out (no endpoint): P.s5 P_parent.s2" in b33m
+          and re.search(r"^  P +s5 .*NO PROBE SERIES$", a33m, re.M) is not None
+          and re.search(r"^  P_parent +s2 .*NO RESUME-START ROW  x5 3\.00000$", a33m, re.M) is not None
+          and f"  P n=6 a=0.0125: {zero33} -> PASS" in b33m and f"  P_parent n=6 a=0.025: {zero33} -> PASS" in b33m
+          and "equal in 19 of 20 session(s); DIFFERS in 1 (largest |mean| 0.001, P_twin.s3: F still subtracts the "
+              "session's own start)" in b33m
+          and "  ENDED BEFORE ITS WINDOW CAP: P_twin.s4" in b33m, b33m[:1500])
+    _, _, _, b33x = se_read("past", range(12))
+    _, _, _, b33z = se_read("nopp", range(7), skip=tuple(f"P_parent.s{s_}" for s_ in range(7)))
+    check("F33 parents past the cap of 11 are not read, and the block says which; with no P_parent session read nothing "
+          "is decided on P alone",
+          "parents past the cap of 11, not read: 11" in b33x and f"  P n=11 a=0.0125: {zero33} -> PASS" in b33x
+          and dec(b33z) == "UNDECIDED: P_parent has no reading"
+          and "  P_parent: NO READING at any parent -- no evidence either way, not a pass" in b33z,
+          dec(b33x) + "\n" + dec(b33z))
+
+    # ---- F34: a session top-up pooled with its first fleet (2026-10-02, register §8 5.3a) ----------------------------
+    # The first fleet reads P_parent UNRESOLVED at 7 parents (+-0.06 by parity); its top-up's parents 7-10 read 0, so
+    # the pooled 11, the second look at 0.025, admit both, and x5 (-0.1) takes P_parent.
+    o34 = os.path.join(TMP, "f34", "gpu_session_out")
+    se_fleet(o34, range(7), spread_pp=0.06, gain_pp=0.1)
+    p34a = gw("--analyze", EXP="session", OUT=o34)
+
+    def se_topup(tag, seeds=range(7, 11), pool=o34, **kw):
+        o_ = os.path.join(TMP, "f34", tag)
+        se_fleet(o_, seeds, gain_pp=0.1, pool=pool, w_seed=10, **kw)
+        p_ = gw("--analyze", EXP="session", OUT=o_)
+        return o_, "\n".join(block_of(p_.stdout) or [])
+    o34t, b34t = se_topup("gpu_session_topup_out")
+    check("F34 the first fleet alone is UNRESOLVED and asks for the top-up; the top-up, recorded as its pool, reads the "
+          "11 parents together -- its own marked * -- and both are admitted: P_parent is taken on the new area",
+          dec("\n".join(block_of(p34a.stdout) or [])).startswith("UNRESOLVED at 7 parent(s): P_parent is UNRESOLVED")
+          and f"POOLED with the first fleet {o34}: its parents and this top-up's (marked *) are read together" in b34t
+          and re.search(r"^  P_parent n=11 a=0\.0(125|25): .* -> PASS$", b34t, re.M) is not None
+          and re.search(r"^  s10\* ", b34t, re.M) is not None and re.search(r"^  s6 ", b34t, re.M) is not None
+          and dec(b34t).startswith("P_parent is taken (O9): both are admitted")
+          and "(ε 0.05 bits/byte per old area, 11 parent(s))" in b34t
+          and "W (NEW-20) at the parent s3, FAB_SLOTS 6144" in b34t and "W (NEW-20) at the parent s10*, FAB_SLOTS 6144" in b34t,
+          b34t[-1800:])
+    for tag34, kw34, why34 in (("card_out", {"card": "NVIDIA H200, 143771"},
+                                "they differ in card (NVIDIA H200 143771 MiB here, NVIDIA H100 PCIe 81559 MiB there)"),
+                               ("commit_out", {"commit": "def5678"}, "they differ in commit (def5678 here, abc1234 there)"),
+                               ("overlap_out", {"seeds": range(6, 10)}, "parent seed(s) 6 are in both"),
+                               ("shape_out", {"sw": 4000}, "they differ in shape (")):
+        _, b34r = se_topup(tag34, **kw34)
+        check(f"F34 a top-up whose {tag34.split('_')[0]} differs from the first fleet's is not pooled: POOLING REFUSED, "
+              f"saying why, and nothing is decided",
+              f"POOLING REFUSED with {o34}: {why34}" in b34r
+              and dec(b34r).startswith("NOTHING IS DECIDED: this top-up's parents pool with its first fleet's only where "
+                                       "commit, card, torch and shape match, and " + why34)
+              and "-- this fleet alone, deciding nothing" in b34r, b34r[-900:])
+    # A LAUNCH AND ITS TOP-UP, END TO END, with the stand-in: the first fleet trains its parents (a parents stage at 7
+    # seeds), reads both candidates UNRESOLVED (+-0.06 by parity) and prints the top-up's command, which run as printed
+    # trains parents 7-10 and pools: both admitted, and x5 (-0.1 on P_parent) takes P_parent.
+    o34l = os.path.join(TMP, "f34l", "gpu_session_out")
+    e34 = dict(PATH=env10["PATH"], EXP="session", DEVICE="cpu", WINDOWS=20, SEEDS="0 1 2 3 4 5 6", PAR=8,
+               SMOKE_WINDOWS=5, PARENT_ARM="k10", PROBE_EVERY=5, SESSION_WINDOWS=8, STUB_PARENT=1, STUB_GAIN_PP="0.1",
+               STUB_FINAL_BYTES="1000", OUT=o34l)
+    p34l = subprocess.run(["bash", SCRIPT], cwd=ROOT, capture_output=True, text=True, timeout=900,
+                          env=clean_env(STUB_SPREAD="0.06", **e34))
+    b34l = "\n".join(block_of(p34l.stdout) or [])
+    cmd34 = (re.search(r"^  top-up: (.*) bash \S+/tools/gpu_launch\.sh --go$", b34l, re.M) or [None, ""])[1]
+    kv34 = {k: v.strip("'") for k, v in re.findall(r"(\w+)=('[^']*'|\S+)", cmd34)}
+    oa34 = os.path.realpath(o34l)
+    check("F34 a stand-in launch with a parents stage reads both UNRESOLVED at 7 parents and prints the top-up's command "
+          "with the fleet's knobs -- parents 7-10, FILL=0, WINDOWS, PARENT_ARM, PROBE_EVERY, SESSION_WINDOWS, DEVICE and "
+          "PAR, its own OUT and POOL_WITH this one; the anchor holds item for item in every session",
+          p34l.returncode == 0 and dec(b34l).startswith("UNRESOLVED at 7 parent(s): P and P_parent are UNRESOLVED")
+          and kv34 == {"EXP": "session", "SEEDS": "7 8 9 10", "FILL": "0", "WINDOWS": "20", "PARENT_ARM": "k10",
+                       "PROBE_EVERY": "5", "SESSION_WINDOWS": "8", "DEVICE": "cpu", "PAR": "8",
+                       "OUT": oa34[:-4] + "_topup_out", "POOL_WITH": oa34}
+          and "equal in 22 of 22 session(s)" in b34l,
+          f"rc {p34l.returncode}; {cmd34!r}; {b34l[-1500:]}")
+    o34u = kv34.get("OUT", os.path.join(TMP, "f34l", "none"))
+    l34 = subprocess.run(["bash", LAUNCHER], cwd=TMP, capture_output=True, text=True, timeout=300,
+                         env=clean_env(PATH=env10["PATH"], FETCH=0, CKPT_MB=50,
+                                       **dict(kv34, OUT=os.path.join(TMP, "f34m", "o_out"))))
+    rl34 = next((ln[len("    ready: "):] for ln in l34.stdout.splitlines() if ln.startswith("    ready: ")), "")
+    p34u = subprocess.run(["bash", SCRIPT], cwd=ROOT, capture_output=True, text=True, timeout=900,
+                          env=clean_env(PATH=env10["PATH"], SMOKE_WINDOWS=5, STUB_PARENT=1, STUB_GAIN_PP="0.1",
+                                        STUB_FINAL_BYTES="1000", **kv34))
+    b34u = "\n".join(block_of(p34u.stdout) or [])
+    check("F34 ... the launcher passes the printed command (the top-up of the first fleet, a parents stage for 7-10); the "
+          "top-up, launched with it, trains parents 7-10, records its first fleet and reads the 11 parents together: "
+          "both admitted, and P_parent is taken on the new area",
+          f"PASS POOL_WITH: this fleet is the top-up of {oa34}" in l34.stdout
+          and "PASS no PARENTS: a parents stage trains k10 at seeds 7 8 9 10 first" in l34.stdout
+          and f"POOL_WITH={oa34}" in rl34 and "SEEDS='7 8 9 10'" in rl34 and "PARENT_ARM=k10" in rl34
+          and p34u.returncode == 0
+          and f"=== pool: with {oa34} (seeds 0 1 2 3 4 5 6)" in txt(os.path.join(o34u, "SUMMARY.txt"))
+          and txt(os.path.join(o34u, "parents", "FINALS.sha256")).count("  ckpt/k10.s") == 8
+          and f"POOLED with the first fleet {oa34}" in b34u
+          and re.search(r"^  P_parent n=11 a=0\.0(125|25): .* -> PASS$", b34u, re.M) is not None
+          and dec(b34u).startswith("P_parent is taken (O9): both are admitted, and x5's R reading on P_parent - on P has "
+                                   "its one-sided upper bound -0.1000 below 0"),
+          l34.stdout[-600:] + b34u[-1500:])
+
 finally:
     # NOTHING THESE CHECKS STARTED OUTLIVES THEM: a process carrying a GW_FLEET_OUT under TMP (a fleet, its
     # runs, its heartbeat) or naming TMP on its command line (a stand-in run, a dashboard) is killed.
