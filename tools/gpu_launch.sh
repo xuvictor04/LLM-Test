@@ -299,12 +299,20 @@ if [[ ( "$KC" == 1 || ( "$EXP_SET" == session && -z "${PARENTS:-}" ) ) && "$W" =
     NA=4; [[ "$EXP_SET" == heldout ]] && NA=3
     FILES=$(( (NS * NA + 1) * (1 + BF) ))
     # EXP=session (§8 5.3a): three sessions a parent and W, at KEEP_CKPT=1, and without PARENTS a parent a seed.
+    # W'S FILES AT W'S SIZE (2026-10-02, the review of 5.3a): its fabric is preallocated at max(the parent's slots, its
+    # n_live + W_HEADROOM), so its files are priced at CKPT_MB x (slots + W_HEADROOM) / slots, the most it can take
+    # (slots EXTRA's FAB_SLOTS, else 4096); gpu_world.sh prices them at the smoke's W, the rest at the others'.
     if [[ "$EXP_SET" == session ]]; then
       FILES=0; [[ "$KC" == 1 ]] && FILES=$(( NS * 3 + 1 )); [[ -z "${PARENTS:-}" ]] && FILES=$(( FILES + NS ))
       FILES=$(( FILES * (1 + BF) ))
+      WF=0; [[ "$KC" == 1 ]] && WF=$(( 1 + BF ))
+      _fs=$(echo " ${EXTRA:-} " | tr ' ' '\n' | sed -n 's/^FAB_SLOTS=\([0-9][0-9]*\)$/\1/p' | tail -1)
+      [[ "${_fs:-0}" -gt 0 ]] || _fs=4096; _wh=${W_HEADROOM:-2048}; [[ "$_wh" =~ ^[0-9]+$ ]] || _wh=2048
+      W_MB=$(( (CKPT_MB * (_fs + _wh) + _fs - 1) / _fs ))
     fi
   fi
   NEED_B=$(( FILES * CKPT_MB * 2 * 1000000 ))
+  [[ "$EXP_SET" == session && "${WF:-0}" -gt 0 ]] && NEED_B=$(( ((FILES - WF) * CKPT_MB + WF * W_MB) * 2 * 1000000 ))
   G() { awk -v b="$1" 'BEGIN { printf "%.1f", b / 1e9 }'; }
   # THE FIX FITS THE EXPERIMENT (2026-10-02, review of 49a657d; gpu_world.sh's own disk check says the same):
   # EXP=retok's spike test needs k0's saves; EXP=heldout's seeds are pre-registered and its first fleet's finals
@@ -317,7 +325,7 @@ if [[ ( "$KC" == 1 || ( "$EXP_SET" == session && -z "${PARENTS:-}" ) ) && "$W" =
     *) _fx="free space there, fewer SEEDS, or KEEP_CKPT=0" ;;
   esac
   if (( FREE_B < NEED_B )); then
-    fail "disk: $(G $FREE_B) GB free at $_p, and the kept checkpoints may need $(G $NEED_B) GB ($FILES files x 2 x $CKPT_MB MB at $NS seed(s))" \
+    fail "disk: $(G $FREE_B) GB free at $_p, and the kept checkpoints may need $(G $NEED_B) GB ($FILES files x 2 x $CKPT_MB MB$([[ "${WF:-0}" -gt 0 ]] && echo ", W's $WF at $W_MB MB") at $NS seed(s))" \
          "$_fx"
   elif (( FREE_B < 2 * NEED_B )) && [[ "${FILL:-$([[ "$EXP_SET" == heldout || "$EXP_SET" == session ]] && echo 0 || echo 1)}" != 0 ]]; then
     warn "disk: $(G $FREE_B) GB free, $(G $NEED_B) GB needed at $NS seed(s): FILL will add few extra seeds (it stops at 0.9 of the free disk)" \

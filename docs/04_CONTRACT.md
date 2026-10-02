@@ -7544,6 +7544,20 @@ that resumed nothing pairs its R with nothing, and a cadence row's pairing stays
 the one it wrote before (each EXP=heldout run's). Telemetry only: nothing reads it in-run.
 `tests/test_probe.py` P1 and P3.
 
+**AMENDED 2026-10-02 — A RESUME WHOSE FIRST CUT IS NOT ITS PARENT'S LAST READS ITS START AGAIN THERE (the review of
+register §8 5.3a).** The start read at the parent's last-cut view equals the parent's R. But an epoch-boundary resume
+cuts its epoch at the restored vocabulary, which holds every id the parent minted after its last cut (0-24 at test
+4's shape: `TOK_GROW_EVERY` 200 against `TOK_RETOK_EVERY` 1000), and its later readings cut at that view or a later
+one. So "a later reading's difference is what this process changed" was false there: from a toy parent holding 24
+such ids, a session at `OPT_LR` 1e-12 for one window read py −0.437 and num −0.074 against its start.
+`spine/loop.py` now reads the start a second time at the child's own first-cut view, with the parent's live-domain
+count, as a `resume_own` row (both closures; `eval.holdout.resume_reads` counts it), wherever the two views differ. Its
+pairing against the `resume` row is what the view alone moved, and the R read pairs against it (that session: 0.000
+on every area). Where the views are equal (a continuing resume, a parent that minted nothing after its last cut)
+nothing is added; a fresh run reads no start. Such runs' series are the ones they wrote before (each EXP=heldout
+run's), and the session's curve and flush bytes are byte-identical with and without the read.
+`tests/test_probe.py` P3.
+
 ### Q-DOM-6 — the domain a held-out window would be routed to, asked read-only — **RESOLVED 2026-09-27 (Q-EVAL-12): `DOM.nearest(dom, part, *, signature)`, `_assign`'s DECISION FACTORED INTO ONE PURE HELPER. NO LEVER, NO WIRE**
 The closures route windows the run did not train on, and `DOM.observe` advances the boundary clock,
 drags a centroid, feeds the reservoir and counts the visit — a reading through it would move the

@@ -44,7 +44,11 @@ were written while both shipped at 0, and each names the arm it reads; the book 
       tests/_state_digest.py); a boundary resume's start read is the parent's R read. THE ROW CARRIES THE
       PAIRING (2026-10-02, register §8 5.3a: 5.1's per-window SD): the child's start rows and its R rows
       write HoldoutReading.paired, [n, mean, SD] per area and half, through a JSON round trip, and no in-run
-      row and no row of the uninterrupted run does.
+      row and no row of the uninterrupted run does. A BOUNDARY RESUME OF A PARENT THAT MINTED AFTER ITS LAST
+      CUT READS ITS START AGAIN AT ITS OWN FIRST CUT (2026-10-02, the review of 5.3a): 'resume_own' rows
+      after the 'resume' rows, both closures, equal to a reading taken directly at that view with the
+      parent's live-domain count, paired against the 'resume' read, and R paired against them; where the
+      first cut is the parent's last (the boundary resume above, the continuing one) nothing more is read.
   P4  THE HALVES: each window and its routing prefix inside its half, no start drawn twice, the bytes
       the block's; the control and report streams issued by name; the cadence reading's windows a prefix
       of the boundary reading's (P3); consumers read the control half only -- the retention best, the
@@ -114,6 +118,7 @@ probe's readings, the best checkpoints it orders and the retention it reports ar
 import contextlib
 import copy
 import json
+import math
 import os
 import re
 import shutil
@@ -135,7 +140,7 @@ from spine import derive                                           # noqa: E402
 from spine import assemble                                         # noqa: E402
 from spine import units as U                                       # noqa: E402
 from spine.compose import (compose, RefusedRun, _phase_windows, _logits_fn, _holdout_units,  # noqa: E402
-                           _windows_in_epoch, _eval_modules, _prefix_units)
+                           _windows_in_epoch, _eval_modules, _prefix_units, _holdout_tokenize, _last_cut_view)
 from eval import api as eval_api                                   # noqa: E402
 from ckpt import api as ckpt_api                                   # noqa: E402
 from opt import api as opt_api                                     # noqa: E402
@@ -1302,7 +1307,76 @@ try:
           and all(per_window(a) == per_window(b) for a, b in zip(_pb, _cb))
           and all(v[1] == 0.0 for rd in _cb for halves in rd.paired.values() for v in halves.values()),
           f"epochs {rbp.epochs}, resume_pos {bc.resume_pos}, reads {len(_pb)}/{len(_cb)}")
+    check("P3 ... and reads nothing more at its start where its first cut is its parent's last (no id minted after it), "
+          "nor does the continuing resume above",
+          int(bp.vocab.size()) == int(bp.seg_log["events"][-1]["view"][0])
+          and [e["kind"] for e in rbc.probe_series].count("resume") == 2
+          and not any(e["kind"] == "resume_own" for e in list(rbc.probe_series) + list(sc)),
+          str([(e["step"], e["kind"]) for e in rbc.probe_series][:4]))
     del bp, bc
+
+    # ---- P3 (boundary, minted after the last cut): the start read again at the child's own first cut -------------
+    # (2026-10-02, the review of register §8 5.3a.) At TOK_GROW_EVERY=10 and no act in the epoch, every id the parent
+    # mints is minted after its last cut (the epoch's first), and the child cuts its epoch at the restored vocabulary:
+    # another view, in which the start read at the parent's view is not what the child's later readings are read at.
+    E6m = dict(E6, TOK_GROW_EVERY="10")
+    with spy_readings() as rd_mp:
+        mp = build(CKPT_DIR=f"{TMP}/p3m", **E6m)
+        rmp = loop.run(mp, max_windows=int(_windows_in_epoch(mp)), progress=False)
+    mt = build(CKPT_RESUME=f"{TMP}/p3m", **E6m)
+    _ev_t = dict(mt.eval_carried)
+    rd_t = eval_api.holdout_probe(
+        mt.configs["EVAL"], units_by_domain=_holdout_units(mt, set(_ev_t["arrived"]), _ev_t["arrived"]),
+        logits_fn=_logits_fn(mt, use_memory=False, live_domains=_ev_t["live_domains"]),
+        tokenize_fn=_holdout_tokenize(mt), step=U.Windows(int(mt.clock.step)), boundary=True)
+    with spy_readings() as rd_mc:
+        mc = build(CKPT_RESUME=f"{TMP}/p3m", CKPT_DIR=f"{TMP}/p3mc", **E6m)
+        _cut_p, _cut_c = mp.seg_log["events"][-1]["view"], _last_cut_view(mc)
+        rmc = loop.run(mc, max_windows=3, progress=False)
+    smc = list(rmc.probe_series)
+    _k = [(e["step"], e["kind"], e["closure"]) for e in smc]
+    _pR = [rd for e, rd in zip(rmp.probe_series, rd_mp) if e["kind"] == "boundary"]
+    _res = [rd for e, rd in zip(smc, rd_mc) if e["kind"] == "resume"]
+    _own = [rd for e, rd in zip(smc, rd_mc) if e["kind"] == "resume_own"]
+    _R = [rd for e, rd in zip(smc, rd_mc) if e["kind"] == "boundary"]
+    _st = int(rmp.windows)
+
+    def _pdiff(a, b):
+        """{area: {half: mean of a - b over the items both read}} -- the pairing, computed here."""
+        out_ = {}
+        for ar in a.areas:
+            out_[ar] = {}
+            for i, h in enumerate(("control", "report")):
+                d_ = [x - y for x, y in zip(per_window(a)[ar][i], per_window(b)[ar][i])
+                      if x is not None and y is not None and math.isfinite(x) and math.isfinite(y)]
+                out_[ar][h] = sum(d_) / len(d_)
+        return out_
+
+    def _near(p_, q_):
+        return all(abs(p_[ar][h][1] - q_[ar][h]) <= 1e-9 for ar in q_ for h in q_[ar])
+    _moved = sum(1 for ar in _own[0].areas for i in (0, 1)
+                 for x, y in zip(per_window(_own[0])[ar][i], per_window(_res[0])[ar][i]) if x != y) if _own else 0
+    check(f"P3 a boundary resume of a parent that minted {int(mp.vocab.size()) - int(_cut_p[0])} id(s) after its last "
+          f"cut (view {_cut_p[0]}) cuts its epoch at {_cut_c[0]}, and reads its start twice before its first window: at the "
+          f"parent's view ('resume', the parent's R read, pairing to exactly 0) and at its own ('resume_own'), each "
+          f"through both closures; eval.holdout.resume_reads counts the four",
+          int(_cut_c[0]) > int(_cut_p[0]) and _k[:4] == [(_st, "resume", "memory-off"), (_st, "resume", "memory-on"),
+                                                        (_st, "resume_own", "memory-off"), (_st, "resume_own", "memory-on")]
+          and mc.eval_books["eval.holdout.resume_reads"] == 4 and len(_pR) == len(_res) == len(_own) == 2
+          and all(per_window(a) == per_window(b) for a, b in zip(_pR, _res))
+          and all(v[1] == 0.0 for rd in _res for hs in rd.paired.values() for v in hs.values()),
+          str(_k[:5]))
+    check(f"P3 ... the 'resume_own' read is the parent's weights at the child's own first cut, with the parent's "
+          f"live-domain count -- window for window a reading taken directly at that view -- and it moved {_moved} "
+          f"window(s); its pairing is against the 'resume' read, and the R read's against it, item for item, both written "
+          f"in their rows",
+          bool(_own) and per_window(_own[0]) == per_window(rd_t) and _moved > 0
+          and all(_near(o.paired, _pdiff(o, r)) for o, r in zip(_own, _res))
+          and all(_near(R_.paired, _pdiff(R_, o)) for R_, o in zip(_R, _own))
+          and all(e.get("paired") == {a: {h: [v[0], v[1], v[2]] for h, v in hs.items()} for a, hs in rd.paired.items()}
+                  for e, rd in zip(smc, rd_mc) if e["kind"] in ("resume_own", "boundary")),
+          f"moved {_moved}; R {len(_R)}")
+    del mp, mt, mc
 
     # =============================================================================================
     # P6: the best checkpoints

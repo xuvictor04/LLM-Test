@@ -1744,14 +1744,18 @@ LOOP_ORDER = (
                                       "closure adds MEM.encode_queries(mem, contexts=x, "
                                       "key_fn=...), MEM.read(mem, store, queries=..., "
                                       "promote=False) and MEM.blend(mem, probs, retrieval), then "
-                                      "log -- each paired against the resume's start reading, or "
-                                      "the parent's last boundary reading, when there is one. A "
+                                      "log -- each paired against the resume's last start reading, "
+                                      "or the parent's last boundary reading, when there is one. A "
                                       "RESUME ALSO READS AT ITS START, after run()'s refusal and "
                                       "finished-clock guards, at the parent's last-cut view and "
                                       "live-domain count, so at the same weights it equals the "
-                                      "parent's final reading; eval.holdout.boundary_reads and "
-                                      "eval.holdout.resume_reads count the two. Boundary readings "
-                                      "are reported and never consumed"),
+                                      "parent's final reading, and where its own first cut is at "
+                                      "another view (an epoch-boundary resume of a parent that "
+                                      "minted after its last cut) again at that view, the same "
+                                      "count ('resume_own', 2026-10-02); "
+                                      "eval.holdout.boundary_reads and eval.holdout.resume_reads "
+                                      "count the two kinds. Boundary readings are reported and "
+                                      "never consumed"),
     ("R", "DATA",  "claims_observe",  "THE BOOK'S TAIL (2026-09-28, Q-DATA-11), inside the same "
                                       "try, after the boundary reading and before the report: where "
                                       "a stop left units consumed since the last pass -- a "
@@ -2364,10 +2368,11 @@ ROW_ARGUMENTS_ELSEWHERE = {
     "EVAL.holdout_probe":
         "units_by_domain is _holdout_units(sysm, ...) -- the arrived areas' pinned (prefix, window) "
         "pairs cut from System.probe_set, each area marked seen_by_parent or not. logits_fn is "
-        "_logits_fn(sysm, use_memory=...) -- the memory-off closure at B and at a resume's start, "
-        "both closures at R. tokenize_fn is _holdout_tokenize(sysm, view) -- TOK.tokenize bound to "
+        "_logits_fn(sysm, use_memory=...) -- the memory-off closure at B, both closures at a "
+        "resume's start and at R. tokenize_fn is _holdout_tokenize(sysm, view) -- TOK.tokenize bound to "
         "the vocabulary at the view the stream was last cut at (the parent's recorded view for a "
-        "resume's start reading), with no labels and regularize=False, so it draws nothing and "
+        "resume's first start reading, its own first cut's for a 'resume_own' one), with no labels "
+        "and regularize=False, so it draws nothing and "
         "counts tok.segment_remap. step is RunClock.step, units.Windows, stamped on the Readings as "
         "`at`.",
     "EVAL.blowup":
@@ -4860,7 +4865,9 @@ def _holdout_tokenize(sysm, view=None, book="eval.holdout"):
     the stream cut at that view, and ids minted since have appeared in no training window, so a
     held-out window cut at the live table would be scored in a segmentation the run never trained
     on -- a reading of the vocabulary's growth, not of retention. A resume's start reading passes
-    its PARENT's last-cut view (LOOP.eval), so it reads what the parent's final reading read.
+    its PARENT's last-cut view (LOOP.eval), so it reads what the parent's final reading read; where
+    the resume's own first cut is at another view, it reads again at that one (spine/loop.py's
+    'resume_own', 2026-10-02).
 
     NO LABELS AND regularize=False, so it draws nothing from the dropout stream, bypasses TOK's
     one-slot cache and counts tok.segment_remap; every cut is booked as eval.holdout.cuts, so

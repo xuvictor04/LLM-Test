@@ -100,6 +100,8 @@ from spine.compose import _probe_armed as _c_probe_armed
 from spine.compose import _phase_of as _c_phase_of
 from spine.compose import _holdout_units as _c_holdout_units
 from spine.compose import _holdout_tokenize as _c_holdout_tokenize
+from spine.compose import _last_cut_view as _c_last_cut_view
+from spine.compose import _view_tuple as _c_view_tuple
 from spine.compose import _logits_fn as _c_logits_fn
 from spine.compose import _gen_prompts as _c_gen_prompts
 from spine.compose import _area_ids as _c_area_ids
@@ -1197,7 +1199,7 @@ def run(sysm, *, max_windows=None, progress=True):
                 tokenize_fn=_c_holdout_tokenize(sysm, view), step=U.Windows(int(clock.step)),
                 boundary=True, previous=_prev_boundary.get(fn.name))
             _ebook["eval.holdout.calls"] += 1
-            _ebook["eval.holdout." + ("resume_reads" if kind == "resume" else "boundary_reads")] += 1
+            _ebook["eval.holdout." + ("boundary_reads" if kind == "boundary" else "resume_reads")] += 1
             _ebook["eval.holdout.windows"] += int(rd.windows)
             _ebook["eval.holdout.seconds"] += time.perf_counter() - _t0
             probe_series.append(_reading_row(rd, kind))
@@ -1206,11 +1208,24 @@ def run(sysm, *, max_windows=None, progress=True):
 
     # A RESUME READS AT ITS START, AFTER THE GUARDS ABOVE AND BEFORE ITS FIRST WINDOW -- at the
     # parent's last-cut view and live-domain count (LOOP.eval), so at the same weights it equals the
-    # parent's final reading, and a later reading's difference is what THIS process changed. Only
-    # on the first run() over a resumed System: the clock still stands at the snapshot's step.
+    # parent's final reading ('resume'). Only on the first run() over a resumed System: the clock
+    # still stands at the snapshot's step.
+    # AND AGAIN AT THIS PROCESS'S OWN FIRST CUT WHERE THAT IS ANOTHER VIEW ('resume_own'; 2026-10-02,
+    # register §8 5.3a's review, Q-EVAL-12). An epoch-boundary resume cuts its epoch at the restored
+    # vocabulary, which holds every id the parent minted after its last cut -- in no window it
+    # trained -- and every later reading of this process cuts at that view or a later one, so its
+    # difference from the 'resume' row is partly the view's: driven, a session at OPT_LR 1e-12 for
+    # one window read py -0.437 bits/byte against it, from 24 such ids. The second read takes the
+    # same weights and live-domain count at this process's view: a later reading's difference from
+    # it is what THIS process changed, and its own pairing against the 'resume' row is what the view
+    # alone moved. Where the two views are equal (a continuing resume, or a parent that minted
+    # nothing after its last cut) it would read the 'resume' row again, and is not taken.
     if (_armed and arrived and sysm.snapshot is not None
             and int(clock.step) == int(sysm.snapshot.step)):
         _boundary_read("resume", view=_evc.get("view"), live=_evc.get("live_domains"))
+        if (_evc.get("view") is not None
+                and _c_view_tuple(_evc["view"]) != _c_last_cut_view(sysm)):
+            _boundary_read("resume_own", live=_evc.get("live_domains"))
 
     # ---- FAB.contribution (2026-09-28, register §8 3.5, 02-R11 and C37; Q-FAB-19) --------------
     # ARMED AT FAB_CONTRIB=1 ON A ROUTED ARM, which startup makes the same test as "with the
@@ -2429,10 +2444,12 @@ def _reading_row(rd, kind):
 
     A BOUNDARY READING PAIRED WITH AN EARLIER ONE ALSO CARRIES ITS PAIRING (2026-10-02, register §8
     5.3a; Q-EVAL-12): `paired`, {area: {half: [n, mean, SD]}} of its per-window differences, as
-    HoldoutReading.paired holds them -- on a resume's start read, against the parent's R read, and on
-    the R read after it, against that start: the per-window SD 5.1 sizes the probe with. Only there:
-    the R read of a run that resumed nothing pairs with nothing, and a cadence reading's pairing is
-    left out, so every row such a run writes (each EXP=heldout run's) is the row it wrote before."""
+    HoldoutReading.paired holds them -- on a resume's start read, against the parent's R read; on its
+    second start read at its own view ('resume_own', where it is taken), against the first; and on
+    the R read after them, against the last start: the per-window SD 5.1 sizes the probe with. Only
+    there: the R read of a run that resumed nothing pairs with nothing, and a cadence reading's
+    pairing is left out, so every row such a run writes (each EXP=heldout run's) is the row it wrote
+    before."""
     row = {"step": int(rd.step), "kind": kind, "closure": rd.closure,
            "control": None if rd.control_mean is None else float(rd.control_mean.value),
            "report": None if rd.report_mean is None else float(rd.report_mean.value),
@@ -2441,7 +2458,7 @@ def _reading_row(rd, kind):
            "areas": {a: {"control": row.get("control_mean"), "report": row.get("report_mean"),
                          "seen_by_parent": bool(row.get("seen_by_parent", False))}
                      for a, row in rd.areas.items()}}
-    if kind in ("resume", "boundary") and rd.paired:
+    if kind in ("resume", "resume_own", "boundary") and rd.paired:
         row["paired"] = {a: {h: [int(v[0]), v[1], v[2]] for h, v in halves.items()}
                          for a, halves in rd.paired.items()}
     return row

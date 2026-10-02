@@ -296,8 +296,9 @@
 # old held-out block stays the parent's; DATA_PHASE_SCHED=x5|x5|x5|x5) at OPT_LR_CONTINUE=as_logged, EXP=heldout's
 # probe pins and the parent arm's settings, for SESSION_WINDOWS (5000) windows. The script's knobs are named
 # clear of every package prefix; EXTRA may not move the session's data levers (refused by name). THE READING: per
-# old area F = the session's R reading - its resume-start reading (memory-off, report half; the start reads the
-# parent's final weights on the same pinned items, O2's anchor); P and P_parent over the parents by the eps rule,
+# old area F = the session's R reading - its start reading at its own first cut (memory-off, report half; the
+# start read at the parent's last cut is the parent's final reading, O2's anchor, and the two starts differ by the
+# ids the parent minted after that cut, reported); P and P_parent over the parents by the eps rule,
 # Holm across the two, at 0.025 a look; O9 takes, of those admitted, the lower x5 R reading paired by parent (a tie
 # to the smaller worst-area mean F); UNRESOLVED below the cap of 11 prints a top-up's command (parents 7-10,
 # trained by its parents stage); 5.1's SDs, W against P and the rest are reported beside it.
@@ -2579,23 +2580,28 @@ def heldout(ctx_arg, archive, eps, pool_arg, home):
 
 # ------------------------------------------------------------------------------------------ session
 # THE FIRST POST-TRAINING SESSIONS (EXP=session; Proposal 05 §8 5.3a, O2, O9; 2026-10-02). A session's endpoint per
-# old area is F = its R reading - its resume-start reading, both through the memory-off closure, report half: the
-# last 'boundary' row of curves/<run>.probe.json against its 'resume' row, which reads the parent's final weights on
-# the same pinned items (O2's anchor). Over the parents each candidate, P and P_parent, is read by the eps rule with
-# the old areas as its cells and Holm across the two, at LOOK_ALPHA a look (7 parents; a top-up's pooled 11). Among
-# the admitted, O9 takes the larger new-area gain: d = x5's R reading on P_parent - on P, paired by parent, read by
-# its one-sided bounds at t(1 - LOOK_ALPHA); a tie goes to the smaller worst-area mean F (C25). A top-up reads its
-# parents with its first fleet's only where commit, card, torch and shape match. Everything after the rule is
-# reported and decides nothing: the anchor, x5's learning, 5.1's SDs with the gate's arithmetic, W against P, the
-# pricing and the rehearsal, rates.
+# old area is F = its R reading - its start reading at its own first cut, both through the memory-off closure, report
+# half: the last 'boundary' row of curves/<run>.probe.json against its 'resume_own' row, or its 'resume' row where it
+# wrote none (its first cut was its parent's last). The 'resume' row reads the parent's final weights at the parent's
+# last cut on the same pinned items (O2's anchor). A session cuts its epoch at the restored vocabulary, which holds
+# the ids the parent minted after its last cut, in no window either trained: subtracting the 'resume' row counted
+# what they move as the session's (the review of 5.3a, 2026-10-02: py -0.437 at one window of OPT_LR 1e-12), so F
+# subtracts 'resume_own' and the difference is reported. Over the parents each candidate, P and P_parent, is read by
+# the eps rule with the old areas as its cells and Holm across the two, at LOOK_ALPHA a look (7 parents; a top-up's
+# pooled 11). Among the admitted, O9 takes the larger new-area gain: d = x5's R reading on P_parent - on P, paired by
+# parent, read by its one-sided bounds at t(1 - LOOK_ALPHA); a tie goes to the smaller worst-area mean F (C25). A
+# top-up reads its parents with its first fleet's only where commit, card, torch and shape match. Everything after
+# the rule is reported and decides nothing: the anchor, the parents' ids minted after their last cut, x5's learning,
+# 5.1's SDs with the gate's arithmetic, W against P, the pricing and the rehearsal, rates.
 SE_CANDS = ("P", "P_parent")              # the rule's candidates; P_twin and W are read beside them
 SE_NEW = "x5"                             # the session's new area
 SE_NEXT = "P+parent at 'replay' 0.40; P+parent with W's headroom; 5.2's continuation rates"
 
 
 def se_runs(out):
-    """{(arm, seed): session} off one EXP=session fleet: each session's resume-start and R rows, its first in-run
-    reading holding x5, its windows and seconds in this process, and the lines the reader reports."""
+    """{(arm, seed): session} off one EXP=session fleet: each session's start rows (at its parent's last cut and, where
+    it wrote one, at its own first cut) and R row, its first in-run reading holding x5, its windows and seconds in this
+    process, and the lines the reader reports."""
     runs = {}
     for log in sorted(glob.glob(os.path.join(out, "logs", "*.log"))):
         tag = os.path.basename(log)[:-4]
@@ -2622,7 +2628,8 @@ def se_runs(out):
         pr = re.search(r"^\s+opt\.continue\.pricing\s+(\S.*?)\s*$", t, re.M)
         rh = re.search(r"^\s+gate:data\.rehearse_parent\s+\('([\w-]+)'", t, re.M)
         runs[(name, int(seed))] = dict(
-            tag=tag, curve=js(".json"), series=series, r=r, res=last("resume"), R=last("boundary"),
+            tag=tag, curve=js(".json"), series=series, r=r, res=last("resume"), own=last("resume_own"),
+            R=last("boundary"),
             first5=next((x for x in rows if x.get("closure") == "memory-off" and x.get("kind") in ("phase", "cadence")
                          and SE_NEW in (x.get("areas") or {})), None),
             win=int(w.group(1)) if w else None, base=int(w.group(2)) if w else None,
@@ -2638,11 +2645,18 @@ def se_val(row, area, half="report"):
     return fnum((((row or {}).get("areas") or {}).get(area) or {}).get(half))
 
 
+def se_start(v):
+    """The session's start reading at its own first cut: its 'resume_own' row, or its 'resume' row where it wrote none
+    (its first cut was its parent's last, so the 'resume' row is that reading)."""
+    return v.get("own") or v.get("res")
+
+
 def se_F(v, areas):
-    """{area: F}: the session's R reading - its resume-start reading, per old area (memory-off, report half)."""
+    """{area: F}: the session's R reading - its start reading at its own first cut, per old area (memory-off, report
+    half)."""
     out_ = {}
     for a in areas:
-        x, y = se_val(v.get("R"), a), se_val(v.get("res"), a)
+        x, y = se_val(v.get("R"), a), se_val(se_start(v), a)
         if x is not None and y is not None:
             out_[a] = x - y
     return out_
@@ -2818,7 +2832,8 @@ def session(ctx_arg, archive, eps, pool_arg, home):
     # ---------------------------------------------------------------- the runs, as read
     star = lambda k: "*" if pooled and k in here else ""
     print()
-    print("=== RUNS (F per old area = R - resume start, memory-off, report half; x5 at R) ===")
+    print("=== RUNS (F per old area = R - start, the start at the session's own first cut, memory-off, report half; x5 "
+          "at R) ===")
     missing = []
     for (n, s), v in sorted(runs.items(), key=lambda kv: (kv[0][0], kv[0][1])):
         f_ = F[(n, s)]
@@ -2849,7 +2864,7 @@ def session(ctx_arg, archive, eps, pool_arg, home):
                          + " ".join(cell(i, row, n_arm) for i, row in enumerate(r_["phases"]))
                          + f" -> {r_['verdict']}"
                          + (f" ({r_['note'].replace('some phase', 'some area')})" if r_["note"] else ""))
-    rule_head = (f"RULE (§8 5.3a; O2, O9): ε {eps:g} bits/byte; per old area ({len(areas)}), F = R - resume start over "
+    rule_head = (f"RULE (§8 5.3a; O2, O9): ε {eps:g} bits/byte; per old area ({len(areas)}), F = R - start over "
                  f"the parents, each look (7 parents; a top-up's pooled 11) at {LOOK_ALPHA:g}: mean [lower at t(1 - "
                  f"a/{len(areas)}), Holm's a across P and P_parent; one-sided upper at t({1 - LOOK_ALPHA:g})]"
                  + (" -- this fleet alone, deciding nothing" if refused else ""))
@@ -2906,6 +2921,27 @@ def session(ctx_arg, archive, eps, pool_arg, home):
         return math.sqrt(sum(x * x for x in xs) / len(xs)) if xs else None
 
     rep_lines = []
+    # (0) THE PARENTS' IDS MINTED AFTER THEIR LAST CUT (the review of 5.3a, 2026-10-02): in no window a parent trained,
+    # and in its sessions' first cut. Per parent their count (SUMMARY's line, off parent_facts), and what they moved:
+    # each session's start at its own first cut - at its parent's last (memory-off, report half), which F leaves out.
+    late = {}
+    for txt_ in (S, rd(os.path.join(pooled, "SUMMARY.txt")) if pooled else ""):
+        m = re.search(r"^=== parents' ids minted after their last cut[^:]*: (.*)$", txt_, re.M)
+        if m:
+            late.update({int(a_): int(b_) for a_, b_ in re.findall(r"s(\d+) (\d+)", m.group(1))})
+    late = {s: n for s, n in late.items() if s in seeds}
+    offs = {ar: [se_val(v["own"], ar) - se_val(v["res"], ar) for k, v in runs.items() if k[1] in seeds
+                 and se_val(v.get("own"), ar) is not None and se_val(v.get("res"), ar) is not None] for ar in areas}
+    n_own = sum(1 for k, v in runs.items() if k[1] in seeds and v.get("own"))
+    n_all = sum(1 for k, v in runs.items() if k[1] in seeds and v.get("res"))
+    if late or n_own:
+        rep_lines.append(
+            "  the parents' ids minted after their last cut"
+            + (" (" + " | ".join(f"s{s} {late[s]}" for s in sorted(late)) + ")" if late else "")
+            + (f": the start at {n_own} of {n_all} session(s)' own first cut - at the parent's last, mean [min, max]: "
+               + " ".join(f"{ar} {fmt(mean(offs[ar]), '+.4f')} [{fmt(min(offs[ar]), '+.4f')},"
+                          f"{fmt(max(offs[ar]), '+.4f')}]" for ar in areas if offs[ar])
+               + "; F leaves it out" if n_own else ": none moved a session's first cut"))
     # (1) x5's learning: its first in-run reading (where it arrived) and its R reading, mean over the parents read.
     xl = []
     for a in SE_CANDS + ("P_twin",):
@@ -2916,7 +2952,7 @@ def session(ctx_arg, archive, eps, pool_arg, home):
     if xl:
         rep_lines.append(f"  {SE_NEW}'s learning (its first in-run reading -> R, mean over parents): " + " | ".join(xl))
     # (2) 5.1's SDs per old area (NEW-02, C04, O11) and the single-run gate's arithmetic: between-run from the twins,
-    # per-window from R - resume start item by item (the R row's pairing), one session's SD at the probe's windows.
+    # per-window from R - start item by item (the R row's pairing), one session's SD at the probe's windows.
     K = len(areas) or 1
     try:
         from statistics import NormalDist
@@ -2949,7 +2985,7 @@ def session(ctx_arg, archive, eps, pool_arg, home):
                        f"{fmt(one, '.4f')}: {verdict_}")
     if sd_rows:
         rep_lines.append(f"  5.1's SDs per old area (NEW-02): between-run from the twins, RMS(P_twin - P)/√2; per-window "
-                         f"from R - resume start item by item (report half); one session's SD, √(between² + "
+                         f"from R - start item by item (report half); one session's SD, √(between² + "
                          f"per-window²/n), against the single-run gate's ε/(z(1 - 0.05/{K}) + 0.84) = {T:.4f}, K {K}:")
         rep_lines += sd_rows
     # (3) W at its parent (NEW-20, descriptive): W - P there, its slots, n_live past the parent's, births.
@@ -3026,7 +3062,7 @@ def session(ctx_arg, archive, eps, pool_arg, home):
         print(l)
 
     # ---------------------------------------------------------------- the block
-    hd = [f"F per old area at R - resume start (memory-off, report half), per parent: "
+    hd = [f"F per old area at R - start (memory-off, report half), per parent: "
           + " | ".join(a for a in SE_CANDS) + f"; then {SE_NEW} at R",
           "  seed  " + " | ".join(" ".join(f"{a:>7}" for a in areas) for _ in SE_CANDS)
           + " | " + " ".join(f"{a:>8}" for a in SE_CANDS)]
@@ -3054,6 +3090,7 @@ def session(ctx_arg, archive, eps, pool_arg, home):
         ("verdict", [anchor, rule_head] + rule_rows + [o9_line, f"DECISION: {decision}"]
          + ([f"  top-up: {cmd}"] if cmd else []) + extra_rows, 0),
         ("reported", ["REPORTED, DECIDES NOTHING:"], 0),
+        ("the parents' ids", [l for l in rep_lines if l.startswith("  the parents' ids minted")], 1),
         ("x5", [l for l in rep_lines if "learning" in l], 1),
         ("SDs", [l for l in rep_lines if "5.1's SDs" in l or l.startswith("    ")], 1),
         ("W", [l for l in rep_lines if l.startswith("  W (NEW-20)")], 1),
@@ -3737,10 +3774,12 @@ fi
 
 # EXP=session's PARENTS (§8 5.3a), checked before anything is written: PARENTS (a directory holding FINALS.sha256
 # and ckpt/, the held-out fleet's OUT or its unpacked finals) lists PARENT_ARM's final checkpoint and vocabulary at
-# every seed in SEEDS, each file's sha256 equals the manifest's, and each final is read -- its step, n_live, FAB_SLOTS
-# and its areas' generated length, which the sessions' stream must keep (so no old block moves). Without PARENTS
-# the parents stage trains them, and they are read after it. Read with the fleet's code, cwd the parents' directory.
-parent_facts() {  # dir arm seed... -> one line a seed, "seed step n_live slots area_bytes", or "!! <why>"
+# every seed in SEEDS, each file's sha256 equals the manifest's, and each final is read -- its step, n_live, FAB_SLOTS,
+# its areas' generated length, which the sessions' stream must keep (so no old block moves), and the ids it minted
+# after its last cut (its vocabulary, the 256 byte ids and one a merge, past its last cut's view; -1 where it logged
+# no cut), which its sessions' first cut holds (2026-10-02). Without PARENTS the parents stage trains them, and they
+# are read after it. Read with the fleet's code, cwd the parents' directory.
+parent_facts() {  # dir arm seed... -> one line a seed, "seed step n_live slots area_bytes late_ids", or "!! <why>"
   ( cd "$1" 9>&- && python3 - "$PWD" "$CODE_DIR" "${@:2}" <<'PY'
 import os, sys
 d, code, arm, seeds = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:]
@@ -3756,8 +3795,10 @@ for s in seeds:
             b = torch.load(p, map_location="cpu", weights_only=False)
         pay = b.get("payload") or {}
         lens = sorted({int(v) for v in ((pay.get("DATA") or {}).get("bytes_present") or {}).values()})
+        cut = ((((pay.get("LOOP") or {}).get("seg_log") or {}).get("events") or [{}])[-1] or {}).get("view")
+        late = 256 + int((pay.get("TOK") or {})["merge_count"]) - int(cut[0]) if cut else -1
         print(s, int(b["step"]), int((pay.get("FAB") or {})["n_live"]), int((b.get("geometry") or {})["fab.slots"][0]),
-              lens[0] if len(lens) == 1 else -1)
+              lens[0] if len(lens) == 1 else -1, late)
     except Exception as e:                              # noqa: BLE001 -- said, and the launch refuses
         print(f"!! {arm}.s{s}: {type(e).__name__}: {str(e)[:200]}")
 PY
@@ -3767,24 +3808,24 @@ PY
 # past), W's parent (the most experts, the lowest seed on a tie) and W_SLOTS, max(its slots, its n_live +
 # W_HEADROOM). A parent whose areas were generated at another length than the sessions' stream keeps is refused:
 # its old blocks would move (tests/test_holdout.py H2), and the fix is the shape of the fleet that trained it.
-declare -A PSTEP=()
+declare -A PSTEP=() PLATE=()
 W_SEED=""; W_SLOTS=""; W_NLIVE=""; W_PSLOTS=""
 parents_take() {  # facts -> 0, or 1 having said why
-  local seed step nl sl ln best=-1 want _sm
+  local seed step nl sl ln late best=-1 want _sm
   _sm=$(echo " $EXTRA " | tr ' ' '\n' | sed -n 's/^DATA_SEG_MAX=//p' | tail -1)
   [[ -n "$_sm" ]] || _sm=$(sed -n 's/^    seg_max = Lever( *\([0-9][0-9]*\) *,.*/\1/p' "$CODE_DIR/src/data/levers.py" 2>/dev/null | head -1)
   want=$(( SBYTES / 5 )); (( want < ${_sm:-0} + 1 )) && want=$(( ${_sm:-0} + 1 )); (( want < 5000 )) && want=5000
   want=$(( 2 * want ))
-  while read -r seed step nl sl ln; do
+  while read -r seed step nl sl ln late; do
     [[ -z "$seed" ]] && continue
-    if [[ "$seed" == "!!" ]]; then echo "!! the parent $step $nl $sl $ln"; return 1; fi
+    if [[ "$seed" == "!!" ]]; then echo "!! the parent $step $nl $sl $ln $late"; return 1; fi
     if [[ "$ln" != "$want" ]]; then
       echo "!! the parent $PARENT_ARM.s$seed's areas were generated $ln bytes long, and a session at DATA_STREAM_BYTES=$SBYTES"
       echo "   (5/4 of the parents' $PBYTES) generates them $want long: its old held-out blocks would move. Give this"
       echo "   fleet the WINDOWS (or EPOCH_BYTES) and EXTRA of the fleet that trained its parents."
       return 1
     fi
-    PSTEP[$seed]=$step
+    PSTEP[$seed]=$step; PLATE[$seed]=${late:--1}
     if (( nl > best )); then best=$nl; W_SEED=$seed; W_NLIVE=$nl; W_PSLOTS=$sl; fi
   done <<< "$1"
   [[ -n "$W_SEED" ]] || { echo "!! no parent could be read"; return 1; }
@@ -4274,7 +4315,7 @@ fi
 # THE KEPT-CHECKPOINT TRIPWIRE: the smoke's k0 saved at SMOKE_WINDOWS/2, so the watcher and the index
 # ran on this card in the first minute, and at least one copy must be kept and coherent. The smoke's
 # checkpoints then size the fleet's disk and are deleted.
-CKPT_BYTES=0
+CKPT_BYTES=0; W_CKPT_BYTES=0
 # (EXP=session's parents stage saves its finals at any KEEP_CKPT -- they are the sessions' parents -- so its smoke does.)
 if [[ "$KEEP_CKPT" == 1 || "$EXP" == session ]]; then
   if [[ "$EXP" == retok ]]; then
@@ -4288,10 +4329,37 @@ if [[ "$KEEP_CKPT" == 1 || "$EXP" == session ]]; then
     fi
     say "  smoke kept: $(grep " coherent " "$_kept" | head -1)"
   fi
-  CKPT_BYTES=$(find "$OUT/smoke/ckpt" -type f -name 'ckpt.pt*' -printf '%s\n' 2>/dev/null | sort -n | tail -1)
-  CKPT_BYTES=${CKPT_BYTES:-0}
-  rm -rf "$OUT/smoke/ckpt"
-  say "  smoke checkpoints: the largest was $(( CKPT_BYTES / 1000000 )) MB; deleted"
+  if [[ "$EXP" == session ]]; then
+    # W'S FILES ARE PRICED AT W'S OWN SIZE (2026-10-02, the review of §8 5.3a): its fabric is preallocated at W_SLOTS,
+    # past its parent's slots, so W's checkpoint is the smoke's largest, and every other file was priced at it -- about
+    # 26 GB at test 5's 66 files where the launcher and the brief say about 20. The other sessions' files take the
+    # largest of theirs, and W's its own; where the smoke ran no W (the parents' arm, before a parents stage), W's take
+    # the parent's scaled by (its slots + W_HEADROOM) / its slots, the most W can take (n_live <= slots).
+    CKPT_BYTES=$(find "$OUT/smoke/ckpt" -type f -name 'ckpt.pt*' ! -path "$OUT/smoke/ckpt/W.s*" -printf '%s\n' \
+                 2>/dev/null | sort -n | tail -1)
+    W_CKPT_BYTES=$(find "$OUT/smoke/ckpt" -type f -name 'ckpt.pt*' -path "$OUT/smoke/ckpt/W.s*" -printf '%s\n' \
+                   2>/dev/null | sort -n | tail -1)
+    CKPT_BYTES=${CKPT_BYTES:-0}
+    if [[ -n "$W_CKPT_BYTES" ]]; then
+      _wsz="W's $(( W_CKPT_BYTES / 1000000 )) MB"
+    else
+      _psl=$(parent_facts "$OUT/smoke" "$PARENT_ARM" "$P0" 2>/dev/null | awk '$1 != "!!" && $4 > 0 {print $4; exit}')
+      if [[ -n "$_psl" ]]; then
+        W_CKPT_BYTES=$(( CKPT_BYTES * (_psl + W_HEADROOM) / _psl ))
+        _wsz="W's priced at $(( W_CKPT_BYTES / 1000000 )) MB, the parent's x ($_psl + $W_HEADROOM) / $_psl slots"
+      else
+        W_CKPT_BYTES=$CKPT_BYTES
+        _wsz="W's priced at the parent's (its slots could not be read)"
+      fi
+    fi
+    rm -rf "$OUT/smoke/ckpt"
+    say "  smoke checkpoints: the largest but W's was $(( CKPT_BYTES / 1000000 )) MB, $_wsz; deleted"
+  else
+    CKPT_BYTES=$(find "$OUT/smoke/ckpt" -type f -name 'ckpt.pt*' -printf '%s\n' 2>/dev/null | sort -n | tail -1)
+    CKPT_BYTES=${CKPT_BYTES:-0}
+    rm -rf "$OUT/smoke/ckpt"
+    say "  smoke checkpoints: the largest was $(( CKPT_BYTES / 1000000 )) MB; deleted"
+  fi
 fi
 
 # ---------------------------------------------------------------- 1b. MEASURE the parallelism
@@ -4404,13 +4472,17 @@ fi
 # checkpoint (the fabric grows toward FAB_SLOTS), k0 at its kept saves plus the ring. FILL stops adding
 # seeds past 0.9 of the free space, and a job list that does not fit at its base seeds is refused.
 gb() { awk -v b="$1" 'BEGIN { printf "%.1f", b / 1e9 }'; }
-jobs_need() {  # bytes the job list's checkpoints may take (EXP=session: its sessions' only at KEEP_CKPT=1)
-  local n=0 line
+jobs_need() {  # bytes the job list's checkpoints may take (EXP=session: its sessions' only at KEEP_CKPT=1, W's at its size)
+  local n=0 nw=0 line
   for line in "${JOBS[@]}"; do
     [[ "$EXP:$KEEP_CKPT" == session:0 && " P P_parent P_twin W " == *" ${line%% *} "* ]] && continue
-    n=$(( n + $(ckpt_files "${line%% *}") ))
+    if [[ "$EXP" == session && "${line%% *}" == W ]]; then
+      nw=$(( nw + $(ckpt_files W) ))
+    else
+      n=$(( n + $(ckpt_files "${line%% *}") ))
+    fi
   done
-  echo $(( n * CKPT_BYTES * 2 ))
+  echo $(( (n * CKPT_BYTES + nw * W_CKPT_BYTES) * 2 ))
 }
 if [[ "$KEEP_CKPT" == 1 || "$EXP" == session ]]; then
   FREE_B=$(( $(df -Pk "$OUT" | awk 'NR == 2 {print $4}') * 1024 ))
@@ -4453,7 +4525,7 @@ if [[ "$FILL" == 1 && "${#JOBS[@]}" -lt "$PAR" ]]; then
   [[ -n "$added" ]] && say "=== FILL: spare slots -> extra seeds$added on every base arm (now $n_seeds seeds)"
 fi
 [[ "$KEEP_CKPT" == 1 || "$EXP" == session ]] && say "=== disk: checkpoints may take about $(gb $(jobs_need)) GB" \
-  "($(( CKPT_BYTES / 1000000 )) MB x 2 per file) of $(gb $FREE_B) GB free at $OUT"
+  "($(( CKPT_BYTES / 1000000 )) MB x 2 per file$([[ "$EXP:$KEEP_CKPT" == session:1 ]] && echo ", W's $(( W_CKPT_BYTES / 1000000 )) MB x 2")) of $(gb $FREE_B) GB free at $OUT"
 say "=== ${#JOBS[@]} run(s), $PAR at a time"
 # THE ETA IS PRICED AT THE MEASURED AGGREGATE RATE at PAR, over every window the job list holds. It
 # assumes every slot stays busy, so the last partial wave makes it slightly optimistic, and the rate
@@ -4553,6 +4625,10 @@ if [[ "$EXP" == session ]]; then
   fi
   say "=== W: FAB_SLOTS=$W_SLOTS at $PARENT_ARM.s$W_SEED, the parent with the most experts (n_live $W_NLIVE + W_HEADROOM" \
       "$W_HEADROOM, against its $W_PSLOTS slots)"
+  # THE IDS EACH PARENT MINTED AFTER ITS LAST CUT (2026-10-02, the review of §8 5.3a): its sessions' first cut holds
+  # them, so each session reads its start a second time there ('resume_own'), and F subtracts that reading.
+  say "=== parents' ids minted after their last cut (in no window a parent trained; its sessions' first cut holds them," \
+      "and F leaves out what they move): $(for _s in $SJOB_SEEDS; do printf 's%s %s | ' "$_s" "${PLATE[$_s]:--1}"; done | sed 's/ | $//')"
   if [[ -z "$PARENTS_ABS" ]]; then
     session_smoke_jobs
     mkdir -p "$OUT/smoke/sessions"
