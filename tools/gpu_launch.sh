@@ -10,7 +10,8 @@
 #     EXP=heldout bash tools/gpu_launch.sh        # the checks: PASS / WARN / FAIL, each FAIL with its fix
 #     EXP=heldout bash tools/gpu_launch.sh --go   # the checks, then the launch, confirmed alive
 # (from the checkout; from anywhere else, by its path: EXP=heldout bash /workspace/LLM-Test/tools/gpu_launch.sh).
-# EXP=heldout is test 4, the current one; notes/OWNER_BRIEF.md gives each test's command with its EXP.
+# EXP=heldout is test 4, the current one, and EXP=session (PARENTS=<its OUT>) test 5, which starts from its finals;
+# notes/OWNER_BRIEF.md gives each test's command with its EXP.
 #
 # EXP IS REQUIRED here (gpu_world.sh's default, world, is the 2026-09-24 experiment, already decided).
 # Every other knob -- WINDOWS, SEEDS, EXTRA, PAR, MPS, OUT, KEEP_CKPT, RETOK_ARMS, DEVICE, ... -- is
@@ -30,7 +31,8 @@
 # quota where it is lower; OMP_NUM_THREADS, which GNU nproc reports instead of the cores, is ignored by
 # the fleet's sizing since the 2026-09-27 review: it was a WARN here that --go launched past, into a
 # fleet sized at one core); the free disk against the kept checkpoints' estimate (EXP=retok keeps k0's
-# saves, EXP=heldout every run's final, and since 2026-09-29 an armed retention probe its best saves:
+# saves, EXP=heldout every run's final, EXP=session every session's and its parents stage's, and since 2026-09-29
+# an armed retention probe its best saves:
 # about 2 x CKPT_MB per file -- 134 MB at EXP=retok, measured on 2026-09-27's finals, whose pins keep the
 # trust book off; 151 MB elsewhere, adding the book's 16.8 MB sketch, saved wherever the book is on since
 # 04-6.3's flip); the branch and whether it is at origin's head, and a dirty tree; a fleet already RUNNING
@@ -71,7 +73,7 @@ done
 KNOBS="EXP OUT WINDOWS SEEDS BYTES RETOK_BYTES EPOCH_BYTES SMOKE_WINDOWS EXTRA ARCH_ALSO LONG PAR MPS FILL
        MAX_SEEDS DEVICE CAL_WINDOWS LADDER RETOK_ARMS COOLDOWN_ARM KEEP_CKPT KEEP_POLL KEEP_EVERY PIN_RETOK
        PROBE_EVERY GO_WORLD_EPOCH EPS RETOK_INCUMBENT HB_EVERY ALLOW_CONCURRENT STOP_WAIT LOG WAIT_S FETCH CKPT_MB
-       POOL_WITH"
+       POOL_WITH PARENTS PARENT_ARM SESSION_WINDOWS W_HEADROOM"
 PFX=$(sed -n 's/^ *PREFIX = "\([A-Z][A-Z0-9]*\)".*/\1/p' src/*/levers.py 2>/dev/null | sort -u | paste -sd'|' -)
 shq() {  # one word for the shell: as it is when it is safe bare, else single-quoted
   if [[ "$1" =~ ^[A-Za-z0-9_./:,@%+=-]+$ ]]; then printf '%s' "$1"; else printf "'%s'" "${1//\'/\'\\\'\'}"; fi
@@ -94,7 +96,7 @@ EXP_SET=${EXP:-}
 CUR_EXP=heldout
 DEVICE=${DEVICE:-cuda}
 case "$EXP_SET" in retok) _o=gpu_retok_out ;; world_epoch) _o=gpu_world_epoch_out ;; heldout) _o=gpu_heldout_out ;;
-                   *) _o=gpu_world_out ;; esac
+                   session) _o=gpu_session_out ;; *) _o=gpu_world_out ;; esac
 OUT=${OUT:-$_o}
 LOG=${LOG:-${EXP_SET:-fleet}_fleet.log}
 CMDENV="EXP=${EXP_SET:-<exp>} "; [[ "$OUT" != "$_o" ]] && CMDENV="${CMDENV}OUT=$OUT "
@@ -113,25 +115,49 @@ echo "    knobs set here (a ready line carries them all): ${READYENV:-(none)}"
 
 # ------------------------------------------------------------------------------------------ the experiment
 case "$EXP_SET" in
-  retok|world|heldout) pass "EXP=$EXP_SET" ;;
+  retok|world|heldout|session) pass "EXP=$EXP_SET" ;;
   world_epoch) if [[ "${GO_WORLD_EPOCH:-0}" == 1 ]]; then pass "EXP=world_epoch (GO_WORLD_EPOCH=1)"
                else fail "EXP=world_epoch is sized, not run, until O13's two WORLD levers are built (gpu_world.sh refuses it)" "EXP=$CUR_EXP"; fi ;;
   "") fail "EXP is not set: say which fleet; the owner brief's current test, test 4, is EXP=$CUR_EXP (gpu_world.sh's default, world, is the decided 2026-09-24 experiment)" \
            "EXP=$CUR_EXP bash $(printf %q "$ROOT/tools/gpu_launch.sh")$([[ $GO == 1 ]] && echo ' --go')" ;;
-  *) fail "EXP='$EXP_SET' is not an experiment gpu_world.sh runs (world, retok, world_epoch, heldout)" "EXP=$CUR_EXP" ;;
+  *) fail "EXP='$EXP_SET' is not an experiment gpu_world.sh runs (world, retok, world_epoch, heldout, session)" "EXP=$CUR_EXP" ;;
 esac
 
-# A TOP-UP'S FIRST FLEET (EXP=heldout, §8 6.3a): the fleet POOL_WITH names, which gpu_world.sh checks again.
+# A TOP-UP'S FIRST FLEET (EXP=heldout and session, §8 6.3a, 5.3a): the fleet POOL_WITH names, which gpu_world.sh
+# checks again.
 if [[ -n "${POOL_WITH:-}" ]]; then
   _pw=$(cd "$POOL_WITH" 2>/dev/null && pwd -P)
-  if [[ "$EXP_SET" != heldout ]]; then
-    fail "POOL_WITH names a top-up's first fleet, which only EXP=heldout reads" "unset POOL_WITH"
-  elif [[ -z "$_pw" ]] || ! grep -q '^=== plan: EXP=heldout;' "$_pw/SUMMARY.txt" 2>/dev/null; then
-    fail "POOL_WITH='$POOL_WITH' holds no EXP=heldout fleet" "the first fleet's OUT, as its block printed it"
+  if [[ "$EXP_SET" != heldout && "$EXP_SET" != session ]]; then
+    fail "POOL_WITH names a top-up's first fleet, which only EXP=heldout and EXP=session read" "unset POOL_WITH"
+  elif [[ -z "$_pw" ]] || ! grep -q "^=== plan: EXP=$EXP_SET;" "$_pw/SUMMARY.txt" 2>/dev/null; then
+    fail "POOL_WITH='$POOL_WITH' holds no EXP=$EXP_SET fleet" "the first fleet's OUT, as its block printed it"
   elif [[ "$_pw" == "$OUT_ABS" ]]; then
     fail "POOL_WITH is this OUT, and the launch would move that fleet aside" "OUT=<its own directory>, as the first fleet's block printed it"
   else
     pass "POOL_WITH: this fleet is the top-up of $_pw"
+  fi
+fi
+
+# EXP=session's PARENTS (§8 5.3a): the parents' finals, PARENT_ARM's at every seed, each listed in the directory's
+# FINALS.sha256; gpu_world.sh checks every file's sha256 before it starts. Without PARENTS a parents stage trains them.
+if [[ "$EXP_SET" == session ]]; then
+  _pa=${PARENT_ARM:-k${PIN_RETOK:-1000}}; _ss=$(echo ${SEEDS:-0 1 2 3 4 5 6})
+  if [[ -z "${PARENTS:-}" ]]; then
+    pass "no PARENTS: a parents stage trains $_pa at seeds $_ss first, one whole epoch each (about 10-16 minutes more on the GPU)"
+  else
+    _pd=$(cd "$PARENTS" 2>/dev/null && pwd -P); _miss=""
+    for _s in $_ss; do for _f in "ckpt/$_pa.s$_s/ckpt.pt" "ckpt/$_pa.s$_s.dyntok.json"; do
+      { [[ -n "$_pd" && -f "$_pd/$_f" ]] && awk -v f="$_f" 'substr($0, 67) == f { k = 1 } END { exit !k }' "$_pd/FINALS.sha256" 2>/dev/null; } \
+        || _miss="$_miss $_f"
+    done; done
+    if [[ -z "$_pd" || ! -f "$_pd/FINALS.sha256" ]]; then
+      fail "PARENTS='$PARENTS' holds no FINALS.sha256" "PARENTS=<the held-out fleet's OUT, or the directory its finals tar was unpacked into>"
+    elif [[ -n "$_miss" ]]; then
+      fail "PARENTS: $(echo $_miss | cut -d' ' -f1) is missing or not in its FINALS.sha256 ($(wc -w <<< "$_miss") file(s) in all)" \
+           "PARENT_ARM and SEEDS as the held-out fleet's (PARENT_ARM=k1000_mn if its DECISION shipped TOK_MINT_NOVEL)"
+    else
+      pass "PARENTS: $_pa's finals at seeds $_ss, in $_pd's FINALS.sha256 (gpu_world.sh checks every sha256 before it starts)"
+    fi
   fi
 fi
 
@@ -243,15 +269,16 @@ pass "cores the fleet sizes its parallelism by: $SIZE$([[ -n "${OMP_NUM_THREADS:
 # ------------------------------------------------------------------------------------------ the disk
 _p=$OUT; while [[ ! -d "$_p" ]]; do _p=$(dirname "$_p"); done
 FREE_B=$(( $(df -Pk "$_p" | awk 'NR == 2 {print $4}') * 1024 ))
-KC=${KEEP_CKPT:-$([[ "$EXP_SET" == retok || "$EXP_SET" == heldout ]] && echo 1 || echo 0)}
+KC=${KEEP_CKPT:-$([[ "$EXP_SET" == retok || "$EXP_SET" == heldout || "$EXP_SET" == session ]] && echo 1 || echo 0)}
 W=${WINDOWS:-20000}
-case "$EXP_SET" in retok) _s="0 1 2" ;; heldout) _s="0 1 2 3 4 5 6" ;; *) _s="0 1 2 3 4" ;; esac
+case "$EXP_SET" in retok) _s="0 1 2" ;; heldout|session) _s="0 1 2 3 4 5 6" ;; *) _s="0 1 2 3 4" ;; esac
 SD=${SEEDS:-$_s}
 NS=$(wc -w <<< "$SD")
 # 134 MB A FILE AT EXP=retok, 151 ELSEWHERE (2026-10-02, review of 49a657d): EXP=retok's pins turn the trust
 # book off, and DATA.stream_state writes no sketch into a checkpoint at 'off'.
 CKPT_MB=${CKPT_MB:-$([[ "$EXP_SET" == retok ]] && echo 134 || echo 151)}
-if [[ "$KC" == 1 && "$W" =~ ^[0-9]+$ ]]; then
+# EXP=session's parents stage (no PARENTS) keeps its finals at any KEEP_CKPT: they are the sessions' parents.
+if [[ ( "$KC" == 1 || ( "$EXP_SET" == session && -z "${PARENTS:-}" ) ) && "$W" =~ ^[0-9]+$ ]]; then
   if [[ "$EXP_SET" == retok ]]; then
     ARMS=${RETOK_ARMS:-"3000 1000"}
     g=0; for c in $ARMS; do a=$g; b=$c; while (( b )); do t=$(( a % b )); a=$b; b=$t; done; g=$a; done
@@ -265,12 +292,17 @@ if [[ "$KC" == 1 && "$W" =~ ^[0-9]+$ ]]; then
     # environment and, at EXP=world_epoch and heldout, the probe's pin -- so the two disk checks count the
     # same files. EXP=world and world_epoch run four arms a seed, EXP=heldout three (2026-10-02), and each
     # fleet one rerun.
-    _pp=""; [[ "$EXP_SET" == world_epoch || "$EXP_SET" == heldout ]] && _pp="EVAL_RETENTION_EVERY=${PROBE_EVERY:-700}"
+    _pp=""; [[ "$EXP_SET" == world_epoch || "$EXP_SET" == heldout || "$EXP_SET" == session ]] && _pp="EVAL_RETENTION_EVERY=${PROBE_EVERY:-700}"
     BF=$(EXTRA="${EXTRA:-}" EXP_ENV="$_pp" CODE_DIR="$ROOT" WINDOWS="$W" KEEP_EVERY=1000 bash -c \
          "$(sed -n "/^# >>> THE BEST SAVES' BUDGET/,/^# <<< THE BEST SAVES' BUDGET\$/p" gpu_world.sh)"$'\n''echo "$BEST_FILES"' 2>/dev/null)
     [[ "$BF" =~ ^[0-9]+$ ]] || BF=0
     NA=4; [[ "$EXP_SET" == heldout ]] && NA=3
     FILES=$(( (NS * NA + 1) * (1 + BF) ))
+    # EXP=session (§8 5.3a): three sessions a parent and W, at KEEP_CKPT=1, and without PARENTS a parent a seed.
+    if [[ "$EXP_SET" == session ]]; then
+      FILES=0; [[ "$KC" == 1 ]] && FILES=$(( NS * 3 + 1 )); [[ -z "${PARENTS:-}" ]] && FILES=$(( FILES + NS ))
+      FILES=$(( FILES * (1 + BF) ))
+    fi
   fi
   NEED_B=$(( FILES * CKPT_MB * 2 * 1000000 ))
   G() { awk -v b="$1" 'BEGIN { printf "%.1f", b / 1e9 }'; }
@@ -281,12 +313,13 @@ if [[ "$KC" == 1 && "$W" =~ ^[0-9]+$ ]]; then
     retok) _fx="free space there, fewer SEEDS, or KEEP_CKPT=0 (which leaves the spike test without its control)" ;;
     heldout) if [[ -n "${POOL_WITH:-}" ]]; then _fx="free space there, or KEEP_CKPT=0: the next test starts from the first fleet's finals, not a top-up's"
              else _fx="free space there, keeping the 7 pre-registered seeds and KEEP_CKPT on: the finals are the next test's parents"; fi ;;
+    session) _fx="free space there, or KEEP_CKPT=0, which keeps no session's checkpoint (a parents stage keeps its finals: the sessions resume them)" ;;
     *) _fx="free space there, fewer SEEDS, or KEEP_CKPT=0" ;;
   esac
   if (( FREE_B < NEED_B )); then
     fail "disk: $(G $FREE_B) GB free at $_p, and the kept checkpoints may need $(G $NEED_B) GB ($FILES files x 2 x $CKPT_MB MB at $NS seed(s))" \
          "$_fx"
-  elif (( FREE_B < 2 * NEED_B )) && [[ "${FILL:-$([[ "$EXP_SET" == heldout ]] && echo 0 || echo 1)}" != 0 ]]; then
+  elif (( FREE_B < 2 * NEED_B )) && [[ "${FILL:-$([[ "$EXP_SET" == heldout || "$EXP_SET" == session ]] && echo 0 || echo 1)}" != 0 ]]; then
     warn "disk: $(G $FREE_B) GB free, $(G $NEED_B) GB needed at $NS seed(s): FILL will add few extra seeds (it stops at 0.9 of the free disk)" \
          "free space for more seeds, or accept fewer"
   else

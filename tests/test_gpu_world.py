@@ -202,6 +202,18 @@ is pinned here, on a fleet whose every number is chosen.
       with the stand-in: the first fleet's printed command launches the top-up that pools with it; the finals'
       manifest and its pack: line, run as printed (a top-up's block packs none); the launch's refusals of
       POOL_WITH, and the launcher's check and ready line.
+  F32 EXP=session's LAUNCH (2026-10-02, register §8 5.3a), with a stand-in that saves a parent's final as CKPT does
+      (its step, n_live, slots and areas' length) and writes a session's series: from PARENTS, an EXP=heldout stand-in
+      fleet's finals, the smoke resumes P, P_parent and P_twin at the first seed and W at the parent with the most
+      experts, and the fleet the three at every seed and W, each resuming its parent's final at its seed into a new
+      CKPT_DIR -- a second epoch, x5 appended at 5/4 of the parents' stream, pure-add, the rate as logged, the probe's
+      pins, the parent arm's settings after them and its own arm's after those (P_twin OPT_LR x 1.0001, W FAB_SLOTS
+      max(the parent's slots, its n_live + W_HEADROOM)); SUMMARY names the parents, the sha256 check and W, and each
+      session's book line its parent's step. Without PARENTS a parents stage trains them first, keeping its finals with
+      a FINALS.sha256, the sessions' smoke runs from them, and the ETA is priced by the two stages. Refused, writing
+      nothing: a PARENT_ARM that is no act arm, PARENTS with no manifest or without a seed's final, a final whose
+      sha256 moved, parents generated at another stream, EXTRA moving a session's data lever, FILL=1. The launcher's
+      check of PARENTS, its disk budget and its ready line.
 """
 import glob
 import json
@@ -920,7 +932,18 @@ if os.environ.get("STUB_BOOK"):
                                                                       "DATA_TRUST")},
                              "env": {k: os.environ.get(k) for k in ("TOK_MINT_NOVEL", "EVAL_HOLDOUT_WINDOWS",
                                                                      "EVAL_RETENTION_N", "EVAL_GENERATE", "DATA_DRAW",
-                                                                     "TOK_GROW_EVERY", "DATA_STREAM_BYTES")}}) + "\n")
+                                                                     "TOK_GROW_EVERY", "DATA_STREAM_BYTES")},
+                             "sess": {k: os.environ.get(k) for k in ("RUN_SEED", "RUN_EPOCHS", "DATA_RESAMPLE", "DATA_AREAS",
+                                                                      "DATA_N_PROCESSES", "DATA_PHASE_SCHED",
+                                                                      "OPT_LR_CONTINUE", "DATA_REPLAY_SHARE",
+                                                                      "DATA_REHEARSE_PARENT", "OPT_LR", "FAB_SLOTS",
+                                                                      "FAB_BIRTH_JITTER")}}) + "\n")
+# A RESUME (EXP=session's sessions, §8 5.3a): the parent's step off its blob, and the run counts its windows from it.
+base = 0
+if os.environ.get("CKPT_RESUME"):
+    import torch
+    base = int(torch.load(os.path.join(os.environ["CKPT_RESUME"], "ckpt.pt"), map_location="cpu",
+                          weights_only=False)["step"])
 time.sleep(float(os.environ.get("STUB_STARTUP", "0")))
 print(f"=== device={os.environ.get('RUN_DEVICE', 'cpu')} amp=off")
 print(f"=== composed: stage=assembled, 0 refusal(s), 0 warning(s); startup took {time.time() - t0:.1f} s (imports and "
@@ -931,7 +954,7 @@ for i in range(1, n + 1):
     if ws:
         time.sleep(ws)
     if i > 1 and i % every == 1:
-        print(f"[{i} windows] loss=2.0000 opt_steps={i} n_live=2049 vocab=600 uncalled=0", flush=True)
+        print(f"[{base + i} windows] loss=2.0000 opt_steps={base + i} n_live=2049 vocab=600 uncalled=0", flush=True)
 json.dump([2.0] * n, open(curve, "w"))
 if "--flush-bytes" in a:
     json.dump([189] * n, open(a[a.index("--flush-bytes") + 1], "w"))
@@ -941,7 +964,31 @@ if "--flush-bytes" in a:
 # is planted, 2.0 + 0.1 x its index + 0.001 x the seed, with STUB_HARM added to num on the act arm without
 # TOK_MINT_NOVEL and STUB_HARM_MN on the one with it, +- STUB_SPREAD (STUB_SPREAD_MN) by the seed's parity.
 ps_rows = []
-if "--probe-series" in a:
+# A SESSION'S SERIES (a resume): its resume-start readings over the parent's four areas -- the parent's final,
+# 2.0 + 0.1 x the area's index + 0.001 x the seed -- then a phase reading where x5 arrives (6.0) and R over all five:
+# each old area F above its start, STUB_F on P and P_twin (the twin +- STUB_TWIN by the seed's parity), STUB_F_PP on
+# P_parent, STUB_F_W on W, + STUB_F_NUM on num, + STUB_SPREAD by parity on P and P_parent; x5 at 3.0 - STUB_GAIN
+# (STUB_GAIN_PP on P_parent).
+arm = tag.rsplit(".s", 1)[0]
+if "--probe-series" in a and base:
+    AR, seed = ("eng", "py", "num", "c"), int(os.environ.get("RUN_SEED", "0"))
+    E = lambda k, d="0": float(os.environ.get(k, d))
+    par = 1 if seed % 2 == 0 else -1
+    F = {"P": E("STUB_F") + par * E("STUB_SPREAD"), "P_parent": E("STUB_F_PP") + par * E("STUB_SPREAD"),
+         "P_twin": E("STUB_F") + par * E("STUB_SPREAD") + par * E("STUB_TWIN"), "W": E("STUB_F_W")}.get(arm, 0.0)
+    v0 = {AR[k]: 2.0 + 0.1 * k + 0.001 * seed for k in range(4)}
+    def srow(step, kind, closure, vals, off=0.0):
+        ars = {k: {"control": v + off, "report": v + off, "seen_by_parent": k != "x5"} for k, v in vals.items()}
+        m_ = sum(x["report"] for x in ars.values()) / len(ars)
+        return {"step": step, "kind": kind, "closure": closure, "control": m_, "report": m_, "windows": 2 * len(ars),
+                "nonfinite": 0, "paired_sd": None, "areas": ars}
+    vr = {k: v + F + (E("STUB_F_NUM") if k == "num" else 0.0) for k, v in v0.items()}
+    vr["x5"] = 3.0 - (E("STUB_GAIN_PP") if arm == "P_parent" else E("STUB_GAIN"))
+    ps_rows = [srow(base, "resume", "memory-off", v0), srow(base, "resume", "memory-on", v0, -0.01),
+               srow(base + 1, "phase", "memory-off", dict(v0, x5=6.0)),
+               srow(base + n, "boundary", "memory-off", vr), srow(base + n, "boundary", "memory-on", vr, -0.01)]
+    json.dump(ps_rows, open(a[a.index("--probe-series") + 1], "w"))
+elif "--probe-series" in a:
     AR, seed = ("eng", "py", "num", "c"), int(os.environ.get("RUN_SEED", "0"))
     act, mn = int(os.environ.get("TOK_RETOK_EVERY") or 0) > 0, float(os.environ.get("TOK_MINT_NOVEL") or 0) > 0
     def val(k):
@@ -960,7 +1007,15 @@ if "--probe-series" in a:
                     row(q * n // 4 + n // 8 + 1, "cadence", "memory-off", min(4, q + 2))]
     ps_rows += [row(n, "boundary", "memory-off", 4), row(n, "boundary", "memory-on", 4, -0.01)]
     json.dump(ps_rows, open(a[a.index("--probe-series") + 1], "w"))
-print(f"=== {n} windows, {n} flushes, {n} optimizer steps, 1 epoch(s) in 1.0s ({n} w/s)")
+if base:
+    print(f"=== {base + n} windows run total ({n} trained by this process, resumed at {base}), {n} flushes this process, "
+          f"{base + n} optimizer steps run total, 2 epoch(s) in 1.0s ({n} w/s this process)")
+    print(f"       opt.continue.pricing                         logged parent: floor")
+    print(f"       fab.resume_widened                           {3 if arm == 'W' else 0}")
+    if arm == "P_parent":
+        print("       gate:data.rehearse_parent                    ('fired', '4 vs 4')")
+else:
+    print(f"=== {n} windows, {n} flushes, {n} optimizer steps, 1 epoch(s) in 1.0s ({n} w/s)")
 if n == w:
     print(f"WARNING: loop: stopped at max_windows={w} window(s) trained by THIS process")
 print(f"       loop.bytes_scored                            {189 * n}")
@@ -996,9 +1051,25 @@ if os.environ.get("STUB_SAVES") == "1" and os.environ.get("CKPT_DIR") and int(os
             json.dump({"entries": [[0, 1]] * (256 + i)}, fh)
         rot(ck + ".dyntok.json", ck + ".prev.dyntok.json")
         time.sleep(float(os.environ.get("STUB_SAVE_SLEEP", "0")))
+# STUB_PARENT=1: A RUN WITH A CKPT_DIR AND NO RESUME SAVES ITS FINAL AS CKPT DOES -- a torch blob holding what
+# gpu_world.sh's parent_facts reads: its step, n_live (3000 + 10 x the seed), FAB_SLOTS (EXTRA's, else 4096) and its
+# areas' generated length at its stream, max(1801, 5000, DATA_STREAM_BYTES // 4) x 2 -- with its vocabulary beside
+# its directory. (EXP=session's parents, §8 5.3a; a resumed run is left to STUB_FINAL_BYTES.)
+if os.environ.get("STUB_PARENT") == "1" and os.environ.get("CKPT_DIR") and not base:
+    import torch
+    ck, sd = os.environ["CKPT_DIR"], int(os.environ.get("RUN_SEED", "0"))
+    os.makedirs(ck, exist_ok=True)
+    ln = max(1801, 5000, int(os.environ.get("DATA_STREAM_BYTES", "0")) // 4) * 2
+    torch.save({"step": n, "epoch": 1, "reason": "final",
+                "geometry": {"fab.slots": (int(os.environ.get("FAB_SLOTS", "4096")), "MAY_WIDEN", "FAB_SLOTS", "")},
+                "payload": {"FAB": {"n_live": 3000 + 10 * sd},
+                            "DATA": {"bytes_present": {k: ln for k in ("eng", "py", "num", "c")}}}},
+               os.path.join(ck, "ckpt.pt"))
+    with open(ck + ".dyntok.json", "w") as fh:
+        json.dump({"entries": [[0, 1]] * 256}, fh)
 # STUB_FINAL_BYTES=n: A RUN WITH A CKPT_DIR LEAVES ONE FINAL CHECKPOINT n BYTES LONG -- sparse, so it takes
 # no disk -- and the smoke's largest checkpoint, which the fleet's disk check sizes every file at, is n.
-if os.environ.get("STUB_FINAL_BYTES") and os.environ.get("CKPT_DIR"):
+elif os.environ.get("STUB_FINAL_BYTES") and os.environ.get("CKPT_DIR"):
     os.makedirs(os.environ["CKPT_DIR"], exist_ok=True)
     with open(os.path.join(os.environ["CKPT_DIR"], "ckpt.pt"), "wb") as fh:
         fh.truncate(int(os.environ["STUB_FINAL_BYTES"]))
@@ -3232,7 +3303,7 @@ for _ in range(100):
     # THE LAUNCH'S OWN CHECKS, before anything is written: POOL_WITH at another EXP, naming no EXP=heldout fleet,
     # naming this OUT, or a seed of the first fleet's again.
     r31 = []
-    for env31, want31 in (({"EXP": "retok", "POOL_WITH": o31l}, "only EXP=heldout reads"),
+    for env31, want31 in (({"EXP": "retok", "POOL_WITH": o31l}, "only EXP=heldout and EXP=session read"),
                           ({"POOL_WITH": os.path.join(TMP, "f31l", "nothing")}, "holds no EXP=heldout fleet"),
                           ({"POOL_WITH": o31l, "OUT": o31l}, "POOL_WITH is this OUT"),
                           ({"POOL_WITH": o31l, "SEEDS": "6 7"}, "seed 6 ran in the first fleet too")):
@@ -3257,6 +3328,145 @@ for _ in range(100):
           and f"POOL_WITH={oa31}" in rl31 and "SEEDS='7 8 9 10'" in rl31 and "PIN_RETOK=10" in rl31
           and "FAIL POOL_WITH=" in l31b.stdout and "holds no EXP=heldout fleet" in l31b.stdout,
           l31.stdout[-600:] + l31b.stdout[-300:])
+
+    # ---- F32: EXP=session's launch (2026-10-02, register §8 5.3a) ------------------------------------------------
+    # The parents: an EXP=heldout stand-in fleet at PIN_RETOK=10 whose finals the stand-in saves as CKPT does
+    # (STUB_PARENT=1: step 50, n_live 3000 + 10 x the seed, FAB_SLOTS 4096), and whose analysis writes FINALS.sha256.
+    o32p = os.path.join(TMP, "f32", "gpu_heldout_out")
+    k32 = dict(PATH=env10["PATH"], DEVICE="cpu", WINDOWS=20, SEEDS="0 1", PAR=4, SMOKE_WINDOWS=5, PIN_RETOK=10,
+               PROBE_EVERY=5, STUB_PARENT=1)
+    p32p = subprocess.run(["bash", SCRIPT], cwd=ROOT, capture_output=True, text=True, timeout=600,
+                          env=clean_env(EXP="heldout", OUT=o32p, **k32))
+    oa32p = os.path.realpath(o32p)
+    b32 = os.path.join(TMP, "f32_book.jsonl")
+    o32 = os.path.join(TMP, "f32", "gpu_session_out")
+    p32 = subprocess.run(["bash", SCRIPT], cwd=ROOT, capture_output=True, text=True, timeout=600,
+                         env=clean_env(EXP="session", OUT=o32, PARENTS=o32p, PARENT_ARM="k10", SESSION_WINDOWS=8,
+                                       STUB_BOOK=b32, STUB_FINAL_BYTES="1000", **k32))
+    r32 = [json.loads(l) for l in open(b32)] if os.path.exists(b32) else []
+    s32 = txt(os.path.join(o32, "SUMMARY.txt"))
+    sm32 = sorted(r["tag"] for r in r32 if "/smoke/" in r["argv"][r["argv"].index("--loss-curve") + 1])
+    fl32 = [r for r in r32 if "/smoke/" not in r["argv"][r["argv"].index("--loss-curve") + 1]]
+    want32 = {"RUN_EPOCHS": "2", "DATA_RESAMPLE": "1", "DATA_AREAS": "eng,py,num,c,x5", "DATA_N_PROCESSES": "5",
+              "DATA_PHASE_SCHED": "x5|x5|x5|x5", "OPT_LR_CONTINUE": "as_logged"}
+    arm32 = {"P": {"DATA_DRAW": "planned"}, "P_parent": {"DATA_DRAW": "replay", "DATA_REPLAY_SHARE": "0.27",
+                                                        "DATA_REHEARSE_PARENT": "1"},
+             "P_twin": {"OPT_LR": "0.0020002"}, "W": {"FAB_SLOTS": "5058"}}
+
+    def lev32(r, k):
+        return (r["sess"].get(k) if k in r["sess"] else r["env"].get(k))
+    check("F32 EXP=session from PARENTS: the smoke resumes P, P_parent and P_twin at the first seed and W at the parent "
+          "with the most experts (seed 1, n_live 3010), and the fleet the three at every seed and W -- 7 sessions, rc 0, "
+          "no rerun",
+          p32p.returncode == 0 and p32.returncode == 0 and sm32 == ["P.s0", "P_parent.s0", "P_twin.s0", "W.s1"]
+          and sorted(r["tag"] for r in fl32) == ["P.s0", "P.s1", "P_parent.s0", "P_parent.s1", "P_twin.s0", "P_twin.s1",
+                                                 "W.s1"], f"rc {p32p.returncode}/{p32.returncode}; {sm32}; "
+                                                          f"{[r['tag'] for r in fl32]}; {p32.stdout[-400:]!r}")
+    check("F32 ... every session resumes its parent's final (CKPT_RESUME the parent's directory, RUN_SEED its seed) into "
+          "a new CKPT_DIR, with a second epoch resampled, x5 appended at 5/4 of the parents' stream (4,725 bytes over 5 "
+          "processes), pure-add, the rate as logged, the probe's pins, the parent arm's cadence after them and its own "
+          "arm's settings after those: P_parent's rehearsal, P_twin's OPT_LR x 1.0001, W's FAB_SLOTS max(4096, 3010 + "
+          "2048); --max-windows 8, probe series and flush bytes",
+          all(r["ckpt"].get("CKPT_RESUME") == os.path.join(oa32p, "ckpt", "k10.s" + r["tag"][-1])
+              and r["sess"]["RUN_SEED"] == r["tag"][-1]
+              and r["ckpt"].get("CKPT_DIR") == os.path.join(o32, "ckpt", r["tag"]) and r["ckpt"].get("CKPT_EVERY") == "0"
+              and all(r["sess"][k] == v for k, v in want32.items()) and r["env"]["DATA_STREAM_BYTES"] == "4725"
+              and r["env"]["EVAL_HOLDOUT_WINDOWS"] == "256" and r["env"]["EVAL_RETENTION_N"] == "24"
+              and r["env"]["EVAL_GENERATE"] == "0" and r["pins"]["EVAL_RETENTION_EVERY"] == "5"
+              and r["retok"] == "10" and r["env"]["TOK_MINT_NOVEL"] == "0"
+              and all(lev32(r, k) == v for k, v in arm32[r["tag"].rsplit(".s", 1)[0]].items())
+              and (r["tag"].startswith("P_parent") or r["env"]["DATA_DRAW"] == "planned")
+              and r["argv"][r["argv"].index("--max-windows") + 1] == "8"
+              and "--probe-series" in r["argv"] and "--flush-bytes" in r["argv"] for r in fl32) and len(fl32) == 7,
+          str([(r["tag"], r["ckpt"], r["sess"]) for r in fl32][:2]))
+    st32 = txt(os.path.join(o32, "logs", "_started.txt"))
+    check("F32 ... SUMMARY names the parents and the sha256 check, the session's pins and W, and each session's book line "
+          "carries its parent's step (base=50), which the dashboard takes off its progress lines",
+          f"=== parents: k10 at seeds 0 1, from {oa32p} (4 file(s) sha256-checked against its FINALS.sha256)" in s32
+          and "=== session: 8 windows, resumed from its parent's final at its seed" in s32
+          and "DATA_STREAM_BYTES=4725 DATA_PHASE_SCHED=x5|x5|x5|x5 OPT_LR_CONTINUE=as_logged; P_twin OPT_LR=0.0020002" in s32
+          and "=== W: FAB_SLOTS=5058 at k10.s1, the parent with the most experts (n_live 3010 + W_HEADROOM 2048, "
+              "against its 4096 slots)" in s32
+          and "=== plan: EXP=session; arms P P_parent P_twin, plus W at the parent with the most experts; window cap 8;" in s32
+          and st32.count(" base=50") == 7, [l for l in s32.splitlines() if l.startswith("=== ")][4:12])
+    # WITHOUT PARENTS: the parents stage first (k10 at both seeds, one whole epoch: cap 60, finals kept under
+    # OUT/parents/ckpt with a FINALS.sha256), then the sessions' smoke from its finals, then the sessions.
+    b32b = os.path.join(TMP, "f32b_book.jsonl")
+    o32b = os.path.join(TMP, "f32b", "gpu_session_out")
+    p32b = subprocess.run(["bash", SCRIPT], cwd=ROOT, capture_output=True, text=True, timeout=600,
+                          env=clean_env(EXP="session", OUT=o32b, PARENT_ARM="k10", SESSION_WINDOWS=8, STUB_BOOK=b32b,
+                                        **k32))
+    r32b = [json.loads(l) for l in open(b32b)] if os.path.exists(b32b) else []
+    s32b = txt(os.path.join(o32b, "SUMMARY.txt"))
+    st32b = [(r["tag"], r["argv"][r["argv"].index("--loss-curve") + 1].split(os.sep)[-2]) for r in r32b]
+    oa32b = os.path.realpath(o32b)
+    check("F32 without PARENTS: the parents' arm smoked fresh, the parents stage (k10 at both seeds, a whole epoch each, "
+          "saving its final under OUT/parents/ckpt at any KEEP_CKPT), the sessions' smoke from its finals, the 7 sessions; "
+          "FINALS.sha256 beside the parents, and an ETA by two stages",
+          p32b.returncode == 0 and len(st32b) == 14
+          # EACH STAGE'S RUNS START AT ONCE, SO THE BOOK ORDERS THE STAGES AND NOT THE RUNS INSIDE ONE.
+          and st32b[0] == ("k10.s0", "smoke") and sorted(st32b[1:3]) == [("k10.s0", "parents"), ("k10.s1", "parents")]
+          and sorted(st32b[3:7]) == [("P.s0", "sessions"), ("P_parent.s0", "sessions"), ("P_twin.s0", "sessions"),
+                                     ("W.s1", "sessions")]
+          and sorted(st32b[7:]) == [(t, "curves") for t in ("P.s0", "P.s1", "P_parent.s0", "P_parent.s1", "P_twin.s0",
+                                                             "P_twin.s1", "W.s1")]
+          and all(r["ckpt"] == {"CKPT_DIR": os.path.join(oa32b, "parents", "ckpt", r["tag"]), "CKPT_EVERY": "0"}
+                  and r["argv"][r["argv"].index("--max-windows") + 1] == "60" for r in r32b[1:3])
+          and all(r["ckpt"].get("CKPT_RESUME") == os.path.join(oa32b, "parents", "ckpt", "k10.s" + r["tag"][-1])
+                  for r in r32b[3:])
+          and txt(os.path.join(o32b, "parents", "FINALS.sha256")).count("  ckpt/k10.s") == 4
+          and re.search(r"^=== ETA by waves: about \d+ min \(\d+ s\): 2 parent run\(s\) in 1 wave\(s\), then 7 "
+                        r"session\(s\) in 2 wave\(s\), over 4 slot\(s\)", s32b, re.M) is not None
+          and "---- 2a. parents stage started" in s32b and "---- 2b. the sessions' smoke" in s32b,
+          f"rc {p32b.returncode}; {st32b}; {p32b.stdout[-300:]!r}")
+    # THE LAUNCH'S REFUSALS, before anything is written.
+    r32r = []
+    bad32 = os.path.join(TMP, "f32bad")
+    shutil.copytree(o32p, bad32, ignore=shutil.ignore_patterns("code"))
+    with open(os.path.join(bad32, "ckpt", "k10.s1.dyntok.json"), "a") as fh_:
+        fh_.write(" ")
+    for env32r, want32r in (({"PARENT_ARM": "k10x"}, "PARENT_ARM='k10x' is not one of EXP=heldout's act arms"),
+                            ({"PARENTS": TMP}, "holds no FINALS.sha256"),
+                            ({"SEEDS": "0 1 2"}, "FINALS.sha256 lists no ckpt/k10.s2"),
+                            ({"PARENTS": bad32}, "a final does not match its sha256 in FINALS.sha256"),
+                            ({"WINDOWS": "200"}, "areas were generated 10000 bytes long, and a session at "
+                                                 "DATA_STREAM_BYTES=47250"),
+                            ({"EXTRA": "DATA_AREAS=eng"}, "EXTRA sets DATA_AREAS, which EXP=session's parents and "
+                                                          "sessions pin"),
+                            ({"FILL": "1"}, "FILL=1: EXP=session's seeds are its parents'")):
+        o_ = os.path.join(TMP, "f32r", str(len(r32r)), "gpu_session_out")
+        e_ = dict(k32, EXP="session", OUT=o_, PARENTS=o32p, PARENT_ARM="k10")
+        e_.update(env32r)
+        p_ = subprocess.run(["bash", SCRIPT], cwd=ROOT, capture_output=True, text=True, timeout=300, env=clean_env(**e_))
+        r32r.append((p_.returncode == 2 and want32r in p_.stdout and "Nothing was started" in p_.stdout
+                     and not os.path.exists(os.path.dirname(o_)), p_.stdout[-200:]))
+    check("F32 a launch refuses, writing nothing: a PARENT_ARM that is no act arm, PARENTS with no manifest, a manifest "
+          "without a seed's final, a final whose sha256 moved, parents generated at another stream than the sessions' "
+          "keeps, EXTRA moving a session's data lever, and FILL=1",
+          [x[0] for x in r32r] == [True] * 7, str([x[1] for x in r32r if not x[0]][:2]))
+    # THE LAUNCHER: its check names the parents, its disk check counts the sessions' files (and a parents stage's),
+    # and its ready line carries the session's knobs.
+    l32 = subprocess.run(["bash", LAUNCHER], cwd=TMP, capture_output=True, text=True, timeout=300,
+                         env=clean_env(PATH=env10["PATH"], EXP="session", DEVICE="cpu", FETCH=0, CKPT_MB=50, SEEDS="0 1",
+                                       PARENTS=o32p, PARENT_ARM="k10", SESSION_WINDOWS=8, W_HEADROOM=100,
+                                       OUT=os.path.join(TMP, "f32l", "gpu_session_out")))
+    rl32 = next((ln[len("    ready: "):] for ln in l32.stdout.splitlines() if ln.startswith("    ready: ")), "")
+    l32b = subprocess.run(["bash", LAUNCHER], cwd=TMP, capture_output=True, text=True, timeout=300,
+                          env=clean_env(PATH=env10["PATH"], EXP="session", DEVICE="cpu", FETCH=0, CKPT_MB=50, SEEDS="0 1",
+                                        PARENT_ARM="k10", KEEP_CKPT=0, OUT=os.path.join(TMP, "f32l", "b")))
+    l32c = subprocess.run(["bash", LAUNCHER], cwd=TMP, capture_output=True, text=True, timeout=300,
+                          env=clean_env(PATH=env10["PATH"], EXP="session", DEVICE="cpu", FETCH=0, SEEDS="0 1 2",
+                                        PARENTS=o32p, PARENT_ARM="k10", OUT=os.path.join(TMP, "f32l", "c")))
+    check("F32 the launcher PASSes EXP=session and its PARENTS, budgets 7 sessions x 3 files (2.1 GB at 50 MB), or a "
+          "parents stage's 2 x 3 files alone at KEEP_CKPT=0 (0.6 GB), FAILs PARENTS without a seed's final, and its ready "
+          "line carries PARENTS, PARENT_ARM, SESSION_WINDOWS and W_HEADROOM",
+          "PASS EXP=session" in l32.stdout and f"PASS PARENTS: k10's finals at seeds 0 1, in {oa32p}'s FINALS.sha256" in l32.stdout
+          and "the kept checkpoints may need 2.1 GB at 2 seed(s)" in l32.stdout
+          and "the kept checkpoints may need 0.6 GB at 2 seed(s)" in l32b.stdout
+          and "PASS no PARENTS: a parents stage trains k10 at seeds 0 1 first" in l32b.stdout
+          and "FAIL PARENTS: ckpt/k10.s2/ckpt.pt is missing or not in its FINALS.sha256" in l32c.stdout
+          and f"PARENTS={o32p}" in rl32 and "PARENT_ARM=k10" in rl32 and "SESSION_WINDOWS=8" in rl32
+          and "W_HEADROOM=100" in rl32, l32.stdout[-700:] + l32b.stdout[-300:] + l32c.stdout[-300:])
 finally:
     # NOTHING THESE CHECKS STARTED OUTLIVES THEM: a process carrying a GW_FLEET_OUT under TMP (a fleet, its
     # runs, its heartbeat) or naming TMP on its command line (a stand-in run, a dashboard) is killed.

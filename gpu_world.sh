@@ -1,7 +1,8 @@
 #!/bin/bash
 # ==================================================================================================
 # THE OWNER'S GPU FLEETS, EACH RUN AS A FLEET THAT FILLS THE CARD: Q-WORLD-10's WORLD EXPERIMENT,
-# 03b S0b's RETOK SHIP RULE, THE WHOLE-EPOCH WORLD RE-RUN'S SIZING AND THE RETOK CADENCE'S HELD-OUT RE-READ
+# 03b S0b's RETOK SHIP RULE, THE WHOLE-EPOCH WORLD RE-RUN'S SIZING, THE RETOK CADENCE'S HELD-OUT RE-READ
+# AND THE FIRST POST-TRAINING SESSIONS
 # ==================================================================================================
 # EXP CHOOSES THE EXPERIMENT, AND ANY OTHER VALUE IS REFUSED BY NAME (Proposal 05 §8 1.5): a
 # misspelled EXP used to fall through to the WORLD fleet, which then ran under the label meant for
@@ -12,6 +13,8 @@
 #                    WORLD levers are built
 #   EXP=heldout      E2's retok part (§8 6.3a): the shipped cadence against k0 on SR0's held-out probe,
 #                    per area, with O14's first remedy arm (below)
+#   EXP=session      the first post-training sessions (§8 5.3a): P, P+parent and a nuisance twin per
+#                    parent, from EXP=heldout's finals onto a fifth synthetic area, and W (below)
 #
 # WHAT EXP=world DECIDED (2026-09-24: within noise, WORLD_FEEDBACK now ships False). Whether WORLD_FEEDBACK stays True (the forecast wired into LM.encode, world_proj
 # born zero) and, if it helps, whether the help is WORLD MODELLING or just added capacity. The
@@ -278,6 +281,25 @@
 #     EXP=heldout SEEDS='7 8 9 10' FILL=0 OUT=gpu_heldout_topup_out POOL_WITH=gpu_heldout_out \
 #         bash tools/gpu_launch.sh --go                   # a top-up, as the block prints it (with PAR)
 #
+# EXP=session IS THE FIRST POST-TRAINING SESSIONS (Proposal 05 §8 5.3a, O9, NEW-02, NEW-20; 2026-10-02): does
+# learning a new area after training keep each older area within eps? Its parents are PARENT_ARM's finals
+# (k<PIN_RETOK>, EXP=heldout's shipped arm; k1000_mn if TOK_MINT_NOVEL ships) at SEEDS: PARENTS=<a directory
+# holding FINALS.sha256 and ckpt/<arm>.s<seed>, the held-out fleet's OUT or its unpacked finals>, every file
+# sha256-checked before anything is written; without PARENTS a PARENTS STAGE trains them first, EXP=heldout's
+# shape and pins, finals kept under $OUT/parents. Each parent then gets three SESSIONS -- P (pure-add), P_parent
+# (P+parent: DATA_DRAW=replay DATA_REPLAY_SHARE=0.27 DATA_REHEARSE_PARENT=1, O9's provisional rehearsal) and P_twin
+# (P at OPT_LR x 1.0001: the nuisance twin, read at every step; FAB_BIRTH_JITTER is read only at a growth birth,
+# under 1% of births, and the GPU reruns are bit-exact) -- and the parent with the most experts a fourth, W (P at
+# FAB_SLOTS = max(its slots, its n_live + W_HEADROOM), NEW-20's W). A session resumes its parent's final
+# (CKPT_RESUME, RUN_SEED its seed, a new CKPT_DIR) into a second epoch (RUN_EPOCHS=2 DATA_RESAMPLE=1) with x5
+# appended (DATA_AREAS=eng,py,num,c,x5 DATA_N_PROCESSES=5 and 5/4 of the parent's DATA_STREAM_BYTES, so every
+# old held-out block stays the parent's; DATA_PHASE_SCHED=x5|x5|x5|x5) at OPT_LR_CONTINUE=as_logged, EXP=heldout's
+# probe pins and the parent arm's settings, for SESSION_WINDOWS (5000) windows. The script's knobs are named
+# clear of every package prefix; EXTRA may not move the session's data levers (refused by name).
+#     EXP=session SEEDS='0 1 2 3 4 5 6' FILL=0 PARENTS=gpu_heldout_out bash tools/gpu_launch.sh --go
+#     EXP=session SEEDS='0 1 2 3 4 5 6' FILL=0 PARENT_ARM=k1000_mn PARENTS=gpu_heldout_out \
+#         bash tools/gpu_launch.sh --go                   # if EXP=heldout's DECISION shipped TOK_MINT_NOVEL
+#
 # EVERY FLEET ENDS IN A BLOCK TO PASTE BACK AND AN ARCHIVE TO KEEP. The GPU box has a checkout and no
 # push token (results/gpu_world_2026-09-24/ANALYSIS.txt was transcribed from its terminal by hand), so
 # the end of every fleet, every --analyze and every early stop prints ONE block, from
@@ -295,13 +317,14 @@ set -u
 _EXP_GIVEN=${EXP+x}
 EXP=${EXP:-world}
 case "$EXP" in
-  world|retok|world_epoch|heldout) ;;
-  *) echo "!! EXP='$EXP' is not an experiment this script runs: world (the default), retok, world_epoch or" \
-          "heldout. Nothing was started."; exit 2 ;;
+  world|retok|world_epoch|heldout|session) ;;
+  *) echo "!! EXP='$EXP' is not an experiment this script runs: world (the default), retok, world_epoch," \
+          "heldout or session. Nothing was started."; exit 2 ;;
 esac
 case "$EXP" in
   retok) _o=gpu_retok_out; _s="0 1 2" ;; world_epoch) _o=gpu_world_epoch_out; _s="0 1 2 3 4" ;;
-  heldout) _o=gpu_heldout_out; _s="0 1 2 3 4 5 6" ;; *) _o=gpu_world_out; _s="0 1 2 3 4" ;;
+  heldout) _o=gpu_heldout_out; _s="0 1 2 3 4 5 6" ;; session) _o=gpu_session_out; _s="0 1 2 3 4 5 6" ;;
+  *) _o=gpu_world_out; _s="0 1 2 3 4" ;;
 esac
 _OUT_GIVEN=${OUT:+x}
 OUT=${OUT:-$_o}
@@ -318,11 +341,12 @@ BYTES=${BYTES:-$(( WINDOWS * 1000 > 2000000 ? WINDOWS * 1000 : 2000000 ))}
 # bytes/window measured on CPU (2026-09-26) -- and the window cap (RUN_WIN) is set out of reach.
 # EXP=world_epoch takes the same whole-epoch sizing, for its own reason: the WORLD re-run must cross
 # every phase of the stream, and a window cap below the epoch would stop it inside one. So does
-# EXP=heldout: its endpoint is each area's reading at the end of the epoch.
+# EXP=heldout: its endpoint is each area's reading at the end of the epoch. And EXP=session's parents, which are
+# EXP=heldout's runs (its sessions resume them at 5/4 of their stream, for SESSION_WINDOWS windows).
 if [[ "$EXP" == retok ]]; then
   BYTES=${RETOK_BYTES:-$(( WINDOWS * 189 ))}
   RUN_WIN=$(( WINDOWS * 3 ))
-elif [[ "$EXP" == world_epoch || "$EXP" == heldout ]]; then
+elif [[ "$EXP" == world_epoch || "$EXP" == heldout || "$EXP" == session ]]; then
   BYTES=${EPOCH_BYTES:-$(( WINDOWS * 189 ))}
   RUN_WIN=$(( WINDOWS * 3 ))
 else
@@ -334,9 +358,9 @@ ARCH_ALSO=${ARCH_ALSO:-}
 LONG=${LONG:-0}
 PAR=${PAR:-auto}
 MPS=${MPS:-auto}
-# FILL IS 0 AT EXP=heldout, WHOSE SEEDS ARE CAPPED (§8 6.3a): FILL adds seeds to fill spare slots, up to
-# MAX_SEEDS, past a pre-registered cap.
-FILL=${FILL:-$([[ "$EXP" == heldout ]] && echo 0 || echo 1)}
+# FILL IS 0 AT EXP=heldout AND EXP=session, WHOSE SEEDS ARE CAPPED (§8 6.3a, 5.3a): FILL adds seeds to fill spare
+# slots, up to MAX_SEEDS, past a pre-registered cap.
+FILL=${FILL:-$([[ "$EXP" == heldout || "$EXP" == session ]] && echo 0 || echo 1)}
 MAX_SEEDS=${MAX_SEEDS:-16}
 DEVICE=${DEVICE:-cuda}
 # 600 AT THE WHOLE-EPOCH SHAPES, 150 AT EXP=world (LOW-GPU-WORLD-ETA). 600 is past FAB's first manage
@@ -350,16 +374,38 @@ LADDER=${LADDER:-"1 2 4 8 12 16 24 32 48 64 96 128"}
 # accident, silently -- spine/lever.py ignores undeclared names under a declared prefix.
 RETOK_ARMS=${RETOK_ARMS:-"3000 1000"}      # EXP=retok: the act cadences, one arm k<c> each
 COOLDOWN_ARM=${COOLDOWN_ARM:-}             # EXP=retok: FAB_COOLDOWN of an extra arm at the fastest cadence
-KEEP_CKPT=${KEEP_CKPT:-$([[ "$EXP" == retok || "$EXP" == heldout ]] && echo 1 || echo 0)}
+KEEP_CKPT=${KEEP_CKPT:-$([[ "$EXP" == retok || "$EXP" == heldout || "$EXP" == session ]] && echo 1 || echo 0)}
 KEEP_POLL=${KEEP_POLL:-1}                  # seconds between the kept-checkpoint watcher's looks
 PIN_RETOK=${PIN_RETOK:-1000}               # the shipped TOK_RETOK_EVERY: every EXP=world_epoch run's pin, EXP=heldout's act arms'
-POOL_WITH=${POOL_WITH:-}                   # EXP=heldout: a top-up's first fleet (its OUT), whose seeds it reads with its own
-PROBE_EVERY=${PROBE_EVERY:-700}            # EXP=world_epoch and heldout: the EVAL_RETENTION_EVERY every run pins (04-6.2's cap)
+POOL_WITH=${POOL_WITH:-}                   # EXP=heldout and session: a top-up's first fleet (its OUT), whose seeds it reads with its own
+PROBE_EVERY=${PROBE_EVERY:-700}            # EXP=world_epoch, heldout and session: the EVAL_RETENTION_EVERY every run pins (04-6.2's cap)
+PARENTS=${PARENTS:-}                       # EXP=session: a directory of the parents' finals (FINALS.sha256 and ckpt/); '' = a parents stage
+PARENT_ARM=${PARENT_ARM:-k$PIN_RETOK}      # EXP=session: the parents' arm, EXP=heldout's shipped one (k<c> or k<c>_mn)
+SESSION_WINDOWS=${SESSION_WINDOWS:-5000}   # EXP=session: the windows a session trains (--max-windows)
+W_HEADROOM=${W_HEADROOM:-2048}             # EXP=session: W's slots, max(the parent's slots, its n_live + this) (NEW-20's H)
 GO_WORLD_EPOCH=${GO_WORLD_EPOCH:-0}
 [[ "$PROBE_EVERY" =~ ^[1-9][0-9]*$ ]] \
   || { echo "!! PROBE_EVERY='$PROBE_EVERY' is not a positive window count (the retention cadence EXP=world_epoch and heldout pin). Nothing was started."; exit 2; }
 [[ "$PIN_RETOK" =~ ^[1-9][0-9]*$ ]] \
   || { echo "!! PIN_RETOK='$PIN_RETOK' is not a positive cadence (EXP=world_epoch's pin, EXP=heldout's act arms). Nothing was started."; exit 2; }
+# EXP=session's KNOBS, AND THE LEVERS ITS SESSIONS PIN (§8 5.3a). EXTRA reaches the parents stage and every
+# session, so a data lever there would train the parents on one stream and resume them on another: refused.
+if [[ "$EXP" == session ]]; then
+  [[ "$PARENT_ARM" =~ ^k[1-9][0-9]*(_mn)?$ ]] \
+    || { echo "!! PARENT_ARM='$PARENT_ARM' is not one of EXP=heldout's act arms (k<c> or k<c>_mn): the parents are its shipped arm's finals. Nothing was started."; exit 2; }
+  [[ "$SESSION_WINDOWS" =~ ^[1-9][0-9]*$ ]] \
+    || { echo "!! SESSION_WINDOWS='$SESSION_WINDOWS' is not a positive window count (a session's --max-windows). Nothing was started."; exit 2; }
+  [[ "$W_HEADROOM" =~ ^[1-9][0-9]*$ ]] \
+    || { echo "!! W_HEADROOM='$W_HEADROOM' is not a positive slot count (W's FAB_SLOTS, max(the parent's slots, its n_live + W_HEADROOM)). Nothing was started."; exit 2; }
+  for _l in DATA_AREAS DATA_N_PROCESSES DATA_SOURCE DATA_PHASE_SCHED DATA_PHASES RUN_EPOCHS DATA_RESAMPLE \
+            OPT_LR_CONTINUE CKPT_RESUME CKPT_DIR; do
+    [[ " $EXTRA " == *" $_l="* ]] && { echo "!! EXTRA sets $_l, which EXP=session's parents and sessions pin (§8 5.3a). Nothing was started."; exit 2; }
+  done
+  [[ "$PARENTS" =~ [[:space:]] ]] \
+    && { echo "!! PARENTS='$PARENTS' holds whitespace, and its path rides inside the job lines, which are split on whitespace. Nothing was started."; exit 2; }
+  [[ "$FILL" == 1 ]] \
+    && { echo "!! FILL=1: EXP=session's seeds are its parents', pre-registered and capped (§8 5.3a), and FILL would add seeds with no parent. Nothing was started."; exit 2; }
+fi
 # THE eps RULE'S TWO READING-TIME SETTINGS (EXP=retok's analysis; O2, O14). They are read when the
 # analysis runs, not recorded at launch, so --analyze can read the same runs against another eps; the
 # analysis prints both.
@@ -415,6 +461,14 @@ arm_env() {  # the lever settings that define each arm; an arm this does not kno
     # k[1-9]*, which would read k1000_mn as TOK_RETOK_EVERY=1000_mn.
     k[1-9]*_mn) local c=${1%_mn}; echo "TOK_RETOK_EVERY=${c#k} TOK_MINT_NOVEL=1.0" ;;
     k[1-9]*)   echo "TOK_RETOK_EVERY=${1#k}" ;;
+    # EXP=session's SESSIONS (§8 5.3a), each after the session's pins and its parent arm's settings: P names
+    # the pinned pure-add draw; P_parent rehearses the parent (O9's provisional preset); P_twin is P at OPT_LR x
+    # 1.0001 (TWIN_LR); W is P at W_SLOTS, known once the parents are read.
+    P)         echo "DATA_DRAW=planned" ;;
+    P_parent)  echo "DATA_DRAW=replay DATA_REPLAY_SHARE=0.27 DATA_REHEARSE_PARENT=1" ;;
+    P_twin)    echo "OPT_LR=$TWIN_LR" ;;
+    W)         [[ -n "${W_SLOTS:-}" ]] || { echo "!! arm_env: W's FAB_SLOTS is not known before the parents are read" >&2; return 1; }
+               echo "FAB_SLOTS=$W_SLOTS" ;;
     # NEVER AN EMPTY ANSWER: an unknown name used to return '' and run the defaults under it.
     *)         echo "!! arm_env: no arm named '$1'" >&2; return 1 ;;
   esac
@@ -442,6 +496,17 @@ if [[ "$EXP" == retok ]]; then
 elif [[ "$EXP" == heldout ]]; then
   BASE_ARMS="k0 k$PIN_RETOK k${PIN_RETOK}_mn"; CTRL=k0
   KEEP_EVERY=${KEEP_EVERY:-0}
+elif [[ "$EXP" == session ]]; then
+  # THE THREE SESSIONS EVERY PARENT GETS; W, at one parent, is added where the parents are read. THE TWIN'S RATE
+  # is the fleet's OPT_LR x 1.0001 -- EXTRA's, else this environment's, else the lever's declared default, read
+  # off the fleet's code as LEVELS is -- at 9 significant digits: 0.0020002 at the shipped 0.002.
+  BASE_ARMS="P P_parent P_twin"; CTRL=P
+  KEEP_EVERY=${KEEP_EVERY:-0}
+  _lr=$(echo " $EXTRA " | tr ' ' '\n' | sed -n 's/^OPT_LR=//p' | tail -1)
+  [[ -n "$_lr" ]] || _lr=$(printenv OPT_LR 2>/dev/null)
+  [[ -n "$_lr" ]] || _lr=$(sed -n 's/^    lr = Lever( *\([0-9.eE+-]*\) *,.*/\1/p' "$CODE_DIR/src/opt/levers.py" 2>/dev/null | head -1)
+  TWIN_LR=$(awk -v x="$_lr" 'BEGIN { if (x + 0 > 0) printf "%.9g", x * 1.0001 }')
+  [[ -n "$TWIN_LR" ]] || { echo "!! EXP=session: the fleet's OPT_LR ('$_lr') is not a positive rate, so P_twin's (x 1.0001) cannot be set. Nothing was started."; exit 2; }
 else
   BASE_ARMS="fb_off fb_on skip world_off"; CTRL=fb_off
   KEEP_EVERY=${KEEP_EVERY:-0}
@@ -463,6 +528,18 @@ EXP_ENV=""
 # per area, the in-run reading at 12, no generation, and plain minting -- the arms set the cadence, and
 # k<c>_mn TOK_MINT_NOVEL, after them. 04-Q5's pin rule does not apply: the arms pair with each other.
 [[ "$EXP" == heldout ]] && EXP_ENV="DATA_DRAW=planned DATA_SYNTH_HOLDOUT=1 EVAL_RETENTION_EVERY=$PROBE_EVERY EVAL_HOLDOUT_WINDOWS=256 EVAL_RETENTION_N=24 EVAL_GENERATE=0 TOK_MINT_NOVEL=0"
+# EXP=session's PINS (§8 5.3a): EXP=heldout's, on the parents stage and on every session, so a session pins again
+# the report items its parent read. The parent arm's settings follow them on every run (TOK_MINT_NOVEL 1.0 at
+# k<c>_mn), then a session's own (SESS_ENV: a second epoch, x5 appended at 5/4 of the parents' stream, so 945,000
+# bytes a process at 3,780,000 and no old block moves; pure-add; the rate as logged) and its arm's.
+if [[ "$EXP" == session ]]; then
+  EXP_ENV="DATA_DRAW=planned DATA_SYNTH_HOLDOUT=1 EVAL_RETENTION_EVERY=$PROBE_EVERY EVAL_HOLDOUT_WINDOWS=256 EVAL_RETENTION_N=24 EVAL_GENERATE=0 TOK_MINT_NOVEL=0"
+  _pb=$(echo " $EXTRA " | tr ' ' '\n' | sed -n 's/^DATA_STREAM_BYTES=//p' | tail -1)
+  PBYTES=${_pb:-$BYTES}
+  [[ "$PBYTES" =~ ^[1-9][0-9]*$ ]] || { echo "!! EXP=session: the parents' DATA_STREAM_BYTES ('$PBYTES') is not a byte count. Nothing was started."; exit 2; }
+  SBYTES=$(( 5 * (PBYTES / 4) ))
+  SESS_ENV="RUN_EPOCHS=2 DATA_RESAMPLE=1 DATA_AREAS=eng,py,num,c,x5 DATA_N_PROCESSES=5 DATA_STREAM_BYTES=$SBYTES DATA_PHASE_SCHED=x5|x5|x5|x5 OPT_LR_CONTINUE=as_logged"
+fi
 # 04-Q5's PIN RULE AT EXP=retok (2026-09-29): the three levers whose defaults flipped, at the values
 # that restore the tree before them -- each only where this tree declares its lever, read off the
 # fleet's code at launch as LEVELS is below. A checkout from before a flip then gets no name its lever
@@ -556,8 +633,24 @@ ckpt_files() {  # name
 
 plan_banner() {  # the fleet's shape, as SUMMARY records it and the EXP=world_epoch guard prints it
   echo "=== $WINDOWS windows per run, DATA_STREAM_BYTES=$BYTES, seeds: $SEEDS, EXTRA='$EXTRA'"
-  echo "=== plan: EXP=$EXP; arms $BASE_ARMS, plus ${CTRL}_rerun at seed 0; window cap $RUN_WIN;" \
-       "CAL_WINDOWS $CAL_WINDOWS; LM_CTX $CTX"
+  if [[ "$EXP" == session ]]; then
+    # A SESSION'S CAP IS ITS --max-windows; the first line's windows and stream are the parents' shape.
+    echo "=== plan: EXP=$EXP; arms $BASE_ARMS, plus W at the parent with the most experts; window cap $SESSION_WINDOWS;" \
+         "CAL_WINDOWS $CAL_WINDOWS; LM_CTX $CTX"
+    if [[ -n "${PARENTS_ABS:-}" ]]; then
+      echo "=== parents: $PARENT_ARM at seeds $SEEDS, from $PARENTS_ABS ($PARENTS_CHECKED file(s) sha256-checked against" \
+           "its FINALS.sha256)"
+    else
+      echo "=== parents: $PARENT_ARM at seeds $SEEDS, a parents stage first: one whole epoch each (window cap $RUN_WIN)," \
+           "these pins and $(arm_env "$PARENT_ARM"), finals kept under $OUT/parents/ckpt"
+    fi
+    echo "=== session: $SESSION_WINDOWS windows, resumed from its parent's final at its seed, the pins and the parent" \
+         "arm's settings, then $SESS_ENV; P_twin OPT_LR=$TWIN_LR; W FAB_SLOTS max(the parent's slots, its n_live +" \
+         "$W_HEADROOM)"
+  else
+    echo "=== plan: EXP=$EXP; arms $BASE_ARMS, plus ${CTRL}_rerun at seed 0; window cap $RUN_WIN;" \
+         "CAL_WINDOWS $CAL_WINDOWS; LM_CTX $CTX"
+  fi
   if [[ "$KEEP_CKPT" == 1 && "$EXP" == retok ]]; then
     echo "=== kept checkpoints: ON, k0 family CKPT_EVERY=$KEEP_EVERY, act arms final only;" \
          "k0's saves hard-linked under $OUT/ckpt/keep"
@@ -2683,7 +2776,7 @@ pack() {  # everything under OUT but checkpoints (and the fleet's code copy), in
   # tar's exit 1 is "a file changed as it was read" (the dashboard's page, a run still ending): the
   # archive is written, so it counts as packed.
   tar -czf "$a" -C "$p" --warning=no-file-changed --warning=no-file-removed \
-      --exclude="$b/ckpt" --exclude="$b/smoke/ckpt" --exclude="$b/mps" --exclude="$b/code" \
+      --exclude="$b/ckpt" --exclude="$b/smoke/ckpt" --exclude="$b/parents/ckpt" --exclude="$b/mps" --exclude="$b/code" \
       --exclude='*.pt' --exclude='*.pt.*' --exclude='.*.tmp' "$b"
   rc=$?
   if [[ "$rc" -le 1 && -s "$a" ]]; then
@@ -2786,8 +2879,10 @@ gw_st() { sed -n "s/^$1=//p" "$OUT/STATE" 2>/dev/null | tail -1; }   # key: its 
 gw_where() {  # where the fleet is, in words, off STATE
   local n
   case "$(gw_st phase)" in
-    smoke) echo "the smoke" ;;
+    smoke) [[ "$(gw_st step)" == sessions ]] && echo "the sessions' smoke" || echo "the smoke" ;;
     cal) echo "calibration $(gw_st step)" ;;
+    parents) n=$(grep -c 'rc=' "$OUT/parents/_done.txt" 2>/dev/null)
+             echo "the parents stage (${n:-0} of $(gw_st runs_total) run(s) ended)" ;;
     fleet) n=$(grep -c 'rc=' "$OUT/logs/_done.txt" 2>/dev/null)
            echo "the fleet (${n:-0} of $(gw_st runs_total) run(s) ended)" ;;
     analysis) echo "the analysis (the runs had ended: --analyze reads them)" ;;
@@ -3113,15 +3208,16 @@ if [[ "$KEEP_CKPT" == 1 && "$OUT" =~ [[:space:]] ]]; then
   echo "   split on whitespace. Choose an OUT without spaces. Nothing was started."; exit 2
 fi
 
-# A TOP-UP NAMES ITS FIRST FLEET (§8 6.3a): POOL_WITH=<that fleet's OUT>, which the launch checks before
-# anything is written -- an EXP=heldout fleet there, not this OUT (a launch moves the fleet in OUT aside), and
+# A TOP-UP NAMES ITS FIRST FLEET (§8 6.3a, 5.3a): POOL_WITH=<that fleet's OUT>, which the launch checks before
+# anything is written -- a fleet of this EXP there, not this OUT (a launch moves the fleet in OUT aside), and
 # none of its seeds run again -- and the banner records for the analysis.
 POOL_ABS=""; POOL_SEEDS=""
 if [[ -n "$POOL_WITH" ]]; then
-  [[ "$EXP" == heldout ]] || { echo "!! POOL_WITH names a top-up's first fleet, which only EXP=heldout reads. Nothing was started."; exit 2; }
+  [[ "$EXP" == heldout || "$EXP" == session ]] \
+    || { echo "!! POOL_WITH names a top-up's first fleet, which only EXP=heldout and EXP=session read. Nothing was started."; exit 2; }
   POOL_ABS=$(cd "$POOL_WITH" 2>/dev/null && pwd -P)
-  if [[ -z "$POOL_ABS" ]] || ! grep -q '^=== plan: EXP=heldout;' "$POOL_ABS/SUMMARY.txt" 2>/dev/null; then
-    echo "!! POOL_WITH='$POOL_WITH' holds no EXP=heldout fleet (no SUMMARY.txt that records one). Nothing was started."; exit 2
+  if [[ -z "$POOL_ABS" ]] || ! grep -q "^=== plan: EXP=$EXP;" "$POOL_ABS/SUMMARY.txt" 2>/dev/null; then
+    echo "!! POOL_WITH='$POOL_WITH' holds no EXP=$EXP fleet (no SUMMARY.txt that records one). Nothing was started."; exit 2
   fi
   if [[ "$POOL_ABS" == "$(realpath -m -- "$OUT")" ]]; then
     echo "!! POOL_WITH is this OUT, and a launch moves the fleet in OUT aside: give the top-up its own OUT, as the"
@@ -3133,6 +3229,89 @@ if [[ -n "$POOL_WITH" ]]; then
     [[ " $POOL_SEEDS " == *" $_s "* ]] \
       && { echo "!! SEEDS: seed $_s ran in the first fleet too ($POOL_SEEDS). Nothing was started."; exit 2; }
   done
+fi
+
+# EXP=session's PARENTS (§8 5.3a), checked before anything is written: PARENTS (a directory holding FINALS.sha256
+# and ckpt/, the held-out fleet's OUT or its unpacked finals) lists PARENT_ARM's final checkpoint and vocabulary at
+# every seed in SEEDS, each file's sha256 equals the manifest's, and each final is read -- its step, n_live, FAB_SLOTS
+# and its areas' generated length, which the sessions' stream must keep (so no old block moves). Without PARENTS
+# the parents stage trains them, and they are read after it. Read with the fleet's code, cwd the parents' directory.
+parent_facts() {  # dir arm seed... -> one line a seed, "seed step n_live slots area_bytes", or "!! <why>"
+  ( cd "$1" 9>&- && python3 - "$PWD" "$CODE_DIR" "${@:2}" <<'PY'
+import os, sys
+d, code, arm, seeds = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:]
+sys.path[:] = [p for p in sys.path if p and os.path.abspath(p) != os.path.abspath(code)]
+sys.path.insert(0, os.path.join(code, "src"))
+import torch
+for s in seeds:
+    p = os.path.join(d, "ckpt", f"{arm}.s{s}", "ckpt.pt")
+    try:
+        try:
+            b = torch.load(p, map_location="cpu", mmap=True, weights_only=False)
+        except TypeError:                               # a torch without mmap=
+            b = torch.load(p, map_location="cpu", weights_only=False)
+        pay = b.get("payload") or {}
+        lens = sorted({int(v) for v in ((pay.get("DATA") or {}).get("bytes_present") or {}).values()})
+        print(s, int(b["step"]), int((pay.get("FAB") or {})["n_live"]), int((b.get("geometry") or {})["fab.slots"][0]),
+              lens[0] if len(lens) == 1 else -1)
+    except Exception as e:                              # noqa: BLE001 -- said, and the launch refuses
+        print(f"!! {arm}.s{s}: {type(e).__name__}: {str(e)[:200]}")
+PY
+  )
+}
+# THE SESSIONS' INPUTS OFF THE FACTS: each parent's step (PSTEP, which the dashboard counts a session's windows
+# past), W's parent (the most experts, the lowest seed on a tie) and W_SLOTS, max(its slots, its n_live +
+# W_HEADROOM). A parent whose areas were generated at another length than the sessions' stream keeps is refused:
+# its old blocks would move (tests/test_holdout.py H2), and the fix is the shape of the fleet that trained it.
+declare -A PSTEP=()
+W_SEED=""; W_SLOTS=""; W_NLIVE=""; W_PSLOTS=""
+parents_take() {  # facts -> 0, or 1 having said why
+  local seed step nl sl ln best=-1 want _sm
+  _sm=$(echo " $EXTRA " | tr ' ' '\n' | sed -n 's/^DATA_SEG_MAX=//p' | tail -1)
+  [[ -n "$_sm" ]] || _sm=$(sed -n 's/^    seg_max = Lever( *\([0-9][0-9]*\) *,.*/\1/p' "$CODE_DIR/src/data/levers.py" 2>/dev/null | head -1)
+  want=$(( SBYTES / 5 )); (( want < ${_sm:-0} + 1 )) && want=$(( ${_sm:-0} + 1 )); (( want < 5000 )) && want=5000
+  want=$(( 2 * want ))
+  while read -r seed step nl sl ln; do
+    [[ -z "$seed" ]] && continue
+    if [[ "$seed" == "!!" ]]; then echo "!! the parent $step $nl $sl $ln"; return 1; fi
+    if [[ "$ln" != "$want" ]]; then
+      echo "!! the parent $PARENT_ARM.s$seed's areas were generated $ln bytes long, and a session at DATA_STREAM_BYTES=$SBYTES"
+      echo "   (5/4 of the parents' $PBYTES) generates them $want long: its old held-out blocks would move. Give this"
+      echo "   fleet the WINDOWS (or EPOCH_BYTES) and EXTRA of the fleet that trained its parents."
+      return 1
+    fi
+    PSTEP[$seed]=$step
+    if (( nl > best )); then best=$nl; W_SEED=$seed; W_NLIVE=$nl; W_PSLOTS=$sl; fi
+  done <<< "$1"
+  [[ -n "$W_SEED" ]] || { echo "!! no parent could be read"; return 1; }
+  W_SLOTS=$(( W_NLIVE + W_HEADROOM > W_PSLOTS ? W_NLIVE + W_HEADROOM : W_PSLOTS ))
+  return 0
+}
+PARENTS_ABS=""; PARENTS_CHECKED=0
+if [[ "$EXP" == session && -n "$PARENTS" ]]; then
+  PARENTS_ABS=$(cd "$PARENTS" 2>/dev/null && pwd -P)
+  [[ -n "$PARENTS_ABS" && -f "$PARENTS_ABS/FINALS.sha256" ]] \
+    || { echo "!! PARENTS='$PARENTS' holds no FINALS.sha256 (the held-out fleet's OUT, or its finals unpacked). Nothing was started."; exit 2; }
+  [[ "$PARENTS_ABS" == "$(realpath -m -- "$OUT")" ]] \
+    && { echo "!! PARENTS is this OUT, and a launch moves the fleet in OUT aside: give the sessions their own OUT. Nothing was started."; exit 2; }
+  _want=""
+  for _s in $SEEDS; do _want="$_want ckpt/$PARENT_ARM.s$_s/ckpt.pt ckpt/$PARENT_ARM.s$_s.dyntok.json"; done
+  _lines=$(awk -v w="$_want" 'BEGIN { n = split(w, a, " "); for (i = 1; i <= n; i++) k[a[i]] = 1 }
+                               k[substr($0, 67)] == 1 { print; k[substr($0, 67)] = 2 }
+                               END { for (f in k) if (k[f] == 1) print "MISSING " f }' "$PARENTS_ABS/FINALS.sha256")
+  _miss=$(sed -n 's/^MISSING //p' <<< "$_lines" | sort | head -4 | tr '\n' ' ')
+  _lines=$(grep -v '^MISSING ' <<< "$_lines")
+  [[ -z "$_miss" ]] || { echo "!! PARENTS' FINALS.sha256 lists no $_miss(PARENT_ARM=$PARENT_ARM, SEEDS='$SEEDS'). Nothing was started."; exit 2; }
+  if [[ -n "${GW_PARENTS_SUM:-}" && "$GW_PARENTS_SUM" == "$(sha256sum <<< "$_lines" | cut -c1-16)" ]]; then
+    PARENTS_CHECKED=${GW_PARENTS_CHECKED:-0}                 # the checkout's launch checked them before the copy
+  else
+    _bad=$(cd "$PARENTS_ABS" && sha256sum -c --quiet 2>&1 <<< "$_lines" | head -4)
+    [[ -z "$_bad" ]] || { echo "!! PARENTS: a final does not match its sha256 in FINALS.sha256:"; echo "$_bad" | sed 's/^/   /'; echo "   Nothing was started."; exit 2; }
+    PARENTS_CHECKED=$(grep -c . <<< "$_lines")
+    export GW_PARENTS_SUM=$(sha256sum <<< "$_lines" | cut -c1-16) GW_PARENTS_CHECKED=$PARENTS_CHECKED
+  fi
+  _facts=$(parent_facts "$PARENTS_ABS" "$PARENT_ARM" $SEEDS)
+  parents_take "$_facts" || { echo "   Nothing was started."; exit 2; }
 fi
 
 # ---------------------------------------------------------------- the launch gate (from the checkout)
@@ -3370,7 +3549,8 @@ run_job() {  # name seed windows gpu arm-env...
   [[ "$FLUSH_BYTES" == 1 ]] && fb=(--flush-bytes "${CURVE_DIR:-$OUT/curves}/$tag.bytes.json")
   # EXP=world_epoch's AND EXP=heldout's RULES READ THE RETENTION PROBE (note WORLD 4, §8 6.3a): each run
   # writes its reading series beside its curve, and the archive packs it with the curves.
-  [[ "$EXP" == world_epoch || "$EXP" == heldout ]] && ps=(--probe-series "${CURVE_DIR:-$OUT/curves}/$tag.probe.json")
+  [[ "$EXP" == world_epoch || "$EXP" == heldout || "$EXP" == session ]] \
+    && ps=(--probe-series "${CURVE_DIR:-$OUT/curves}/$tag.probe.json")
   if [[ "$KEEP_CKPT" == 1 && "$EXP" == retok && "$name" == k0 ]]; then
     for a in "$@"; do [[ "$a" == CKPT_DIR=* ]] && ck="${a#CKPT_DIR=}"; done
   fi
@@ -3395,7 +3575,11 @@ run_job() {  # name seed windows gpu arm-env...
       python3 "$CODE_DIR/run.py" --max-windows "$win" --loss-curve "${CURVE_DIR:-$OUT/curves}/$tag.json" "${fb[@]}" \
       "${ps[@]}" > "$log" 2>&1 &
   rp=$!
-  echo "$tag pid=$rp t0=$t0 cap=$win target=$tw" >> "${JOB_DIR:-$OUT/logs}/_started.txt"
+  # A SESSION'S PROGRESS LINES COUNT ITS RUN'S WINDOWS, ITS PARENT'S INCLUDED (EXP=session): base= is its parent's
+  # step, which the dashboard takes off them.
+  local base=""
+  for a in "$@"; do [[ "$a" == CKPT_RESUME=* && -n "${PSTEP[$seed]:-}" ]] && base=" base=${PSTEP[$seed]}"; done
+  echo "$tag pid=$rp t0=$t0 cap=$win target=$tw$base" >> "${JOB_DIR:-$OUT/logs}/_started.txt"
   wait "$rp"
   local rc=$?
   if [[ -n "$w" ]]; then
@@ -3447,9 +3631,36 @@ if [[ "$KEEP_CKPT" == 1 && "$EXP" == retok ]]; then
 fi
 
 # ---------------------------------------------------------------- 1. smoke every arm
-say "---- 1. smoke: every arm, seed 0, $SMOKE_WINDOWS windows, all at once"
+# EXP=session's SESSIONS RESUME A PARENT (§8 5.3a): its job line is the parent arm's settings, the session's pins, its
+# arm's and its resume, in that order, the later winning. Its smoke is the four sessions from the parents, P, P_parent
+# and P_twin at the first seed and W at W's, when PARENTS names them; without PARENTS the parents' arm at the first
+# seed, fresh, and the sessions' smoke after the parents stage.
+P0=$(echo $SEEDS | cut -d' ' -f1)
+PDIR=""
+[[ "$EXP" == session ]] && PDIR=${PARENTS_ABS:-$(realpath -m -- "$OUT/parents")}
+session_job() {  # arm seed windows ckpt-base [smoke] -> its job line
+  echo "$1 $2 $3 $(arm_env "$PARENT_ARM") $SESS_ENV $(arm_env "$1") CKPT_RESUME=$PDIR/ckpt/$PARENT_ARM.s$2" \
+       "$(ckpt_env "$1" "$2" "$4" ${5:-})"
+}
+session_smoke_jobs() {
+  local a
+  JOBS=()
+  for a in $BASE_ARMS; do add_job "$(session_job "$a" "$P0" "$SMOKE_WINDOWS" "$OUT/smoke/ckpt" smoke)"; done
+  add_job "$(session_job W "$W_SEED" "$SMOKE_WINDOWS" "$OUT/smoke/ckpt" smoke)"
+}
 JOBS=()
-for a in $BASE_ARMS; do add_job "$a 0 $SMOKE_WINDOWS $(arm_env $a) $(ckpt_env $a 0 "$OUT/smoke/ckpt" smoke)"; done
+if [[ "$EXP" == session && -n "$PARENTS_ABS" ]]; then
+  say "---- 1. smoke: every session from the parents ($PARENT_ARM; W's at seed $W_SEED, the rest at seed $P0)," \
+      "$SMOKE_WINDOWS windows each, all at once"
+  session_smoke_jobs
+elif [[ "$EXP" == session ]]; then
+  say "---- 1. smoke: the parents' arm $PARENT_ARM, seed $P0, $SMOKE_WINDOWS windows (the sessions' smoke follows the" \
+      "parents stage)"
+  add_job "$PARENT_ARM $P0 $SMOKE_WINDOWS $(arm_env "$PARENT_ARM") CKPT_DIR=$OUT/smoke/ckpt/$PARENT_ARM.s$P0 CKPT_EVERY=0"
+else
+  say "---- 1. smoke: every arm, seed 0, $SMOKE_WINDOWS windows, all at once"
+  for a in $BASE_ARMS; do add_job "$a 0 $SMOKE_WINDOWS $(arm_env $a) $(ckpt_env $a 0 "$OUT/smoke/ckpt" smoke)"; done
+fi
 if [[ -n "$ARCH_ALSO" ]]; then
   for a in fb_off fb_on; do add_job "${a}@$ARCH_ALSO 0 $SMOKE_WINDOWS LM_ARCH=$ARCH_ALSO $(arm_env $a) $(ckpt_env "${a}@$ARCH_ALSO" 0 "$OUT/smoke/ckpt" smoke)"; done
 fi
@@ -3467,19 +3678,25 @@ say "    ${#JOBS[@]} run(s) start $(date -u +%H:%M:%SZ). Each builds on the CPU 
   "measures it here -- and only then uses the GPU, so nvidia-smi reads idle until they train. The step's result" \
   "prints when it ends$HB_NOTE."
 JOB_DIR="$OUT/smoke" CURVE_DIR="$OUT/smoke" run_fleet "${#JOBS[@]}"
-if grep -q "rc=[1-9]" "$OUT/smoke/_done.txt"; then
-  say "!! a smoke arm FAILED -- stopping before the fleet:"
-  grep "rc=[1-9]" "$OUT/smoke/_done.txt" | sed 's/^/    /' | tee -a "$S"
-  for f in $(grep "rc=[1-9]" "$OUT/smoke/_done.txt" | cut -d' ' -f1); do
-    say "    --- $f (last 8 lines)"; tail -8 "$OUT/smoke/$f.log" | sed 's/^/      /' | tee -a "$S"
-  done
-  fail_back "a smoke arm failed" $(grep "rc=[1-9]" "$OUT/smoke/_done.txt" | cut -d' ' -f1 | sed "s#^#$OUT/smoke/#; s#\$#.log#")
-  exit 1
-fi
-# the tripwires and the sizing numbers, read off the smoke logs
-SIZING=$(python3 - "$OUT/smoke" "$DEVICE" <<'PY' | tee -a "$S"
-import re, sys, glob, os
+# A SMOKE RUN THAT FAILED STOPS THE FLEET WITH ITS BLOCK; and the tripwires and sizing numbers, read off the smoke's
+# logs -- functions since EXP=session's second smoke (the sessions', after its parents stage) reads them too.
+smoke_rc() {  # dir
+  if grep -q "rc=[1-9]" "$1/_done.txt"; then
+    say "!! a smoke arm FAILED -- stopping before the fleet:"
+    grep "rc=[1-9]" "$1/_done.txt" | sed 's/^/    /' | tee -a "$S"
+    for f in $(grep "rc=[1-9]" "$1/_done.txt" | cut -d' ' -f1); do
+      say "    --- $f (last 8 lines)"; tail -8 "$1/$f.log" | sed 's/^/      /' | tee -a "$S"
+    done
+    fail_back "a smoke arm failed" $(grep "rc=[1-9]" "$1/_done.txt" | cut -d' ' -f1 | sed "s#^#$1/#; s#\$#.log#")
+    exit 1
+  fi
+}
+smoke_rc "$OUT/smoke"
+smoke_read() {  # dir
+python3 - "$1" "$DEVICE" "$EXP" <<'PY'
+import json, re, sys, glob, os
 d, dev = sys.argv[1], sys.argv[2]
+exp = sys.argv[3] if len(sys.argv) > 3 else ""
 def rep(t):
     out = {}
     for m in re.finditer(r"^\s+([A-Za-z_][\w.@()-]*\.[\w.@()-]+)\s+(\S+)\s*$", t, re.M):
@@ -3497,21 +3714,37 @@ for log in sorted(glob.glob(os.path.join(d, "*.log"))):
         bad.append(f"{arm}: lm.encode.extra_applied is PRESENT ({ea}) on the unwired control")
     if arm == "world_off" and built != "null":
         bad.append(f"{arm}: world.built is {built!r}, expected 'null'")
+    # A SESSION'S ANCHOR (EXP=session, §8 5.3a): its resume-start reading through the memory-off closure, over
+    # the four old areas, is what every F subtracts.
+    if exp == "session" and arm in ("P", "P_parent", "P_twin", "W"):
+        try:
+            ser = json.load(open(log[:-4] + ".probe.json"))
+        except (OSError, ValueError):
+            ser = None
+        if not any(isinstance(x, dict) and x.get("kind") == "resume" and x.get("closure") == "memory-off"
+                   and {"eng", "py", "num", "c"} <= set(x.get("areas") or {}) for x in ser or []):
+            bad.append(f"{os.path.basename(log)[:-4]}: no resume-start reading over the old areas in its probe series")
     m = re.search(r"peak CUDA memory [\d.]+ GiB allocated, ([\d.]+) GiB reserved", t)
     if m: peak = max(peak, float(m.group(1)))
     m = re.search(r"=== (\d+) windows[^\n]*? in ([\d.]+)s", t)
-    if m and float(m.group(2)) > 0: wps.append(int(m.group(1)) / float(m.group(2)))
+    # A RESUMED RUN'S LINE COUNTS ITS RUN'S WINDOWS (its parent's included) AND THIS PROCESS'S SECONDS.
+    h = re.search(r"^=== \d+ windows run total \((\d+) trained by this process", t, re.M)
+    if m and float(m.group(2)) > 0: wps.append((int(h.group(1)) if h else int(m.group(1))) / float(m.group(2)))
 for b in bad: print("  TRIPWIRE:", b)
 print(f"  smoke: {len(glob.glob(os.path.join(d, '*.log')))} arm(s) ran; peak reserved {peak:.3f} GiB per process; "
       f"{min(wps) if wps else 0:.1f}-{max(wps) if wps else 0:.1f} windows/s per process while all ran at once")
 print(f"SIZING peak_gib={peak:.4f} wps={min(wps) if wps else 0:.3f} bad={len(bad)}")
 PY
-)
-if echo "$SIZING" | grep -q "bad=[1-9]"; then
-  say "!! a tripwire failed in the smoke -- stopping before the fleet."
-  fail_back "a smoke tripwire failed: $(echo "$SIZING" | grep TRIPWIRE | head -3 | sed 's/^ *TRIPWIRE: //' | tr '\n' ';')"
-  exit 1
-fi
+}
+smoke_trip() {  # sizing
+  if echo "$1" | grep -q "bad=[1-9]"; then
+    say "!! a tripwire failed in the smoke -- stopping before the fleet."
+    fail_back "a smoke tripwire failed: $(echo "$1" | grep TRIPWIRE | head -3 | sed 's/^ *TRIPWIRE: //' | tr '\n' ';')"
+    exit 1
+  fi
+}
+SIZING=$(smoke_read "$OUT/smoke" | tee -a "$S")
+smoke_trip "$SIZING"
 PEAK_GIB=$(echo "$SIZING" | sed -n 's/.*peak_gib=\([0-9.]*\).*/\1/p')
 SMOKE_WPS=$(echo "$SIZING" | sed -n 's/.*wps=\([0-9.]*\).*/\1/p')
 # THE STARTUP, MEASURED: run.py's '=== composed' line says how long the run took from its first line
@@ -3538,7 +3771,8 @@ fi
 # ran on this card in the first minute, and at least one copy must be kept and coherent. The smoke's
 # checkpoints then size the fleet's disk and are deleted.
 CKPT_BYTES=0
-if [[ "$KEEP_CKPT" == 1 ]]; then
+# (EXP=session's parents stage saves its finals at any KEEP_CKPT -- they are the sessions' parents -- so its smoke does.)
+if [[ "$KEEP_CKPT" == 1 || "$EXP" == session ]]; then
   if [[ "$EXP" == retok ]]; then
     _kept="$OUT/smoke/ckpt/keep/k0.s0.kept.txt"
     if [[ $(grep -c " coherent " "$_kept" 2>/dev/null) -lt 1 ]]; then
@@ -3640,8 +3874,21 @@ fi
 
 # ---------------------------------------------------------------- 2. the job list and its size
 JOBS=()
-for s in $SEEDS; do for a in $BASE_ARMS; do add_job "$a $s $RUN_WIN $(arm_env $a) $(ckpt_env $a $s "$OUT/ckpt")"; done; done
-add_job "${CTRL}_rerun 0 $RUN_WIN $(arm_env $CTRL) $(ckpt_env ${CTRL}_rerun 0 "$OUT/ckpt")"
+if [[ "$EXP" == session ]]; then
+  # THE PARENTS STAGE'S RUNS, WITHOUT PARENTS (their finals saved at any KEEP_CKPT: they are the sessions' parents),
+  # THEN THE SESSIONS: three at every seed and W at one. Until the parents are read W stands at the first seed, for
+  # the disk check and the ETA.
+  PJOBS=()
+  if [[ -z "$PARENTS_ABS" ]]; then
+    for s in $SEEDS; do PJOBS+=("$PARENT_ARM $s $RUN_WIN $(arm_env "$PARENT_ARM") CKPT_DIR=$PDIR/ckpt/$PARENT_ARM.s$s CKPT_EVERY=0"); done
+  fi
+  JOBS=("${PJOBS[@]}")
+  for s in $SEEDS; do for a in $BASE_ARMS; do add_job "$a $s $SESSION_WINDOWS"; done; done
+  add_job "W ${W_SEED:-$P0} $SESSION_WINDOWS"
+else
+  for s in $SEEDS; do for a in $BASE_ARMS; do add_job "$a $s $RUN_WIN $(arm_env $a) $(ckpt_env $a $s "$OUT/ckpt")"; done; done
+  add_job "${CTRL}_rerun 0 $RUN_WIN $(arm_env $CTRL) $(ckpt_env ${CTRL}_rerun 0 "$OUT/ckpt")"
+fi
 if [[ -n "$ARCH_ALSO" ]]; then
   for s in $SEEDS; do for a in fb_off fb_on; do add_job "${a}@$ARCH_ALSO $s $WINDOWS LM_ARCH=$ARCH_ALSO $(arm_env $a) $(ckpt_env "${a}@$ARCH_ALSO" $s "$OUT/ckpt")"; done; done
 fi
@@ -3653,12 +3900,15 @@ fi
 # checkpoint (the fabric grows toward FAB_SLOTS), k0 at its kept saves plus the ring. FILL stops adding
 # seeds past 0.9 of the free space, and a job list that does not fit at its base seeds is refused.
 gb() { awk -v b="$1" 'BEGIN { printf "%.1f", b / 1e9 }'; }
-jobs_need() {  # bytes the job list's checkpoints may take
+jobs_need() {  # bytes the job list's checkpoints may take (EXP=session: its sessions' only at KEEP_CKPT=1)
   local n=0 line
-  for line in "${JOBS[@]}"; do n=$(( n + $(ckpt_files "${line%% *}") )); done
+  for line in "${JOBS[@]}"; do
+    [[ "$EXP:$KEEP_CKPT" == session:0 && " P P_parent P_twin W " == *" ${line%% *} "* ]] && continue
+    n=$(( n + $(ckpt_files "${line%% *}") ))
+  done
   echo $(( n * CKPT_BYTES * 2 ))
 }
-if [[ "$KEEP_CKPT" == 1 ]]; then
+if [[ "$KEEP_CKPT" == 1 || "$EXP" == session ]]; then
   FREE_B=$(( $(df -Pk "$OUT" | awk 'NR == 2 {print $4}') * 1024 ))
   NEED_B=$(jobs_need)
   if [[ "$NEED_B" -gt "$FREE_B" ]]; then
@@ -3669,6 +3919,7 @@ if [[ "$KEEP_CKPT" == 1 ]]; then
       retok) _fx="free space, run fewer SEEDS, or KEEP_CKPT=0 (which leaves the spike test without its control)" ;;
       heldout) if [[ -n "$POOL_WITH" ]]; then _fx="free space, or KEEP_CKPT=0: the next test starts from the first fleet's finals, not a top-up's"
                else _fx="free space, keeping the 7 pre-registered seeds and KEEP_CKPT on: the finals are the next test's parents"; fi ;;
+      session) _fx="free space, or KEEP_CKPT=0, which keeps no session's checkpoint (a parents stage keeps its finals: the sessions resume them)" ;;
       *) _fx="free space, run fewer SEEDS, or KEEP_CKPT=0" ;;
     esac
     say "!! disk: the kept checkpoints may need $(gb $NEED_B) GB and $OUT has $(gb $FREE_B) GB free."
@@ -3697,7 +3948,7 @@ if [[ "$FILL" == 1 && "${#JOBS[@]}" -lt "$PAR" ]]; then
   done
   [[ -n "$added" ]] && say "=== FILL: spare slots -> extra seeds$added on every base arm (now $n_seeds seeds)"
 fi
-[[ "$KEEP_CKPT" == 1 ]] && say "=== disk: checkpoints may take about $(gb $(jobs_need)) GB" \
+[[ "$KEEP_CKPT" == 1 || "$EXP" == session ]] && say "=== disk: checkpoints may take about $(gb $(jobs_need)) GB" \
   "($(( CKPT_BYTES / 1000000 )) MB x 2 per file) of $(gb $FREE_B) GB free at $OUT"
 say "=== ${#JOBS[@]} run(s), $PAR at a time"
 # THE ETA IS PRICED AT THE MEASURED AGGREGATE RATE at PAR, over every window the job list holds. It
@@ -3723,25 +3974,105 @@ if rate > 0:
     for w in ws:
         heapq.heappush(ends, heapq.heappop(ends) + w / per + st)
     eta = max(ends)
-    print(f"=== ETA by waves: about {eta / 60:.0f} min ({eta:.0f} s): {len(ws)} run(s) over {par} slot(s), "
-          f"{math.ceil(len(ws) / par)} wave(s), each run its windows at {per:.2f} windows/s plus {st:.0f} s of startup; "
-          f"each run's R stage and saves come on top")
+    if "$EXP" == "session":
+        # TWO STAGES (§8 5.3a): the parents stage's runs, then the sessions, which start when the last parent ends.
+        par_w = [w for j, w in zip([j for j in jobs if j.strip()], ws) if j.split()[0] not in ("P", "P_parent", "P_twin", "W")]
+        ses_w = [w for j, w in zip([j for j in jobs if j.strip()], ws) if j.split()[0] in ("P", "P_parent", "P_twin", "W")]
+        t1 = 0.0
+        if par_w:
+            ends = [0.0] * max(1, min(par, len(par_w)))
+            for w in par_w:
+                heapq.heappush(ends, heapq.heappop(ends) + w / per + st)
+            t1 = max(ends)
+        ends = [t1] * max(1, min(par, len(ses_w)))
+        for w in ses_w:
+            heapq.heappush(ends, heapq.heappop(ends) + w / per + st)
+        eta = max(ends)
+        print(f"=== ETA by waves: about {eta / 60:.0f} min ({eta:.0f} s): "
+              + (f"{len(par_w)} parent run(s) in {math.ceil(len(par_w) / par)} wave(s), then " if par_w else "")
+              + f"{len(ses_w)} session(s) in {math.ceil(len(ses_w) / par)} wave(s), over {par} slot(s), each run its "
+              f"windows at {per:.2f} windows/s plus {st:.0f} s of startup; each run's reads (a session's resume start "
+              f"and R) and saves come on top")
+    else:
+        print(f"=== ETA by waves: about {eta / 60:.0f} min ({eta:.0f} s): {len(ws)} run(s) over {par} slot(s), "
+              f"{math.ceil(len(ws) / par)} wave(s), each run its windows at {per:.2f} windows/s plus {st:.0f} s of startup; "
+              f"each run's R stage and saves come on top")
 PY
 
+# ---------------------------------------------------------------- 3. EXP=session's parents stage and its sessions
+SMI_PID=""
+smi_start() {  # the nvidia-smi sampler, once
+  if [[ "$DEVICE" == cuda && -z "$SMI_PID" ]]; then
+    # THE SAMPLER NEVER HOLDS THE LOCK (9>&-): it runs until it is killed, and a SIGKILLed fleet cannot.
+    nvidia-smi --query-gpu=index,utilization.gpu,memory.used,memory.total \
+               --format=csv,noheader,nounits -l 2 > "$OUT/smi.csv" 2>/dev/null 9>&- &
+    SMI_PID=$!
+    gw_state smi_pid="$SMI_PID"
+  fi
+}
+# WITHOUT PARENTS THE PARENTS COME FIRST (§8 5.3a): the parents' arm at every seed, one whole epoch, its final kept
+# under $OUT/parents/ckpt with a FINALS.sha256 beside it as the held-out fleet's (so a later fleet may name it as
+# PARENTS); a parent that failed or saved no final drops its seed's sessions, said here and in the block. The
+# finals are then read as PARENTS' are, and the sessions' smoke runs from them before the sessions.
+if [[ "$EXP" == session ]]; then
+  SJOB_SEEDS=$(echo $SEEDS)
+  if [[ -z "$PARENTS_ABS" ]]; then
+    JOBS=("${PJOBS[@]}")
+    mkdir -p "$OUT/parents"
+    say "---- 2a. parents stage started $(date -u +%H:%M:%SZ): $PARENT_ARM at seeds $SJOB_SEEDS, one whole epoch each," \
+        "$PAR at a time; each spends ~${STARTUP_S:-15-30} s on the CPU before it trains$HB_NOTE"
+    gw_step parents "" "$OUT/parents" "${#JOBS[@]}" "$WINDOWS"
+    gw_state par="$PAR" runs_total="${#JOBS[@]}" windows="$WINDOWS"
+    smi_start
+    _t0=$(date +%s)
+    JOB_DIR="$OUT/parents" CURVE_DIR="$OUT/parents" run_fleet "$PAR"
+    say "---- parents stage finished in $(( ($(date +%s) - _t0) / 60 )) min ($(( $(date +%s) - _t0 )) s)"
+    _ok=""
+    for s in $SJOB_SEEDS; do
+      awk -v t="$PARENT_ARM.s$s" '$1 == t && $2 == "rc=0" { f = 1 } END { exit !f }' "$OUT/parents/_done.txt" 2>/dev/null \
+        && [[ -f "$PDIR/ckpt/$PARENT_ARM.s$s/ckpt.pt" && -f "$PDIR/ckpt/$PARENT_ARM.s$s.dyntok.json" ]] && _ok="$_ok $s"
+    done
+    _ok=$(echo $_ok)
+    [[ "$_ok" != "$SJOB_SEEDS" ]] && say "!! parents that FAILED or saved no final (logs in $OUT/parents): their seeds' sessions do" \
+      "not run; seeds left: ${_ok:-none}"
+    [[ -n "$_ok" ]] || { fail_back "the parents stage left no parent (its logs are in $OUT/parents)" \
+                           $(ls "$OUT/parents"/*.log 2>/dev/null | head -2); exit 1; }
+    SJOB_SEEDS=$_ok; P0=${_ok%% *}
+    ( cd "$PDIR" && for s in $SJOB_SEEDS; do sha256sum "ckpt/$PARENT_ARM.s$s/ckpt.pt" "ckpt/$PARENT_ARM.s$s.dyntok.json"; done ) \
+      > "$PDIR/FINALS.sha256"
+    if ! parents_take "$(parent_facts "$PDIR" "$PARENT_ARM" $SJOB_SEEDS)" > "$OUT/parents/.take" 2>&1; then
+      say "$(cat "$OUT/parents/.take")"
+      fail_back "the parents stage's finals could not be read for the sessions: $(head -1 "$OUT/parents/.take" | sed 's/^!! //')"
+      exit 1
+    fi
+    say "=== parents: $(echo $SJOB_SEEDS | wc -w) final(s) under $PDIR, sha256 in its FINALS.sha256"
+  fi
+  say "=== W: FAB_SLOTS=$W_SLOTS at $PARENT_ARM.s$W_SEED, the parent with the most experts (n_live $W_NLIVE + W_HEADROOM" \
+      "$W_HEADROOM, against its $W_PSLOTS slots)"
+  if [[ -z "$PARENTS_ABS" ]]; then
+    session_smoke_jobs
+    mkdir -p "$OUT/smoke/sessions"
+    say "---- 2b. the sessions' smoke: every session from the parents (W's at seed $W_SEED, the rest at seed $P0)," \
+        "$SMOKE_WINDOWS windows each, all at once"
+    gw_step smoke sessions "$OUT/smoke/sessions" "${#JOBS[@]}" "$SMOKE_WINDOWS"
+    JOB_DIR="$OUT/smoke/sessions" CURVE_DIR="$OUT/smoke/sessions" run_fleet "${#JOBS[@]}"
+    smoke_rc "$OUT/smoke/sessions"
+    smoke_trip "$(smoke_read "$OUT/smoke/sessions" | tee -a "$S")"
+    rm -rf "$OUT/smoke/ckpt"
+  fi
+  JOBS=()
+  for s in $SJOB_SEEDS; do for a in $BASE_ARMS; do add_job "$(session_job "$a" "$s" "$SESSION_WINDOWS" "$OUT/ckpt")"; done; done
+  add_job "$(session_job W "$W_SEED" "$SESSION_WINDOWS" "$OUT/ckpt")"
+fi
+
 # ---------------------------------------------------------------- 4. the fleet, with a sampler
+FLEET_W=$WINDOWS; [[ "$EXP" == session ]] && FLEET_W=$SESSION_WINDOWS
 say "---- 2. fleet started $(date -u +%H:%M:%SZ)"
-gw_step fleet "" "$OUT/logs" "${#JOBS[@]}" "$WINDOWS"
-gw_state par="$PAR" runs_total="${#JOBS[@]}" windows="$WINDOWS"
+gw_step fleet "" "$OUT/logs" "${#JOBS[@]}" "$FLEET_W"
+gw_state par="$PAR" runs_total="${#JOBS[@]}" windows="$FLEET_W"
 say "    ${#JOBS[@]} run(s), $PAR at a time; each spends ~${STARTUP_S:-15-30} s on the CPU before it trains. The fleet's" \
     "own line prints when its last run ends$HB_NOTE; $GW_WATCH shows every run."
-SMI_PID=""
-if [[ "$DEVICE" == cuda ]]; then
-  # THE SAMPLER NEVER HOLDS THE LOCK (9>&-): it runs until it is killed, and a SIGKILLed fleet cannot.
-  nvidia-smi --query-gpu=index,utilization.gpu,memory.used,memory.total \
-             --format=csv,noheader,nounits -l 2 > "$OUT/smi.csv" 2>/dev/null 9>&- &
-  SMI_PID=$!
-  gw_state smi_pid="$SMI_PID"
-fi
+smi_start
 T0=$(date +%s)
 run_fleet "$PAR"
 T1=$(date +%s)

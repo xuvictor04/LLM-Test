@@ -94,7 +94,7 @@ ROOT = os.path.dirname(TOOLS)
 ARGS = sys.argv[2:]
 VERDICT_RC = {"RUNNING": 0, "FINISHED": 1, "NO FLEET": 2, "STOPPED": 3, "DEAD": 4, "STALLED": 5}
 DEFAULT_OUT = {"world": "gpu_world_out", "retok": "gpu_retok_out", "world_epoch": "gpu_world_epoch_out",
-               "heldout": "gpu_heldout_out"}
+               "heldout": "gpu_heldout_out", "session": "gpu_session_out"}
 READER_FLAGS = {"--status", "--analyze", "--stop", "--help", "-h"}
 HIST_MAX = 24            # heartbeat samples kept (12 minutes at gpu_world.sh's default HB_EVERY of 30 s)
 RATE_SPAN = 300.0        # a rate is measured over at most the last 5 minutes
@@ -481,7 +481,7 @@ def verdict(out):
     elif alive(st.get("pid"), st.get("pid_start")):
         v.update(verdict="RUNNING", why="its shell is alive")
         v["newest"] = newest_output(out, v)
-        if (st.get("phase") in ("smoke", "cal", "fleet") and v["newest"] is not None
+        if (st.get("phase") in ("smoke", "cal", "parents", "fleet") and v["newest"] is not None
                 and now - v["newest"] > STALL_MIN * 60):
             v.update(verdict="STALLED", why=f"its shell is alive, but no run log, book or SUMMARY line has "
                                              f"changed for {dur(now - v['newest'])} (--stall-min {STALL_MIN:g})")
@@ -548,6 +548,11 @@ def parse_log(path):
     fin = re.search(r"^=== (\d+) windows[ ,][^\n]*? in ([\d.]+)s", whole, re.M)
     if fin:
         info["final"], info["loop_s"] = int(fin.group(1)), float(fin.group(2))
+        # A RESUMED RUN'S LINE COUNTS ITS RUN'S WINDOWS, ITS PARENT'S INCLUDED (EXP=session's sessions): this
+        # process's are in its brackets, and its seconds are this process's.
+        here = re.search(r"^=== \d+ windows run total \((\d+) trained by this process", whole, re.M)
+        if here:
+            info["final"] = int(here.group(1))
     pr = re.findall(r"^\[(\d+) windows\]", whole, re.M)
     info["prog"] = int(pr[-1]) if pr else None
     ls = [x for x in whole[-8192:].splitlines() if x.strip()]
@@ -571,7 +576,7 @@ def step_runs(v):
     if not sd or not os.path.isdir(sd) or os.path.realpath(sd) == os.path.realpath(v.get("out") or ""):
         return []                                # the setup and the analysis run no step
     started = read_book(os.path.join(sd, "_started.txt"),
-                        r"(\S+) pid=(\d+) t0=(\d+)(?: cap=(\d+))?(?: target=(\d+))?")
+                        r"(\S+) pid=(\d+) t0=(\d+)(?: cap=(\d+))?(?: target=(\d+))?(?: base=(\d+))?")
     done = read_book(os.path.join(sd, "_done.txt"), r"(\S+) rc=(-?\d+) secs=(\d+)")
     tags = list(started) + [t for t in done if t not in started]
     if not started:                              # a fleet from before _started.txt: its logs
@@ -584,9 +589,12 @@ def step_runs(v):
     for tag in tags:
         s, d = started.get(tag), done.get(tag)
         info = parse_log(os.path.join(sd, tag + ".log"))
+        # A SESSION'S PROGRESS LINES COUNT FROM ITS PARENT'S STEP, which its _started line carries as base=.
+        base = int(s.group(6)) if s and s.group(6) else 0
+        prog = None if info.get("prog") is None else max(0, info["prog"] - base)
         r = {"tag": tag, "t0": int(s.group(3)) if s else None, "pid": int(s.group(2)) if s else None,
              "startup": info.get("startup"), "mtime": info.get("mtime"), "last": info.get("last", ""),
-             "windows": info.get("final") or info.get("prog")}
+             "windows": info.get("final") or prog}
         r["target"] = (int(s.group(5) or s.group(4)) if s and (s.group(5) or s.group(4))
                        else int(v.get("step_windows") or 0) or None)
         if d:
@@ -700,7 +708,7 @@ def step_eta(rows, v, now):
             ends.append(max(0.0, startup - (now - (r.get("t0") or now))) + target / prior)
         else:
             ends.append(max(0.0, target - w) / (r.get("rate") or prior))
-    queued = max(0, int(v.get("runs_total") or 0) - len(rows)) if v.get("phase") == "fleet" else 0
+    queued = max(0, int(v.get("runs_total") or 0) - len(rows)) if v.get("phase") in ("fleet", "parents") else 0
     par = max(1, int(v.get("par") or 0) or len(ends))
     slots = sorted(ends) + [0.0] * max(0, par - len(ends))
     per = startup + (v.get("windows") or v.get("step_windows") or 0) / prior
@@ -873,15 +881,21 @@ def ended_txt(c):
 
 def stage_short(v):
     ph = v.get("phase") or "?"
-    return {"cal": f"cal {v.get('step') or ''}".strip(), "setup": "setup", "smoke": "smoke", "fleet": "fleet",
-            "analysis": "analysis", "stopping": "stopping"}.get(ph, ph)
+    return {"cal": f"cal {v.get('step') or ''}".strip(), "setup": "setup",
+            "smoke": "smoke" + (" (sessions)" if v.get("step") == "sessions" else ""), "fleet": "fleet",
+            "parents": "parents", "analysis": "analysis", "stopping": "stopping"}.get(ph, ph)
 
 
 def stage_long(v):
     ph = v.get("phase") or "?"
     runs, win = int(v.get("step_runs") or 0) or "?", int(v.get("step_windows") or 0) or "?"
+    if ph == "smoke" and v.get("step") == "sessions":
+        return f"the sessions' smoke: {runs} session(s) x {win} windows, from the parents stage's finals"
     if ph == "smoke":
         return f"smoke: every arm, seed 0, {runs} run(s) x {win} windows"
+    if ph == "parents":
+        return (f"parents stage: {int(v.get('runs_total') or 0) or '?'} run(s), {int(v.get('par') or 0) or '?'} at a "
+                f"time, {int(v.get('windows') or 0) or '?'} windows each (one whole epoch); the sessions follow")
     if ph == "cal":
         return f"calibration {v.get('step') or ''}: {runs} run(s) x {win} windows"
     if ph == "fleet":
@@ -908,10 +922,10 @@ def line(v, now):
         tw = [r.get("windows") or 0 for r in rows if r.get("phase") == "train"]
         tgt = int(v.get("step_windows") or 0)
         n = f"{int(v['runs_total'])} run(s), PAR {int(v.get('par') or 0)}" \
-            if v.get("phase") == "fleet" and v.get("runs_total") else f"{len(rows)} run(s)"
+            if v.get("phase") in ("fleet", "parents") and v.get("runs_total") else f"{len(rows)} run(s)"
         wtxt = "" if not tw else (f" (w <101/{tgt})" if max(tw) == 0 else f" (w {min(tw)}-{max(tw)}/{tgt})")
         seg = f"{n}: {c['cpu']} on CPU, {c['train']} training" + wtxt + ended_txt(c)
-        if v.get("phase") == "fleet" and v.get("runs_total"):
+        if v.get("phase") in ("fleet", "parents") and v.get("runs_total"):
             q = max(0, int(v["runs_total"]) - len(rows))
             seg += f", {q} queued" if q else ""
         parts.append(seg)
@@ -989,7 +1003,7 @@ def frame(v, now, width=100):
         c = counts(rows)
         seg = f" runs       {len(rows)} in this step: {c['cpu']} starting on CPU, {c['train']} training" + ended_txt(c)
         tgt = sum(r.get("target") or 0 for r in rows)
-        if v.get("phase") == "fleet" and v.get("runs_total"):
+        if v.get("phase") in ("fleet", "parents") and v.get("runs_total"):
             q = max(0, int(v["runs_total"]) - len(rows))
             seg += f"; {q} queued, of {int(v['runs_total'])}"
             tgt += q * int(v.get("windows") or 0)
