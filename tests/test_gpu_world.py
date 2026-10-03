@@ -4061,9 +4061,14 @@ for _ in range(100):
               "eval.holdout.seconds": "3.000000", "eval.holdout.windows": sum(r_["windows"] for r_ in rows),
               "data.trust.wall_s": f"{trust:.6f}", "data.trust.passes": 110, "data.trust.claims": 5000,
               "data.trust.conflicted_claims": 40, "data.trust.sources": 37, "fab.n_live": 2000 + seed}
+        # The plan's gates as run.py's R stage prints them: under 'replay' data.exposure_max's value says why its
+        # split is exact and holds a quote, so it prints in double quotes, its reason after ' -- '.
         gates = ["       gate:data.phase_entered                      ('fired', '4 vs 4')",
                  "       gate:data.exposure_skew                      ('fired', '6.8082 vs 3.0')",
-                 "       gate:data.splice_window                      ('fired', '5.897 vs 8.0')"]
+                 "       gate:data.splice_window                      ('fired', '5.897 vs 8.0')",
+                 "       gate:data.exposure_max                       " + (
+                     "('armed-but-zero', \"0.0264 vs 2.0 -- DATA_DRAW=replay: this split is EXACT, as under 'planned'\")"
+                     if name.endswith("_replay") else "('armed-but-zero', '0.029 vs 2.0')")]
         write(os.path.join(out, "logs", tag + ".log"), "\n".join(
             ["=== device=cuda amp=off tf32=(True, True) torch_seed=1",
              f"=== {windows} windows, {windows} flushes, {windows} optimizer steps, 1 epoch(s) in 20.0s (20.0 w/s)",
@@ -4129,8 +4134,8 @@ for _ in range(100):
               "0.0000 py 0.0000 num 0.0000 c 0.0000 | time-integrated k1000_replay - k1000 sd 0.0000" in b36
           and "k1000_replay eng -0.0100 py -0.0100 num -0.0100 c -0.0100" in b36
           and "the book at R, mean over the runs: passes 110, claims 5000, conflicted claims 40, sources 37" in b36
-          and "the plan's gates (flags, as pre-registered): data.exposure_skew fired 6.8082 vs 3.0; data.splice_window "
-              "fired 5.897 vs 8.0" in b36
+          and "the plan's gates (flags, as pre-registered): data.exposure_skew fired 6.8082 vs 3.0; data.exposure_max "
+              "armed-but-zero 0.0264 vs 2.0 / armed-but-zero 0.029 vs 2.0; data.splice_window fired 5.897 vs 8.0" in b36
           and "against EVAL_RETENTION_EVERY 650 (§8 0.4)" in b36 and "n_live at the end (NEW-20): k0 2003" in b36
           and "ETA by waves 1080 s, took 1140 s: 1.06x" in b36,
           [l for l in b36.splitlines() if l.startswith("  ")][-12:])

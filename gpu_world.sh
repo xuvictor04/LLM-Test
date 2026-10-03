@@ -3009,12 +3009,14 @@ def heldout_real(ctx_arg, archive, eps, pool_arg, home):
         rep_lines.append("  the book at R, mean over the runs: " + ", ".join(f"{k.replace('_', ' ')} {fmt(x, '.0f')}"
                                                                          for k, x in bk.items()))
     # THE PLAN'S GATES, off this fleet's R stages (their value is two words, which rep() does not take): on real text at
-    # this shape data.exposure_skew and data.splice_window fire, both flags (§8 6.3b's sizing).
+    # this shape data.exposure_skew and data.splice_window fire, both flags (§8 6.3b's sizing). A value that holds a
+    # quote prints in double quotes -- under 'replay' data.exposure_max's says why its split is exact, after ' -- ' --
+    # and each is read up to its reason.
     gl = {}
     for lg in sorted(glob.glob(os.path.join(OUT, "logs", "*.log"))):
-        for g_, st_, vt_ in re.findall(r"^\s+gate:data\.(exposure_skew|exposure_max|splice_window)\s+\('([\w-]+)', "
-                                       r"'([^']*)'\)\s*$", rd(lg), re.M):
-            gl.setdefault(g_, set()).add(f"{st_} {vt_}")
+        for g_, st_, v1_, v2_ in re.findall(r"^\s+gate:data\.(exposure_skew|exposure_max|splice_window)\s+\('([\w-]+)', "
+                                            r"(?:'([^']*)'|\"([^\"]*)\")\)\s*$", rd(lg), re.M):
+            gl.setdefault(g_, set()).add(f"{st_} {(v1_ or v2_).split(' -- ')[0]}")
     fl = [f"data.{g_} " + " / ".join(sorted(gl[g_])) for g_ in ("exposure_skew", "exposure_max", "splice_window")
           if gl.get(g_)]
     if fl:
