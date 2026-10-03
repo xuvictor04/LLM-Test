@@ -2653,10 +2653,12 @@ def heldout(ctx_arg, archive, eps, pool_arg, home):
 #        PASS ends S's B-provisional label on real text; FAIL keeps it and names the next remedy arms; UNRESOLVED below
 #        the cap prints a top-up's command, whose block pools both fleets where commit, card, torch and shape match.
 #   O16, its own family: S_replay - S CONFIRMs 'replay' where every area's end-state upper bound is within eps and the
-#        time-integrated all-area report gap's (from 20% of the stream on) is below 0 (o16_confirm). A CONFIRM goes to
-#        the owner (D8); anything else at the last look passes to E1 (§8 6.4).
+#        time-integrated all-area report gap's (from 20% of the stream on) is below 0 (o16_confirm). A CONFIRM at either
+#        look goes to the owner (D8) and stands: a top-up's block reads the first fleet's own seeds again, the first
+#        look, beside the pooled ones. Anything else at the last look passes to E1 (§8 6.4).
 #   E3: the source-reliability book's seconds over each run's loop seconds, their mean against 2% of wall.
-# Everything after them is reported and decides nothing.
+# Each rule reads its own seeds, those where both of its runs hold R's reading. Everything after the rules is reported
+# and decides nothing.
 HR_E3 = 0.02                              # E3's cap on the book's share of wall (Proposal 04 §7, 04-6.3)
 HR_WINDOWS, HR_BYTES, HR_EVERY = 17476, 3780000, 650   # the real-text fleet's defaults, which a top-up's command omits
 
@@ -2702,7 +2704,7 @@ def heldout_real(ctx_arg, archive, eps, pool_arg, home):
 
     # ---------------------------------------------------------------- a top-up's first fleet (6.3a's pooling)
     pool = (pool_arg or sget(r"^=== pool: with (\S+)") or "").strip()
-    pooled, refused, pool_lines = None, None, []
+    pooled, refused, pool_lines, first = None, None, [], {}
     if pool:
         P = rd(os.path.join(pool, "SUMMARY.txt"))
         if not P:
@@ -2723,7 +2725,8 @@ def heldout_real(ctx_arg, archive, eps, pool_arg, home):
                 refused = f"seed(s) {' '.join(map(str, both))} are in both"
             else:
                 pooled = pool
-                runs.update({k: v for k, v in there.items() if k[0] != "k0_rerun"})
+                first = {k: v for k, v in there.items() if k[0] != "k0_rerun"}      # O16's first look reads these
+                runs.update(first)
                 reruns = [("the first fleet's", there.get(("k0_rerun", 0)), there.get(("k0", 0)))] + reruns
         pool_lines = ([f"POOLED with the first fleet {pooled}: its seeds and this top-up's (marked *) are read "
                        f"together; commit, card, torch and shape match"] if pooled else
@@ -2731,15 +2734,25 @@ def heldout_real(ctx_arg, archive, eps, pool_arg, home):
 
     # ---------------------------------------------------------------- the endpoints
     end = {k: ho_end(v) for k, v in runs.items()}
-    k0s = sorted(s for (n, s) in runs if n == "k0" and end[(n, s)])
-    seeds, past = k0s[:CAP_SEEDS], k0s[CAP_SEEDS:]
     seen = [a for e in end.values() for a in e]
     areas = [a for a in HO_AREAS if a in seen] + sorted(set(seen) - set(HO_AREAS))
 
-    def pairs(a, b):
-        """One list per area of a - b over the seeds read where both runs hold R's reading."""
+    # EACH RULE READS ITS OWN SEEDS (2026-10-03, review of 2bb0dac): those where both of its runs hold R's reading, the
+    # first CAP_SEEDS of them -- O14's S and k0, O16's S_replay and S. Both read the seeds where k0 held it, so a k0 that
+    # died took its seed out of O16's pairs, which do not involve k0; and O14's cap counted k0's readings where a
+    # top-up's command counts O14's pairs, so the seed a top-up ran in place of a dead S was left past the cap.
+    def own(a, b, rs):
+        """(the seeds read, those past the cap): the seeds of `rs` where runs a and b both hold R's reading."""
+        both_ = sorted(s for (n, s) in rs if n == a and end.get((a, s)) and end.get((b, s))) if a and b else []
+        return both_[:CAP_SEEDS], both_[CAP_SEEDS:]
+    seeds, past = own(S_, "k0", runs)
+    seeds16, past16 = own(R_, S_, runs)
+    read = sorted(set(seeds) | set(seeds16))
+
+    def pairs(a, b, sds):
+        """One list per area of a - b over the seeds sds, each where both runs hold R's reading."""
         per = [[] for _ in areas]
-        for s in seeds:
+        for s in sds:
             ea, eb = end.get((a, s)), end.get((b, s))
             if ea and eb:
                 for i, ar in enumerate(areas):
@@ -2749,20 +2762,27 @@ def heldout_real(ctx_arg, archive, eps, pool_arg, home):
 
     # O14 ON REAL TEXT: S - k0, the eps rule at one arm, LOOK_ALPHA a look.
     acted = bool(S_) and any((runs.get((S_, s)) or {}).get("acts") for s in seeds)
-    d14 = pairs(S_, "k0") if acted else []
+    d14 = pairs(S_, "k0", seeds) if acted else []
     R14 = eps_rule({S_: d14}, eps, LOOK_ALPHA)[S_] if acted else None
     n14 = max([len(xs) for xs in d14] or [0])
     room = n14 < CAP_SEEDS and not pool
     v14 = R14["verdict"] if R14 else None
     kind = ("refused" if refused else "undecided" if v14 is None else "pass" if v14 == "PASS" else
             "withdraw" if v14 == "FAIL" else "topup" if room else "unresolved")
-    # O16: S_replay - S, per area at the end state and over the time-integrated gap.
+    # O16: S_replay - S, per area at the end state and over the time-integrated gap. A top-up's block reads it twice:
+    # over the pooled seeds, and over the first fleet's own (`first`), its first look, as that fleet's block read them. A
+    # CONFIRM stands at either look: power.py's 4.10% over the two looks counts one at 7 seeds or over the pooled 11.
     ti = {k: hr_integ(v) for k, v in runs.items()}
-    d16 = pairs(R_, S_) if S_ and R_ else []
-    g16 = [ti[(R_, s)] - ti[(S_, s)] for s in seeds
-           if ti.get((R_, s)) is not None and ti.get((S_, s)) is not None] if S_ and R_ else []
-    n16 = max([len(xs) for xs in d16] or [0])
-    conf, a16, b16 = o16_confirm(d16, g16, eps, LOOK_ALPHA) if n16 else (False, None, None)
+
+    def o16(sds):
+        """O16 over the seeds sds: (n, CONFIRM, eps_rule's reading of the areas, better_than's of the gap, the areas'
+        differences, the gap's)."""
+        d = pairs(R_, S_, sds) if sds else []
+        g = [ti[(R_, s)] - ti[(S_, s)] for s in sds if ti.get((R_, s)) is not None and ti.get((S_, s)) is not None]
+        n = max([len(xs) for xs in d] or [0])
+        return (n,) + (o16_confirm(d, g, eps, LOOK_ALPHA) if n else (False, None, None)) + (d, g)
+    n16, conf, a16, b16, d16, g16 = o16(seeds16)
+    f16 = o16(own(R_, S_, first)[0]) if pooled else None
     # E3: the book's seconds over each run's loop seconds.
     wall = {k: fnum(v["r"].get("data.trust.wall_s")) / v["secs"] for k, v in runs.items()
             if fnum(v["r"].get("data.trust.wall_s")) is not None and v["secs"]}
@@ -2811,34 +2831,47 @@ def heldout_real(ctx_arg, archive, eps, pool_arg, home):
         d14_ = (f"NOTHING IS DECIDED: this top-up's seeds pool with its first fleet's only where commit, card, torch and "
                 f"shape match, and {refused}; the first fleet's reading stands, and the top-up runs again on its card and "
                 f"torch, at its commit")
+    elif S_ and not seeds:
+        d14_ = f"UNDECIDED: no {S_} - k0 pair holds R's reading in these runs"
     else:
         d14_ = f"UNDECIDED: {S_ or 'S'} did not act in these runs" + ("" if S_ else " (no S in the logs)")
-    # O16's DECISION: a CONFIRM stands at either look; anything else waits for the top-up where one follows, else E1.
-    why16 = []
-    if a16:
-        for i, (n, m, lo, up) in enumerate(a16["phases"]):
-            if up is None:
-                why16.append(f"{areas[i]}: n < 2")
-            elif up > eps:
-                why16.append(f"{areas[i]}'s upper bound {up:+.4f} above ε")
-        if b16[2] is None:
-            why16.append("the gap: n < 2")
-        elif not b16[3]:
-            why16.append(f"the gap's upper bound {b16[2]:+.4f} not below 0")
+
+    # O16's DECISION: a CONFIRM stands at either look; anything else waits for the top-up where one follows, else E1. A
+    # top-up's block whose first look CONFIRMed carries that CONFIRM, the pooled reading beside it deciding nothing.
+    def why(a_, b_):
+        """What kept one look of O16 from a CONFIRM."""
+        w = []
+        if a_:
+            for i, (n, m, lo, up) in enumerate(a_["phases"]):
+                if up is None:
+                    w.append(f"{areas[i]}: n < 2")
+                elif up > eps:
+                    w.append(f"{areas[i]}'s upper bound {up:+.4f} above ε")
+            if b_[2] is None:
+                w.append("the gap: n < 2")
+            elif not b_[3]:
+                w.append(f"the gap's upper bound {b_[2]:+.4f} not below 0")
+        return w
+    why16 = why(a16, b16)
     if kind == "refused":
         d16_ = "NOTHING IS DECIDED (the pooling was refused, above)"
+    elif f16 and f16[1]:
+        d16_ = (f"'replay' at 0.27 is CONFIRMed against 'planned' on real text at the first look, the first fleet's "
+                f"{f16[0]} seed(s): a CONFIRM stands at either look, so it went to the owner with that fleet's block (D8), "
+                f"and 'planned' holds until they answer; the pooled {n16} above decide nothing")
     elif not n16:
         d16_ = f"not read: no {R_} - {S_} pair holds R's reading"
     elif conf:
-        d16_ = (f"'replay' at 0.27 is CONFIRMed against 'planned' on real text -- every area's upper bound within ε, the "
-                f"time-integrated gap's {b16[2]:+.4f} below 0: it goes to the owner (D8), and 'planned' holds until they "
-                f"answer ({n16} seed(s))")
+        d16_ = (f"'replay' at 0.27 is CONFIRMed against 'planned' on real text{' at the second look' if pooled else ''} -- "
+                f"every area's upper bound within ε, the time-integrated gap's {b16[2]:+.4f} below 0: it goes to the owner "
+                f"(D8), and 'planned' holds until they answer ({n16} seed(s))")
     elif kind == "topup":
         d16_ = (f"not CONFIRMed at {n16} seed(s) ({'; '.join(why16)}): read again over the top-up's pooled seeds, the "
                 f"second look")
     else:
-        d16_ = (f"'replay' is not CONFIRMed ({'; '.join(why16)}): 'planned' stays (D8), and the draw passes to E1 "
-                f"(§8 6.4) ({n16} seed(s))")
+        d16_ = (f"'replay' is not CONFIRMed{' at either look' if pooled else ''} ("
+                + ("over the pooled seeds, " if pooled else "") + f"{'; '.join(why16)}): 'planned' stays (D8), and the "
+                f"draw passes to E1 (§8 6.4) ({n16} seed(s))")
     every = (re.search(r"(?:^| )DATA_TRUST_EVERY=(\d+)", sget(r"^=== \d+ windows per run, .*?, EXTRA='(.*)'$") or "")
              or [None, None])[1]
     te = f"DATA_TRUST_EVERY {every}" if every else "DATA_TRUST_EVERY (its default, 160)"
@@ -2859,7 +2892,7 @@ def heldout_real(ctx_arg, archive, eps, pool_arg, home):
         e = end[(n, s)]
         why_ = ("NO PROBE SERIES" if v["series"] is None else "NO BOUNDARY ROW (memory-off)" if not e else "")
         if why_:
-            missing.append(f"{v['tag']}{'*' if pooled and (n, s) in here else ''}")
+            missing.append((n, f"{v['tag']}{'*' if pooled and (n, s) in here else ''}"))
         print(f"  {n:<14} s{s:<3} {v['win'] or '?':>6} win  acts {fmt(v['acts'], 'n'):>4}  "
               + ("  ".join(f"{a} {e[a]:.5f}" for a in areas if a in e) or why_)
               + (f"  integrated {ti[(n, s)]:.5f}" if ti.get((n, s)) is not None else "")
@@ -2888,11 +2921,16 @@ def heldout_real(ctx_arg, archive, eps, pool_arg, home):
            f"t({1 - LOOK_ALPHA:g})]" + (" -- this fleet alone, deciding nothing" if refused else ""))
     r14 = ([f"  {S_} n={n14} a={R14['level']:.3g}: " + cells(R14["phases"], n14) + f" -> {R14['verdict']}"
             + (f" ({R14['note'].replace('some phase', 'some area')})" if R14["note"] else "")] if R14 else
+           [f"  {S_}: no {S_} - k0 pair holds R's reading -- nothing read"] if S_ and not seeds else
            [f"  {S_ or 'S'}: NO ACT FIRED at any seed -- no evidence either way, not a pass"])
     h16 = (f"RULE O16 (§8 6.3b; its own family): {R_} - {S_} paired over seeds, at {LOOK_ALPHA:g} a look: CONFIRM where "
            f"every area's one-sided upper bound at t({1 - LOOK_ALPHA:g}) is within ε and the time-integrated all-area "
-           f"report gap's, from 20% of the stream on, is below 0")
+           f"report gap's, from 20% of the stream on, is below 0; a CONFIRM at either look stands")
     r16 = []
+    if f16:
+        r16.append(f"  the first look, the first fleet's n={f16[0]}: " + (
+            f"CONFIRMed (every area's upper bound within ε, the gap's {f16[3][2]:+.4f} below 0)" if f16[1] else
+            "not CONFIRMed (" + ("; ".join(why(f16[2], f16[3])) or f"no {R_} - {S_} pair holds R's reading") + ")"))
     if a16:
         r16.append(f"  end state n={n16}: " + cells(a16["phases"], n16) + f" -> {a16['verdict']}"
                    + (f" ({a16['note'].replace('some phase', 'some area')})" if a16["note"] else ""))
@@ -2914,10 +2952,14 @@ def heldout_real(ctx_arg, archive, eps, pool_arg, home):
     print()
     print(f"=== {e3_} ===")
     extra_rows = []
-    if missing:
-        extra_rows.append(f"  left out of the pairs (no endpoint): {' '.join(missing)}")
-    if past:
-        extra_rows.append(f"  seeds past the cap of {CAP_SEEDS}, not read: {' '.join(map(str, past))}")
+    for rule, nm_ in (("O14", ("k0", S_)), ("O16", (S_, R_))):
+        lo_ = [t_ for n, t_ in missing if n in nm_]
+        if lo_:
+            extra_rows.append(f"  left out of {rule}'s pairs (no endpoint): {' '.join(lo_)}")
+    for rule, p_ in ((None, past),) if past == past16 else (("O14", past), ("O16", past16)):
+        if p_:
+            extra_rows.append(f"  seeds past the cap of {CAP_SEEDS}, not read{' by ' + rule if rule else ''}: "
+                              f"{' '.join(map(str, p_))}")
     for l in extra_rows:
         print(l)
 
@@ -2925,7 +2967,8 @@ def heldout_real(ctx_arg, archive, eps, pool_arg, home):
     arms = [a for a in (S_, R_) if a]
 
     def per_arm(a):
-        return [(s, runs[(a, s)]) for s in seeds if (a, s) in runs]
+        """Arm a's runs at the seeds its rules read: k0 O14's, S_replay O16's, S either's."""
+        return [(s, runs[(a, s)]) for s in (seeds if a == "k0" else seeds16 if a == R_ else read) if (a, s) in runs]
 
     def sd(xs):
         n_, m_, se_ = mean_se(xs)
@@ -2951,21 +2994,23 @@ def heldout_real(ctx_arg, archive, eps, pool_arg, home):
             off += nb
         return [lo_n[k] * ctx / L2 / lo_b[k] if lo_b[k] else None for k in range(nph)]
     ph = {k: phases(v) for k, v in runs.items()}
-    for a, b in ((S_, "k0"), (R_, S_)):
-        if not (a and b):
-            continue
+    # O14's PER-PHASE PREQUENTIAL READING (§8 2.1's endpoint), S - k0 alone, the register's: the two train on one stream.
+    # S_replay - S's is not read (2026-10-03, review of 2bb0dac): under 'replay' phases 2-4 train on another mix, 27% of
+    # their bytes the faded areas' text, so its training bits/byte differ by the text, whatever the draw does to them.
+    if S_:
         per = [[] for _ in range(nph)]
         for s in seeds:
-            pa, pb = ph.get((a, s)), ph.get((b, s))
+            pa, pb = ph.get((S_, s)), ph.get(("k0", s))
             if pa and pb:
                 for k in range(nph):
                     if pa[k] is not None and pb[k] is not None:
                         per[k].append(pa[k] - pb[k])
         if any(per):
-            pr_ = eps_rule({a: per}, eps)[a]
+            pr_ = eps_rule({S_: per}, eps)[S_]
             body = " ".join(f"p{k + 1} " + ("-" if m is None else f"{m:+.4f}" + (f" [{lo:+.4f},{up:+.4f}]" if lo is not None else ""))
                             for k, (n, m, lo, up) in enumerate(pr_["phases"]))
-            rep_lines.append(f"  prequential per phase, {a} - {b} n={max(len(x) for x in per)}: {body} -> {pr_['verdict']}")
+            rep_lines.append(f"  prequential per phase (O14's 2.1 endpoint), {S_} - k0 n={max(len(x) for x in per)}: {body} "
+                             f"-> {pr_['verdict']}")
     mem = []
     for a in ["k0"] + arms:
         prs = [(ho_end(v, "memory-on"), ho_end(v)) for _, v in per_arm(a)]
@@ -3106,13 +3151,14 @@ def heldout_real(ctx_arg, archive, eps, pool_arg, home):
     hd = [f"held-out bits/byte at R (memory-off, report half), per seed: k0, then {S_} - k0, then {R_} - {S_}",
           "  seed  " + " ".join(f"{a:>7}" for a in areas) + "".join(" | " + " ".join(f"{a:>8}" for a in areas)
                                                                    for _ in range(2))]
-    t_rows = []
-    for s in seeds:
+    t_rows = []                     # every seed either rule reads; each difference where its own rule reads that seed
+    for s in read:
         e0, es, er = end.get(("k0", s)) or {}, end.get((S_, s)) or {}, end.get((R_, s)) or {}
         cells_ = " ".join(f"{fmt(e0.get(a), '.4f'):>7}" for a in areas)
-        for ea, eb in ((es, e0), (er, es)):
-            cells_ += " | " + " ".join(f"{fmt(ea[x] - eb[x] if x in ea and x in eb else None, '+.4f'):>8}" for x in areas)
-        t_rows.append(f"  {'s' + str(s) + ('*' if pooled and ('k0', s) in here else ''):<6}{cells_}")
+        for ea, eb, on in ((es, e0, s in seeds), (er, es, s in seeds16)):
+            cells_ += " | " + " ".join(f"{fmt(ea[x] - eb[x] if on and x in ea and x in eb else None, '+.4f'):>8}"
+                                       for x in areas)
+        t_rows.append(f"  {'s' + str(s) + ('*' if pooled and s in mine else ''):<6}{cells_}")
 
     def table(n=None):
         if n is None or len(t_rows) + 2 <= n:

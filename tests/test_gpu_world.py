@@ -245,11 +245,15 @@ is pinned here, on a fleet whose every number is chosen.
       PASS ends S's label on real text, FAIL keeps it and names the next remedy arms (TOK_MINT_NOVEL 1.0 first at k<c>),
       UNRESOLVED below the cap prints the top-up's command, at the cap it is reported; O16, S_replay - S, CONFIRMs where
       every area's upper bound is within eps and the time-integrated gap's is below 0 (to the known answer), not where
-      replay harms an area, and waits for a top-up's look; E3's wall within and above 2%; runs with no endpoint and seeds
-      past the cap; what is reported beside them; S's finals alone in FINALS.sha256 with their pack line.
+      replay harms an area, and waits for a top-up's look; E3's wall within and above 2%; each rule's own seeds, where
+      both its runs hold R's reading (a k0 with no endpoint leaves O16's 7 pairs whole), the runs each leaves out and its
+      seeds past the cap; what is reported beside them, the per-phase prequential reading S - k0's alone; S's finals
+      alone in FINALS.sha256 with their pack line.
   F37 THE REAL-TEXT TOP-UP: pooled with its first fleet where commit, card, torch, shape and source match -- the pooled 11
-      deciding both O14 and O16 -- and refused, deciding nothing, where card or commit differ, a seed is in both, or the
-      first fleet is synthetic. End to end with the stand-in: the printed command passes the launcher and pools.
+      deciding O14, and O16 where its first look, re-read over the first fleet's seeds, did not CONFIRM: a CONFIRM at
+      the first look stands, the pooled reading beside it deciding nothing; O14's cap counts its pairs, as the top-up's
+      command does -- and refused, deciding nothing, where card or commit differ, a seed is in both, or the first fleet
+      is synthetic. End to end with the stand-in: the printed command passes the launcher and pools.
 """
 import glob
 import json
@@ -4137,8 +4141,28 @@ for _ in range(100):
           and "the plan's gates (flags, as pre-registered): data.exposure_skew fired 6.8082 vs 3.0; data.exposure_max "
               "armed-but-zero 0.0264 vs 2.0 / armed-but-zero 0.029 vs 2.0; data.splice_window fired 5.897 vs 8.0" in b36
           and "against EVAL_RETENTION_EVERY 650 (§8 0.4)" in b36 and "n_live at the end (NEW-20): k0 2003" in b36
-          and "ETA by waves 1080 s, took 1140 s: 1.06x" in b36,
+          and "ETA by waves 1080 s, took 1140 s: 1.06x" in b36
+          and [l for l in b36.splitlines() if "prequential" in l]
+          == ["  prequential per phase (O14's 2.1 endpoint), k1000 - k0 n=7: "
+              + " ".join(f"p{k} +0.0000 [+0.0000,+0.0000]" for k in range(1, 5)) + " -> PASS"],
           [l for l in b36.splitlines() if l.startswith("  ")][-12:])
+    # THE PER-PHASE PREQUENTIAL READING IS O14's ALONE (2026-10-03, review of 2bb0dac): under 'replay' phases 2-4 train on
+    # another mix, so S_replay's training bits/byte, here 2.2-2.22 there against S's 2.0, differ by the text. Every
+    # held-out reading of S_replay is S's.
+    o36q = os.path.join(TMP, "f36", "preq", "gpu_heldout_real_out")
+    hr_fleet(o36q, range(7))
+    for s_ in range(7):
+        p_ = os.path.join(o36q, "curves", f"k1000_replay.s{s_}.json")
+        cu_ = json.load(open(p_))
+        write(p_, json.dumps([x if i < 100 else (2.2 + 0.01 * (s_ % 3)) * LN2 * 189 / CTX for i, x in enumerate(cu_)]))
+    b36q = "\n".join(block_of(gw("--analyze", EXP="heldout", OUT=o36q).stdout) or [])
+    check("F36 the per-phase prequential reading is O14's, S - k0 alone, as the register lists it: S_replay - S's is not "
+          "read, its phases 2-4 trained on another text mix (here 0.2 bits/byte above S's there, every held-out reading "
+          "S's)",
+          [l for l in b36q.splitlines() if "prequential" in l]
+          == ["  prequential per phase (O14's 2.1 endpoint), k1000 - k0 n=7: "
+              + " ".join(f"p{k} +0.0000 [+0.0000,+0.0000]" for k in range(1, 5)) + " -> PASS"]
+          and f"  end state n=7: {zero36} -> PASS" in b36q, [l for l in b36q.splitlines() if "prequential" in l])
     # O16 CONFIRMS: every area 0.02 lower under 'replay' (within eps), the time-integrated gap -0.05 x 199 / 320 =
     # -0.0311 +- 0.01 x 199 / 320 by parity: its upper bound below 0 at t(0.975, 6).
     _, _, _, b36c = hr_read("confirm", range(7), rep=-0.02, tgap=-0.05, tspread=0.01)
@@ -4152,6 +4176,17 @@ for _ in range(100):
           and dec16(b36c) == f"'replay' at 0.27 is CONFIRMed against 'planned' on real text -- every area's upper bound "
                              f"within ε, the time-integrated gap's {u36:+.4f} below 0: it goes to the owner (D8), and "
                              f"'planned' holds until they answer (7 seed(s))", dec16(b36c))
+    # O16 READS ITS OWN SEEDS (2026-10-03, review of 2bb0dac): the same fleet with k0.s3's boundary rows gone. O16 pairs
+    # S_replay - S where both hold R's reading -- all 7, to the same answer -- and O14 S - k0 at the 6 where k0 does too.
+    _, _, _, b36k0 = hr_read("k0miss", range(7), rep=-0.02, tgap=-0.05, tspread=0.01, nobnd=("k0.s3",))
+    check("F36 a k0 with no boundary row leaves O14's pairs alone: O16, which does not involve k0, pairs its 7 seeds -- the "
+          "same CONFIRM -- and the per-seed row shows S_replay - S beside no k0 reading",
+          f"  time-integrated gap n=7: mean {m36:+.4f}, one-sided upper {u36:+.4f}: below 0, significantly better" in b36k0
+          and "  end state n=7: " + " ".join(f"{a} -0.0200 [-0.0200,-0.0200]" for a in HO_AR) + " -> PASS" in b36k0
+          and dec16(b36k0).endswith("'planned' holds until they answer (7 seed(s))")
+          and f"  k1000 n=6 a=0.025: {zero36} -> PASS" in b36k0
+          and "left out of O14's pairs (no endpoint): k0.s3" in b36k0 and "left out of O16's" not in b36k0
+          and re.search(r"^  s3 +(- +){4}\| +(- +){4}\|( +-0\.0200){4}$", b36k0, re.M) is not None, b36k0[-1800:])
     _, _, _, b36h = hr_read("harm", range(7), rep_num=0.2, tgap=-0.05)
     check("F36 'replay' that harms an area past eps is not CONFIRMed, whatever its gap: num's +0.2000, its lower bound "
           "past eps, FAILs the area condition, and the draw passes to E1",
@@ -4190,11 +4225,19 @@ for _ in range(100):
           "value",
           "mean 5.00% over 21 run(s) (largest 5.00%), at PAR 24, against 2%: ABOVE it, so DATA_TRUST_EVERY 320 lengthens "
           "(E3's rule)" in b36e, [l for l in b36e.splitlines() if l.startswith("E3")])
-    _, _, a36m, b36g = hr_read("missing", range(12), nobnd=("k1000_replay.s3",))
-    check("F36 a run with no boundary row is named and left out of its pairs, and seeds past the cap of 11 are not read",
-          "left out of the pairs (no endpoint): k1000_replay.s3" in b36g and "seeds past the cap of 11, not read: 11" in b36g
-          and "  end state n=10: " in b36g and re.search(r"^  k1000_replay +s3 .*NO BOUNDARY ROW", a36m, re.M) is not None,
-          b36g[-900:])
+    # 13 seeds, S_replay.s3 with no boundary row: O14 reads its first 11 pairs, seeds 0-10; O16 its own first 11, 0-2 and
+    # 4-11. Each rule names what it left out and its seeds past the cap; the per-seed rows show each difference its rule reads.
+    _, _, a36m, b36g = hr_read("missing", range(13), nobnd=("k1000_replay.s3",))
+    check("F36 a run with no boundary row is named and left out of its rule's pairs, each rule reads its own first 11 "
+          "seeds where both its runs hold R's reading, and seeds past the cap of 11 are not read, by rule",
+          "left out of O16's pairs (no endpoint): k1000_replay.s3" in b36g and "left out of O14's" not in b36g
+          and "seeds past the cap of 11, not read by O14: 11 12" in b36g
+          and "seeds past the cap of 11, not read by O16: 12" in b36g
+          and f"  k1000 n=11 a=0.025: {zero36} -> PASS" in b36g and f"  end state n=11: {zero36} -> PASS" in b36g
+          and re.search(r"^  s3 +2\.0030 .*\| +(\+0\.0000 +){4}\|( +-){4}$", b36g, re.M) is not None
+          and re.search(r"^  s11 +2\.0110 .*\| +(- +){4}\|( +\+0\.0000){4}$", b36g, re.M) is not None
+          and re.search(r"^  s12 ", b36g, re.M) is None
+          and re.search(r"^  k1000_replay +s3 .*NO BOUNDARY ROW", a36m, re.M) is not None, b36g[-1500:])
     # THE FINALS: S's alone, 6.1's real-text parents, with the pack line; a synthetic fleet is still read by 6.3a's reader.
     o36k = os.path.join(TMP, "f36", "finals", "gpu_heldout_real_out")
     hr_fleet(o36k, range(2))
@@ -4214,12 +4257,15 @@ for _ in range(100):
 
     # ---- F37: a real-text top-up pooled with its first fleet (2026-10-02, register §8 6.3b) -----------------------------
     # The first fleet reads S UNRESOLVED at 7 seeds (num +0.4 at even seeds, 0 at odd) and O16 not CONFIRMed (its gap
-    # -0.0311 +- 0.0311, its upper bound +0.0040); its top-up's seeds 7-10 read num +0.3 and the gap -0.0311 at each: the
+    # -0.0311 +- 0.0311, its upper bound +0.0041); its top-up's seeds 7-10 read num +0.3 and the gap -0.0311 at each: the
     # pooled 11, the second look, FAIL S and CONFIRM 'replay' (the gap's upper bound -0.0109).
     o37 = os.path.join(TMP, "f37", "gpu_heldout_real_out")
     hr_fleet(o37, range(7), harm=0.2, spread=0.2, rep=-0.02, tgap=-0.05, tspread=0.05)
     p37a = gw("--analyze", EXP="heldout", OUT=o37)
     b37a = "\n".join(block_of(p37a.stdout) or [])
+    g37 = [(-0.05 + (0.05 if s_ % 2 == 0 else -0.05)) * 199 / 320 for s_ in range(7)]
+    m37 = sum(g37) / 7
+    u37 = m37 + 2.4469118511449697 * math.sqrt(sum((x - m37) ** 2 for x in g37) / 6 / 7)
 
     def hr_topup(tag, seeds=range(7, 11), pool=o37, **kw):
         o_ = os.path.join(TMP, "f37", tag)
@@ -4228,15 +4274,68 @@ for _ in range(100):
         return o_, "\n".join(block_of(p_.stdout) or [])
     o37t, b37t = hr_topup("gpu_heldout_real_topup_out")
     check("F37 the first fleet alone is UNRESOLVED and asks for the top-up, O16 waiting for it; the top-up, recorded as "
-          "its pool, reads the 11 seeds together -- its own marked * -- and S FAILs on real text and 'replay' CONFIRMs",
+          "its pool, reads the 11 seeds together -- its own marked * -- and S FAILs on real text and 'replay' CONFIRMs at "
+          "the second look, the first look's reading beside it",
           dec14(b37a).startswith("UNRESOLVED at 7 seed(s): k1000 is UNRESOLVED") and "top-up:" in b37a
-          and dec16(b37a).startswith("not CONFIRMed at 7 seed(s)")
+          and dec16(b37a) == f"not CONFIRMed at 7 seed(s) (the gap's upper bound {u37:+.4f} not below 0): read again over "
+                             f"the top-up's pooled seeds, the second look"
           and f"POOLED with the first fleet {o37}: its seeds and this top-up's (marked *) are read together" in b37t
           and re.search(r"^  k1000 n=11 a=0\.025: .* -> FAIL$", b37t, re.M) is not None
           and re.search(r"^  s10\* ", b37t, re.M) is not None
           and dec14(b37t).startswith("k1000 FAILs against k0 on real text")
-          and dec16(b37t).startswith("'replay' at 0.27 is CONFIRMed against 'planned' on real text")
+          and f"  the first look, the first fleet's n=7: not CONFIRMed (the gap's upper bound {u37:+.4f} not below 0)" in b37t
+          and dec16(b37t).startswith("'replay' at 0.27 is CONFIRMed against 'planned' on real text at the second look -- ")
           and "FINALS: none" in b37t, b37a[-600:] + b37t[-1500:])
+    o37n = os.path.join(TMP, "f37", "gpu_heldout_real_neither_out")
+    hr_fleet(o37n, range(7, 11), harm=0.3, rep=-0.02, tgap=0.10, pool=o37)
+    b37n = "\n".join(block_of(gw("--analyze", EXP="heldout", OUT=o37n).stdout) or [])
+    check("F37 a top-up that CONFIRMs 'replay' at neither look: 'planned' stays and the draw passes to E1, said of both",
+          dec16(b37n).startswith("'replay' is not CONFIRMed at either look (over the pooled seeds, the gap's upper bound +")
+          and dec16(b37n).endswith("not below 0): 'planned' stays (D8), and the draw passes to E1 (§8 6.4) (11 seed(s))")
+          and f"  the first look, the first fleet's n=7: not CONFIRMed (the gap's upper bound {u37:+.4f} not below 0)" in b37n,
+          b37n[-1200:])
+    # A CONFIRM AT THE FIRST LOOK STANDS (2026-10-03, review of 2bb0dac): F36's CONFIRMing draw beside an S UNRESOLVED at 7
+    # seeds (num +0.15 at even seeds, -0.05 at odd); the top-up's seeds 7-10 read the gap +0.10 x 199 / 320, so the
+    # pooled 11 alone would not CONFIRM. power.py's 4.10% over the two looks counts a CONFIRM at either.
+    o37c = os.path.join(TMP, "f37c", "gpu_heldout_real_out")
+    hr_fleet(o37c, range(7), harm=0.05, spread=0.1, rep=-0.02, tgap=-0.05, tspread=0.01)
+    b37c = "\n".join(block_of(gw("--analyze", EXP="heldout", OUT=o37c).stdout) or [])
+    o37ct = os.path.join(TMP, "f37c", "gpu_heldout_real_topup_out")
+    hr_fleet(o37ct, range(7, 11), harm=0.05, spread=0.1, rep=-0.02, tgap=0.10, pool=o37c)
+    b37ct = "\n".join(block_of(gw("--analyze", EXP="heldout", OUT=o37ct).stdout) or [])
+    g37c = g36 + [0.10 * 199 / 320] * 4
+    m37c = sum(g37c) / 11
+    u37c = m37c + 2.2281388519649385 * math.sqrt(sum((x - m37c) ** 2 for x in g37c) / 10 / 11)
+    check(f"F37 'replay' CONFIRMed at the first look, its O14 UNRESOLVED: the top-up's block carries that CONFIRM, which "
+          f"stands, and its pooled 11 ({u37c:+.4f}, not below 0) decide nothing",
+          dec14(b37c).startswith("UNRESOLVED at 7 seed(s): k1000 is UNRESOLVED") and "top-up:" in b37c
+          and dec16(b37c).startswith(f"'replay' at 0.27 is CONFIRMed against 'planned' on real text -- every area's upper "
+                                     f"bound within ε, the time-integrated gap's {u36:+.4f} below 0")
+          and dec14(b37ct).startswith("UNRESOLVED at the cap")
+          and f"  the first look, the first fleet's n=7: CONFIRMed (every area's upper bound within ε, the gap's {u36:+.4f} "
+              f"below 0)" in b37ct
+          and f"  time-integrated gap n=11: mean {m37c:+.4f}, one-sided upper {u37c:+.4f}: not below 0" in b37ct
+          and dec16(b37ct) == "'replay' at 0.27 is CONFIRMed against 'planned' on real text at the first look, the first "
+                              "fleet's 7 seed(s): a CONFIRM stands at either look, so it went to the owner with that "
+                              "fleet's block (D8), and 'planned' holds until they answer; the pooled 11 above decide nothing",
+          dec16(b37c) + " || " + b37ct[-1500:])
+    # O14's CAP COUNTS ITS PAIRS, AS THE TOP-UP'S COMMAND DOES (2026-10-03): S.s3 with no boundary row, O14 UNRESOLVED at
+    # 6 pairs, so the command asks for seeds 7-11. Pooled, O14 reads 11 pairs, seed 11 in place of seed 3; it read seeds
+    # 0-10 where k0 held R's reading, 10 pairs, and left seed 11 past the cap.
+    o37p = os.path.join(TMP, "f37p", "gpu_heldout_real_out")
+    hr_fleet(o37p, range(7), harm=0.05, spread=0.1, nobnd=("k1000.s3",))
+    b37p = "\n".join(block_of(gw("--analyze", EXP="heldout", OUT=o37p).stdout) or [])
+    o37pt = os.path.join(TMP, "f37p", "gpu_heldout_real_topup_out")
+    hr_fleet(o37pt, range(7, 12), harm=0.05, spread=0.1, pool=o37p)
+    b37pt = "\n".join(block_of(gw("--analyze", EXP="heldout", OUT=o37pt).stdout) or [])
+    check("F37 a first fleet whose S lost one boundary row reads O14 at 6 pairs and asks for seeds 7-11; pooled, O14 and "
+          "O16 each read 11 pairs, seed 11 among them, nothing past the cap, and both name the run they left out",
+          dec14(b37p).startswith("UNRESOLVED at 6 seed(s): k1000 is UNRESOLVED") and "SEEDS='7 8 9 10 11'" in b37p
+          and re.search(r"^  k1000 n=11 a=0\.025: ", b37pt, re.M) is not None
+          and dec14(b37pt).endswith("(ε 0.05 bits/byte, 11 seed(s))") and "  end state n=11: " in b37pt
+          and "past the cap" not in b37pt and re.search(r"^  s11\* ", b37pt, re.M) is not None
+          and "left out of O14's pairs (no endpoint): k1000.s3" in b37pt
+          and "left out of O16's pairs (no endpoint): k1000.s3" in b37pt, b37p[-900:] + b37pt[-1500:])
     for tag37, kw37, why37 in (("card_out", {"card": "NVIDIA H200, 143771"},
                                 "they differ in card (NVIDIA H200 143771 MiB here, NVIDIA H100 PCIe 81559 MiB there)"),
                                ("commit_out", {"commit": "def5678"}, "they differ in commit (def5678 here, abc1234 there)"),
