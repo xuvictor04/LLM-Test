@@ -240,6 +240,16 @@ is pinned here, on a fleet whose every number is chosen.
       writing nothing: an unknown source, real text at another EXP, SHIP_ARM without the real source, an S that is no act
       arm, a real-text top-up of a synthetic fleet. The launcher's check, OUT, log, disk and ready line; the dashboard's
       reading of a real-text launch's OUT.
+  F36 EXP=heldout HELDOUT_SOURCE=real's READING, on fleets written by hand, routed to its own reader by SUMMARY's source
+      line (a synthetic fleet keeps 6.3a's, F30): O14, S - k0 per area by the eps rule at one arm, a = 0.025 a look --
+      PASS ends S's label on real text, FAIL keeps it and names the next remedy arms (TOK_MINT_NOVEL 1.0 first at k<c>),
+      UNRESOLVED below the cap prints the top-up's command, at the cap it is reported; O16, S_replay - S, CONFIRMs where
+      every area's upper bound is within eps and the time-integrated gap's is below 0 (to the known answer), not where
+      replay harms an area, and waits for a top-up's look; E3's wall within and above 2%; runs with no endpoint and seeds
+      past the cap; what is reported beside them; S's finals alone in FINALS.sha256 with their pack line.
+  F37 THE REAL-TEXT TOP-UP: pooled with its first fleet where commit, card, torch, shape and source match -- the pooled 11
+      deciding both O14 and O16 -- and refused, deciding nothing, where card or commit differ, a seed is in both, or the
+      first fleet is synthetic. End to end with the stand-in: the printed command passes the launcher and pools.
 """
 import glob
 import json
@@ -3993,6 +4003,284 @@ for _ in range(100):
         sp35.wait()
     check("F35 the dashboard reads a real-text launch's OUT as gpu_heldout_real_out, where its own scan finds it",
           f"{sp35.pid}\tshell" in sc35[0] and f"{sp35.pid}\t" not in sc35[1], str(sc35))
+
+    # ---- F36: EXP=heldout HELDOUT_SOURCE=real's reading, rule and block (2026-10-02, register §8 6.3b) ----------------
+    # Fleets written by hand, each number chosen, on F30's plan: each area's R reading 2.0 + 0.1 x its index + 0.001 x
+    # the seed, with `harm` added to num on S and S_replay (+- `spread` by the seed's parity), `rep` added to every area
+    # of S_replay alone (+- `rspread`), or `rep_num` to its num; the in-run all-area report 2.5, and on S_replay 2.5 +
+    # `tgap` (+- `tspread`) from the stream's middle on; the book's seconds `trust` over 20 s of loop time.
+    def hr_summary(out, *, seeds, s_="k1000", commit="abc1234", card="NVIDIA H100 PCIe, 81559",
+                   torch_="torch 2.7.0, CUDA 12.8", pool=None, windows=400, par=24, extra="", source=True):
+        n_, mib = card.split(", ")
+        L = [f"=== gpu_world.sh  2026-10-03T12:00:00Z  commit {commit}",
+             f"=== code: this fleet runs its own copy, {out}/code (gpu_world.sh, run.py, src/, tools/fleet_dash.sh; "
+             f"sha256 0123456789abcdef), taken from commit {commit} at launch: a git pull during the fleet reaches none of it",
+             "    index, name, memory.total [MiB], memory.used [MiB]", f"    0, {n_}, {mib} MiB, 1 MiB",
+             "=== 26 CPU core(s), 1 GPU(s), device=cuda", f"=== {torch_}",
+             f"=== {windows} windows per run, DATA_STREAM_BYTES={windows * 189}, seeds: {seeds}, EXTRA='{extra}'",
+             f"=== plan: EXP=heldout; arms k0 {s_} {s_}_replay, plus k0_rerun at seed 0; window cap {3 * windows}; "
+             f"CAL_WINDOWS 600; LM_CTX {CTX}"]
+        if source:
+            L.append(f"=== source: real text (HELDOUT_SOURCE=real, §8 6.3b): DATA_SOURCE=real, one epoch of {windows * 189} "
+                     f"bytes; S {s_}, S_replay {s_}_replay ('replay' at 0.27); every run writes the book's series "
+                     f"(run.py --trust-series)")
+        L += [f"=== kept checkpoints: ON, one final checkpoint per run under {out}/ckpt, and beside it the retention "
+              f"probe's best saves (ckpt.pt.best and .best.prev): up to 3 checkpoint files per run, all counted in the "
+              f"disk check",
+              "=== pins: DATA_SOURCE=real pinned, DATA_DRAW=planned pinned, EVAL_RETENTION_EVERY=650 pinned, "
+              "EVAL_HOLDOUT_WINDOWS=256 pinned, EVAL_RETENTION_N=24 pinned, EVAL_GENERATE=0 pinned, TOK_MINT_NOVEL=0 pinned"]
+        if pool:
+            L.append(f"=== pool: with {pool} (seeds 0 1 2 3 4 5 6): this fleet is its top-up, and its analysis reads "
+                     f"the two fleets' seeds together where commit, card, torch and shape match")
+        L += [f"=== {len(seeds.split()) * 3 + 1} run(s), {par} at a time",
+              "=== ETA by waves: about 18 min (1080 s): 22 run(s) over 24 slot(s), 1 wave(s), each run its windows "
+              "at 19.20 windows/s plus 15 s of startup",
+              "---- 2. fleet started 12:10:00Z", "---- fleet finished in 19 min (1140 s)"]
+        write(os.path.join(out, "SUMMARY.txt"), "\n".join(L) + "\n")
+
+    def hr_run(out, name, seed, *, harm=0.0, rep=0.0, rep_num=0.0, tgap=0.0, trust=0.2, windows=400, nobnd=False):
+        tag = f"{name}.s{seed}"
+
+        def val(k):
+            return 2.0 + 0.1 * k + 0.001 * seed + (harm if HO_AR[k] == "num" else 0.0) + rep \
+                + (rep_num if HO_AR[k] == "num" else 0.0)
+
+        def row(step, kind, closure, nar, rep_=None, off=0.0):
+            ars = {HO_AR[k]: {"control": val(k) + off, "report": val(k) + off, "seen_by_parent": False}
+                   for k in range(nar)}
+            m_ = sum(x["report"] for x in ars.values()) / nar if rep_ is None else rep_
+            return {"step": step, "kind": kind, "closure": closure, "control": m_, "report": m_,
+                    "windows": 24 * nar, "nonfinite": 0, "paired_sd": None, "areas": ars}
+        rows = []
+        for q in range(4):
+            for st, kind in ((q * windows // 4 + 1, "phase"), (q * windows // 4 + windows // 8 + 1, "cadence")):
+                rows.append(row(st, kind, "memory-off", min(4, q + 2), rep_=2.5 + (tgap if st > windows // 2 else 0.0)))
+        if not nobnd:
+            rows += [row(windows, "boundary", "memory-off", 4), row(windows, "boundary", "memory-on", 4, off=-0.01)]
+        cc = {"loop.bytes_scored": 189 * windows, "loop.acts": 0 if name.startswith("k0") else 3,
+              "eval.holdout.seconds": "3.000000", "eval.holdout.windows": sum(r_["windows"] for r_ in rows),
+              "data.trust.wall_s": f"{trust:.6f}", "data.trust.passes": 110, "data.trust.claims": 5000,
+              "data.trust.conflicted_claims": 40, "data.trust.sources": 37, "fab.n_live": 2000 + seed}
+        gates = ["       gate:data.phase_entered                      ('fired', '4 vs 4')",
+                 "       gate:data.exposure_skew                      ('fired', '6.8082 vs 3.0')",
+                 "       gate:data.splice_window                      ('fired', '5.897 vs 8.0')"]
+        write(os.path.join(out, "logs", tag + ".log"), "\n".join(
+            ["=== device=cuda amp=off tf32=(True, True) torch_seed=1",
+             f"=== {windows} windows, {windows} flushes, {windows} optimizer steps, 1 epoch(s) in 20.0s (20.0 w/s)",
+             "=== R STAGE -- the did-it-fire surfaces:"] + [f"       {k:<44} {v}" for k, v in cc.items()] + gates) + "\n")
+        write(os.path.join(out, "curves", tag + ".json"), json.dumps([2.0 * LN2 * 189 / CTX] * windows))
+        write(os.path.join(out, "curves", tag + ".bytes.json"), json.dumps([189] * windows))
+        write(os.path.join(out, "curves", tag + ".probe.json"), json.dumps(rows))
+        with open(os.path.join(out, "logs", "_done.txt"), "a") as fh:
+            fh.write(f"{tag} rc=0 secs=25\n")
+
+    def hr_fleet(out, seeds, *, s_="k1000", harm=0.0, spread=0.0, rep=0.0, rspread=0.0, rep_num=0.0, tgap=0.0,
+                 tspread=0.0, trust=0.2, nobnd=(), **kw):
+        hr_summary(out, seeds=" ".join(map(str, seeds)), s_=s_, **kw)
+        for s_d in seeds:
+            par_ = 1 if s_d % 2 == 0 else -1
+            h_ = harm + par_ * spread
+            for nm, kw_ in (("k0", {}), (s_, {"harm": h_}),
+                            (f"{s_}_replay", {"harm": h_, "rep": rep + par_ * rspread, "rep_num": rep_num,
+                                              "tgap": tgap + par_ * tspread})):
+                hr_run(out, nm, s_d, trust=trust, nobnd=f"{nm}.s{s_d}" in nobnd, **kw_)
+        hr_run(out, "k0_rerun", 0, trust=trust)
+
+    def hr_read(tag, seeds, pool_env=None, **kw):
+        o_ = os.path.join(TMP, "f36", tag, "gpu_heldout_real_out")
+        hr_fleet(o_, seeds, **kw)
+        p_ = gw("--analyze", EXP="heldout", OUT=o_, **({"POOL_WITH": pool_env} if pool_env else {}))
+        return o_, p_, txt(os.path.join(o_, "ANALYSIS.txt")), "\n".join(block_of(p_.stdout) or [])
+
+    def dec14(text):
+        return (re.search(r"^DECISION \(O14, real text\): (.*)$", text, re.M) or [None, ""])[1]
+
+    def dec16(text):
+        return (re.search(r"^DECISION \(O16, the draw\): (.*)$", text, re.M) or [None, ""])[1]
+
+    zero36 = " ".join(f"{a} +0.0000 [+0.0000,+0.0000]" for a in HO_AR)
+    o36, p36, a36, b36 = hr_read("pass", range(7))
+    check("F36 a harmless real-text fleet is read by its own reader: S PASSes against k0 on every area (the eps rule at "
+          "one arm, a = 0.025, the upper bound at t(0.975)) and its label ends on real text; 'replay' is not CONFIRMed "
+          "(no gap) and passes to E1; the book's 1% of wall is within E3's 2%; the block, within 80 lines and equal to "
+          "PASTE_BACK.txt, is labelled real text and carries each seed's k0, S - k0 and S_replay - S",
+          p36.returncode == 0 and "commit abc1234  launched 2026-10-03T12:00:00Z  real text" in b36
+          and "synthetic source" not in b36 and f"  k1000 n=7 a=0.025: {zero36} -> PASS" in b36
+          and "per area (4), S - k0 paired over seeds, each look (7 seeds; a top-up's pooled 11) at 0.025: mean [lower "
+              "at t(1 - a/4), one-sided upper at t(0.975)]" in b36
+          and dec14(b36).startswith("k1000 PASSes against k0 on every area's held-out reading on real text: its "
+                                    "B-provisional label ends here, and whole where 6.3a's synthetic reading PASSed too")
+          and f"  end state n=7: {zero36} -> PASS" in b36
+          and "  time-integrated gap n=7: mean +0.0000, one-sided upper +0.0000: not below 0" in b36
+          and dec16(b36) == "'replay' is not CONFIRMed (the gap's upper bound +0.0000 not below 0): 'planned' stays (D8), "
+                            "and the draw passes to E1 (§8 6.4) (7 seed(s))"
+          and "E3 (04-6.3): the book's seconds over the loop's, mean 1.00% over 21 run(s) (largest 1.00%), at PAR 24, "
+              "against 2%: within it, DATA_TRUST_EVERY (its default, 160) stays" in b36
+          and 0 < len(block_of(p36.stdout)) <= 80
+          and block_of(p36.stdout) == txt(os.path.join(o36, "PASTE_BACK.txt")).splitlines()
+          and "per seed: k0, then k1000 - k0, then k1000_replay - k1000" in b36
+          and re.search(r"^  s6 +2\.0060 +2\.1060 +2\.2060 +2\.3060 \| +\+0\.0000 .* \| +\+0\.0000", b36, re.M) is not None,
+          b36[-2500:])
+    check("F36 ... and beside it, deciding nothing: S - k0's time-integrated gap, the end-state SD per area of both "
+          "differences and the gap's, memory-on - memory-off, the book at R, the plan's gates as flags, readings per "
+          "phase against the pinned 650, n_live and the probe's seconds, and the ETA by waves against the wall",
+          "time-integrated report gap from 20% of the stream, k1000 - k0: mean +0.0000 sd 0.0000 n=7" in b36
+          and "end-state SD per area: k1000 - k0 eng 0.0000 py 0.0000 num 0.0000 c 0.0000 | k1000_replay - k1000 eng "
+              "0.0000 py 0.0000 num 0.0000 c 0.0000 | time-integrated k1000_replay - k1000 sd 0.0000" in b36
+          and "k1000_replay eng -0.0100 py -0.0100 num -0.0100 c -0.0100" in b36
+          and "the book at R, mean over the runs: passes 110, claims 5000, conflicted claims 40, sources 37" in b36
+          and "the plan's gates (flags, as pre-registered): data.exposure_skew fired 6.8082 vs 3.0; data.splice_window "
+              "fired 5.897 vs 8.0" in b36
+          and "against EVAL_RETENTION_EVERY 650 (§8 0.4)" in b36 and "n_live at the end (NEW-20): k0 2003" in b36
+          and "ETA by waves 1080 s, took 1140 s: 1.06x" in b36,
+          [l for l in b36.splitlines() if l.startswith("  ")][-12:])
+    # O16 CONFIRMS: every area 0.02 lower under 'replay' (within eps), the time-integrated gap -0.05 x 199 / 320 =
+    # -0.0311 +- 0.01 x 199 / 320 by parity: its upper bound below 0 at t(0.975, 6).
+    _, _, _, b36c = hr_read("confirm", range(7), rep=-0.02, tgap=-0.05, tspread=0.01)
+    g36 = [(-0.05 + (0.01 if s_ % 2 == 0 else -0.01)) * 199 / 320 for s_ in range(7)]
+    m36 = sum(g36) / 7
+    u36 = m36 + 2.4469118511449697 * math.sqrt(sum((x - m36) ** 2 for x in g36) / 6 / 7)
+    check(f"F36 'replay' CONFIRMs where every area's upper bound is within eps (-0.0200 each) and the time-integrated "
+          f"gap's ({u36:+.4f}, its mean {m36:+.4f}) is below 0: it goes to the owner, 'planned' holding until they answer",
+          f"  time-integrated gap n=7: mean {m36:+.4f}, one-sided upper {u36:+.4f}: below 0, significantly better" in b36c
+          and " ".join(f"{a} -0.0200 [-0.0200,-0.0200]" for a in HO_AR) + " -> PASS" in b36c
+          and dec16(b36c) == f"'replay' at 0.27 is CONFIRMed against 'planned' on real text -- every area's upper bound "
+                             f"within ε, the time-integrated gap's {u36:+.4f} below 0: it goes to the owner (D8), and "
+                             f"'planned' holds until they answer (7 seed(s))", dec16(b36c))
+    _, _, _, b36h = hr_read("harm", range(7), rep_num=0.2, tgap=-0.05)
+    check("F36 'replay' that harms an area past eps is not CONFIRMed, whatever its gap: num's +0.2000, its lower bound "
+          "past eps, FAILs the area condition, and the draw passes to E1",
+          "num +0.2000 [+0.2000,+0.2000]" in b36h
+          and dec16(b36h).startswith("'replay' is not CONFIRMed (num's upper bound +0.2000 above ε): 'planned' stays (D8)"),
+          dec16(b36h))
+    _, _, _, b36f = hr_read("fail", range(7), harm=0.2)
+    check("F36 S FAILs against k0 on real text: its label stays, 1000 stays on meanwhile (never 0), and O14's next remedy "
+          "arms run on real text -- TOK_MINT_NOVEL 1.0 first where S is k1000; no ESCALATE",
+          dec14(b36f).startswith("k1000 FAILs against k0 on real text: its B-provisional label stays, 1000 stays on "
+                                 "meanwhile (0 is never shipped by the rule) and O14's next remedy arms run on real text: "
+                                 "TOK_MINT_NOVEL 1.0 (k1000_mn), then LM_ANCHOR_USES raised, OPT_HORIZON_REVISE=0, and "
+                                 "OPT_BORN_CLOCK once §8 4.2 builds it") and "ESCALATE" not in b36f, dec14(b36f))
+    _, _, _, b36m = hr_read("failmn", range(7), s_="k1000_mn", harm=0.2)
+    check("F36 S at k1000_mn (6.3a shipped TOK_MINT_NOVEL 1.0) FAILs: the next remedy arms start after it",
+          dec14(b36m).startswith("k1000_mn FAILs against k0 on real text") and "OPT_HORIZON_REVISE=0" in dec14(b36m)
+          and "TOK_MINT_NOVEL 1.0 (" not in dec14(b36m), dec14(b36m))
+    o36u, _, _, b36u = hr_read("unres", range(7), harm=0.05, spread=0.1, rep=-0.02, tgap=-0.05, tspread=0.2)
+    oa36 = os.path.realpath(o36u)
+    check("F36 UNRESOLVED below the cap prints the top-up's command -- HELDOUT_SOURCE=real, SHIP_ARM, the next 4 seeds, "
+          "FILL=0, the fleet's shape where it is not the real-text default (WINDOWS, EPOCH_BYTES), PAR, its own OUT and "
+          "POOL_WITH this one -- and O16, not CONFIRMed at this look, waits for the pooled second",
+          dec14(b36u).startswith("UNRESOLVED at 7 seed(s): k1000 is UNRESOLVED against k0")
+          and f"  top-up: EXP=heldout HELDOUT_SOURCE=real SHIP_ARM=k1000 SEEDS='7 8 9 10' FILL=0 WINDOWS=400 "
+              f"EPOCH_BYTES=75600 PAR=24 OUT={oa36[:-4]}_topup_out POOL_WITH={oa36} bash {ROOT}/tools/gpu_launch.sh --go"
+              in b36u
+          and dec16(b36u).startswith("not CONFIRMed at 7 seed(s) (the gap's upper bound ")
+          and dec16(b36u).endswith("not below 0): read again over the top-up's pooled seeds, the second look"),
+          b36u[-1500:])
+    _, _, _, b36x = hr_read("cap", range(11), harm=0.05, spread=0.1)
+    check("F36 the same at the cap of 11 is reported unresolved, never escalated, and S's label stays; no top-up",
+          dec14(b36x).startswith("UNRESOLVED at the cap: k1000 is UNRESOLVED against k0 at the seed cap; reported so, "
+                                 "never escalated, and its B-provisional label stays") and "top-up:" not in b36x, dec14(b36x))
+    _, _, _, b36e = hr_read("e3", range(7), trust=1.0, extra="DATA_TRUST_EVERY=320")
+    check("F36 E3: the book at 5% of the loop's seconds is above 2%, so DATA_TRUST_EVERY lengthens, named at the fleet's "
+          "value",
+          "mean 5.00% over 21 run(s) (largest 5.00%), at PAR 24, against 2%: ABOVE it, so DATA_TRUST_EVERY 320 lengthens "
+          "(E3's rule)" in b36e, [l for l in b36e.splitlines() if l.startswith("E3")])
+    _, _, a36m, b36g = hr_read("missing", range(12), nobnd=("k1000_replay.s3",))
+    check("F36 a run with no boundary row is named and left out of its pairs, and seeds past the cap of 11 are not read",
+          "left out of the pairs (no endpoint): k1000_replay.s3" in b36g and "seeds past the cap of 11, not read: 11" in b36g
+          and "  end state n=10: " in b36g and re.search(r"^  k1000_replay +s3 .*NO BOUNDARY ROW", a36m, re.M) is not None,
+          b36g[-900:])
+    # THE FINALS: S's alone, 6.1's real-text parents, with the pack line; a synthetic fleet is still read by 6.3a's reader.
+    o36k = os.path.join(TMP, "f36", "finals", "gpu_heldout_real_out")
+    hr_fleet(o36k, range(2))
+    for t_ in ("k0.s0", "k1000.s0", "k1000.s1", "k1000_replay.s0"):
+        write(os.path.join(o36k, "ckpt", t_, "ckpt.pt"), "x" * 10)
+        write(os.path.join(o36k, "ckpt", t_ + ".dyntok.json"), "{}")
+    p36k = gw("--analyze", EXP="heldout", OUT=o36k)
+    b36k = "\n".join(block_of(p36k.stdout) or [])
+    check("F36 the finals: FINALS.sha256 lists S's final checkpoints and vocabularies alone (4 files: 6.1's real-text "
+          "parents) and the block's pack: line packs them; the archive is gpu_heldout_real_<date>.tgz",
+          sorted(l[66:] for l in txt(os.path.join(o36k, "FINALS.sha256")).splitlines())
+          == ["ckpt/k1000.s0.dyntok.json", "ckpt/k1000.s0/ckpt.pt", "ckpt/k1000.s1.dyntok.json", "ckpt/k1000.s1/ckpt.pt"]
+          and "FINALS: 4 file(s), the k1000 runs' final checkpoints and vocabularies" in b36k
+          and "§8 6.1's real-text parents, which the pack: line below packs to upload" in b36k
+          and re.search(r"^  pack: tar -cf \S+/gpu_heldout_real_2026-10-03_finals\.tar -C ", b36k, re.M) is not None
+          and "archive: gpu_heldout_real_2026-10-03.tgz beside" in b36k, b36k[-700:])
+
+    # ---- F37: a real-text top-up pooled with its first fleet (2026-10-02, register §8 6.3b) -----------------------------
+    # The first fleet reads S UNRESOLVED at 7 seeds (num +0.4 at even seeds, 0 at odd) and O16 not CONFIRMed (its gap
+    # -0.0311 +- 0.0311, its upper bound +0.0040); its top-up's seeds 7-10 read num +0.3 and the gap -0.0311 at each: the
+    # pooled 11, the second look, FAIL S and CONFIRM 'replay' (the gap's upper bound -0.0109).
+    o37 = os.path.join(TMP, "f37", "gpu_heldout_real_out")
+    hr_fleet(o37, range(7), harm=0.2, spread=0.2, rep=-0.02, tgap=-0.05, tspread=0.05)
+    p37a = gw("--analyze", EXP="heldout", OUT=o37)
+    b37a = "\n".join(block_of(p37a.stdout) or [])
+
+    def hr_topup(tag, seeds=range(7, 11), pool=o37, **kw):
+        o_ = os.path.join(TMP, "f37", tag)
+        hr_fleet(o_, seeds, harm=0.3, rep=-0.02, tgap=-0.05, pool=pool, **kw)
+        p_ = gw("--analyze", EXP="heldout", OUT=o_)
+        return o_, "\n".join(block_of(p_.stdout) or [])
+    o37t, b37t = hr_topup("gpu_heldout_real_topup_out")
+    check("F37 the first fleet alone is UNRESOLVED and asks for the top-up, O16 waiting for it; the top-up, recorded as "
+          "its pool, reads the 11 seeds together -- its own marked * -- and S FAILs on real text and 'replay' CONFIRMs",
+          dec14(b37a).startswith("UNRESOLVED at 7 seed(s): k1000 is UNRESOLVED") and "top-up:" in b37a
+          and dec16(b37a).startswith("not CONFIRMed at 7 seed(s)")
+          and f"POOLED with the first fleet {o37}: its seeds and this top-up's (marked *) are read together" in b37t
+          and re.search(r"^  k1000 n=11 a=0\.025: .* -> FAIL$", b37t, re.M) is not None
+          and re.search(r"^  s10\* ", b37t, re.M) is not None
+          and dec14(b37t).startswith("k1000 FAILs against k0 on real text")
+          and dec16(b37t).startswith("'replay' at 0.27 is CONFIRMed against 'planned' on real text")
+          and "FINALS: none" in b37t, b37a[-600:] + b37t[-1500:])
+    for tag37, kw37, why37 in (("card_out", {"card": "NVIDIA H200, 143771"},
+                                "they differ in card (NVIDIA H200 143771 MiB here, NVIDIA H100 PCIe 81559 MiB there)"),
+                               ("commit_out", {"commit": "def5678"}, "they differ in commit (def5678 here, abc1234 there)"),
+                               ("overlap_out", {"seeds": range(6, 10)}, "seed(s) 6 are in both")):
+        _, b37r = hr_topup(tag37, **kw37)
+        check(f"F37 a real-text top-up whose {tag37.split('_')[0]} differs from the first fleet's is not pooled: POOLING "
+              f"REFUSED, NOTHING IS DECIDED", f"POOLING REFUSED with {o37}: {why37}" in b37r
+              and dec14(b37r).startswith("NOTHING IS DECIDED") and dec16(b37r).startswith("NOTHING IS DECIDED"),
+              b37r[-800:])
+    o37s = os.path.join(TMP, "f37", "synth_first", "gpu_heldout_out")
+    ho_fleet(o37s, range(7), harm=0.2, spread=0.2)
+    _, b37s = hr_topup("source_out", pool=o37s)
+    check("F37 a real-text top-up of a synthetic first fleet is not pooled: they differ in shape and source",
+          "they differ in" in b37s and "source (real text here, synthetic there)" in b37s
+          and dec14(b37s).startswith("NOTHING IS DECIDED"), b37s[-800:])
+    # END TO END with the stand-in: a real-text fleet at 7 seeds whose S reads UNRESOLVED prints the top-up's command,
+    # which the launcher passes and which, run as printed, pools with it. As F31's, the stand-in plants num at +0.2 +-
+    # 0.2 on k10 in the first fleet (UNRESOLVED at 7) and +0.3 in the top-up (FAIL over the pooled 11, its lower bound
+    # about +0.10), and 'replay' 0.02 lower on every area of k10_replay, every reading (CONFIRMed).
+    o37l = os.path.join(TMP, "f37l", "gpu_heldout_real_out")
+    e37 = dict(PATH=env10["PATH"], EXP="heldout", HELDOUT_SOURCE="real", DEVICE="cpu", WINDOWS=20, SEEDS="0 1 2 3 4 5 6",
+               PAR=8, SMOKE_WINDOWS=5, PIN_RETOK=10, PROBE_EVERY=5, KEEP_CKPT=0, OUT=o37l)
+    p37l = subprocess.run(["bash", SCRIPT], cwd=ROOT, capture_output=True, text=True, timeout=900,
+                          env=clean_env(STUB_HARM="0.2", STUB_SPREAD="0.2", STUB_REPLAY="-0.02", **e37))
+    b37l = "\n".join(block_of(p37l.stdout) or [])
+    cmd37 = (re.search(r"^  top-up: (.*) bash \S+/tools/gpu_launch\.sh --go$", b37l, re.M) or [None, ""])[1]
+    kv37 = {k: v.strip("'") for k, v in re.findall(r"(\w+)=('[^']*'|\S+)", cmd37)}
+    oa37 = os.path.realpath(o37l)
+    check("F37 a stand-in real-text launch reads S UNRESOLVED at 7 seeds and prints the top-up's command with the fleet's "
+          "knobs -- HELDOUT_SOURCE=real, SHIP_ARM, seeds 7-10, FILL=0, WINDOWS, PROBE_EVERY, DEVICE and PAR, its own OUT "
+          "and POOL_WITH this one (the stream is the default, so no EPOCH_BYTES)",
+          p37l.returncode == 0 and dec14(b37l).startswith("UNRESOLVED at 7 seed(s): k10 is UNRESOLVED")
+          and kv37 == {"EXP": "heldout", "HELDOUT_SOURCE": "real", "SHIP_ARM": "k10", "SEEDS": "7 8 9 10", "FILL": "0",
+                       "WINDOWS": "20", "PROBE_EVERY": "5", "DEVICE": "cpu", "PAR": "8",
+                       "OUT": oa37[:-4] + "_topup_out", "POOL_WITH": oa37}, f"rc {p37l.returncode}; {cmd37!r}; {b37l[-1200:]}")
+    l37 = subprocess.run(["bash", LAUNCHER], cwd=TMP, capture_output=True, text=True, timeout=300,
+                         env=clean_env(PATH=env10["PATH"], FETCH=0, CKPT_MB=50, **dict(kv37, OUT=os.path.join(TMP, "f37m", "o_out"))))
+    p37u = subprocess.run(["bash", SCRIPT], cwd=ROOT, capture_output=True, text=True, timeout=900,
+                          env=clean_env(PATH=env10["PATH"], SMOKE_WINDOWS=5, KEEP_CKPT=0, STUB_HARM="0.3",
+                                        STUB_REPLAY="-0.02", **kv37))
+    b37u = "\n".join(block_of(p37u.stdout) or [])
+    check("F37 ... the launcher passes the printed command (the top-up of the first, real-text fleet), and run as printed "
+          "the top-up records its first fleet and reads the 11 seeds together: S FAILs on real text, 'replay' CONFIRMs",
+          f"PASS POOL_WITH: this fleet is the top-up of {oa37}" in l37.stdout and "HELDOUT_SOURCE=real" in l37.stdout
+          and p37u.returncode == 0 and f"POOLED with the first fleet {oa37}" in b37u
+          and re.search(r"^  k10 n=11 a=0\.025: .* -> FAIL$", b37u, re.M) is not None
+          and dec14(b37u).startswith("k10 FAILs against k0 on real text")
+          and dec16(b37u).startswith("'replay' at 0.27 is CONFIRMed against 'planned' on real text"),
+          l37.stdout[-500:] + b37u[-1500:])
 
 finally:
     # NOTHING THESE CHECKS STARTED OUTLIVES THEM: a process carrying a GW_FLEET_OUT under TMP (a fleet, its

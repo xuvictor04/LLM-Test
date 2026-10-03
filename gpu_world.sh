@@ -328,7 +328,8 @@
 # the per-seed bits/byte, each cadence's per-phase bounds and verdict, eps, the choice and why, M
 # reported, rates, secondaries with the blackout split, and kept checkpoints; at EXP=heldout the per-seed
 # held-out readings, each act arm's per-area bounds and verdict, the DECISION and, where it is UNRESOLVED,
-# the top-up's command, what is reported beside it, and the finals' pack line; at EXP=session the per-parent F
+# the top-up's command, what is reported beside it, and the finals' pack line, and on real text S - k0 and S_replay - S
+# with O14's, O16's and E3's lines; at EXP=session the per-parent F
 # per old area, the anchor, each candidate's bounds and verdict, O9's reading of x5, the DECISION, a top-up's
 # command, and what is reported beside it). Paste it
 # into the chat. $OUT is then packed beside itself as <name>_<launch date>.tgz -- logs, curves, smoke,
@@ -1327,6 +1328,18 @@ def choose(cadences, verdicts, better, inc, remedy=None, room=False):
                          f"the whole-run {c[1:]} - {inc[1:]} upper bound "
                          + ("cannot be formed (n < 2)" if b[2] is None else f"{b[2]:+.4f} is not below 0")))
     return "stays", inc, "; ".join(parts)
+
+
+def o16_confirm(areas, gap, eps, alpha):
+    """O16's CONFIRM (2026-10-02, §8 6.3b; Proposal 05 O16): 'replay' against 'planned', S_replay - S paired by seed.
+    areas: one list per area of the end-state differences; gap: the time-integrated all-area report gaps. CONFIRM where
+    every area's one-sided upper bound at t(1 - alpha) is at most eps -- eps_rule's PASS at one arm, whose lower bounds
+    say where 'replay' harms an area past eps -- and the gap's one-sided upper bound at t(1 - alpha) is below 0,
+    better_than's 'significantly better'. Returns (confirm, eps_rule's reading, better_than's (n, mean, upper, better,
+    level)); at n < 2 nothing can be CONFIRMed."""
+    ar = eps_rule({"r": areas}, eps, alpha)["r"]
+    g = better_than({"r": gap}, alpha)["r"] if gap else (0, None, None, False, alpha)
+    return ar["verdict"] == "PASS" and bool(g[3]), ar, g
 # <<< THE ε RULE
 
 
@@ -2632,6 +2645,500 @@ def heldout(ctx_arg, archive, eps, pool_arg, home):
     ])
 
 
+# ------------------------------------------------------------------------------------------ heldout, real text
+# E2's SHAPE (b) ON REAL TEXT, WITH O16's DRAW PAIR AND E3's WALL (EXP=heldout HELDOUT_SOURCE=real; Proposal 05 §8 6.3b,
+# O14, O16, 04-6.3; 2026-10-02). SUMMARY's source line routes a fleet here; 6.3a's reader above reads the synthetic one,
+# unchanged. Three readings, each at LOOK_ALPHA a look (the 7 seeds; a top-up's pooled 11):
+#   O14: S - k0 per area on R's reading (memory-off, report half), by the eps rule at one arm -- 6.3a's rule at K=1. S
+#        PASS ends S's B-provisional label on real text; FAIL keeps it and names the next remedy arms; UNRESOLVED below
+#        the cap prints a top-up's command, whose block pools both fleets where commit, card, torch and shape match.
+#   O16, its own family: S_replay - S CONFIRMs 'replay' where every area's end-state upper bound is within eps and the
+#        time-integrated all-area report gap's (from 20% of the stream on) is below 0 (o16_confirm). A CONFIRM goes to
+#        the owner (D8); anything else at the last look passes to E1 (§8 6.4).
+#   E3: the source-reliability book's seconds over each run's loop seconds, their mean against 2% of wall.
+# Everything after them is reported and decides nothing.
+HR_E3 = 0.02                              # E3's cap on the book's share of wall (Proposal 04 §7, 04-6.3)
+HR_WINDOWS, HR_BYTES, HR_EVERY = 17476, 3780000, 650   # the real-text fleet's defaults, which a top-up's command omits
+
+
+def hr_integ(v):
+    """The time-integrated all-area report of one run, from 20% of its stream to its end: its in-run readings
+    (memory-off, 'phase' and 'cadence'), a step function of the stream position its flush bytes place them at, integrated
+    over the bytes and divided by their span -- 6.3a's reported reading, here O16's endpoint. None without the series."""
+    ser, fb = v["series"], v["fbytes"]
+    if not ser or not fb or not v["win"] or not v["flushes"]:
+        return None
+    wpf = max(1, round(v["win"] / v["flushes"]))
+    cum = [0]
+    for b in fb:
+        cum.append(cum[-1] + b)
+    T = cum[-1]
+    pts = sorted((cum[min(len(fb), int(r_["step"]) // wpf)], float(r_["report"])) for r_ in ser
+                 if isinstance(r_, dict) and r_.get("kind") in ("phase", "cadence")
+                 and r_.get("closure") == "memory-off" and fnum(r_.get("report")) is not None)
+    if not pts or T <= 0:
+        return None
+    lo, acc = 0.2 * T, 0.0
+    for i, (x, val) in enumerate(pts):
+        a_ = lo if i == 0 else max(x, lo)
+        b_ = pts[i + 1][0] if i + 1 < len(pts) else T
+        acc += val * max(0.0, min(b_, T) - a_)
+    return acc / (T - lo)
+
+
+def heldout_real(ctx_arg, archive, eps, pool_arg, home):
+    ctx = int(sget(r"^=== plan: .*?LM_CTX (\d+)") or ctx_arg)
+    total = int(sget(r"DATA_STREAM_BYTES=(\d+)") or 0)
+    done = done_book()
+    here = ho_runs(OUT)
+    runs = {k: v for k, v in here.items() if k[0] != "k0_rerun"}
+    reruns = [("this fleet's", here.get(("k0_rerun", 0)), here.get(("k0", 0)))]
+    mine = {s for (n, s) in runs}
+    names = {n for (n, s) in runs}
+    # S AND S_replay, off the source line SUMMARY records (else the arms the logs hold).
+    sr = re.search(r"^=== source: real text .*?; S (\S+), S_replay (\S+) ", S, re.M)
+    S_ = sr.group(1) if sr else min((n for n in names if re.fullmatch(r"k[1-9]\d*(_mn)?", n)), default=None)
+    R_ = sr.group(2) if sr else (f"{S_}_replay" if S_ else None)
+
+    # ---------------------------------------------------------------- a top-up's first fleet (6.3a's pooling)
+    pool = (pool_arg or sget(r"^=== pool: with (\S+)") or "").strip()
+    pooled, refused, pool_lines = None, None, []
+    if pool:
+        P = rd(os.path.join(pool, "SUMMARY.txt"))
+        if not P:
+            refused = f"{pool} holds no SUMMARY.txt"
+        else:
+            a_, b_ = ho_facts(S), ho_facts(P)
+            diff = [k for k in ("commit", "code", "card", "torch", "shape") if a_[k] != b_[k]]
+            if not re.search(r"^=== source: real text", P, re.M):
+                diff.append("source (real text here, synthetic there)")
+            there = ho_runs(pool)
+            both = sorted(mine & {s for (n, s) in there if n != "k0_rerun"})
+            reruns = [("this top-up's, against the first fleet's k0.s0", here.get(("k0_rerun", 0)),
+                       there.get(("k0", 0)))]
+            if diff:
+                refused = "they differ in " + "; ".join(
+                    d if d.startswith("source") else f"{d} ({a_[d]} here, {b_[d]} there)" for d in diff)
+            elif both:
+                refused = f"seed(s) {' '.join(map(str, both))} are in both"
+            else:
+                pooled = pool
+                runs.update({k: v for k, v in there.items() if k[0] != "k0_rerun"})
+                reruns = [("the first fleet's", there.get(("k0_rerun", 0)), there.get(("k0", 0)))] + reruns
+        pool_lines = ([f"POOLED with the first fleet {pooled}: its seeds and this top-up's (marked *) are read "
+                       f"together; commit, card, torch and shape match"] if pooled else
+                      [f"POOLING REFUSED with {pool}: {refused}; nothing is decided here"])
+
+    # ---------------------------------------------------------------- the endpoints
+    end = {k: ho_end(v) for k, v in runs.items()}
+    k0s = sorted(s for (n, s) in runs if n == "k0" and end[(n, s)])
+    seeds, past = k0s[:CAP_SEEDS], k0s[CAP_SEEDS:]
+    seen = [a for e in end.values() for a in e]
+    areas = [a for a in HO_AREAS if a in seen] + sorted(set(seen) - set(HO_AREAS))
+
+    def pairs(a, b):
+        """One list per area of a - b over the seeds read where both runs hold R's reading."""
+        per = [[] for _ in areas]
+        for s in seeds:
+            ea, eb = end.get((a, s)), end.get((b, s))
+            if ea and eb:
+                for i, ar in enumerate(areas):
+                    if ar in ea and ar in eb:
+                        per[i].append(ea[ar] - eb[ar])
+        return per
+
+    # O14 ON REAL TEXT: S - k0, the eps rule at one arm, LOOK_ALPHA a look.
+    acted = bool(S_) and any((runs.get((S_, s)) or {}).get("acts") for s in seeds)
+    d14 = pairs(S_, "k0") if acted else []
+    R14 = eps_rule({S_: d14}, eps, LOOK_ALPHA)[S_] if acted else None
+    n14 = max([len(xs) for xs in d14] or [0])
+    room = n14 < CAP_SEEDS and not pool
+    v14 = R14["verdict"] if R14 else None
+    kind = ("refused" if refused else "undecided" if v14 is None else "pass" if v14 == "PASS" else
+            "withdraw" if v14 == "FAIL" else "topup" if room else "unresolved")
+    # O16: S_replay - S, per area at the end state and over the time-integrated gap.
+    ti = {k: hr_integ(v) for k, v in runs.items()}
+    d16 = pairs(R_, S_) if S_ and R_ else []
+    g16 = [ti[(R_, s)] - ti[(S_, s)] for s in seeds
+           if ti.get((R_, s)) is not None and ti.get((S_, s)) is not None] if S_ and R_ else []
+    n16 = max([len(xs) for xs in d16] or [0])
+    conf, a16, b16 = o16_confirm(d16, g16, eps, LOOK_ALPHA) if n16 else (False, None, None)
+    # E3: the book's seconds over each run's loop seconds.
+    wall = {k: fnum(v["r"].get("data.trust.wall_s")) / v["secs"] for k, v in runs.items()
+            if fnum(v["r"].get("data.trust.wall_s")) is not None and v["secs"]}
+
+    c = (re.match(r"k(\d+)", S_ or "") or [None, "?"])[1]
+    nxt = 1 + max([s for (n, s) in runs] + [int(t.rpartition(".s")[2]) for t in done if t.rpartition(".s")[2].isdigit()]
+                  or [-1])
+    cmd = None
+    if kind == "topup":
+        sz = re.search(r"^=== (\d+) windows per run, DATA_STREAM_BYTES=(\d+), seeds: .*?, EXTRA='(.*)'$", S, re.M)
+        pe = re.search(r"EVAL_RETENTION_EVERY=(\d+) pinned", S)
+        dv = re.search(r"^=== \d+ CPU core\(s\), \d+ GPU\(s\), device=(\w+)", S, re.M)
+        pr = (re.findall(r"^=== \d+ run\(s\), (\d+) at a time", S, re.M) or [None])[-1]
+        oa = os.path.realpath(OUT)
+        kv = [("EXP", "heldout"), ("HELDOUT_SOURCE", "real"), ("SHIP_ARM", S_),
+              ("SEEDS", " ".join(str(s) for s in range(nxt, nxt + CAP_SEEDS - n14))), ("FILL", "0")]
+        if sz and int(sz.group(1)) != HR_WINDOWS:
+            kv.append(("WINDOWS", sz.group(1)))
+        if sz and int(sz.group(2)) != HR_BYTES:
+            kv.append(("EPOCH_BYTES", sz.group(2)))
+        if sz and sz.group(3):
+            kv.append(("EXTRA", sz.group(3)))
+        if pe and int(pe.group(1)) != HR_EVERY:
+            kv.append(("PROBE_EVERY", pe.group(1)))
+        if dv and dv.group(1) != "cuda":
+            kv.append(("DEVICE", dv.group(1)))
+        if pr:
+            kv.append(("PAR", pr))
+        kv += [("OUT", (oa[:-4] if oa.endswith("_out") else oa) + "_topup_out"), ("POOL_WITH", oa)]
+        cmd = " ".join(f"{k}={shlex.quote(v)}" for k, v in kv) + f" bash {shlex.quote(os.path.join(home, 'tools', 'gpu_launch.sh'))} --go"
+    nxt_arms = ("TOK_MINT_NOVEL 1.0 (" + (S_ or "k?") + "_mn), then " if S_ and not S_.endswith("_mn") else "") + HO_REMEDIES
+    tail_ = f" (ε {eps:g} bits/byte, {n14} seed(s))"
+    if kind == "pass":
+        d14_ = (f"{S_} PASSes against k0 on every area's held-out reading on real text: its B-provisional label ends here, "
+                f"and whole where 6.3a's synthetic reading PASSed too (§8 6.3b)" + tail_)
+    elif kind == "withdraw":
+        d14_ = (f"{S_} FAILs against k0 on real text: its B-provisional label stays, {c} stays on meanwhile (0 is never "
+                f"shipped by the rule) and O14's next remedy arms run on real text: {nxt_arms}" + tail_)
+    elif kind == "topup":
+        d14_ = (f"UNRESOLVED at {n14} seed(s): {S_} is UNRESOLVED against k0; top up to the cap of {CAP_SEEDS} on this card "
+                f"and torch with the command below, then paste back the top-up's block, which reads both fleets" + tail_)
+    elif kind == "unresolved":
+        d14_ = (f"UNRESOLVED at the cap: {S_} is UNRESOLVED against k0 at the seed cap; reported so, never escalated, and "
+                f"its B-provisional label stays" + tail_)
+    elif kind == "refused":
+        d14_ = (f"NOTHING IS DECIDED: this top-up's seeds pool with its first fleet's only where commit, card, torch and "
+                f"shape match, and {refused}; the first fleet's reading stands, and the top-up runs again on its card and "
+                f"torch, at its commit")
+    else:
+        d14_ = f"UNDECIDED: {S_ or 'S'} did not act in these runs" + ("" if S_ else " (no S in the logs)")
+    # O16's DECISION: a CONFIRM stands at either look; anything else waits for the top-up where one follows, else E1.
+    why16 = []
+    if a16:
+        for i, (n, m, lo, up) in enumerate(a16["phases"]):
+            if up is None:
+                why16.append(f"{areas[i]}: n < 2")
+            elif up > eps:
+                why16.append(f"{areas[i]}'s upper bound {up:+.4f} above ε")
+        if b16[2] is None:
+            why16.append("the gap: n < 2")
+        elif not b16[3]:
+            why16.append(f"the gap's upper bound {b16[2]:+.4f} not below 0")
+    if kind == "refused":
+        d16_ = "NOTHING IS DECIDED (the pooling was refused, above)"
+    elif not n16:
+        d16_ = f"not read: no {R_} - {S_} pair holds R's reading"
+    elif conf:
+        d16_ = (f"'replay' at 0.27 is CONFIRMed against 'planned' on real text -- every area's upper bound within ε, the "
+                f"time-integrated gap's {b16[2]:+.4f} below 0: it goes to the owner (D8), and 'planned' holds until they "
+                f"answer ({n16} seed(s))")
+    elif kind == "topup":
+        d16_ = (f"not CONFIRMed at {n16} seed(s) ({'; '.join(why16)}): read again over the top-up's pooled seeds, the "
+                f"second look")
+    else:
+        d16_ = (f"'replay' is not CONFIRMed ({'; '.join(why16)}): 'planned' stays (D8), and the draw passes to E1 "
+                f"(§8 6.4) ({n16} seed(s))")
+    every = (re.search(r"(?:^| )DATA_TRUST_EVERY=(\d+)", sget(r"^=== \d+ windows per run, .*?, EXTRA='(.*)'$") or "")
+             or [None, None])[1]
+    te = f"DATA_TRUST_EVERY {every}" if every else "DATA_TRUST_EVERY (its default, 160)"
+    par_ = (re.findall(r"^=== \d+ run\(s\), (\d+) at a time", S, re.M) or ["?"])[-1]
+    if wall:
+        mw, xw = sum(wall.values()) / len(wall), max(wall.values())
+        e3_ = (f"E3 (04-6.3): the book's seconds over the loop's, mean {100 * mw:.2f}% over {len(wall)} run(s) (largest "
+               f"{100 * xw:.2f}%), at PAR {par_}, against {100 * HR_E3:g}%: "
+               + (f"within it, {te} stays" if mw <= HR_E3 else f"ABOVE it, so {te} lengthens (E3's rule)"))
+    else:
+        e3_ = "E3 (04-6.3): no run printed data.trust.wall_s with its loop seconds: E3's wall is not read"
+
+    # ---------------------------------------------------------------- the runs, as read
+    print()
+    print("=== RUNS (held-out bits/byte at R: the last 'boundary' row, closure memory-off, report half; real text) ===")
+    missing = []
+    for (n, s), v in sorted(runs.items(), key=lambda kv: (kv[0][0], kv[0][1])):
+        e = end[(n, s)]
+        why_ = ("NO PROBE SERIES" if v["series"] is None else "NO BOUNDARY ROW (memory-off)" if not e else "")
+        if why_:
+            missing.append(f"{v['tag']}{'*' if pooled and (n, s) in here else ''}")
+        print(f"  {n:<14} s{s:<3} {v['win'] or '?':>6} win  acts {fmt(v['acts'], 'n'):>4}  "
+              + ("  ".join(f"{a} {e[a]:.5f}" for a in areas if a in e) or why_)
+              + (f"  integrated {ti[(n, s)]:.5f}" if ti.get((n, s)) is not None else "")
+              + ("  STOPPED AT THE WINDOW CAP" if v["stopped"] else ""))
+    rr_lines = []
+    for who, a_, b_ in reruns:
+        if a_ is None:
+            continue
+        ea, eb = ho_end(a_), ho_end(b_ or {})
+        d_ = [abs(ea[x] - eb[x]) for x in ea if x in eb]
+        pq = (abs(sum(a_["curve"]) - sum(b_["curve"])) if a_.get("curve") and b_ and b_.get("curve") else None)
+        rr_lines.append(f"k0_rerun ({who}): " + ("no k0.s0 reading to pair it with" if not d_ else
+                        f"k0 seed 0 twice, R per area max |diff| {max(d_):.3g}"
+                        + (f", summed loss |diff| {pq:.3g}" if pq is not None else "")
+                        + (" (BIT-EXACT)" if max(d_) == 0 and pq == 0 else "")))
+    print()
+    for l in rr_lines:
+        print(f"=== RUN-TO-RUN: {l} ===")
+
+    def cells(rows, n_arm):
+        return " ".join(f"{areas[i]} -" if m is None else
+                        f"{areas[i]} {m:+.4f} " + (f"[{lo:+.4f},{up:+.4f}]" if lo is not None else "[-]")
+                        + (f" (n={n})" if n != n_arm else "") for i, (n, m, lo, up) in enumerate(rows))
+    h14 = (f"RULE O14 (§8 6.3b; O2): ε {eps:g} bits/byte; per area ({len(areas)}), S - k0 paired over seeds, each look "
+           f"(7 seeds; a top-up's pooled 11) at {LOOK_ALPHA:g}: mean [lower at t(1 - a/{len(areas)}), one-sided upper at "
+           f"t({1 - LOOK_ALPHA:g})]" + (" -- this fleet alone, deciding nothing" if refused else ""))
+    r14 = ([f"  {S_} n={n14} a={R14['level']:.3g}: " + cells(R14["phases"], n14) + f" -> {R14['verdict']}"
+            + (f" ({R14['note'].replace('some phase', 'some area')})" if R14["note"] else "")] if R14 else
+           [f"  {S_ or 'S'}: NO ACT FIRED at any seed -- no evidence either way, not a pass"])
+    h16 = (f"RULE O16 (§8 6.3b; its own family): {R_} - {S_} paired over seeds, at {LOOK_ALPHA:g} a look: CONFIRM where "
+           f"every area's one-sided upper bound at t({1 - LOOK_ALPHA:g}) is within ε and the time-integrated all-area "
+           f"report gap's, from 20% of the stream on, is below 0")
+    r16 = []
+    if a16:
+        r16.append(f"  end state n={n16}: " + cells(a16["phases"], n16) + f" -> {a16['verdict']}"
+                   + (f" ({a16['note'].replace('some phase', 'some area')})" if a16["note"] else ""))
+        r16.append(f"  time-integrated gap n={b16[0]}: mean " + fmt(b16[1], "+.4f") + ", one-sided upper "
+                   + ("- (n < 2)" if b16[2] is None else f"{b16[2]:+.4f}")
+                   + (": below 0, significantly better" if b16[3] else ": not below 0"))
+    print()
+    print("=== " + h14 + " ===")
+    for l in r14:
+        print(l)
+    print(f"=== DECISION (O14, real text): {d14_} ===")
+    if cmd:
+        print(f"    top-up: {cmd}")
+    print()
+    print("=== " + h16 + " ===")
+    for l in r16:
+        print(l)
+    print(f"=== DECISION (O16, the draw): {d16_} ===")
+    print()
+    print(f"=== {e3_} ===")
+    extra_rows = []
+    if missing:
+        extra_rows.append(f"  left out of the pairs (no endpoint): {' '.join(missing)}")
+    if past:
+        extra_rows.append(f"  seeds past the cap of {CAP_SEEDS}, not read: {' '.join(map(str, past))}")
+    for l in extra_rows:
+        print(l)
+
+    # ---------------------------------------------------------------- reported, deciding nothing (6.3a's, at real text)
+    arms = [a for a in (S_, R_) if a]
+
+    def per_arm(a):
+        return [(s, runs[(a, s)]) for s in seeds if (a, s) in runs]
+
+    def sd(xs):
+        n_, m_, se_ = mean_se(xs)
+        return None if se_ is None else se_ * math.sqrt(n_)
+
+    def mm(xs, spec):
+        xs = [x for x in xs if x is not None]
+        return (f"{fmt(mean(xs), spec)} [{fmt(min(xs), spec)}-{fmt(max(xs), spec)}]" if xs else "-")
+
+    rep_lines = []
+    gate_n = [v["nph"] for v in runs.values() if v["nph"]]
+    nph = max(sorted(set(gate_n)), key=gate_n.count) if gate_n else 4
+
+    def phases(v):
+        cu, fb = v["curve"], v["fbytes"]
+        if not (cu and fb and len(cu) == len(fb) and total):
+            return None
+        lo_n, lo_b, off = [0.0] * nph, [0] * nph, 0
+        for x, nb in zip(cu, fb):
+            k = min(nph - 1, next((j for j in range(nph) if off < round((j + 1) * total / nph)), nph - 1))
+            lo_n[k] += x
+            lo_b[k] += nb
+            off += nb
+        return [lo_n[k] * ctx / L2 / lo_b[k] if lo_b[k] else None for k in range(nph)]
+    ph = {k: phases(v) for k, v in runs.items()}
+    for a, b in ((S_, "k0"), (R_, S_)):
+        if not (a and b):
+            continue
+        per = [[] for _ in range(nph)]
+        for s in seeds:
+            pa, pb = ph.get((a, s)), ph.get((b, s))
+            if pa and pb:
+                for k in range(nph):
+                    if pa[k] is not None and pb[k] is not None:
+                        per[k].append(pa[k] - pb[k])
+        if any(per):
+            pr_ = eps_rule({a: per}, eps)[a]
+            body = " ".join(f"p{k + 1} " + ("-" if m is None else f"{m:+.4f}" + (f" [{lo:+.4f},{up:+.4f}]" if lo is not None else ""))
+                            for k, (n, m, lo, up) in enumerate(pr_["phases"]))
+            rep_lines.append(f"  prequential per phase, {a} - {b} n={max(len(x) for x in per)}: {body} -> {pr_['verdict']}")
+    mem = []
+    for a in ["k0"] + arms:
+        prs = [(ho_end(v, "memory-on"), ho_end(v)) for _, v in per_arm(a)]
+        dd = {ar: mean([on[ar] - off[ar] for on, off in prs if ar in on and ar in off]) for ar in areas}
+        if any(x is not None for x in dd.values()):
+            mem.append(f"{a} " + " ".join(f"{ar} {fmt(x, '+.4f')}" for ar, x in dd.items()))
+    if mem:
+        rep_lines.append("  memory-on - memory-off at R, mean over seeds (NEW-03): " + " | ".join(mem))
+    xs14 = [ti[(S_, s)] - ti[("k0", s)] for s in seeds if ti.get((S_, s)) is not None and ti.get(("k0", s)) is not None]
+    if xs14:
+        rep_lines.append(f"  time-integrated report gap from 20% of the stream, {S_} - k0: mean {sum(xs14) / len(xs14):+.4f} "
+                         f"sd {fmt(sd(xs14), '.4f')} n={len(xs14)}")
+    sdl = [f"{lab} " + " ".join(f"{ar} {fmt(sd(xs), '.4f')}" for ar, xs in zip(areas, dd_))
+           for lab, dd_ in ((f"{S_} - k0", d14), (f"{R_} - {S_}", d16)) if dd_]
+    if sdl or g16:
+        rep_lines.append("  end-state SD per area: " + " | ".join(sdl)
+                         + (f" | time-integrated {R_} - {S_} sd {fmt(sd(g16), '.4f')}" if g16 else ""))
+    rep_lines.append("  n_live at the end (NEW-20): " + " | ".join(
+        f"{a} {mm([v['nlive'] for _, v in per_arm(a)], '.0f')}" for a in ["k0"] + arms))
+    pr2 = []
+    for a in ["k0"] + arms:
+        tot, inrun, rsh = [], [], []
+        for _, v in per_arm(a):
+            sec_, win_ = fnum(v["r"].get("eval.holdout.seconds")), fnum(v["r"].get("eval.holdout.windows"))
+            rw = sum(int(x.get("windows") or 0) for x in (v["series"] or []) if isinstance(x, dict)
+                     and x.get("kind") == "boundary")
+            if sec_ is None or not win_:
+                continue
+            r_s = sec_ * rw / win_
+            tot.append(sec_)
+            rsh.append(r_s)
+            if v["secs"]:
+                inrun.append(100 * (sec_ - r_s) / v["secs"])
+        if tot:
+            pr2.append(f"{a} {mean(tot):.1f} s, R {mean(rsh):.1f} s, in-run {fmt(mean(inrun), '.2f')}% of loop time")
+    if pr2:
+        rep_lines.append("  the probe's seconds (eval.holdout.seconds; R's share by its windows): " + " | ".join(pr2))
+    bk = {k: mean([fnum(v["r"].get(f"data.trust.{k}")) for v in runs.values()])
+          for k in ("passes", "claims", "conflicted_claims", "sources")}
+    if any(x is not None for x in bk.values()):
+        rep_lines.append("  the book at R, mean over the runs: " + ", ".join(f"{k.replace('_', ' ')} {fmt(x, '.0f')}"
+                                                                         for k, x in bk.items()))
+    # THE PLAN'S GATES, off this fleet's R stages (their value is two words, which rep() does not take): on real text at
+    # this shape data.exposure_skew and data.splice_window fire, both flags (§8 6.3b's sizing).
+    gl = {}
+    for lg in sorted(glob.glob(os.path.join(OUT, "logs", "*.log"))):
+        for g_, st_, vt_ in re.findall(r"^\s+gate:data\.(exposure_skew|exposure_max|splice_window)\s+\('([\w-]+)', "
+                                       r"'([^']*)'\)\s*$", rd(lg), re.M):
+            gl.setdefault(g_, set()).add(f"{st_} {vt_}")
+    fl = [f"data.{g_} " + " / ".join(sorted(gl[g_])) for g_ in ("exposure_skew", "exposure_max", "splice_window")
+          if gl.get(g_)]
+    if fl:
+        rep_lines.append("  the plan's gates (flags, as pre-registered): " + "; ".join(fl))
+    cnt, short = [], []
+    for k, v in runs.items():
+        steps, cs = [], []
+        for r_ in v["series"] or []:
+            if not isinstance(r_, dict) or r_.get("closure") != "memory-off":
+                continue
+            if r_.get("kind") == "phase":
+                steps.append(int(r_["step"]))
+                cs.append(1)
+            elif r_.get("kind") == "cadence" and cs:
+                cs[-1] += 1
+        cnt += [(x, v["tag"], i + 1) for i, x in enumerate(cs)]
+        if steps and v["win"]:
+            ln_ = [b - a for a, b in zip(steps, steps[1:])] + [v["win"] - steps[-1] + 1]
+            short.append((min(ln_), v["tag"]))
+    pin_every = sget(r"EVAL_RETENTION_EVERY=(\d+) pinned")
+    if cnt:
+        lo_ = min(cnt)
+        sh = min(short) if short else None
+        rep_lines.append(f"  in-run readings per phase: fewest {lo_[0]} ({lo_[1]}, phase {lo_[2]}), most {max(cnt)[0]}"
+                         + (f"; shortest phase {sh[0]:,} windows ({sh[1]}), / 5 = {sh[0] / 5:.0f} against "
+                            f"EVAL_RETENTION_EVERY {pin_every or '?'} (§8 0.4)" if sh else ""))
+    rate_rows = []
+    for a in ["k0"] + arms:
+        wps = [v["win"] / v["secs"] for _, v in per_arm(a) if v["win"] and v["secs"]]
+        if wps:
+            rate_rows.append(f"{a} {mean(wps):.2f} [{min(wps):.2f}-{max(wps):.2f}]")
+    agg = []
+    fin = re.search(r"^---- fleet finished in \d+ min \((\d+) s\)", S, re.M)
+    eta = re.search(r"^=== ETA by waves: about \d+ min \((\d+) s\)", S, re.M)
+    if fin and int(fin.group(1)) > 0:
+        wl = int(fin.group(1))
+        tw = sum(v["win"] for k, v in here.items() if v["win"])
+        agg.append(f"  this fleet: {tw:,} windows in {wl} s of fleet wall = {tw / wl:.2f} windows/s aggregate"
+                   + (f"; ETA by waves {eta.group(1)} s, took {wl} s: {wl / max(1, int(eta.group(1))):.2f}x" if eta else ""))
+
+    # ---------------------------------------------------------------- the finals: 6.1's real-text parents
+    # S's final checkpoints and vocabularies (the training default's draw, 'planned'), sha256 in FINALS.sha256 with a
+    # pack line, as 6.3a's are; a top-up packs none, and an archive (no ckpt/) keeps the manifest its fleet wrote.
+    fin_lines = []
+    ck = os.path.join(OUT, "ckpt")
+    man = os.path.join(OUT, "FINALS.sha256")
+    if os.path.isdir(ck):
+        rows, nb = [], 0
+        for (n, s), v in sorted(here.items()):
+            if n != S_:
+                continue
+            for rel in (f"ckpt/{v['tag']}/ckpt.pt", f"ckpt/{v['tag']}.dyntok.json"):
+                p_ = os.path.join(OUT, rel)
+                if os.path.isfile(p_):
+                    h = hashlib.sha256()
+                    with open(p_, "rb") as fh:
+                        for blk in iter(lambda: fh.read(1 << 20), b""):
+                            h.update(blk)
+                    rows.append(f"{h.hexdigest()}  {rel}")
+                    nb += os.path.getsize(p_)
+        with open(man, "w") as fh:
+            fh.write("".join(r_ + "\n" for r_ in rows))
+        oa, tar_ = os.path.realpath(OUT), re.sub(r"\.tgz$", "", os.path.realpath(archive)) + "_finals.tar"
+        fin_lines.append(f"FINALS: {len(rows)} file(s), the {S_} runs' final checkpoints and vocabularies, {nb / 1e9:.2f} "
+                         f"GB, sha256 in FINALS.sha256; "
+                         + ("a top-up's: §8 6.1 starts from the first fleet's, which its block's pack: line packs" if pool
+                            else "§8 6.1's real-text parents, which the pack: line below packs to upload"))
+        if not pool:
+            fin_lines.append(f"  pack: tar -cf {tar_} -C {oa} FINALS.sha256 $(cut -c67- {oa}/FINALS.sha256)")
+    elif os.path.exists(man):
+        n_ = sum(1 for l in rd(man).splitlines() if l.strip())
+        fin_lines.append(f"FINALS: {n_} file(s) in FINALS.sha256, as the fleet's own analysis wrote it (no ckpt/ here: "
+                         f"an archive packs none)")
+    else:
+        fin_lines.append("FINALS: none" + (" (KEEP_CKPT was off)" if KEPT_ON == "OFF" else
+                                           ": this directory holds no ckpt/ and no FINALS.sha256"))
+
+    print()
+    print("=== REPORTED, DECIDES NOTHING (§8 6.3b) ===")
+    for l in rep_lines + ["  windows/s per run (mean [min-max] over the seeds read): " + " | ".join(rate_rows)] + agg:
+        print(l)
+    print()
+    for l in fin_lines:
+        print(l if l.startswith("  ") else "=== " + l)
+
+    # ---------------------------------------------------------------- the block
+    hd = [f"held-out bits/byte at R (memory-off, report half), per seed: k0, then {S_} - k0, then {R_} - {S_}",
+          "  seed  " + " ".join(f"{a:>7}" for a in areas) + "".join(" | " + " ".join(f"{a:>8}" for a in areas)
+                                                                   for _ in range(2))]
+    t_rows = []
+    for s in seeds:
+        e0, es, er = end.get(("k0", s)) or {}, end.get((S_, s)) or {}, end.get((R_, s)) or {}
+        cells_ = " ".join(f"{fmt(e0.get(a), '.4f'):>7}" for a in areas)
+        for ea, eb in ((es, e0), (er, es)):
+            cells_ += " | " + " ".join(f"{fmt(ea[x] - eb[x] if x in ea and x in eb else None, '+.4f'):>8}" for x in areas)
+        t_rows.append(f"  {'s' + str(s) + ('*' if pooled and ('k0', s) in here else ''):<6}{cells_}")
+
+    def table(n=None):
+        if n is None or len(t_rows) + 2 <= n:
+            return hd + t_rows
+        keep = max(0, n - 3)
+        return hd + t_rows[:keep] + [f"  ... {len(t_rows) - keep} more seed row(s): in ANALYSIS.txt's RUNS"]
+    labels = ["real text"] + (["pooled"] if pooled else [])
+    emit([
+        ("head", head("heldout", labels) + failures(here, done), 0),
+        ("pool", pool_lines, 0),
+        ("per-seed rows", table, 0),
+        ("verdict", rr_lines + [h14] + r14 + [f"DECISION (O14, real text): {d14_}"]
+         + ([f"  top-up: {cmd}"] if cmd else []) + [h16] + r16 + [f"DECISION (O16, the draw): {d16_}", e3_]
+         + extra_rows, 0),
+        ("reported", ["REPORTED, DECIDES NOTHING:"], 0),
+        ("time-integrated and SD", [l for l in rep_lines if "time-integrated report gap" in l or "end-state SD" in l], 1),
+        ("prequential", [l for l in rep_lines if "prequential" in l], 2),
+        ("memory", [l for l in rep_lines if "memory-on" in l], 2),
+        ("book and flags", [l for l in rep_lines if "the book at R" in l or "plan's gates" in l], 2),
+        ("readings", [l for l in rep_lines if "readings per phase" in l], 2),
+        ("pool and probe costs", [l for l in rep_lines if "n_live" in l or "probe's seconds" in l], 3),
+        ("rates", ["  windows/s per run: " + " | ".join(rate_rows)], 4),
+        ("aggregate", agg, 1),
+        ("finals", fin_lines, 0),
+        ("archive", [archive_line(archive)], 0),
+    ])
+
+
 # ------------------------------------------------------------------------------------------ session
 # THE FIRST POST-TRAINING SESSIONS (EXP=session; Proposal 05 §8 5.3a, O2, O9; 2026-10-02). A session's endpoint per
 # old area is F = its R reading - its start reading at its own first cut, both through the memory-off closure, report
@@ -3195,7 +3702,10 @@ def fail(exp, archive, reason, logs):
 if MODE == "retok":
     retok(int(sys.argv[3]), sys.argv[4], float(sys.argv[5]), int(sys.argv[6]))
 elif MODE == "heldout":
-    heldout(int(sys.argv[3]), sys.argv[4], float(sys.argv[5]), sys.argv[6], sys.argv[7])
+    # THE REAL-TEXT FLEET (§8 6.3b) IS READ BY ITS OWN READER, ROUTED BY THE SOURCE LINE ITS SUMMARY RECORDS; every other
+    # EXP=heldout fleet by 6.3a's, as before.
+    (heldout_real if re.search(r"^=== source: real text", S, re.M) else heldout)(
+        int(sys.argv[3]), sys.argv[4], float(sys.argv[5]), sys.argv[6], sys.argv[7])
 elif MODE == "session":
     session(int(sys.argv[3]), sys.argv[4], float(sys.argv[5]), sys.argv[6], sys.argv[7])
 elif MODE == "wrap":
