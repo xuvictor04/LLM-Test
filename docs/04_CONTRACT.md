@@ -5203,6 +5203,13 @@ from the whole epoch-0 stream, which 'replay' changes after phase 1. At `SIG_WAR
 rates do. It also found the block leaving S_replay's `data.exposure_max` out of its reported gates, a value Python
 prints in double quotes, fixed in 10724cd.
 
+**2026-10-03, REVIEWED (a9c03d2).** A top-up's block reads O16's first look again, over the first fleet's own seeds, and
+a CONFIRM there stands, the pooled reading beside it deciding nothing: it read the pooled seeds alone, so a CONFIRM
+already with the owner could be followed by 'planned' staying, where the register's error over the two looks counts a
+CONFIRM at either. Each rule pairs over the seeds where both its runs hold R's reading, and S_replay − S's per-phase
+prequential reading, on training text that differs by draw, is not reported. A synthetic fleet's output is still byte
+for byte cce2d39's (`cpu/heldout_identity.out`).
+
 **THE QUESTION AS IT STOOD.**
 
 `TOK.on_window` raises `Due.retok` on its own `retok_every` cadence, and the act it asks for is to

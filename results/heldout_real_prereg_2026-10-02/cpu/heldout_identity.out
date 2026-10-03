@@ -10,3 +10,16 @@ $ bash ../../session_prereg_2026-10-02/cpu/heldout_identity.sh "$BEFORE" "$AFTER
 (3) --analyze, FINALS.sha256: identical at cce2d39 and 10724cd
 (3) --analyze, stdout: identical at cce2d39 and 10724cd
 (exit 0)
+
+2026-10-03, the review's fix: the same fleet run again in one clone at one path, at cce2d39 and at a9c03d2, the commit
+that changed gpu_world.sh
+$ bash ../../session_prereg_2026-10-02/cpu/heldout_identity.sh "$BEFORE" "$AFTER" "$CLONE" a9c03d2
+(1) 21 curve, flush-bytes and probe-series files: 21 byte-identical
+    FINALS.sha256 identical: 4 final checkpoint and vocabulary files byte for byte
+(2) ANALYSIS.txt: 4 line(s) carry the commit, the launch or measured seconds; every other line identical (0 differing)
+(2) PASTE_BACK.txt: 5 line(s) carry the commit, the launch or measured seconds; every other line identical (0 differing)
+(3) --analyze, ANALYSIS.txt: identical at cce2d39 and a9c03d2
+(3) --analyze, PASTE_BACK.txt: identical at cce2d39 and a9c03d2
+(3) --analyze, FINALS.sha256: identical at cce2d39 and a9c03d2
+(3) --analyze, stdout: identical at cce2d39 and a9c03d2
+(exit 0)

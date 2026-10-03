@@ -1,6 +1,6 @@
 # Agent state — read this first after a session reset
 
-Updated 2026-10-03 (test 6, E2's shape (b) on real text with O16's draw pair and E3's wall, register §8 6.3b: pre-registered, built, checked on CPU and handed to the owner; before it, tests 4 and 5, §8 6.3a and 5.3a) on `rm-predict-DC` (the only branch pushed to; no PRs unless asked).
+Updated 2026-10-03 (test 6, E2's shape (b) on real text with O16's draw pair and E3's wall, register §8 6.3b: pre-registered, built, checked on CPU, handed to the owner and reviewed; before it, tests 4 and 5, §8 6.3a and 5.3a) on `rm-predict-DC` (the only branch pushed to; no PRs unless asked).
 
 ## Where things stand
 - **WORLD_FEEDBACK ships False** (d97779d) on the 20k-window GPU fleet: the forecast was within
@@ -336,6 +336,19 @@ Updated 2026-10-03 (test 6, E2's shape (b) on real text with O16's draw pair and
   gates (10724cd). F35-F37 pin it; the CPU check is results/heldout_real_prereg_2026-10-02/cpu/ (the contract's
   Q-RUN-8 note). Handed to the owner as brief test 6, to run after test 4's blocks. NEXT: read test 4's block, then
   5's and 6's; §8 6.1 continues from test 6's finals.
+- 2026-10-03, REVIEW OF 75e2210..2d4a9fb (test 6; 5 findings, two of them one, each checked against the code, fixed in
+  a9c03d2 and the commit after it; none is wrong). O16's two looks could give opposite DECISIONs: a top-up's block
+  read O16 over the pooled 11 alone, so a CONFIRM at 7 seeds, already with the owner, could be followed by "'planned'
+  stays", where power.py's 4.10% counts a CONFIRM at either look. The top-up's block now reads the first fleet's own
+  seeds again, the first look, and a CONFIRM there stands, the pooled reading beside it deciding nothing. Each rule
+  pairs over the seeds where both its runs hold R's reading: O16 read k0's, so a k0 with no endpoint dropped an O16
+  pair; and O14's cap counted k0's readings where the top-up's command counts pairs, leaving the seed run in place of
+  a dead S past the cap (found beside it). S_replay - S's per-phase prequential line, with a verdict, compared
+  training text that differs by draw (27% faded-area bytes in phases 2-4): only O14's S - k0 is reported, as the
+  register lists. The brief's test 6 block: about 22 GB of disk if a top-up follows, and a CONFIRM in either block
+  stands. F36 and F37 pin it (257 checks). EXP=heldout's output is byte for byte cce2d39's at a9c03d2
+  (results/heldout_real_prereg_2026-10-02/cpu/heldout_identity.out); cpu/PASTE_BACK.txt stays 10724cd's record (its
+  S_replay - S prequential line, since dropped).
 0. Proposal 05 §8 orders everything: Stage 0 (owner rulings O1-O20; the fleet-archive reads; the
    k0_nuis pair; phase-traversal resizing), then Stage 1's small builds (vocab `.prev` rotation, DOM
    Levels, counters, OPT_LR_CONTINUE 'as_logged', gpu_world.sh kept checkpoints) before the owner's

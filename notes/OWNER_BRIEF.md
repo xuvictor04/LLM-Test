@@ -134,7 +134,8 @@ cd "$R" && git fetch origin rm-predict-DC && git checkout rm-predict-DC && git p
 EXP=heldout HELDOUT_SOURCE=real SEEDS='0 1 2 3 4 5 6' FILL=0 bash "$R/tools/gpu_launch.sh" --go
 ```
 - If test 4's DECISION shipped `TOK_MINT_NOVEL` 1.0, put `SHIP_ARM=k1000_mn` before `bash`.
-- It writes to `gpu_heldout_real_out/` and leaves test 4's `gpu_heldout_out/` alone. It needs about 20 GB of free disk.
+- It writes to `gpu_heldout_real_out/` and leaves test 4's `gpu_heldout_out/` alone. It needs about 20 GB of free disk,
+  about 22 GB if a top-up follows (it budgets 12 GB more while `gpu_heldout_real_out/ckpt/` stays).
 - **Time:** 22 runs. On the H100 PCIe box they run as one wave, about 25-30 minutes from launch to block. On the H200
   box, two waves, about 20-25 minutes.
 - Watch, stop and paste back as for test 4, with `HELDOUT_SOURCE=real` after `EXP=heldout`: `bash "$R/tools/fleet_dash.sh"`,
@@ -142,8 +143,8 @@ EXP=heldout HELDOUT_SOURCE=real SEEDS='0 1 2 3 4 5 6' FILL=0 bash "$R/tools/gpu_
   `cat "$R/gpu_heldout_real_out/PASTE_BACK.txt"`. Upload the `.tgz` its `archive:` line names.
 - **If its first DECISION says UNRESOLVED,** run the command after `top-up:` on the same box, before any `git pull`
   (about 20 minutes). Then paste back `cat "$R/gpu_heldout_real_topup_out/PASTE_BACK.txt"` and upload its `.tgz`.
-- **If its draw DECISION reads "'replay' at 0.27 is CONFIRMed",** rehearsing faded areas beat the default draw: that
-  comes to you (your D8), and the default stays until you answer.
+- **If either block's draw DECISION reads "'replay' at 0.27 is CONFIRMed",** rehearsing faded areas beat the default
+  draw: that comes to you (your D8), and the default stays until you answer. A CONFIRM in either block stands.
 - **Keep `gpu_heldout_real_out/ckpt/` on the box,** or run the command after `pack:` in its block and download the
   `_finals.tar` it writes (about 1 GB): the first continuation onto new real text starts from them.
 
