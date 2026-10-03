@@ -4,6 +4,7 @@ and the windows each half pins, the exposure and the plan's gates, phase 1's byt
 and the learning rate OPT prices each draw's epoch at.
 
     python3 realplan.py <seed> [DATA_STREAM_BYTES]      # 3,780,000 by default: the fleet's EPOCH_BYTES
+    OPT_LR_WARMUP=20 python3 realplan.py <seed> 64800  # cpu/'s toy shape, whose warmup the lever sets as at the fleet's
 
 The pins are the fleet's (DATA_SOURCE=real, EVAL_RETENTION_EVERY=650, EVAL_HOLDOUT_WINDOWS=256,
 EVAL_RETENTION_N=24) and each draw is the arm's: 'planned' (k0 and S) and 'replay' at 0.27 (S_replay).
@@ -95,5 +96,5 @@ lr = [(s, opt_api.lr_at(ca, oa, U.Steps(s)), opt_api.lr_at(cb, ob, U.Steps(s))) 
 part = next((s for s, x, y in lr if x != y), None)
 print(f"  the two streams first part at byte {first:,} of {len(ba):,} (phase 1 ends at {b1:,}); OPT's rate first differs "
       f"at optimizer step {part} (planned {lr[part - 1][1]!r}, replay {lr[part - 1][2]!r}), "
-      f"the warmup's last step {int(oa.horizon.warmup)} at {lr[int(oa.horizon.warmup) - 1][1]!r} on both; at step 5000 "
-      f"{lr[4999][1]!r} and {lr[4999][2]!r}")
+      f"the warmup's last step {int(oa.horizon.warmup)} at {lr[int(oa.horizon.warmup) - 1][1]!r} on both; at step "
+      f"{min(5000, len(lr))} {lr[min(5000, len(lr)) - 1][1]!r} and {lr[min(5000, len(lr)) - 1][2]!r}")

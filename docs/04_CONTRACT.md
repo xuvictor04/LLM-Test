@@ -5186,6 +5186,23 @@ merges re-segment older areas' held-out text here, which 6.3a's synthetic text c
 holds the sizing, the pins (the probe at 650, from the act arms' phases), the seeds and what each outcome does.
 No `src/` file changes.
 
+**2026-10-03: BUILT (d166cd0, 2bb0dac, 10724cd), AND ITS CPU OPERATION CHECK (operation only;
+`results/heldout_real_prereg_2026-10-02/cpu/`, each script beside its output).** `gpu_world.sh EXP=heldout
+HELDOUT_SOURCE=real` launches the fleet into an OUT of its own and reads it with a reader of its own, which SUMMARY's
+source line selects. A synthetic fleet is read as before: a tiny one's output is byte for byte cce2d39's
+(`cpu/heldout_identity.out`). `tests/test_gpu_world.py` F35-F37 pin the launch, the three readings' outcomes on fleets
+written by hand, and the top-up. The same command at `DEVICE=cpu`, at a toy shape where bursts and acts fire
+(`WINDOWS=300 EPOCH_BYTES=64800 SEEDS='0 1' PIN_RETOK=40 PROBE_EVERY=30 EXTRA='TOK_GROW_EVERY=20 OPT_LR_WARMUP=20'`),
+ran 7 runs and 3 smoke runs to rc=0, finite, and wrote its block. Every run read real text, S_replay alone at 'replay'
+0.27, the share gauges equal to the plan. The acts and each run's windows are the model-free replay's, and S equals k0
+bit for bit through its first act. `data.exposure_skew` fires as a flag. The book forms claims and prints its seconds.
+k0_rerun is bit-exact, and k40.s0's final continues into a second epoch with the probe on, its resume readings the
+parent's R readings. THE CHECK CORRECTED THE REGISTER'S DRAW PAIR BEFORE ANY FLEET RAN (its row's dated correction).
+S and S_replay are bit-identical at their first flush and apart from the second, because SIG's pre-loop warm-up draws
+from the whole epoch-0 stream, which 'replay' changes after phase 1. At `SIG_WARMUP=0` nothing parts them before OPT's
+rates do. It also found the block leaving S_replay's `data.exposure_max` out of its reported gates, a value Python
+prints in double quotes, fixed in 10724cd.
+
 **THE QUESTION AS IT STOOD.**
 
 `TOK.on_window` raises `Due.retok` on its own `retok_every` cadence, and the act it asks for is to

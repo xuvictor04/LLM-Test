@@ -1,6 +1,6 @@
 # Agent state — read this first after a session reset
 
-Updated 2026-10-02 (test 4, E2's retok part as its own fleet, register §8 6.3a: pre-registered, built, checked on CPU, reviewed and handed to the owner; before it, the Stage 3 merge and the reorganisation's Phase B, both reviewed) on `rm-predict-DC` (the only branch pushed to; no PRs unless asked).
+Updated 2026-10-03 (test 6, E2's shape (b) on real text with O16's draw pair and E3's wall, register §8 6.3b: pre-registered, built, checked on CPU and handed to the owner; before it, tests 4 and 5, §8 6.3a and 5.3a) on `rm-predict-DC` (the only branch pushed to; no PRs unless asked).
 
 ## Where things stand
 - **WORLD_FEEDBACK ships False** (d97779d) on the 20k-window GPU fleet: the forecast was within
@@ -317,6 +317,25 @@ Updated 2026-10-02 (test 4, E2's retok part as its own fleet, register §8 6.3a:
   launcher passed at 19.9), the launcher W's at (slots + W_HEADROOM) / slots. The brief's test 5 block has test
   4's clone line, "set R to yours" and a line that unpacks test 4's finals. EXP=heldout's output is byte for
   byte cce2d39's at the fix (cpu/heldout_identity.out): test 4, running at cce2d39, is untouched.
+- 2026-10-03, TEST 6 READY: E2'S SHAPE (b) ON REAL TEXT, WITH O16'S DRAW PAIR AND E3'S WALL (register §8 6.3b).
+  75e2210 pre-registers it, d166cd0 builds the launch, 2bb0dac the reader, 10724cd a fix its CPU check found, and
+  the commit after them checks it on CPU. `EXP=heldout HELDOUT_SOURCE=real SEEDS='0 1 2 3 4 5 6' FILL=0 bash
+  tools/gpu_launch.sh --go` runs k0, S (`SHIP_ARM`: 6.3a's shipped configuration, k1000 or k1000_mn) and S_replay (S
+  at 'replay' 0.27) at seeds 0-6 and k0_rerun, one whole real-text epoch of 3,780,000 bytes each, into
+  gpu_heldout_real_out (test 4's gpu_heldout_out, test 5's parents, is never moved). Its block reads O14 (S against
+  k0 per area, 6.3a's rule at one arm) and O16 (S_replay against S, CONFIRMed where every area's upper bound is
+  within ε and the time-integrated gap's is below 0; a CONFIRM goes to the owner), each look at 0.025, and E3 (the
+  book's seconds over the loop's, against 2%), and packs S's finals, 6.1's real-text parents. Where it departs from
+  the judge's plan the register's row says why: the probe at 650 (S's shortest phase / 5 is 670), O16's bound at
+  0.025 a look, not 95% (a null 'replay' CONFIRMs 7.75% of the time over two looks at 0.05). Its reader sits beside
+  6.3a's, routed by SUMMARY's source line: a tiny EXP=heldout fleet is byte for byte cce2d39's
+  (cpu/heldout_identity.out), so test 4, running at cce2d39, is untouched. THE CPU CHECK CORRECTED THE REGISTER
+  BEFORE ANY FLEET RAN: S and S_replay part at their second flush, not after OPT's warmup, since SIG's pre-loop
+  warm-up draws from the whole epoch-0 stream, which 'replay' changes after phase 1 (the row's dated correction;
+  O16's reading is unchanged). It also found the block leaving S_replay's data.exposure_max out of its reported
+  gates (10724cd). F35-F37 pin it; the CPU check is results/heldout_real_prereg_2026-10-02/cpu/ (the contract's
+  Q-RUN-8 note). Handed to the owner as brief test 6, to run after test 4's blocks. NEXT: read test 4's block, then
+  5's and 6's; §8 6.1 continues from test 6's finals.
 0. Proposal 05 §8 orders everything: Stage 0 (owner rulings O1-O20; the fleet-archive reads; the
    k0_nuis pair; phase-traversal resizing), then Stage 1's small builds (vocab `.prev` rotation, DOM
    Levels, counters, OPT_LR_CONTINUE 'as_logged', gpu_world.sh kept checkpoints) before the owner's

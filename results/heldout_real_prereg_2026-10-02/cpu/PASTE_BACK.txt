@@ -1,0 +1,36 @@
+==== PASTE THIS BACK ====
+gpu_world.sh EXP=heldout  commit 10724cd  launched 2026-10-03T01:10:28Z  real text
+card: no GPU listed; torch 2.14.0+cu130, CUDA 13.0; NCPU 4; PAR 4; MPS off; device=cpu
+shape: 300 windows/run, DATA_STREAM_BYTES=64800, seeds 0 1, EXTRA='TOK_GROW_EVERY=20 OPT_LR_WARMUP=20'; cap 900; CAL 600; LM_CTX 128; kept ckpts ON; pins DATA_SOURCE=real pinned, DATA_DRAW=planned pinned, EVAL_RETENTION_EVERY=30 pinned, EVAL_HOLDOUT_WINDOWS=256 pinned, EVAL_RETENTION_N=24 pinned, EVAL_GENERATE=0 pinned, TOK_MINT_NOVEL=0 pinned
+runs: 7 of 7 ended rc=0, every one
+held-out bits/byte at R (memory-off, report half), per seed: k0, then k40 - k0, then k40_replay - k40
+  seed      eng      py     num       c |      eng       py      num        c |      eng       py      num        c
+  s0     5.1232  5.0427  4.3232  5.2081 |  -0.0931  -0.2913  -0.3990  -0.2026 |  -0.4031  -0.0286  +0.2084  +0.0018
+  s1     5.2015  4.3259  3.9513  5.2593 |  -0.4699  -0.6206  -0.2940  -0.5469 |  -0.0213  +0.4731  +0.5827  +0.3621
+k0_rerun (this fleet's): k0 seed 0 twice, R per area max |diff| 0, summed loss |diff| 0 (BIT-EXACT)
+RULE O14 (§8 6.3b; O2): ε 0.05 bits/byte; per area (4), S - k0 paired over seeds, each look (7 seeds; a top-up's pooled 11) at 0.025: mean [lower at t(1 - a/4), one-sided upper at t(0.975)]
+  k40 n=2 a=0.025: eng -0.2815 [-9.8756,+2.1124] py -0.4560 [-8.8420,+1.6365] num -0.3465 [-3.0196,+0.3205] c -0.3747 [-9.1404,+1.8125] -> UNRESOLVED
+DECISION (O14, real text): UNRESOLVED at 2 seed(s): k40 is UNRESOLVED against k0; top up to the cap of 11 on this card and torch with the command below, then paste back the top-up's block, which reads both fleets (ε 0.05 bits/byte, 2 seed(s))
+  top-up: EXP=heldout HELDOUT_SOURCE=real SHIP_ARM=k40 SEEDS='2 3 4 5 6 7 8 9 10' FILL=0 WINDOWS=300 EPOCH_BYTES=64800 EXTRA='TOK_GROW_EVERY=20 OPT_LR_WARMUP=20' PROBE_EVERY=30 DEVICE=cpu PAR=4 OUT=/tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/t23/t3/cpu2/gpu_heldout_real_topup_out POOL_WITH=/tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/t23/t3/cpu2/gpu_heldout_real_out bash /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/t23/t3/cpu2/tools/gpu_launch.sh --go
+RULE O16 (§8 6.3b; its own family): k40_replay - k40 paired over seeds, at 0.025 a look: CONFIRM where every area's one-sided upper bound at t(0.975) is within ε and the time-integrated all-area report gap's, from 20% of the stream on, is below 0
+  end state n=2: eng -0.2122 [-9.9340,+2.2135] py +0.2222 [-12.5510,+3.4094] num +0.3955 [-9.1349,+2.7735] c +0.1820 [-8.9907,+2.4707] -> UNRESOLVED
+  time-integrated gap n=2: mean +0.0557, one-sided upper +1.9456: not below 0
+DECISION (O16, the draw): not CONFIRMed at 2 seed(s) (eng's upper bound +2.2135 above ε; py's upper bound +3.4094 above ε; num's upper bound +2.7735 above ε; c's upper bound +2.4707 above ε; the gap's upper bound +1.9456 not below 0): read again over the top-up's pooled seeds, the second look
+E3 (04-6.3): the book's seconds over the loop's, mean 0.01% over 6 run(s) (largest 0.02%), at PAR 4, against 2%: within it, DATA_TRUST_EVERY (its default, 160) stays
+REPORTED, DECIDES NOTHING:
+  time-integrated report gap from 20% of the stream, k40 - k0: mean -0.2243 sd 0.1827 n=2
+  end-state SD per area: k40 - k0 eng 0.2664 py 0.2329 num 0.0742 c 0.2434 | k40_replay - k40 eng 0.2700 py 0.3547 num 0.2647 c 0.2547 | time-integrated k40_replay - k40 sd 0.2103
+  prequential per phase, k40 - k0 n=2: p1 +0.0120 [-0.3275,+0.0963] p2 -0.1545 [-1.2798,+0.1247] p3 -0.2716 [-7.5194,+1.5263] p4 -0.3603 [-4.1939,+0.5906] -> UNRESOLVED
+  prequential per phase, k40_replay - k40 n=2: p1 -0.0327 [-0.9193,+0.1872] p2 +0.2597 [-0.4109,+0.4260] p3 +0.3620 [-10.1419,+2.9677] p4 +0.2734 [-6.5397,+1.9635] -> UNRESOLVED
+  memory-on - memory-off at R, mean over seeds (NEW-03): k0 eng +0.2323 py -0.0926 num +0.1780 c -0.4223 | k40 eng +0.2290 py +0.0009 num +0.1394 c -0.2868 | k40_replay eng +0.1505 py +0.0053 num +0.2392 c -0.2992
+  the book at R, mean over the runs: passes 2, claims 205, conflicted claims 0, sources 20
+  the plan's gates (flags, as pre-registered): data.exposure_skew fired 5.1057 vs 3.0 / fired 6.8082 vs 3.0; data.exposure_max armed-but-zero 0.0264 vs 2.0 / armed-but-zero 0.029 vs 2.0; data.splice_window fired 5.897 vs 8.0 / fired 5.898 vs 8.0
+  in-run readings per phase: fewest 3 (k0.s0, phase 1), most 4; shortest phase 66 windows (k40.s1), / 5 = 13 against EVAL_RETENTION_EVERY 30 (§8 0.4)
+  n_live at the end (NEW-20): k0 2314 [2294-2335] | k40 2312 [2300-2324] | k40_replay 2308 [2295-2322]
+  the probe's seconds (eval.holdout.seconds; R's share by its windows): k0 161.8 s, R 109.3 s, in-run 18.19% of loop time | k40 142.9 s, R 99.3 s, in-run 17.01% of loop time | k40_replay 137.4 s, R 95.4 s, in-run 15.99% of loop time
+  windows/s per run: k0 1.04 [1.02-1.06] | k40 1.12 [0.98-1.25] | k40_replay 1.13 [0.96-1.29]
+  this fleet: 2,056 windows in 759 s of fleet wall = 2.71 windows/s aggregate; ETA by waves 271 s, took 759 s: 2.80x
+FINALS: 4 file(s), the k40 runs' final checkpoints and vocabularies, 0.29 GB, sha256 in FINALS.sha256; §8 6.1's real-text parents, which the pack: line below packs to upload
+  pack: tar -cf /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/t23/t3/cpu2/gpu_heldout_real_2026-10-03_finals.tar -C /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/t23/t3/cpu2/gpu_heldout_real_out FINALS.sha256 $(cut -c67- /tmp/claude-0/-home-user-LLM-Test/e880caf7-1208-58de-93fd-49c41549bf70/scratchpad/t23/t3/cpu2/gpu_heldout_real_out/FINALS.sha256)
+archive: gpu_heldout_real_2026-10-03.tgz beside gpu_heldout_real_out (logs, curves, SUMMARY, ANALYSIS, this block; no checkpoints) -- keep it
+==== END ====

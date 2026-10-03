@@ -1,0 +1,12 @@
+EXP=heldout unchanged by this build (§8 6.3b): the tiny CPU fleet of results/session_prereg_2026-10-02/cpu/heldout_identity.sh,
+run in one clone at one path at cce2d39 (BEFORE) and at 10724cd (AFTER), this build's last commit to change code
+$ bash ../../session_prereg_2026-10-02/cpu/heldout_identity.sh "$BEFORE" "$AFTER" "$CLONE" 10724cd
+(1) 21 curve, flush-bytes and probe-series files: 21 byte-identical
+    FINALS.sha256 identical: 4 final checkpoint and vocabulary files byte for byte
+(2) ANALYSIS.txt: 4 line(s) carry the commit, the launch or measured seconds; every other line identical (0 differing)
+(2) PASTE_BACK.txt: 5 line(s) carry the commit, the launch or measured seconds; every other line identical (0 differing)
+(3) --analyze, ANALYSIS.txt: identical at cce2d39 and 10724cd
+(3) --analyze, PASTE_BACK.txt: identical at cce2d39 and 10724cd
+(3) --analyze, FINALS.sha256: identical at cce2d39 and 10724cd
+(3) --analyze, stdout: identical at cce2d39 and 10724cd
+(exit 0)

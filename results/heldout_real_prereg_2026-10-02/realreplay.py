@@ -7,10 +7,14 @@ area's text (or, after a fade, from the area's own stale tally): the cross-area 
 alphabets are disjoint, cannot show (src/data/api.py:856).
 
     python3 realreplay.py <seed> <TOK_RETOK_EVERY> <TOK_MINT_NOVEL> [<DATA_DRAW>]   # the fleet's shape, 3,780,000 B
+    python3 realreplay.py <seed> 40 0 <DATA_DRAW> 64800 20 <out.json>   # cpu/'s toy shape: DATA_STREAM_BYTES,
+                                                                         # TOK_GROW_EVERY; the acts and windows to a
+                                                                         # file for cpu/checks.py
 
 Run it in place, by its path, from any directory but the checkout's root (it finds src/ two folders up)."""
 import bisect
 import collections
+import json
 import os
 import sys
 import time
@@ -25,11 +29,14 @@ from tok import api as tok_api                                     # noqa: E402
 
 seed, retok, novel = int(sys.argv[1]), sys.argv[2], sys.argv[3]
 draw = sys.argv[4] if len(sys.argv) > 4 else "planned"
-env = dict(os.environ, RUN_SEED=str(seed), DATA_STREAM_BYTES="3780000", RUN_DEVICE="cpu", OMP_NUM_THREADS="1",
+nbytes, grow, jout = (sys.argv[5:8] + [None, None, None])[:3]
+env = dict(os.environ, RUN_SEED=str(seed), DATA_STREAM_BYTES=nbytes or "3780000", RUN_DEVICE="cpu", OMP_NUM_THREADS="1",
            DATA_DIR=os.path.join(ROOT, "data"), DATA_SOURCE="real", DATA_DRAW=draw, TOK_RETOK_EVERY=retok,
            TOK_MINT_NOVEL=novel)
 if draw == "replay":
     env["DATA_REPLAY_SHARE"] = "0.27"
+if grow:
+    env["TOK_GROW_EVERY"] = grow
 t0 = time.time()
 configs, _, _ = _build(environ=env)
 run, lm, data, tok = configs["RUN"], configs["LM"], configs["DATA"], configs["TOK"]
@@ -78,6 +85,9 @@ print(f"seed {seed} TOK_RETOK_EVERY={retok} TOK_MINT_NOVEL={novel} DATA_DRAW={dr
 print(f"  windows per phase: {' '.join(f'p{k + 1} {wph[k]:,}' for k in range(np_))}; the shortest / 5 = "
       f"{min(wph[k] for k in range(np_)) / 5:.0f} (§8 0.4: the cap EVAL_RETENTION_EVERY may not pass)")
 print("  mints born per phase: " + " ".join(f"p{k + 1} {sum(1 for p in born.values() if p == k)}" for k in range(np_)))
+if jout:
+    with open(jout, "w") as fh:
+        json.dump({"acts": acts, "windows": i, "wph": [wph[k] for k in range(np_)]}, fh)
 for ar in names:
     blk = areas.holdout[ar]
     first = min(k for k in range(np_) if ar in live[k])

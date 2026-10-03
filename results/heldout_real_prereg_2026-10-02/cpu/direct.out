@@ -1,0 +1,7 @@
+$ bash direct.sh "$C" D
+child: === 349 windows run total (60 trained by this process, resumed at 289), 60 flushes this process, 349 optimizer steps run total, 1 epoch(s) in 201.7s (0.3 w/s this process)
+nowarm.s0: === 30 windows, 30 flushes, 30 optimizer steps, 0 epoch(s) in 30.5s (1.0 w/s)
+nowarm_replay.s0: === 30 windows, 30 flushes, 30 optimizer steps, 0 epoch(s) in 35.1s (0.9 w/s)
+nowarm.s1: === 30 windows, 30 flushes, 30 optimizer steps, 0 epoch(s) in 33.8s (0.9 w/s)
+nowarm_replay.s1: === 30 windows, 30 flushes, 30 optimizer steps, 0 epoch(s) in 32.7s (0.9 w/s)
+(exit 0)

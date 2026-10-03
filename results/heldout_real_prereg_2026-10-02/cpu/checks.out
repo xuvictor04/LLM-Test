@@ -1,0 +1,30 @@
+$ python3 checks.py "$C/gpu_heldout_real_out" D
+  replay: seed 0 TOK_RETOK_EVERY=40 TOK_MINT_NOVEL=0 DATA_DRAW=planned: windows 289, acts 7, build vocab 512, final vocab 534, mints 22 (5s)
+  replay: seed 0 TOK_RETOK_EVERY=40 TOK_MINT_NOVEL=0 DATA_DRAW=replay: windows 292, acts 7, build vocab 512, final vocab 533, mints 21 (5s)
+  plan: seed 0: planned 301 windows (phase 1 sha256 7bfcf92c373ad157), replay 305 windows (phase 1 sha256 7bfcf92c373ad157); bytes part at 16,200, the rate at step 21
+  replay: seed 1 TOK_RETOK_EVERY=40 TOK_MINT_NOVEL=0 DATA_DRAW=planned: windows 283, acts 7, build vocab 512, final vocab 535, mints 23 (6s)
+  replay: seed 1 TOK_RETOK_EVERY=40 TOK_MINT_NOVEL=0 DATA_DRAW=replay: windows 292, acts 7, build vocab 512, final vocab 532, mints 20 (6s)
+  plan: seed 1: planned 298 windows (phase 1 sha256 7beebca99a3168a8), replay 302 windows (phase 1 sha256 7beebca99a3168a8); bytes part at 16,200, the rate at step 21
+PASS every fleet and smoke run ended rc=0 -- {'k0.s1': '0', 'k40.s0': '0', 'k0.s0': '0', 'k40_replay.s0': '0', 'k40.s1': '0', 'k0_rerun.s0': '0', 'k40_replay.s1': '0'} {'k40.s0': '0', 'k40_replay.s0': '0', 'k0.s0': '0'}
+PASS finite: no run stopped or was refused, every loss and every probe value finite
+PASS every run read real text: DATA_SOURCE=real among the pins SUMMARY records, its source line, and S_replay alone at 'replay' 0.27 (its data.replay gate fired)
+PASS every series holds phase readings at the four phases' starts and cadence readings, memory-off, over the areas arrived so far, and R's boundary readings through both closures over all four areas at 1,024 windows (128 report windows an area) -- []
+    readings per run (phase, cadence): {'k0.s0': (4, 10), 'k0.s1': (4, 9), 'k0_rerun.s0': (4, 10), 'k40.s0': (4, 8), 'k40.s1': (4, 9), 'k40_replay.s0': (4, 9), 'k40_replay.s1': (4, 8)}
+PASS seed 0: the acts and the windows are the replay's: k40 acts [41, 81, 121, 161, 201, 241, 281] in 289 windows, k40_replay [41, 81, 121, 161, 201, 241, 281] in 292
+PASS seed 0: k40 equals k0 bit for bit through its first act (window 41): their first differing flush is 43 -- first diff 43
+PASS seed 0: k40 and k40_replay are bit-identical at their first flush and part at the second: SIG's warm-up, 800 steps on each, ends at separation 0.9394668340682983 on k40 and 0.9604330658912659 on k40_replay, the epoch-0 streams it draws from being the two draws' -- first diff 2
+PASS seed 0: without SIG's warm-up (SIG_WARMUP=0, direct.sh) nothing parts the pair before OPT's rates do: bit-identical through flush 21, the last whose parameters no rate apart has touched (window w's update takes step w's rate, and the model-free plan's two draws first price step 21 apart), and apart from flush 23, 4,533 bytes into the stream: inside phase 1 (16,200 bytes, one stream under both draws, their sha256 equal), before byte 16,200, where the two streams first part -- first diff 23
+PASS seed 1: the acts and the windows are the replay's: k40 acts [41, 81, 121, 161, 201, 241, 281] in 283 windows, k40_replay [41, 81, 121, 161, 201, 241, 281] in 292
+PASS seed 1: k40 equals k0 bit for bit through its first act (window 41): their first differing flush is 43 -- first diff 43
+PASS seed 1: k40 and k40_replay are bit-identical at their first flush and part at the second: SIG's warm-up, 800 steps on each, ends at separation 0.9712391495704651 on k40 and 0.9461539387702942 on k40_replay, the epoch-0 streams it draws from being the two draws' -- first diff 2
+PASS seed 1: without SIG's warm-up (SIG_WARMUP=0, direct.sh) nothing parts the pair before OPT's rates do: bit-identical through flush 21, the last whose parameters no rate apart has touched (window w's update takes step w's rate, and the model-free plan's two draws first price step 21 apart), and apart from flush 23, 4,423 bytes into the stream: inside phase 1 (16,200 bytes, one stream under both draws, their sha256 equal), before byte 16,200, where the two streams first part -- first diff 23
+PASS the share gauges equal the plan in every run, phase by phase; 'replay' gives the faded areas their shares (eng from phase 2, py in phase 4) and 'planned' only the live areas -- {}
+    S_replay.s0's gauges (permille, planned = realised): p0 eng 500 py 500 | p1 eng 270 num 365 py 365 | p2 eng 270 num 365 py 365 | p3 c 365 eng 135 num 365 py 135
+PASS data.exposure_skew fires on every run (5.1057 vs 3.0, 6.8082 vs 3.0) as a flag: every run trained to its end
+PASS the book reads real text: data.trust.claims above 0 and data.trust.wall_s printed on every run, and each run's series of passes covers the units it read: k0.s0 208 claims, 0.024747 s, 2 passes, k0.s1 194 claims, 0.040032 s, 2 passes, k0_rerun.s0 208 claims, 0.047665 s, 2 passes, ...
+PASS k0_rerun is exact: its losses and its R readings are k0.s0's
+PASS the block reads the fleet by the real-text reader: labelled real text, with O14's, O16's and E3's lines and S's finals' pack line, within 80 lines
+PASS the block's plan-gates line names every value the runs' startup prints for the three plan gates, both draws': exposure_max 0.0264 vs 2.0 / 0.029 vs 2.0; exposure_skew 5.1057 vs 3.0 / 6.8082 vs 3.0; splice_window 5.897 vs 8.0 / 5.898 vs 8.0 -- data.exposure_skew fired 5.1057 vs 3.0 / fired 6.8082 vs 3.0; data.exposure_max armed-but-zero 0.0264 vs 2.0 / armed-but-zero 0.029 vs 2.0; data.splice_window fired 5.897 vs 8.0 / fired 5.898 vs 8.0
+PASS k40.s0's final continues into a second epoch with the probe on (RUN_EPOCHS=2 DATA_RESAMPLE=1): it trains its 60 windows, its resume readings are the parent's R readings through both closures, area for area, and it reads on: resume memory-off at 289, resume memory-on at 289, phase memory-off at 290, cadence memory-off at 301, cadence memory-off at 331, boundary memory-off at 349, boundary memory-on at 349 -- [True, True]
+    ok
+(exit 0)
