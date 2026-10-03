@@ -232,6 +232,14 @@ is pinned here, on a fleet whose every number is chosen.
       parents admitting what the first 7 could not -- and refused, deciding nothing, where card, commit or the
       session's shape differ or a parent is in both. End to end with the stand-in: a fleet with a parents stage
       prints the top-up's command, the launcher passes it, and run as printed it trains parents 7-10 and pools.
+  F35 EXP=heldout HELDOUT_SOURCE=real's LAUNCH (2026-10-02, register §8 6.3b), with the stand-in writing the book's series
+      too: k0, S (SHIP_ARM, k<PIN_RETOK> by default, or its _mn) and S_replay (S at DATA_DRAW=replay 0.27) at every seed and
+      k0_rerun; every run on real text, its pins after EXTRA (DATA_SOURCE=real in DATA_SYNTH_HOLDOUT's place) and its arm's
+      settings after them; probe, flush and trust series on every run; the defaults written as numbers (17,476 windows,
+      3,780,000 bytes, the probe at 650) and an OUT of its own; HELDOUT_SOURCE=real on every command it prints. Refused,
+      writing nothing: an unknown source, real text at another EXP, SHIP_ARM without the real source, an S that is no act
+      arm, a real-text top-up of a synthetic fleet. The launcher's check, OUT, log, disk and ready line; the dashboard's
+      reading of a real-text launch's OUT.
 """
 import glob
 import json
@@ -950,7 +958,8 @@ if os.environ.get("STUB_BOOK"):
                                                                       "DATA_TRUST")},
                              "env": {k: os.environ.get(k) for k in ("TOK_MINT_NOVEL", "EVAL_HOLDOUT_WINDOWS",
                                                                      "EVAL_RETENTION_N", "EVAL_GENERATE", "DATA_DRAW",
-                                                                     "TOK_GROW_EVERY", "DATA_STREAM_BYTES")},
+                                                                     "TOK_GROW_EVERY", "DATA_STREAM_BYTES",
+                                                                     "DATA_SOURCE", "DATA_REPLAY_SHARE")},
                              "sess": {k: os.environ.get(k) for k in ("RUN_SEED", "RUN_EPOCHS", "DATA_RESAMPLE", "DATA_AREAS",
                                                                       "DATA_N_PROCESSES", "DATA_PHASE_SCHED",
                                                                       "OPT_LR_CONTINUE", "DATA_REPLAY_SHARE",
@@ -1020,6 +1029,11 @@ elif "--probe-series" in a:
         if act and AR[k] == "num":
             h = float(os.environ.get("STUB_HARM_MN" if mn else "STUB_HARM", "0"))
             h += (1 if seed % 2 == 0 else -1) * float(os.environ.get("STUB_SPREAD_MN" if mn else "STUB_SPREAD", "0"))
+        # THE DRAW PAIR (§8 6.3b): at DATA_DRAW=replay every area, at every reading, moves by STUB_REPLAY, +-
+        # STUB_SPREAD_REPLAY by the seed's parity.
+        if os.environ.get("DATA_DRAW") == "replay":
+            h += float(os.environ.get("STUB_REPLAY", "0"))
+            h += (1 if seed % 2 == 0 else -1) * float(os.environ.get("STUB_SPREAD_REPLAY", "0"))
         return 2.0 + 0.1 * k + 0.001 * seed + h
     def row(step, kind, closure, nar, off=0.0):
         ars = {AR[k]: {"control": val(k) + off, "report": val(k) + off, "seen_by_parent": False} for k in range(nar)}
@@ -1048,8 +1062,19 @@ if ps_rows:
     print(f"       loop.acts                                    {(n - 1) // _r if _r else 0}")
     print(f"       eval.holdout.seconds                         1.500000")
     print(f"       eval.holdout.windows                         {sum(r['windows'] for r in ps_rows)}")
-    print(f"       data.trust.wall_s                            0.250000")
+    print(f"       data.trust.wall_s                            {float(os.environ.get('STUB_TRUST_S', '0.25')):.6f}")
     print(f"       fab.n_live                                   2049")
+# --trust-series (§8 6.3b): the book's passes as run.py writes them (RunResult.trust_series), two cadence passes and the
+# epoch's last, with STUB_TRUST_S of seconds over the three, and its counters.
+if "--trust-series" in a:
+    ts = [{"kind": k, "step": st, "at": 0, "units": 100, "seconds": float(os.environ.get("STUB_TRUST_S", "0.25")) / 3,
+           "conflicted_claims": 3, "sources": 37, "evidence": {"eng/a.txt": [1.0, 12]}, "trust": {"eng/a.txt": 0.9}}
+          for k, st in (("cadence", n // 3), ("cadence", 2 * n // 3), ("roll", n))]
+    json.dump(ts, open(a[a.index("--trust-series") + 1], "w"))
+    print("       data.trust.passes                            3")
+    print("       data.trust.claims                            208")
+    print("       data.trust.conflicted_claims                 3")
+    print("       data.trust.sources                           37")
 if os.environ.get("WORLD_ENABLED") == "0":
     print("       world.built                                  null")
 elif os.environ.get("WORLD_FEEDBACK") == "1":
@@ -3841,6 +3866,133 @@ for _ in range(100):
           and dec(b34u).startswith("P_parent is taken (O9): both are admitted, and x5's R reading on P_parent - on P has "
                                    "its one-sided upper bound -0.1000 below 0"),
           l34.stdout[-600:] + b34u[-1500:])
+
+    # ---- F35: EXP=heldout HELDOUT_SOURCE=real's launch (2026-10-02, register §8 6.3b) --------------------------------
+    # E2's shape (b) on real text. The stand-in records what each run saw; PIN_RETOK=10 makes S k10 and S_replay
+    # k10_replay; EXTRA tries to move four pinned levers and sets one that is not pinned.
+    o35 = os.path.join(TMP, "f35", "gpu_heldout_real_out")
+    b35 = os.path.join(TMP, "f35_book.jsonl")
+    k35 = dict(EXP="heldout", HELDOUT_SOURCE="real", DEVICE="cpu", WINDOWS=20, SEEDS="0 1", PAR=3, SMOKE_WINDOWS=5,
+               PIN_RETOK=10, PROBE_EVERY=5, EXTRA="DATA_SOURCE=synthetic EVAL_HOLDOUT_WINDOWS=32 DATA_DRAW=uniform "
+                                                 "TOK_MINT_NOVEL=0.5 TOK_GROW_EVERY=20", OUT=o35)
+    p35 = subprocess.run(["bash", SCRIPT], cwd=ROOT, capture_output=True, text=True, timeout=300,
+                         env=clean_env(PATH=env10["PATH"], STUB_BOOK=b35, STUB_FINAL_BYTES="50000000", **k35))
+    r35 = [json.loads(l) for l in open(b35)] if os.path.exists(b35) else []
+    s35 = txt(os.path.join(o35, "SUMMARY.txt"))
+    sm35 = [r for r in r35 if "/smoke/" in r["argv"][r["argv"].index("--loss-curve") + 1]]
+    fl35 = [r for r in r35 if r not in sm35]
+    arm35 = {"k0": ("0", "0", "planned", None), "k0_rerun": ("0", "0", "planned", None),
+             "k10": ("10", "0", "planned", None), "k10_replay": ("10", "0", "replay", "0.27")}
+    check("F35 EXP=heldout HELDOUT_SOURCE=real launches k0, S (SHIP_ARM, k<PIN_RETOK> by default) and S_replay at every "
+          "seed and k0_rerun -- the smoke's 3 and the fleet's 7 runs, rc 0 -- every run on real text, pinned after EXTRA "
+          "(which moves no pinned lever and keeps an unpinned one), its arm's settings after the pins: 'replay' at 0.27 "
+          "on S_replay alone; DATA_SYNTH_HOLDOUT not pinned; the stream 3,780,000 bytes, written as the number",
+          p35.returncode == 0 and len(sm35) == 3 and sorted(r["tag"] for r in fl35)
+          == ["k0.s0", "k0.s1", "k0_rerun.s0", "k10.s0", "k10.s1", "k10_replay.s0", "k10_replay.s1"]
+          and all(r["env"]["DATA_SOURCE"] == "real" and r["pins"]["DATA_SYNTH_HOLDOUT"] is None
+                  and r["pins"]["EVAL_RETENTION_EVERY"] == "5" and r["env"]["EVAL_HOLDOUT_WINDOWS"] == "256"
+                  and r["env"]["EVAL_RETENTION_N"] == "24" and r["env"]["EVAL_GENERATE"] == "0"
+                  and r["env"]["TOK_GROW_EVERY"] == "20" and r["env"]["DATA_STREAM_BYTES"] == "3780000" for r in r35)
+          and all((r["retok"], r["env"]["TOK_MINT_NOVEL"], r["env"]["DATA_DRAW"], r["env"]["DATA_REPLAY_SHARE"])
+                  == arm35[r["tag"].rsplit(".s", 1)[0]] for r in r35),
+          f"rc {p35.returncode}; {[(r['tag'], r['retok'], r['env']) for r in r35][:4]}; {p35.stderr[-300:]!r}")
+    check("F35 ... each writes its probe series, flush bytes and the book's series beside its curve, and saves its final "
+          "alone, the smoke's too",
+          all("--probe-series" in r["argv"] and "--flush-bytes" in r["argv"] and "--trust-series" in r["argv"] for r in r35)
+          and all(os.path.exists(os.path.join(o35, "curves", r["tag"] + ".trust.json")) for r in fl35)
+          and all(r["ckpt"] == {"CKPT_DIR": os.path.join(o35, "ckpt", r["tag"]), "CKPT_EVERY": "0"} for r in fl35),
+          str([(r["tag"], r["argv"][-6:]) for r in r35][:2]))
+    check("F35 ... SUMMARY records the source, S and S_replay, the arms and the pins -- DATA_SOURCE=real in "
+          "DATA_SYNTH_HOLDOUT's place -- and every command it prints for the owner carries HELDOUT_SOURCE=real",
+          "=== source: real text (HELDOUT_SOURCE=real, §8 6.3b): DATA_SOURCE=real, one epoch of 3780000 bytes; S k10, "
+          "S_replay k10_replay ('replay' at 0.27)" in s35
+          and "=== plan: EXP=heldout; arms k0 k10 k10_replay, plus k0_rerun at seed 0; window cap 60;" in s35
+          and "=== pins: DATA_SOURCE=real pinned, DATA_DRAW=planned pinned, EVAL_RETENTION_EVERY=5 pinned, "
+              "EVAL_HOLDOUT_WINDOWS=256 pinned, EVAL_RETENTION_N=24 pinned, EVAL_GENERATE=0 pinned, TOK_MINT_NOVEL=0 pinned"
+              in s35
+          and f"one look: EXP=heldout HELDOUT_SOURCE=real OUT={o35} bash {SCRIPT} --status" in s35,
+          [l for l in s35.splitlines() if l.startswith(("=== source", "=== plan", "=== pins", "=== pid"))])
+    # S = k<c>_mn (6.3a shipped TOK_MINT_NOVEL 1.0): S_replay is k<c>_mn at 'replay'.
+    b35m = os.path.join(TMP, "f35m_book.jsonl")
+    p35m = subprocess.run(["bash", SCRIPT], cwd=ROOT, capture_output=True, text=True, timeout=300,
+                          env=clean_env(PATH=env10["PATH"], STUB_BOOK=b35m, SHIP_ARM="k10_mn", KEEP_CKPT=0,
+                                        **dict(k35, SEEDS="0", OUT=os.path.join(TMP, "f35m", "gpu_heldout_real_out"))))
+    r35m = [json.loads(l) for l in open(b35m)] if os.path.exists(b35m) else []
+    check("F35 SHIP_ARM=k<c>_mn runs S at TOK_MINT_NOVEL 1.0 and S_replay at 1.0 and 'replay'",
+          p35m.returncode == 0 and {(r["tag"].rsplit(".s", 1)[0], r["retok"], r["env"]["TOK_MINT_NOVEL"],
+                                     r["env"]["DATA_DRAW"]) for r in r35m}
+          == {("k0", "0", "0", "planned"), ("k0_rerun", "0", "0", "planned"), ("k10_mn", "10", "1.0", "planned"),
+              ("k10_mn_replay", "10", "1.0", "replay")}, str(sorted({(r["tag"], r["env"]["DATA_DRAW"]) for r in r35m})))
+    # THE DEFAULTS ON REAL TEXT, written as numbers: 17,476 windows (k0's epoch at seed 0), 3,780,000 bytes, the probe
+    # at 650; its own OUT.
+    o35d = os.path.join(TMP, "f35d")
+    os.makedirs(o35d, exist_ok=True)
+    p35d = subprocess.run(["bash", SCRIPT], cwd=o35d, capture_output=True, text=True, timeout=300,
+                          env=clean_env(PATH=env10["PATH"], EXP="heldout", HELDOUT_SOURCE="real", DEVICE="cpu", SEEDS="0",
+                                        PAR=4, SMOKE_WINDOWS=5, KEEP_CKPT=0, OUT=os.path.join(o35d, "gpu_heldout_real_out")))
+    s35d = txt(os.path.join(o35d, "gpu_heldout_real_out", "SUMMARY.txt"))
+    check("F35 its defaults are written as numbers: 17,476 windows a run (k0's epoch at seed 0), DATA_STREAM_BYTES "
+          "3,780,000, the window cap 3 x 17,476, the probe at 650; S is k1000",
+          p35d.returncode == 0 and "=== 17476 windows per run, DATA_STREAM_BYTES=3780000, seeds: 0," in s35d
+          and "arms k0 k1000 k1000_replay, plus k0_rerun at seed 0; window cap 52428;" in s35d
+          and "EVAL_RETENTION_EVERY=650 pinned" in s35d, [l for l in s35d.splitlines() if l.startswith("=== ")][:12])
+    # THE REFUSALS, before anything is written: an unknown source, real text at another EXP, SHIP_ARM where the source is
+    # not real (a real-text command that lost HELDOUT_SOURCE would launch the synthetic fleet into test 4's OUT), an S
+    # that is no act arm, and a real-text top-up of a synthetic first fleet.
+    ref35 = {"source": gw(EXP="heldout", HELDOUT_SOURCE="rael", OUT=os.path.join(TMP, "f35r", "a")),
+             "exp": gw(EXP="session", HELDOUT_SOURCE="real", OUT=os.path.join(TMP, "f35r", "b")),
+             "ship": gw(EXP="heldout", SHIP_ARM="k1000_mn", OUT=os.path.join(TMP, "f35r", "c")),
+             "arm": gw(EXP="heldout", HELDOUT_SOURCE="real", SHIP_ARM="k1000x", OUT=os.path.join(TMP, "f35r", "d")),
+             "pool": gw(EXP="heldout", HELDOUT_SOURCE="real", SEEDS="7", POOL_WITH=o29, OUT=os.path.join(TMP, "f35r", "e"))}
+    want35 = {"source": "HELDOUT_SOURCE='rael' is not a source EXP=heldout reads",
+              "exp": "HELDOUT_SOURCE=real is EXP=heldout's (§8 6.3b, E2's shape (b) on real text), not EXP=session's",
+              "ship": "SHIP_ARM='k1000_mn' names the real-text fleet's S, and HELDOUT_SOURCE is not real",
+              "arm": "SHIP_ARM='k1000x' is not one of 6.3a's act arms",
+              "pool": "holds a synthetic EXP=heldout fleet, and this top-up is real-text (HELDOUT_SOURCE)"}
+    check("F35 refused by name, writing nothing: an unknown HELDOUT_SOURCE, real text at another EXP, SHIP_ARM without "
+          "HELDOUT_SOURCE=real, an S that is no act arm, and a real-text top-up naming a synthetic first fleet",
+          all(p_.returncode == 2 and want35[k] in p_.stdout for k, p_ in ref35.items())
+          and not os.path.exists(os.path.join(TMP, "f35r")),
+          str({k: p_.stdout[-200:] for k, p_ in ref35.items() if want35[k] not in p_.stdout}))
+    # THE LAUNCHER: the source's check, its own OUT and log, the same disk budget as EXP=heldout's three arms, the ready
+    # line carrying HELDOUT_SOURCE and SHIP_ARM; and its refusals.
+    l35 = subprocess.run(["bash", LAUNCHER], cwd=TMP, capture_output=True, text=True, timeout=300,
+                         env=clean_env(PATH=env10["PATH"], EXP="heldout", HELDOUT_SOURCE="real", SHIP_ARM="k1000_mn",
+                                       DEVICE="cpu", SEEDS="0 1", CKPT_MB=50, FETCH=0))
+    rl35 = next((ln[len("    ready: "):] for ln in l35.stdout.splitlines() if ln.startswith("    ready: ")), "")
+    l35b = [subprocess.run(["bash", LAUNCHER], cwd=TMP, capture_output=True, text=True, timeout=300,
+                           env=clean_env(PATH=env10["PATH"], DEVICE="cpu", FETCH=0, OUT=os.path.join(TMP, "f35l", "x"),
+                                         **e_)).stdout
+            for e_ in ({"EXP": "heldout", "SHIP_ARM": "k1000_mn"}, {"EXP": "heldout", "HELDOUT_SOURCE": "real",
+                                                                    "SHIP_ARM": "k1000x"},
+                       {"EXP": "heldout", "HELDOUT_SOURCE": "real", "POOL_WITH": o29})]
+    check("F35 the launcher: HELDOUT_SOURCE=real PASSes with S and its own OUT (gpu_heldout_real_out) and log, budgets "
+          "three arms a seed and the rerun as EXP=heldout does (2.1 GB at 50 MB), and its ready line carries "
+          "HELDOUT_SOURCE and SHIP_ARM; SHIP_ARM without the real source, an S that is no act arm and a real-text top-up "
+          "of a synthetic fleet FAIL",
+          "PASS HELDOUT_SOURCE=real: real text, S = k1000_mn and its 'replay' twin, OUT gpu_heldout_real_out" in l35.stdout
+          and "LOG=heldout_real_fleet.log" in l35.stdout
+          and "the kept checkpoints may need 2.1 GB at 2 seed(s)" in l35.stdout
+          and "HELDOUT_SOURCE=real" in rl35 and "SHIP_ARM=k1000_mn" in rl35 and "EXP=heldout" in rl35
+          and "FAIL SHIP_ARM='k1000_mn' names the real-text fleet's S" in l35b[0]
+          and "FAIL SHIP_ARM='k1000x' is not one of test 4's act arms" in l35b[1]
+          and "holds an EXP=heldout fleet on other text than this top-up's (HELDOUT_SOURCE)" in l35b[2],
+          l35.stdout[-800:] + "".join(x[-300:] for x in l35b))
+    # THE DASHBOARD finds a real-text launch from before the lock (no GW_FLEET_OUT) in its own OUT: a gpu_world.sh
+    # stood in, at EXP=heldout HELDOUT_SOURCE=real, is a process of gpu_heldout_real_out and not of gpu_heldout_out.
+    d35 = os.path.join(TMP, "f35dash")
+    write(os.path.join(d35, "gpu_world.sh"), "sleep 30\n")
+    sp35 = subprocess.Popen(["bash", os.path.join(d35, "gpu_world.sh")], cwd=d35,
+                            env=clean_env(EXP="heldout", HELDOUT_SOURCE="real"))
+    try:
+        time.sleep(0.5)
+        sc35 = [subprocess.run(["bash", DASH, "--scan", "own", os.path.join(d35, o_)], capture_output=True, text=True,
+                               timeout=60).stdout for o_ in ("gpu_heldout_real_out", "gpu_heldout_out")]
+    finally:
+        sp35.kill()
+        sp35.wait()
+    check("F35 the dashboard reads a real-text launch's OUT as gpu_heldout_real_out, where its own scan finds it",
+          f"{sp35.pid}\tshell" in sc35[0] and f"{sp35.pid}\t" not in sc35[1], str(sc35))
 
 finally:
     # NOTHING THESE CHECKS STARTED OUTLIVES THEM: a process carrying a GW_FLEET_OUT under TMP (a fleet, its

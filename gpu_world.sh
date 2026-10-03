@@ -12,7 +12,8 @@
 #   EXP=world_epoch  the whole-epoch, phase-traversing WORLD re-run: sized, and refused until O13's two
 #                    WORLD levers are built
 #   EXP=heldout      E2's retok part (§8 6.3a): the shipped cadence against k0 on SR0's held-out probe,
-#                    per area, with O14's first remedy arm (below)
+#                    per area, with O14's first remedy arm (below); at HELDOUT_SOURCE=real E2's shape (b) on
+#                    real text (§8 6.3b), with O16's draw pair and E3's wall (below)
 #   EXP=session      the first post-training sessions (§8 5.3a): P, P+parent and a nuisance twin per
 #                    parent, from EXP=heldout's finals onto a fifth synthetic area, and W (below)
 #
@@ -280,6 +281,19 @@
 #     EXP=heldout SEEDS='0 1 2 3 4 5 6' FILL=0 bash tools/gpu_launch.sh --go
 #     EXP=heldout SEEDS='7 8 9 10' FILL=0 OUT=gpu_heldout_topup_out POOL_WITH=gpu_heldout_out \
 #         bash tools/gpu_launch.sh --go                   # a top-up, as the block prints it (with PAR)
+# HELDOUT_SOURCE=real IS E2's SHAPE (b) ON REAL TEXT (Proposal 05 §8 6.3b, O14, O16, 04-6.3; 2026-10-02), where an
+# arriving area's merges can re-segment older areas' text, which the synthetic alphabets cannot. Arms k0, S and
+# S_replay -- S is SHIP_ARM, the configuration 6.3a ships (k<PIN_RETOK>, or its _mn), and S_replay is S at
+# DATA_DRAW=replay DATA_REPLAY_SHARE=0.27 (O16's draw pair) -- at seeds 0-6, and k0_rerun: 22 runs, each one whole
+# epoch of the real source at EPOCH_BYTES 3,780,000, written as the number (17,476 windows at k0, seed 0), its OUT
+# gpu_heldout_real_out. The pins are 6.3a's with DATA_SOURCE=real in place of DATA_SYNTH_HOLDOUT=1 (inert on real
+# text, whose blocks are always carved) and the probe's cadence at 650 (the act arms' shortest phase / 5 is 670 at
+# k1000), and every run writes the source-reliability book's series too (run.py --trust-series). Its reading: S - k0
+# by 6.3a's rule at one arm; S_replay - S for O16, CONFIRM where every area's upper bound is within eps and the
+# time-integrated all-area gap's below 0, each look at LOOK_ALPHA; the book's seconds against E3's 2% of wall.
+#     EXP=heldout HELDOUT_SOURCE=real SEEDS='0 1 2 3 4 5 6' FILL=0 bash tools/gpu_launch.sh --go
+#     EXP=heldout HELDOUT_SOURCE=real SHIP_ARM=k1000_mn SEEDS='0 1 2 3 4 5 6' FILL=0 \
+#         bash tools/gpu_launch.sh --go                   # if 6.3a's DECISION shipped TOK_MINT_NOVEL
 #
 # EXP=session IS THE FIRST POST-TRAINING SESSIONS (Proposal 05 §8 5.3a, O9, NEW-02, NEW-20; 2026-10-02): does
 # learning a new area after training keep each older area within eps? Its parents are PARENT_ARM's finals
@@ -329,14 +343,33 @@ case "$EXP" in
   *) echo "!! EXP='$EXP' is not an experiment this script runs: world (the default), retok, world_epoch," \
           "heldout or session. Nothing was started."; exit 2 ;;
 esac
+# EXP=heldout's SOURCE (§8 6.3b, 2026-10-02): synthetic, 6.3a's fleet and the default, or real, E2's shape (b) on real
+# text, a fleet of its own with its own OUT. Refused by name at any other EXP or value; and SHIP_ARM, the real-text
+# fleet's S, is refused where the source is not real: a real-text command that lost HELDOUT_SOURCE would otherwise
+# launch the synthetic fleet into gpu_heldout_out, whose finals are test 5's parents.
+HELDOUT_SOURCE=${HELDOUT_SOURCE:-synthetic}
+case "$HELDOUT_SOURCE" in
+  synthetic) [[ -n "${SHIP_ARM:-}" && "$EXP" == heldout ]] \
+               && { echo "!! SHIP_ARM='$SHIP_ARM' names the real-text fleet's S, and HELDOUT_SOURCE is not real: add" \
+                         "HELDOUT_SOURCE=real (§8 6.3b), or unset SHIP_ARM for 6.3a's synthetic fleet. Nothing was started."; exit 2; } ;;
+  real) [[ "$EXP" == heldout ]] \
+          || { echo "!! HELDOUT_SOURCE=real is EXP=heldout's (§8 6.3b, E2's shape (b) on real text), not EXP=$EXP's. Nothing" \
+                    "was started."; exit 2; } ;;
+  *) echo "!! HELDOUT_SOURCE='$HELDOUT_SOURCE' is not a source EXP=heldout reads: synthetic (the default, §8 6.3a) or" \
+          "real (§8 6.3b). Nothing was started."; exit 2 ;;
+esac
+HO_REAL=0; [[ "$EXP" == heldout && "$HELDOUT_SOURCE" == real ]] && HO_REAL=1
 case "$EXP" in
   retok) _o=gpu_retok_out; _s="0 1 2" ;; world_epoch) _o=gpu_world_epoch_out; _s="0 1 2 3 4" ;;
   heldout) _o=gpu_heldout_out; _s="0 1 2 3 4 5 6" ;; session) _o=gpu_session_out; _s="0 1 2 3 4 5 6" ;;
   *) _o=gpu_world_out; _s="0 1 2 3 4" ;;
 esac
+[[ "$HO_REAL" == 1 ]] && _o=gpu_heldout_real_out
 _OUT_GIVEN=${OUT:+x}
 OUT=${OUT:-$_o}
-WINDOWS=${WINDOWS:-20000}
+# THE REAL-TEXT FLEET'S WINDOWS ARE ITS k0's EPOCH AT SEED 0 (17,476: results/heldout_real_prereg_2026-10-02/realplan.out),
+# which the ETA and the dashboard's targets read; its stream is EPOCH_BYTES, below.
+WINDOWS=${WINDOWS:-$([[ "$HO_REAL" == 1 ]] && echo 17476 || echo 20000)}
 SEEDS=${SEEDS:-$_s}
 # DATA_STREAM_BYTES >= 1000 x windows, so every run stops at --max-windows and never at the end of
 # the stream. A run that ran out of stream is flagged in the summary; it is a different length of
@@ -353,6 +386,11 @@ BYTES=${BYTES:-$(( WINDOWS * 1000 > 2000000 ? WINDOWS * 1000 : 2000000 ))}
 # EXP=heldout's runs (its sessions resume them at 5/4 of their stream, for SESSION_WINDOWS windows).
 if [[ "$EXP" == retok ]]; then
   BYTES=${RETOK_BYTES:-$(( WINDOWS * 189 ))}
+  RUN_WIN=$(( WINDOWS * 3 ))
+elif [[ "$HO_REAL" == 1 ]]; then
+  # THE REAL SOURCE'S EPOCH IS WRITTEN AS THE NUMBER (§8 6.3b): 189 bytes a window is the synthetic text's, and real
+  # text packs 216 at the build vocabulary, so WINDOWS x 189 would be another stream.
+  BYTES=${EPOCH_BYTES:-3780000}
   RUN_WIN=$(( WINDOWS * 3 ))
 elif [[ "$EXP" == world_epoch || "$EXP" == heldout || "$EXP" == session ]]; then
   BYTES=${EPOCH_BYTES:-$(( WINDOWS * 189 ))}
@@ -386,9 +424,10 @@ KEEP_CKPT=${KEEP_CKPT:-$([[ "$EXP" == retok || "$EXP" == heldout || "$EXP" == se
 KEEP_POLL=${KEEP_POLL:-1}                  # seconds between the kept-checkpoint watcher's looks
 PIN_RETOK=${PIN_RETOK:-1000}               # the shipped TOK_RETOK_EVERY: every EXP=world_epoch run's pin, EXP=heldout's act arms'
 POOL_WITH=${POOL_WITH:-}                   # EXP=heldout and session: a top-up's first fleet (its OUT), whose seeds it reads with its own
-PROBE_EVERY=${PROBE_EVERY:-700}            # EXP=world_epoch, heldout and session: the EVAL_RETENTION_EVERY every run pins (04-6.2's cap)
+PROBE_EVERY=${PROBE_EVERY:-$([[ "$HO_REAL" == 1 ]] && echo 650 || echo 700)}  # EXP=world_epoch, heldout and session: the EVAL_RETENTION_EVERY every run pins (04-6.2's cap; 650 on real text, §8 6.3b)
 PARENTS=${PARENTS:-}                       # EXP=session: a directory of the parents' finals (FINALS.sha256 and ckpt/); '' = a parents stage
 PARENT_ARM=${PARENT_ARM:-k$PIN_RETOK}      # EXP=session: the parents' arm, EXP=heldout's shipped one (k<c> or k<c>_mn)
+SHIP_ARM=${SHIP_ARM:-k$PIN_RETOK}          # EXP=heldout HELDOUT_SOURCE=real: S, the configuration 6.3a ships (k<c> or k<c>_mn)
 SESSION_WINDOWS=${SESSION_WINDOWS:-5000}   # EXP=session: the windows a session trains (--max-windows)
 W_HEADROOM=${W_HEADROOM:-2048}             # EXP=session: W's slots, max(the parent's slots, its n_live + this) (NEW-20's H)
 GO_WORLD_EPOCH=${GO_WORLD_EPOCH:-0}
@@ -396,6 +435,8 @@ GO_WORLD_EPOCH=${GO_WORLD_EPOCH:-0}
   || { echo "!! PROBE_EVERY='$PROBE_EVERY' is not a positive window count (the retention cadence EXP=world_epoch and heldout pin). Nothing was started."; exit 2; }
 [[ "$PIN_RETOK" =~ ^[1-9][0-9]*$ ]] \
   || { echo "!! PIN_RETOK='$PIN_RETOK' is not a positive cadence (EXP=world_epoch's pin, EXP=heldout's act arms). Nothing was started."; exit 2; }
+[[ "$HO_REAL" == 1 && ! "$SHIP_ARM" =~ ^k[1-9][0-9]*(_mn)?$ ]] \
+  && { echo "!! SHIP_ARM='$SHIP_ARM' is not one of 6.3a's act arms (k<c> or k<c>_mn): S is the configuration it ships. Nothing was started."; exit 2; }
 # EXP=session's KNOBS, AND THE LEVERS ITS SESSIONS PIN (§8 5.3a). EXTRA reaches the parents stage and every
 # session, so a data lever there would train the parents on one stream and resume them on another: refused.
 if [[ "$EXP" == session ]]; then
@@ -468,6 +509,12 @@ arm_env() {  # the lever settings that define each arm; an arm this does not kno
     # O14's FIRST REMEDY ARM (§8 6.3a, EXP=heldout): the cadence with TOK_MINT_NOVEL at 1.0. Ahead of
     # k[1-9]*, which would read k1000_mn as TOK_RETOK_EVERY=1000_mn.
     k[1-9]*_mn) local c=${1%_mn}; echo "TOK_RETOK_EVERY=${c#k} TOK_MINT_NOVEL=1.0" ;;
+    # O16's DRAW PAIR (§8 6.3b, EXP=heldout HELDOUT_SOURCE=real): S, then 'replay' at 0.27. Ahead of k[1-9]*, which would
+    # read k1000_replay as TOK_RETOK_EVERY=1000_replay; S is an act arm or its _mn.
+    k[1-9]*_replay) local b=${1%_replay} e
+               [[ "$b" =~ ^k[1-9][0-9]*(_mn)?$ ]] && e=$(arm_env "$b") \
+                 || { echo "!! arm_env: no arm named '$1'" >&2; return 1; }
+               echo "$e DATA_DRAW=replay DATA_REPLAY_SHARE=0.27" ;;
     k[1-9]*)   echo "TOK_RETOK_EVERY=${1#k}" ;;
     # EXP=session's SESSIONS (§8 5.3a), each after the session's pins and its parent arm's settings: P names
     # the pinned pure-add draw; P_parent rehearses the parent (O9's provisional preset); P_twin is P at OPT_LR x
@@ -503,6 +550,7 @@ if [[ "$EXP" == retok ]]; then
   done
 elif [[ "$EXP" == heldout ]]; then
   BASE_ARMS="k0 k$PIN_RETOK k${PIN_RETOK}_mn"; CTRL=k0
+  [[ "$HO_REAL" == 1 ]] && BASE_ARMS="k0 $SHIP_ARM ${SHIP_ARM}_replay"
   KEEP_EVERY=${KEEP_EVERY:-0}
 elif [[ "$EXP" == session ]]; then
   # THE THREE SESSIONS EVERY PARENT GETS; W, at one parent, is added where the parents are read. THE TWIN'S RATE
@@ -536,6 +584,8 @@ EXP_ENV=""
 # per area, the in-run reading at 12, no generation, and plain minting -- the arms set the cadence, and
 # k<c>_mn TOK_MINT_NOVEL, after them. 04-Q5's pin rule does not apply: the arms pair with each other.
 [[ "$EXP" == heldout ]] && EXP_ENV="DATA_DRAW=planned DATA_SYNTH_HOLDOUT=1 EVAL_RETENTION_EVERY=$PROBE_EVERY EVAL_HOLDOUT_WINDOWS=256 EVAL_RETENTION_N=24 EVAL_GENERATE=0 TOK_MINT_NOVEL=0"
+# ON REAL TEXT (§8 6.3b) the source takes DATA_SYNTH_HOLDOUT's place: a real area's block is carved whatever that says.
+[[ "$HO_REAL" == 1 ]] && EXP_ENV="DATA_SOURCE=real DATA_DRAW=planned EVAL_RETENTION_EVERY=$PROBE_EVERY EVAL_HOLDOUT_WINDOWS=256 EVAL_RETENTION_N=24 EVAL_GENERATE=0 TOK_MINT_NOVEL=0"
 # EXP=session's PINS (§8 5.3a): EXP=heldout's, on the parents stage and on every session, so a session pins again
 # the report items its parent read. The parent arm's settings follow them on every run (TOK_MINT_NOVEL 1.0 at
 # k<c>_mn), then a session's own (SESS_ENV: a second epoch, x5 appended at 5/4 of the parents' stream, so 945,000
@@ -659,6 +709,10 @@ plan_banner() {  # the fleet's shape, as SUMMARY records it and the EXP=world_ep
     echo "=== plan: EXP=$EXP; arms $BASE_ARMS, plus ${CTRL}_rerun at seed 0; window cap $RUN_WIN;" \
          "CAL_WINDOWS $CAL_WINDOWS; LM_CTX $CTX"
   fi
+  # THE REAL-TEXT FLEET SAYS SO (§8 6.3b): its reader, a top-up's launch and the block read this line.
+  [[ "$HO_REAL" == 1 ]] && echo "=== source: real text (HELDOUT_SOURCE=real, §8 6.3b): DATA_SOURCE=real, one epoch of" \
+       "$BYTES bytes; S $SHIP_ARM, S_replay ${SHIP_ARM}_replay ('replay' at 0.27); every run writes the book's series" \
+       "(run.py --trust-series)"
   if [[ "$KEEP_CKPT" == 1 && "$EXP" == retok ]]; then
     echo "=== kept checkpoints: ON, k0 family CKPT_EVERY=$KEEP_EVERY, act arms final only;" \
          "k0's saves hard-linked under $OUT/ckpt/keep"
@@ -3344,7 +3398,8 @@ fail_back() {  # reason [log...] : a stop before (or in) the analysis still ends
 # started without it (9>&-), and so are the readers the fleet calls. The file holds nothing and is
 # never replaced: a replaced file would hand the next launch a fresh, unlocked one.
 LOCKF=${OUT%/}; LOCKF="${LOCKF:-.}.lock"
-_cmdenv="EXP=$EXP "; [[ -n "$_OUT_GIVEN" ]] && _cmdenv="${_cmdenv}OUT=$OUT "
+_cmdenv="EXP=$EXP "; [[ "$HO_REAL" == 1 ]] && _cmdenv="${_cmdenv}HELDOUT_SOURCE=real "
+[[ -n "$_OUT_GIVEN" ]] && _cmdenv="${_cmdenv}OUT=$OUT "
 # ...AND THEY WORK FROM ANY DIRECTORY: the script and the dashboard by absolute path (GW_HOME, above), the
 # dashboard given OUT's absolute path; gpu_world.sh cds to its checkout, where a relative OUT resolves.
 GW_CMD="${_cmdenv}bash $(printf %q "$GW_HOME/gpu_world.sh")"
@@ -3764,6 +3819,14 @@ if [[ -n "$POOL_WITH" ]]; then
     echo "!! POOL_WITH is this OUT, and a launch moves the fleet in OUT aside: give the top-up its own OUT, as the"
     echo "   first fleet's block prints it. Nothing was started."; exit 2
   fi
+  # AND ITS TEXT (§8 6.3b): a real-text top-up reads only with a real-text first fleet, a synthetic one only with a synthetic.
+  if [[ "$EXP" == heldout ]]; then
+    _pr=0; grep -q "^=== source: real text" "$POOL_ABS/SUMMARY.txt" 2>/dev/null && _pr=1
+    if [[ "$_pr" != "$HO_REAL" ]]; then
+      echo "!! POOL_WITH='$POOL_WITH' holds a $( (( _pr )) && echo real-text || echo synthetic) EXP=heldout fleet, and this top-up is" \
+           "$( (( HO_REAL )) && echo real-text || echo synthetic) (HELDOUT_SOURCE): the two read other text. Nothing was started."; exit 2
+    fi
+  fi
   POOL_SEEDS=$(sed -n "s/^=== [0-9]* windows per run, DATA_STREAM_BYTES=[0-9]*, seeds: \(.*\), EXTRA='.*'\$/\1/p" \
                "$POOL_ABS/SUMMARY.txt" | head -1)
   for _s in $SEEDS; do
@@ -4089,13 +4152,15 @@ run_job() {  # name seed windows gpu arm-env...
   local tag="$name.s$seed"
   local log="$OUT/logs/$tag.log" t0=$(date +%s)
   [[ -n "${JOB_DIR:-}" ]] && log="$JOB_DIR/$tag.log"
-  local vis=() fb=() ps=() ck="" kd="" w="" a
+  local vis=() fb=() ps=() ts=() ck="" kd="" w="" a
   [[ "$DEVICE" == cuda ]] && vis=(CUDA_VISIBLE_DEVICES="$gpu")
   [[ "$FLUSH_BYTES" == 1 ]] && fb=(--flush-bytes "${CURVE_DIR:-$OUT/curves}/$tag.bytes.json")
   # EXP=world_epoch's AND EXP=heldout's RULES READ THE RETENTION PROBE (note WORLD 4, §8 6.3a): each run
   # writes its reading series beside its curve, and the archive packs it with the curves.
   [[ "$EXP" == world_epoch || "$EXP" == heldout || "$EXP" == session ]] \
     && ps=(--probe-series "${CURVE_DIR:-$OUT/curves}/$tag.probe.json")
+  # ON REAL TEXT THE SOURCE-RELIABILITY BOOK'S SERIES TOO (§8 6.3b): its passes, claims and seconds, which E3 reads.
+  [[ "$HO_REAL" == 1 ]] && ts=(--trust-series "${CURVE_DIR:-$OUT/curves}/$tag.trust.json")
   if [[ "$KEEP_CKPT" == 1 && "$EXP" == retok && "$name" == k0 ]]; then
     for a in "$@"; do [[ "$a" == CKPT_DIR=* ]] && ck="${a#CKPT_DIR=}"; done
   fi
@@ -4118,7 +4183,7 @@ run_job() {  # name seed windows gpu arm-env...
   env "${vis[@]}" PYTHONUNBUFFERED=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 RUN_DEVICE="$DEVICE" RUN_SEED="$seed" \
       DATA_STREAM_BYTES="$BYTES" $EXTRA $EXP_ENV "$@" \
       python3 "$CODE_DIR/run.py" --max-windows "$win" --loss-curve "${CURVE_DIR:-$OUT/curves}/$tag.json" "${fb[@]}" \
-      "${ps[@]}" > "$log" 2>&1 &
+      "${ps[@]}" "${ts[@]}" > "$log" 2>&1 &
   rp=$!
   # A SESSION'S PROGRESS LINES COUNT ITS RUN'S WINDOWS, ITS PARENT'S INCLUDED (EXP=session): base= is its parent's
   # step, which the dashboard takes off them.

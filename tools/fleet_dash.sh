@@ -94,7 +94,7 @@ ROOT = os.path.dirname(TOOLS)
 ARGS = sys.argv[2:]
 VERDICT_RC = {"RUNNING": 0, "FINISHED": 1, "NO FLEET": 2, "STOPPED": 3, "DEAD": 4, "STALLED": 5}
 DEFAULT_OUT = {"world": "gpu_world_out", "retok": "gpu_retok_out", "world_epoch": "gpu_world_epoch_out",
-               "heldout": "gpu_heldout_out", "session": "gpu_session_out"}
+               "heldout": "gpu_heldout_out", "heldout_real": "gpu_heldout_real_out", "session": "gpu_session_out"}
 READER_FLAGS = {"--status", "--analyze", "--stop", "--help", "-h"}
 HIST_MAX = 24            # heartbeat samples kept (12 minutes at gpu_world.sh's default HB_EVERY of 30 s)
 RATE_SPAN = 300.0        # a rate is measured over at most the last 5 minutes
@@ -257,6 +257,9 @@ def launch_out(argv, env, cwd):
     if env.get("GW_FLEET_OUT"):
         return os.path.realpath(env["GW_FLEET_OUT"])
     exp = env.get("EXP") or "world"
+    # EXP=heldout HELDOUT_SOURCE=real (register §8 6.3b) is a fleet of its own, in an OUT of its own.
+    if exp == "heldout" and env.get("HELDOUT_SOURCE") == "real":
+        exp = "heldout_real"
     return os.path.realpath(os.path.join(cwd, env.get("OUT") or DEFAULT_OUT.get(exp, "gpu_world_out")))
 
 

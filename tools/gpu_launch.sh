@@ -11,6 +11,7 @@
 #     EXP=heldout bash tools/gpu_launch.sh --go   # the checks, then the launch, confirmed alive
 # (from the checkout; from anywhere else, by its path: EXP=heldout bash /workspace/LLM-Test/tools/gpu_launch.sh).
 # EXP=heldout is test 4, the current one, and EXP=session (PARENTS=<its OUT>) test 5, which starts from its finals;
+# EXP=heldout HELDOUT_SOURCE=real (SHIP_ARM=<test 4's shipped arm>) is test 6, on real text, with its own OUT;
 # notes/OWNER_BRIEF.md gives each test's command with its EXP.
 #
 # EXP IS REQUIRED here (gpu_world.sh's default, world, is the 2026-09-24 experiment, already decided).
@@ -73,7 +74,7 @@ done
 KNOBS="EXP OUT WINDOWS SEEDS BYTES RETOK_BYTES EPOCH_BYTES SMOKE_WINDOWS EXTRA ARCH_ALSO LONG PAR MPS FILL
        MAX_SEEDS DEVICE CAL_WINDOWS LADDER RETOK_ARMS COOLDOWN_ARM KEEP_CKPT KEEP_POLL KEEP_EVERY PIN_RETOK
        PROBE_EVERY GO_WORLD_EPOCH EPS RETOK_INCUMBENT HB_EVERY ALLOW_CONCURRENT STOP_WAIT LOG WAIT_S FETCH CKPT_MB
-       POOL_WITH PARENTS PARENT_ARM SESSION_WINDOWS W_HEADROOM"
+       POOL_WITH PARENTS PARENT_ARM SESSION_WINDOWS W_HEADROOM HELDOUT_SOURCE SHIP_ARM"
 PFX=$(sed -n 's/^ *PREFIX = "\([A-Z][A-Z0-9]*\)".*/\1/p' src/*/levers.py 2>/dev/null | sort -u | paste -sd'|' -)
 shq() {  # one word for the shell: as it is when it is safe bare, else single-quoted
   if [[ "$1" =~ ^[A-Za-z0-9_./:,@%+=-]+$ ]]; then printf '%s' "$1"; else printf "'%s'" "${1//\'/\'\\\'\'}"; fi
@@ -97,9 +98,15 @@ CUR_EXP=heldout
 DEVICE=${DEVICE:-cuda}
 case "$EXP_SET" in retok) _o=gpu_retok_out ;; world_epoch) _o=gpu_world_epoch_out ;; heldout) _o=gpu_heldout_out ;;
                    session) _o=gpu_session_out ;; *) _o=gpu_world_out ;; esac
+# THE REAL-TEXT FLEET (EXP=heldout HELDOUT_SOURCE=real, §8 6.3b) HAS AN OUT AND A LOG OF ITS OWN, as gpu_world.sh gives it:
+# launched into gpu_heldout_out it would move test 4's fleet, whose finals are test 5's parents, aside.
+HO_REAL=0; [[ "$EXP_SET" == heldout && "${HELDOUT_SOURCE:-}" == real ]] && HO_REAL=1
+_l=${EXP_SET:-fleet}
+[[ "$HO_REAL" == 1 ]] && _o=gpu_heldout_real_out && _l=heldout_real
 OUT=${OUT:-$_o}
-LOG=${LOG:-${EXP_SET:-fleet}_fleet.log}
-CMDENV="EXP=${EXP_SET:-<exp>} "; [[ "$OUT" != "$_o" ]] && CMDENV="${CMDENV}OUT=$OUT "
+LOG=${LOG:-${_l}_fleet.log}
+CMDENV="EXP=${EXP_SET:-<exp>} "; [[ "$HO_REAL" == 1 ]] && CMDENV="${CMDENV}HELDOUT_SOURCE=real "
+[[ "$OUT" != "$_o" ]] && CMDENV="${CMDENV}OUT=$OUT "
 # THE COMMANDS IT PRINTS WORK FROM ANY DIRECTORY (2026-09-27 review): a second terminal opens in
 # /workspace or /root, where `bash tools/fleet_dash.sh` is "No such file". gpu_world.sh cds to its
 # checkout, so the relative OUT in CMDENV still resolves there.
@@ -122,6 +129,17 @@ case "$EXP_SET" in
            "EXP=$CUR_EXP bash $(printf %q "$ROOT/tools/gpu_launch.sh")$([[ $GO == 1 ]] && echo ' --go')" ;;
   *) fail "EXP='$EXP_SET' is not an experiment gpu_world.sh runs (world, retok, world_epoch, heldout, session)" "EXP=$CUR_EXP" ;;
 esac
+# EXP=heldout's SOURCE AND S (§8 6.3b), as gpu_world.sh refuses them.
+case "${HELDOUT_SOURCE:-synthetic}" in
+  synthetic) [[ -n "${SHIP_ARM:-}" && "$EXP_SET" == heldout ]] \
+               && fail "SHIP_ARM='$SHIP_ARM' names the real-text fleet's S, and HELDOUT_SOURCE is not real: this would launch test 4's synthetic fleet into gpu_heldout_out" \
+                       "HELDOUT_SOURCE=real for test 6, or unset SHIP_ARM" ;;
+  real) if [[ "$EXP_SET" != heldout ]]; then fail "HELDOUT_SOURCE=real is EXP=heldout's (test 6, §8 6.3b)" "EXP=heldout, or unset HELDOUT_SOURCE"
+        elif [[ ! "${SHIP_ARM:-k${PIN_RETOK:-1000}}" =~ ^k[1-9][0-9]*(_mn)?$ ]]; then
+          fail "SHIP_ARM='${SHIP_ARM:-}' is not one of test 4's act arms (k<c> or k<c>_mn)" "SHIP_ARM=k1000, or k1000_mn if test 4's DECISION shipped TOK_MINT_NOVEL"
+        else pass "HELDOUT_SOURCE=real: real text, S = ${SHIP_ARM:-k${PIN_RETOK:-1000}} and its 'replay' twin, OUT $OUT"; fi ;;
+  *) fail "HELDOUT_SOURCE='$HELDOUT_SOURCE' is not synthetic or real" "HELDOUT_SOURCE=real for test 6, or unset it for test 4" ;;
+esac
 
 # A TOP-UP'S FIRST FLEET (EXP=heldout and session, §8 6.3a, 5.3a): the fleet POOL_WITH names, which gpu_world.sh
 # checks again.
@@ -131,6 +149,9 @@ if [[ -n "${POOL_WITH:-}" ]]; then
     fail "POOL_WITH names a top-up's first fleet, which only EXP=heldout and EXP=session read" "unset POOL_WITH"
   elif [[ -z "$_pw" ]] || ! grep -q "^=== plan: EXP=$EXP_SET;" "$_pw/SUMMARY.txt" 2>/dev/null; then
     fail "POOL_WITH='$POOL_WITH' holds no EXP=$EXP_SET fleet" "the first fleet's OUT, as its block printed it"
+  elif [[ "$EXP_SET" == heldout && "$(grep -q "^=== source: real text" "$_pw/SUMMARY.txt" 2>/dev/null && echo 1 || echo 0)" != "$HO_REAL" ]]; then
+    fail "POOL_WITH='$POOL_WITH' holds an EXP=heldout fleet on other text than this top-up's (HELDOUT_SOURCE)" \
+         "the first fleet's OUT and HELDOUT_SOURCE, as its block printed them"
   elif [[ "$_pw" == "$OUT_ABS" ]]; then
     fail "POOL_WITH is this OUT, and the launch would move that fleet aside" "OUT=<its own directory>, as the first fleet's block printed it"
   else
@@ -292,7 +313,8 @@ if [[ ( "$KC" == 1 || ( "$EXP_SET" == session && -z "${PARENTS:-}" ) ) && "$W" =
     # environment and, at EXP=world_epoch and heldout, the probe's pin -- so the two disk checks count the
     # same files. EXP=world and world_epoch run four arms a seed, EXP=heldout three (2026-10-02), and each
     # fleet one rerun.
-    _pp=""; [[ "$EXP_SET" == world_epoch || "$EXP_SET" == heldout || "$EXP_SET" == session ]] && _pp="EVAL_RETENTION_EVERY=${PROBE_EVERY:-700}"
+    _pp=""; [[ "$EXP_SET" == world_epoch || "$EXP_SET" == heldout || "$EXP_SET" == session ]] \
+      && _pp="EVAL_RETENTION_EVERY=${PROBE_EVERY:-$([[ "$HO_REAL" == 1 ]] && echo 650 || echo 700)}"
     BF=$(EXTRA="${EXTRA:-}" EXP_ENV="$_pp" CODE_DIR="$ROOT" WINDOWS="$W" KEEP_EVERY=1000 bash -c \
          "$(sed -n "/^# >>> THE BEST SAVES' BUDGET/,/^# <<< THE BEST SAVES' BUDGET\$/p" gpu_world.sh)"$'\n''echo "$BEST_FILES"' 2>/dev/null)
     [[ "$BF" =~ ^[0-9]+$ ]] || BF=0
